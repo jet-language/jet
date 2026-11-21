@@ -921,36 +921,43 @@ sema_diagnostic_origin_file_row: fn(origins: [SemaDiagnosticOrigin], file: Strin
     -1
 }
 
-// A placed diagnostic's origin: the handed text when its file is the
-// entry (`entry_file`, as the driver displays it), else its file.
-sema_diagnostic_placed_origin: fn(diagnostic: Diagnostic, entry_file: String) -> SemaDiagnosticOrigin? Never! {
+// The entry's path as an origin row holds it: its own text of `entry_path`.
+sema_diagnostic_entry_path: fn(entry_path: String?) -> String? Never! {
+    named: entry_path ?? return None
+    Val("{named}")
+}
+
+// A placed diagnostic's origin: the entry's (`entry_path`) when its file is
+// the entry (`entry_file`, as the driver displays it), else its file.
+sema_diagnostic_placed_origin: fn(diagnostic: Diagnostic, entry_file: String, entry_path: String?) -> SemaDiagnosticOrigin? Never! {
     if diagnostic.origin == .Val(placed) {
-        path: if placed.display == entry_file -> String?{None} else -> String?{Val("{placed.display}")}
+        path: if placed.display == entry_file -> sema_diagnostic_entry_path(entry_path) else -> String?{Val("{placed.display}")}
         return Val(SemaDiagnosticOrigin{file: "{placed.path}", path: path, digest: "{placed.revision}"})
     }
     None
 }
 
-// The origins of diagnostics over text a query was handed (`entry_source`,
+// The origins of diagnostics over the entry text of a query (`entry_source`,
 // which the loader displays as `entry_file`) and the `files` it loaded beside
-// it, as it read them.
-sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile], entry_file: String, entry_source: String) -> [SemaDiagnosticOrigin] Never! {
+// it, as it read them. `entry_path` is the path the entry's origin names: the
+// file the caller read it from, or None for text handed to the query.
+sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile], entry_file: String, entry_source: String, entry_path: String?) -> [SemaDiagnosticOrigin] Never! {
     origins := [SemaDiagnosticOrigin]{}
+    // The entry text may be named both ways; it is hashed once.
+    entry_digest := ""
     loop diagnostic in diagnostics {
         file: sema_diagnostic_origin_file(diagnostic) ?? next
         if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next
-        if sema_diagnostic_placed_origin(diagnostic, entry_file) == .Val(placed) {
+        if sema_diagnostic_placed_origin(diagnostic, entry_file, entry_path) == .Val(placed) {
+            if diagnostic.origin == .Val(entry) {
+                if entry.display == entry_file -> entry_digest = "{placed.digest}"
+            }
             origins.push(placed)
             next
         }
         if file == "" || file == entry_file {
-            // The handed text may be named both ways; it is hashed once.
-            digest := ""
-            loop origin in origins {
-                if origin.path == None -> digest = "{origin.digest}"
-            }
-            if digest == "" -> digest = sha256_hex(entry_source)
-            origins.push(SemaDiagnosticOrigin{file: "{file}", path: None, digest: digest})
+            if entry_digest == "" -> entry_digest = sha256_hex(entry_source)
+            origins.push(SemaDiagnosticOrigin{file: "{file}", path: sema_diagnostic_entry_path(entry_path), digest: "{entry_digest}"})
             next
         }
         loop loaded in files {
@@ -964,11 +971,11 @@ sema_diagnostic_loaded_origins: fn(diagnostics: [Diagnostic], files: [SourceFile
 
 // The origins of a checked result's diagnostics, read from the modules the
 // check held: each module's own source under the file its spans name. The
-// entry is the text the query was handed, so its origin names no path, and
+// entry's origin names `entry_path` (None for text handed to the query), and
 // `entry_digest` is the digest the caller already took of it. In a module
 // stitched from several files, a file that starts at its first byte is that
 // file's own slice of the module source.
-sema_diagnostic_checked_origins: fn(diagnostics: [Diagnostic], registration: SemaRegistrationGraph, entry_digest: String) -> [SemaDiagnosticOrigin] Never! {
+sema_diagnostic_checked_origins: fn(diagnostics: [Diagnostic], registration: SemaRegistrationGraph, entry_digest: String, entry_path: String?) -> [SemaDiagnosticOrigin] Never! {
     entry_file := ""
     loop row in registration.modules {
         if row.module_identity == registration.entry_module_identity {
@@ -979,12 +986,12 @@ sema_diagnostic_checked_origins: fn(diagnostics: [Diagnostic], registration: Sem
     loop diagnostic in diagnostics {
         file: sema_diagnostic_origin_file(diagnostic) ?? next
         if sema_diagnostic_origin_file_row(origins, file) >= 0 -> next
-        if sema_diagnostic_placed_origin(diagnostic, entry_file) == .Val(placed) {
+        if sema_diagnostic_placed_origin(diagnostic, entry_file, entry_path) == .Val(placed) {
             origins.push(placed)
             next
         }
         if file == "" || file == entry_file {
-            origins.push(SemaDiagnosticOrigin{file: "{file}", path: None, digest: "{entry_digest}"})
+            origins.push(SemaDiagnosticOrigin{file: "{file}", path: sema_diagnostic_entry_path(entry_path), digest: "{entry_digest}"})
             next
         }
         if sema_diagnostic_module_origin(registration, file) == .Val(origin) -> origins.push(origin)

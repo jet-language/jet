@@ -58,16 +58,20 @@ digest_require: fn(ok: Bool, name: String) Never! {
     // The public origins reuse the digest the presentation took; they never
     // hash again. The first diagnostic of a file names its origin.
     presented[0].origin = Val(DiagnosticOrigin{display: "main.jet", path: "{DIGEST_ROOT}/main.jet", source: DIGEST_MAIN, revision: "already-taken"})
-    public: sema_diagnostic_loaded_origins(presented, [SourceFile]{}, "main.jet", DIGEST_MAIN)
+    public: sema_diagnostic_loaded_origins(presented, [SourceFile]{}, "main.jet", DIGEST_MAIN, None)
     digest_require(public.len() == 2, "one public origin per snapshot")
     digest_require(public[sema_diagnostic_origin_row(public, presented[0])].digest == "already-taken", "a placed origin's digest is reused, not recomputed")
     digest_require(public[sema_diagnostic_origin_row(public, presented[0])].path == None, "the handed text names no path")
     digest_require(public[sema_diagnostic_origin_row(public, presented[1])].digest == helper_digest, "an imported snapshot keeps its own digest")
+    // The same entry read from a file names that file, with the same digest.
+    named: sema_diagnostic_loaded_origins(presented, [SourceFile]{}, "main.jet", DIGEST_MAIN, Val("main.jet"))
+    digest_require(named[sema_diagnostic_origin_row(named, presented[0])].path == Val("main.jet"), "an entry read from a file names it")
+    digest_require(named[sema_diagnostic_origin_row(named, presented[0])].digest == "already-taken", "a named entry's digest is reused, not recomputed")
 
     // Unplaced diagnostics over handed text and loaded files: one digest per
     // snapshot, from the texts the load held.
     loaded: [SourceFile]{SourceFile{id: source_file_id("helper.jet"), path: "helper.jet", source: DIGEST_HELPER}}
-    rows: sema_diagnostic_loaded_origins(raw, loaded, "main.jet", DIGEST_MAIN)
+    rows: sema_diagnostic_loaded_origins(raw, loaded, "main.jet", DIGEST_MAIN, None)
     digest_require(rows.len() == 2, "five located diagnostics over two snapshots take two digests")
     loop index in 0..<5 {
         row: sema_diagnostic_origin_row(rows, raw[index])

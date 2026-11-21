@@ -1,0 +1,21 @@
+# A file the CLI read is named by that file in every span and origin: no internal staging label leaks. Text Jet code hands to core.compiler was read from no file, so its own spans name "" while an imported file keeps its name.
+fixture: DiagnosticOriginWitnesses.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+stdout: !~ "core.compiler.jet" # the staging label never reaches the output
+json: stdout doc $.compiler.value.diagnostics[?code="E0107"][0].span.file = "main.jet"
+json: stdout doc $.compiler.value.diagnostics[?code="E0107"][0].origin.path = "main.jet"
+json: stdout doc $.compiler.value.functions[?name="run"][0].span.file = "main.jet"
+json: stdout doc $.compiler.value.diagnostics[?code="L0508"][0].span.file = "helper.jet"
+step: jet inspect compiler parse habit.jet
+exit: 0
+stdout: !~ "core.compiler.jet"
+json: stdout doc $.compiler.value.diagnostics #>= 1
+json: stdout doc $.compiler.value.diagnostics[0].origin.path = "habit.jet"
+step: jet inspect compiler lex habit.jet
+exit: 0
+stdout: !~ "core.compiler.jet"
+step: jet run spans.jet
+exit: 0
+stdout: = "E0107 []\nL0508 [helper.jet]\nrun []\nvalue [helper.jet]\nidle [helper.jet]\n" # the handed text's own error and function name no file; helper.jet's keep its name

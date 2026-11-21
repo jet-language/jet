@@ -62,6 +62,9 @@ JetDriverCompilerCheckInput: struct {
     parsed: JetCompilerServicesParseFacts,
     request: JetDriverCompileRequest,
     retain_projection: Bool,
+    // The file the checked text was read from, which its records name; None
+    // for text handed to the query, whose records name no file.
+    entry_path: String?,
 }
 
 JetDriverCompilerCheckResult: struct {
@@ -111,7 +114,7 @@ jet_driver_compiler_queries_check_disk: fn(queries: &JetDriverCompilerQueries, p
 jet_driver_compiler_queries_check_text: fn(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: &&JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     root: request.authorized_sources.entry_path
     jet_driver_compiler_queries_set_document(queries, root, parsed.source)
-    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request.move(), retain_projection: true})
+    jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request.move(), retain_projection: true, entry_path: None})
 }
 
 jet_driver_compiler_check_failure: fn(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
@@ -216,6 +219,7 @@ jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registr
             graph: graph.move(),
             module_sources: module_sources,
             diagnostics: diagnostics,
+            entry_path: input.entry_path,
         },
     )
     complete := graph_complete && checked.semantic_index_complete

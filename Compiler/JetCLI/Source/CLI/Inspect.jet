@@ -895,8 +895,8 @@ jet_cli_inspect_compiler: fn(args: [String], color: Bool) -[FS, Env, Exec, IO, F
     // payload.
     name: if operation == "source-map" -> "source_map" else -> operation
     value := JetCLIStatusValue.Null
-    if operation == "lex" -> value = jet_cli_compiler_lexed(source) else if operation == "parse" {
-        value = jet_cli_compiler_syntax_tree(source)
+    if operation == "lex" -> value = jet_cli_compiler_lexed(file, source) else if operation == "parse" {
+        value = jet_cli_compiler_syntax_tree(file, source)
     } else { value = jet_cli_compiler_source_map(source) }
     payload: jet_cli_status_object(
         [JetCLIStatusField]{
@@ -1129,11 +1129,12 @@ jet_cli_compiler_position: fn(positions: JetCLIPositions, offset: Int) -> JetCLI
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("line", jet_cli_status_int(positions.lines[index])), jet_cli_status_field("column", jet_cli_status_int(positions.columns[index]))})
 }
 
-// `lex_source` + `status_lexed`: every token of the source with its inline
-// `package: { }` carrier masked (Package `mask_inline_package_source`; a
-// malformed carrier is the only diagnostic), with its kind, exact source text,
-// byte span, and line/column ends, then the lexer diagnostics.
-jet_cli_compiler_lexed: fn(source: String) -> JetCLIStatusValue Never! {
+// `lex_source` + `status_lexed`: every token of `source`, read from `file`,
+// with its inline `package: { }` carrier masked (Package
+// `mask_inline_package_source`; a malformed carrier is the only diagnostic),
+// with its kind, exact source text, byte span, and line/column ends, then the
+// lexer diagnostics, whose origins name `file`.
+jet_cli_compiler_lexed: fn(file: String, source: String) -> JetCLIStatusValue Never! {
     bytes: source.bytes()
     carrier: jet_driver_inline_package(source)
     lexed: lex(jet_driver_mask_inline_package(source, carrier).bytes())
@@ -1171,7 +1172,7 @@ jet_cli_compiler_lexed: fn(source: String) -> JetCLIStatusValue Never! {
             jet_cli_status_field("api_version", jet_cli_status_int(1)),
             jet_cli_status_field("source", jet_cli_status_text(source)),
             jet_cli_status_field("tokens", jet_cli_status_array(tokens)),
-            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics, jet_eval_compiler_services_text_origins(diagnostics, source))),
+            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics, jet_eval_compiler_services_text_origins(diagnostics, file, source))),
         },
     )
 }
@@ -1336,11 +1337,12 @@ jet_cli_compiler_item: fn(item: Item) -> JetCLIStatusValue Never! {
     )
 }
 
-// `parse_source` + `status_syntax_tree`: lexer diagnostics (or a malformed
-// inline carrier) stop before the parse of the masked source; a parse with
-// errors keeps only its error diagnostics and no items; a clean parse lists
-// every top-level item and its advisories.
-jet_cli_compiler_syntax_tree: fn(source: String) -> JetCLIStatusValue Never! {
+// `parse_source` + `status_syntax_tree` of `source`, read from `file`: lexer
+// diagnostics (or a malformed inline carrier) stop before the parse of the
+// masked source; a parse with errors keeps only its error diagnostics and no
+// items; a clean parse lists every top-level item and its advisories. The
+// diagnostics' origins name `file`.
+jet_cli_compiler_syntax_tree: fn(file: String, source: String) -> JetCLIStatusValue Never! {
     carrier: jet_driver_inline_package(source)
     masked: jet_driver_mask_inline_package(source, carrier).bytes()
     lexed: lex(masked)
@@ -1364,7 +1366,7 @@ jet_cli_compiler_syntax_tree: fn(source: String) -> JetCLIStatusValue Never! {
             jet_cli_status_field("api_version", jet_cli_status_int(1)),
             jet_cli_status_field("source", jet_cli_status_text(source)),
             jet_cli_status_field("items", jet_cli_status_array(items)),
-            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics, jet_eval_compiler_services_text_origins(diagnostics, source))),
+            jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics, jet_eval_compiler_services_text_origins(diagnostics, file, source))),
         },
     )
 }
