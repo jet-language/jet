@@ -720,245 +720,245 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3027,
-      "column": 9,
-      "reason": "the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there"
+      "line": 3026,
+      "column": 5,
+      "reason": "the mem file's NUL-terminated path, then each piece of `bytes`, at most `chunk` long, are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and openat and pwrite64 read them there"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3056,
+      "line": 3061,
       "column": 5,
       "reason": "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3068,
+      "line": 3073,
       "column": 5,
       "reason": "the helper's PTRACE_GETFPREGS writes the 512-byte block at LOADER_TRACE_BYTES of the trace's scratch page, inside it, and the block is copied from there"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3084,
+      "line": 3089,
       "column": 5,
       "reason": "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3096,
+      "line": 3101,
       "column": 5,
       "reason": "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3109,
+      "line": 3114,
       "column": 5,
       "reason": "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3127,
+      "line": 3132,
       "column": 5,
       "reason": "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3143,
+      "line": 3148,
       "column": 5,
       "reason": "the helper's PTRACE_GETSIGINFO writes the 128-byte siginfo at the start of the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3160,
+      "line": 3165,
       "column": 5,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3183,
+      "line": 3188,
       "column": 9,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3207,
+      "line": 3212,
       "column": 5,
       "reason": "tgkill of one thread of the helper's own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3217,
+      "line": 3222,
       "column": 9,
       "reason": "SIGKILL to the helper's own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3228,
+      "line": 3233,
       "column": 17,
       "reason": "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3247,
+      "line": 3252,
       "column": 9,
       "reason": "wait4 of our own child, the helper, keeping no status"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3393,
+      "line": 3398,
       "column": 5,
       "reason": "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3405,
+      "line": 3410,
       "column": 1,
       "reason": "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3420,
+      "line": 3425,
       "column": 1,
       "reason": "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3446,
+      "line": 3451,
       "column": 1,
       "reason": "clock_gettime writes two words at the caller's `scratch`, read before the next"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3460,
+      "line": 3465,
       "column": 9,
       "reason": "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3580,
+      "line": 3585,
       "column": 5,
       "reason": "the attribute block goes to the command's fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3593,
+      "line": 3598,
       "column": 5,
       "reason": "clock_gettime writes the command's page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3731,
+      "line": 3736,
       "column": 5,
       "reason": "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3747,
+      "line": 3752,
       "column": 9,
       "reason": "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3783,
+      "line": 3788,
       "column": 5,
       "reason": "the go byte of the command's page to the child's pipe"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3791,
+      "line": 3796,
       "column": 5,
       "reason": "read fills the failed execve's word of the command's page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3810,
+      "line": 3815,
       "column": 5,
       "reason": "wait4 writes the int status and the rusage to the command's page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3821,
+      "line": 3826,
       "column": 5,
       "reason": "the command's page holds the wait status and rusage its reap wrote"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3850,
+      "line": 3855,
       "column": 5,
       "reason": "the attributes go to the command's fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3870,
+      "line": 3875,
       "column": 5,
       "reason": "each read goes to the command's page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3884,
+      "line": 3889,
       "column": 1,
       "reason": "pipe2 writes two int descriptors to the caller's word `word`, read at once"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3898,
+      "line": 3903,
       "column": 1,
       "reason": "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3921,
+      "line": 3926,
       "column": 1,
       "reason": "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3953,
+      "line": 3958,
       "column": 5,
       "reason": "the attributes go to the fresh page's attribute words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3972,
+      "line": 3977,
       "column": 5,
       "reason": "each read goes to the counters' own page's read words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 3985,
+      "line": 3990,
       "column": 1,
       "reason": "read fills three words of the caller's counted-run page `page`"
     },
@@ -4668,42 +4668,42 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 114,
+      "line": 118,
       "column": 5,
       "reason": "close(2) releases a descriptor this route opened"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 124,
+      "line": 128,
       "column": 9,
       "reason": "read(2) fills at most the caller's remaining owned bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 146,
+      "line": 150,
       "column": 9,
       "reason": "socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 162,
+      "line": 166,
       "column": 9,
       "reason": "connect(2) reads the owned 23-byte address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 178,
+      "line": 182,
       "column": 9,
       "reason": "sendto(2) with MSG_NOSIGNAL reads the owned request"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteSys.jet",
-      "line": 620,
+      "line": 624,
       "column": 5,
       "reason": "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call"
     },
@@ -4850,21 +4850,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2058,
+      "line": 2064,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2417,
+      "line": 2423,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2480,
+      "line": 2486,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -12026,41 +12026,41 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2968:5 | "the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2979:5 | "the helper's PTRACE_POKEDATA writes one word of its own stopped tracee" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2995:9 | "process_vm_readv reads the two iovecs at LOADER_TRACE_IOV and writes at most `want` bytes from LOADER_TRACE_BYTES, inside the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3027:9 | "the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3056:5 | "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3068:5 | "the helper's PTRACE_GETFPREGS writes the 512-byte block at LOADER_TRACE_BYTES of the trace's scratch page, inside it, and the block is copied from there" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3084:5 | "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3096:5 | "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3109:5 | "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3127:5 | "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3143:5 | "the helper's PTRACE_GETSIGINFO writes the 128-byte siginfo at the start of the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3160:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3183:9 | "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3207:5 | "tgkill of one thread of the helper's own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3217:9 | "SIGKILL to the helper's own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3228:17 | "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3247:9 | "wait4 of our own child, the helper, keeping no status" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3393:5 | "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3405:1 | "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3420:1 | "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3446:1 | "clock_gettime writes two words at the caller's `scratch`, read before the next" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3460:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3580:5 | "the attribute block goes to the command's fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3593:5 | "clock_gettime writes the command's page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3731:5 | "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3747:9 | "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3783:5 | "the go byte of the command's page to the child's pipe" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3791:5 | "read fills the failed execve's word of the command's page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3810:5 | "wait4 writes the int status and the rusage to the command's page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3821:5 | "the command's page holds the wait status and rusage its reap wrote" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3850:5 | "the attributes go to the command's fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3870:5 | "each read goes to the command's page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3884:1 | "pipe2 writes two int descriptors to the caller's word `word`, read at once" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3898:1 | "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3921:1 | "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3953:5 | "the attributes go to the fresh page's attribute words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3972:5 | "each read goes to the counters' own page's read words" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3985:1 | "read fills three words of the caller's counted-run page `page`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3026:5 | "the mem file's NUL-terminated path, then each piece of `bytes`, at most `chunk` long, are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and openat and pwrite64 read them there" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3061:5 | "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3073:5 | "the helper's PTRACE_GETFPREGS writes the 512-byte block at LOADER_TRACE_BYTES of the trace's scratch page, inside it, and the block is copied from there" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3089:5 | "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3101:5 | "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3114:5 | "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3132:5 | "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3148:5 | "the helper's PTRACE_GETSIGINFO writes the 128-byte siginfo at the start of the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3165:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3188:9 | "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3212:5 | "tgkill of one thread of the helper's own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3222:9 | "SIGKILL to the helper's own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3233:17 | "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3252:9 | "wait4 of our own child, the helper, keeping no status" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3398:5 | "`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3410:1 | "the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3425:1 | "`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3451:1 | "clock_gettime writes two words at the caller's `scratch`, read before the next" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3465:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3585:5 | "the attribute block goes to the command's fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3598:5 | "clock_gettime writes the command's page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3736:5 | "each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3752:9 | "fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3788:5 | "the go byte of the command's page to the child's pipe" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3796:5 | "read fills the failed execve's word of the command's page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3815:5 | "wait4 writes the int status and the rusage to the command's page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3826:5 | "the command's page holds the wait status and rusage its reap wrote" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3855:5 | "the attributes go to the command's fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3875:5 | "each read goes to the command's page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3889:1 | "pipe2 writes two int descriptors to the caller's word `word`, read at once" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3903:1 | "close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3926:1 | "the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3958:5 | "the attributes go to the fresh page's attribute words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3977:5 | "each read goes to the counters' own page's read words" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3990:1 | "read fills three words of the caller's counted-run page `page`" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 67:9 | "the scratch mapping is the child's own, made above" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 144:9 | "getrandom fills the first word of our scratch page" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 151:9 | "getrandom wrote the scratch page's first word" |
@@ -12590,12 +12590,12 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 124:5 | "the log start runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteALog.jet | 131:5 | "the entry function configures before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAMath.jet | 14:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 114:5 | "close(2) releases a descriptor this route opened" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 124:9 | "read(2) fills at most the caller's remaining owned bytes" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 146:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 162:9 | "connect(2) reads the owned 23-byte address" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 178:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
-| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 620:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 118:5 | "close(2) releases a descriptor this route opened" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 128:9 | "read(2) fills at most the caller's remaining owned bytes" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 150:9 | "socket(AF_UNIX, SOCK_STREAM&#124;SOCK_CLOEXEC) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 166:9 | "connect(2) reads the owned 23-byte address" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 182:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
+| Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 624:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 333:13 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 342:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
 | Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 352:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
@@ -12616,9 +12616,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1365:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1705:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1757:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2058:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2417:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2480:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2064:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2423:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2486:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 164:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |

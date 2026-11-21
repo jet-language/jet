@@ -26,8 +26,8 @@ run: fn() {
     args: process.args()
     if args.len() == 2 && args[0] == "--pool-owner" {
         // The job writes its pid, then becomes a sleep that outlives the owner
-        // unless the pool's parent-death mark stops it.
-        job: process.cmd([String]{"sh", "-c", "echo $$ > {args[1]}.tmp && mv {args[1]}.tmp {args[1]} && exec sleep 60"})
+        // by far unless the pool's parent-death mark stops it.
+        job: process.cmd([String]{"sh", "-c", "echo $$ > {args[1]}.tmp && mv {args[1]}.tmp {args[1]} && exec sleep 3600"})
         _: process.run_all([ProcessSpec]{job}, 1) ?? return
         return
     }
@@ -46,11 +46,16 @@ run: fn() {
     owner.kill() ?? panic("owner kill failed: {err}")
     receipt: owner.wait() ?? panic("owner wait failed: {err}")
     print("owner killed by signal 9: {(receipt.signal ?? 0) == 9}")
+    // A killed job can take a while to leave a busy host's run queue or a
+    // stalled disk read, so this waits up to 10 minutes; a job the mark
+    // missed would still be sleeping for the rest of its hour.
     waits = 0
-    loop running(pid) && waits < 500 {
+    loop running(pid) && waits < 60000 {
         waits += 1
         time.sleep(10ms)
     }
     print("job running after its owner died: {running(pid)}")
+    // A job the mark missed must not outlive this check by an hour.
+    if running(pid) -> _: process.cmd([String]{"kill", "-9", pid}).run()
     files.remove_all(directory) ?? panic("cleanup failed: {err}")
 }

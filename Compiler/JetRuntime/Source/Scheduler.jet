@@ -1931,11 +1931,17 @@ scheduler_wake_idle: fn(root: I64) -> I64 {
     record
 }
 
-// scheduler_wake_idle for queued work, one claim at a time: -1 while a
-// claimed carrier has not woken yet (woken160), which claims the next itself
-// once it runs (jet_rt_scheduler_worker); the root lock is held.
+// scheduler_wake_idle for queued work: one claim for each queued job
+// (queued256) not yet covered by a claimed carrier still on its way
+// (woken160), so a burst of submits (a spawn of k tasks) claims up to k
+// idle carriers at once, each woken by its submit, rather than one wake
+// at a time down a chain. Past that it returns -1: a claimed carrier is
+// on its way, and it claims the next itself once it runs
+// (jet_rt_scheduler_worker), as it does for a woken fiber, whose ready
+// FIFO the queued count leaves out. The root lock is held.
 scheduler_wake_work: fn(root: I64) -> I64 {
-    if (sync_load(wrapping(root + I64{160})) != I64{0}) { return I64{-1} }
+    woken: sync_load(wrapping(root + I64{160}))
+    if (woken != I64{0} && woken >= sync_load(wrapping(root + I64{256}))) { return I64{-1} }
     scheduler_wake_idle(root)
 }
 
