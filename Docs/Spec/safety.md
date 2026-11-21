@@ -1602,7 +1602,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2512,
+      "line": 2520,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6782,63 +6782,63 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4104,
+      "line": 4124,
       "column": 1,
       "reason": "`seed` is a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4107,
+      "line": 4127,
       "column": 5,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4123,
+      "line": 4143,
       "column": 5,
       "reason": "timing runs on test keys and nonces, each used for its run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4146,
+      "line": 4166,
       "column": 1,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4154,
+      "line": 4174,
       "column": 1,
       "reason": "a timing run's test key, used for that run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4194,
+      "line": 4214,
       "column": 5,
       "reason": "timing runs on test keys, each used for its run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4605,
+      "line": 4625,
       "column": 5,
       "reason": "test keys and nonces, each used for this run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4608,
+      "line": 4628,
       "column": 1,
       "reason": "`r` draws test keys and nonces, each used for this run only"
     },
     {
       "package": "Core",
       "file": "Core/Net/SSL/TLS.jet",
-      "line": 4638,
+      "line": 4658,
       "column": 5,
       "reason": "test keys and nonces, each used for this run only"
     },
@@ -11900,7 +11900,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2519:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2529:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2631:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2512:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2520:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 196:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 204:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 236:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12640,15 +12640,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 3780:5 | "verification of a vector record's public signature" |
 | Core | Core/Net/SSL/TLS.jet | 3793:13 | "the record's private key is used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3809:13 | "the record's public key, message and signature" |
-| Core | Core/Net/SSL/TLS.jet | 4104:1 | "`seed` is a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 4107:5 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 4123:5 | "timing runs on test keys and nonces, each used for its run only" |
-| Core | Core/Net/SSL/TLS.jet | 4146:1 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 4154:1 | "a timing run's test key, used for that run only" |
-| Core | Core/Net/SSL/TLS.jet | 4194:5 | "timing runs on test keys, each used for its run only" |
-| Core | Core/Net/SSL/TLS.jet | 4605:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Net/SSL/TLS.jet | 4608:1 | "`r` draws test keys and nonces, each used for this run only" |
-| Core | Core/Net/SSL/TLS.jet | 4638:5 | "test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 4124:1 | "`seed` is a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 4127:5 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 4143:5 | "timing runs on test keys and nonces, each used for its run only" |
+| Core | Core/Net/SSL/TLS.jet | 4166:1 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 4174:1 | "a timing run's test key, used for that run only" |
+| Core | Core/Net/SSL/TLS.jet | 4214:5 | "timing runs on test keys, each used for its run only" |
+| Core | Core/Net/SSL/TLS.jet | 4625:5 | "test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 4628:1 | "`r` draws test keys and nonces, each used for this run only" |
+| Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 245:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 351:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1684:5 | "read the final path component's OS metadata kind without opening an identity handle" |
