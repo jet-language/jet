@@ -313,6 +313,18 @@ ir_x64_partner: fn(m: IRModule, f: IRFunction, at: Int, left_reads: [Bool]) -> I
     if left_reads[at] -> f.a[at] else -> -1
 }
 
+// Whether instruction `at` is a zone open with a result in a module that
+// keeps zone sites. Selection writes the open's 0 before the site, ahead of
+// the call its stub or inline skip makes (X64Select.jet ir_x64_zone_site),
+// so its result is not fresh: it must not take the register of the name
+// the call still reads, though the name dies at the open.
+ir_x64_zone_open: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if m.zones_stripped || f.op[at] != .CallRuntime || f.dst[at] < 0 || f.a[at] < 0 || f.a[at] >= m.names.len() {
+        return false
+    }
+    m.names[f.a[at]] == "jet_perf_zone_open_named"
+}
+
 // Whether selecting instruction `at` makes no call, in its body or in a
 // slow path, and leaves r8 and r9 alone: structure, a constant, a memory
 // access, a frame address or byte copy, an inline-range test (IntBig, in
@@ -1071,7 +1083,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // Float slots worth a register (ir_x64_clobbers) over xmm8-xmm15 and, for
     // those whose ranges hold no call passing more than two Floats, xmm2-xmm7
     // (IR_X64_XMM_REGISTERS). A
-    // slot that starts with its write may take the register of one its
+    // slot that starts with its write, but for a zone open's result
+    // (ir_x64_zone_open), may take the register of one its
     // writer reads last, that of the writer's first operand first (an
     // atomic add's delta: `partners`), an If's result that of its then arm's source
     // (ir_x64_phis), and a copy that may share its source's register
@@ -1083,7 +1096,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     general: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
     clobbers: ir_x64_clobbers(m, f, consts, values, heats)
     floating: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float && peak_weights[slot] > 2 * ir_x64_clobbered(clobbers, f.op.len(), peaks[slot], starts[slot], ends[slot])
-    fresh: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
+    fresh: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot && !ir_x64_zone_open(m, f, starts[slot])
     partners: loop slot in 0..<count -> if fresh[slot] -> ir_x64_partner(m, f, starts[slot], left_reads) else -> -1
     phis: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)

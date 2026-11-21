@@ -1674,6 +1674,16 @@ result_surface_name: fn(ok: Type, err: Type) -> String Never! {
     type_name(ok)
 }
 
+// `ty` as type_name spells it, but with the error always spelled: a
+// Result of the implicit default `Err` is `Int Err!`, which type_name
+// leaves as `Int`, as a signature's `-> Int` does.
+type_failure_name: fn(ty: Type) -> String Never! {
+    if ty == .Result(ok, err) && err == (Type.Named{name: "Err"}) && ok != (Type.Named{name: "Unit"}) {
+        return "{type_marked_name(ok)} Err!"
+    }
+    type_name(ty)
+}
+
 // A type written before a suffix mark is grouped when the mark would
 // otherwise bind to its last member.
 type_marked_name: fn(ty: Type) -> String Never! {

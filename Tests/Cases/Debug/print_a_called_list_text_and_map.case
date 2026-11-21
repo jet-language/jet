@@ -1,0 +1,68 @@
+# `print` of a call shows the value the call returned, for each value that
+# grows as it is built: a list, a text and a map, and their `.len()`, on
+# every tier. The `held_` functions are also passed as values, so each keeps
+# the failure its value's type allows and shows `Ok` with what it returned,
+# as `locals` would. A map shows its entries as `key: value`. The program
+# then runs on unchanged. No other debugger is on PATH.
+fixture: PrintACalledListTextAndMap.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step console_o0: jet debug {work}/.jet/build/prog --break prog.jet:46
+env: PATH={work}/no-tools
+stdin: print_a_called_list_text_and_map.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:46  in run()" # the stop after every call ran
+stdout: ~ "\nnumbers(3, 2) = [3, 4]\n" # a list
+stdout: ~ "\nnumbers(3, 2).len() = 2\n" # and its length
+stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n" # a text
+stdout: ~ "\nwords(\"xy\", 3).len() = 6\n" # and its length
+stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n" # a map
+stdout: ~ "\ncounts(\"k\", 7).len() = 1\n" # and its length
+stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n" # the same, from a function used as a value
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
+stdout: ~ "14\nProgram finished\n" # the evaluations left the program's run unchanged
+step: jet build -O1 prog.jet
+exit: 0
+step console_o1: jet debug {work}/.jet/build/prog --break prog.jet:46
+env: PATH={work}/no-tools
+stdin: print_a_called_list_text_and_map.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:46  in run()" # the same stop on O1
+stdout: ~ "\nnumbers(3, 2) = [3, 4]\n" # the same values on O1
+stdout: ~ "\nnumbers(3, 2).len() = 2\n"
+stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n"
+stdout: ~ "\nwords(\"xy\", 3).len() = 6\n"
+stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n"
+stdout: ~ "\ncounts(\"k\", 7).len() = 1\n"
+stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n"
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
+stdout: ~ "14\nProgram finished\n"
+step: jet build -O2 prog.jet
+exit: 0
+step console_o2: jet debug {work}/.jet/build/prog --break prog.jet:46
+env: PATH={work}/no-tools
+stdin: print_a_called_list_text_and_map.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:46  in run()" # the same stop on O2
+stdout: ~ "\nnumbers(3, 2) = [3, 4]\n" # the same values on O2
+stdout: ~ "\nnumbers(3, 2).len() = 2\n"
+stdout: ~ "\nwords(\"xy\", 3) = \"xyxyxy\"\n"
+stdout: ~ "\nwords(\"xy\", 3).len() = 6\n"
+stdout: ~ "\ncounts(\"k\", 7) = [\"k\": 7]\n"
+stdout: ~ "\ncounts(\"k\", 7).len() = 1\n"
+stdout: ~ "\nheld_numbers(3, 2) = Ok([3, 4])\n"
+stdout: ~ "\nheld_numbers(3, 2).len() = Ok(2)\n"
+stdout: ~ "\nheld_words(\"xy\", 3) = Ok(\"xyxyxy\")\n"
+stdout: ~ "\nheld_words(\"xy\", 3).len() = Ok(6)\n"
+stdout: ~ "\nheld_counts(\"k\", 7) = Ok([\"k\": 7])\n"
+stdout: ~ "\nheld_counts(\"k\", 7).len() = Ok(1)\n"
+stdout: ~ "14\nProgram finished\n"

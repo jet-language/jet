@@ -1,0 +1,1188 @@
+
+$ jet --version
+jet a0.0.46-dev
+Release status: Prerelease
+Release disposition: Current
+Release readiness: Not ready
+Compatibility policy: Future 1.0 (planned; not active)
+Supported editions: 2026 (newest: 2026)
+Registry protocol: v1
+(exit 0, load 3.77)
+
+$ node --version
+v24.19.0
+(exit 0, load 3.77)
+
+$ python3 --version
+Python 3.14.7
+(exit 0, load 3.77)
+ 12:21:39  up 4 days 21:42,  1 user,  load average: 3.77, 26.21, 64.89
+
+$ nice -n 19 jet build -O0 --output-dir=O0 main.jet
+required effects: Exec.Args, IO, Mem, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0, load 3.77)
+
+$ nice -n 19 jet build -O1 --output-dir=O1 main.jet
+required effects: Exec.Args, IO, Mem, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0, load 3.77)
+
+$ nice -n 19 jet build -O2 --output-dir=O2 main.jet
+required effects: Exec.Args, IO, Mem, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0, load 3.77)
+
+$ nice -n 19 jet build --os=web main.jet
+required effects: Exec.Args, IO, Mem, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0, load 3.63)
+
+$ jet debug O2/main --do symbols   (the builders)
+0x40c030            1749      function  main.build
+0x40c710            3736      function  main.build_arm
+0x40d5b0            1658      function  main.build_into
+0x40dc30            1765      function  main.build_to
+0x41ac10            75        function  main.build__value_292a659526249d82
+0x41ac60            79        function  main.build_to__value_5f721607324e8b85
+0x41acb0            79        function  main.build_arm__value_ab62d0927e5110f6
+0x41ad00            475       function  main.build_into__value_1258c6352287dcc6
+
+$ jet debug main.jet --break main.jet:40 --do continue --do locals -- arg direct 2 1 0
+Breakpoint set  main.jet:40
+Breakpoint hit  main.jet:40  in build_to()
+40 |     out.push(i + dest)        <- here
+Locals:  dest = 0   i = 0   items = 2   out = []
+Breakpoint hit  main.jet:40  in build_to()
+40 |     out.push(i + dest)        <- here
+Locals:  dest = 0   i = 1   items = 2   out = []
+dest: Int = 0
+i: Int = 1
+items: Int = 2
+out: [Int] = []
+(exit 0, load 3.63)
+
+$ jet debug main.jet --break main.jet:33 --do continue --do locals -- plain direct 2 1 0
+Breakpoint set  main.jet:33
+Breakpoint hit  main.jet:33  in build()
+33 |     out.push(i)        <- here
+Locals:  i = 0   items = 2   out = []
+Breakpoint hit  main.jet:33  in build()
+33 |     out.push(i)        <- here
+Locals:  i = 1   items = 2   out = []
+i: Int = 1
+items: Int = 2
+out: [Int] = []
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 25.520523916666665 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 23.197985166666665 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.813377875 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 22.437588541666667 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 45.288654791666666 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 23.274075625 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 24.935935291666667 ns a call, total 49200000
+(exit 0, load 3.63)
+
+$ taskset -c 16-31 O0/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 28.218499958333332 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 22.72438354166667 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 47.56472070833333 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 24.734221958333332 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 27.240870833333332 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.618189041666668 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 25.124756041666668 ns a call, total 49200000
+(exit 0, load 3.58)
+
+$ taskset -c 16-31 O0/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 50.72808475 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 24.690683125 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 25.65255841666667 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 24.288576958333334 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 24.818312625 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 49.866134458333335 ns a call, total 49200000
+(exit 0, load 3.45)
+
+$ taskset -c 16-31 O0/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 24.0309755 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 24.59210725 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 24.305899166666666 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 24.592085541666666 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 44.93874879166667 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 25.796671791666668 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.327295291666665 ns a call, total 49200000
+(exit 0, load 3.42)
+
+$ taskset -c 16-31 O0/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.018062083333334 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 26.320637708333333 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 49.524354458333335 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 27.792615416666667 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.11328025 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 26.245939083333333 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.079348 ns a call, total 49200000
+(exit 0, load 3.30)
+
+$ taskset -c 16-31 O0/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 45.457560208333334 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 27.70149875 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.174301916666668 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.351003375 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.054577375 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 52.10620616666667 ns a call, total 49200000
+(exit 0, load 3.20)
+
+$ taskset -c 16-31 O0/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 24.610086375 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 23.95166125 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.185276583333334 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.294590708333335 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 53.232011791666665 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 23.799113708333334 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 23.90859575 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 23.943059416666667 ns a call, total 49200000
+(exit 0, load 3.10)
+
+$ taskset -c 16-31 O0/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.502302916666668 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 46.66892966666666 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 32.43822829166667 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 33.667887375 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 33.77269258333333 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 31.90890425 ns a call, total 49200000
+(exit 0, load 3.01)
+
+$ taskset -c 16-31 O0/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 68.294120375 ns a call, total 49200000
+(exit 0, load 2.93)
+
+$ taskset -c 16-31 O0/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 32.92669816666667 ns a call, total 49200000
+(exit 0, load 2.93)
+
+$ taskset -c 16-31 O0/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 32.41426545833333 ns a call, total 49200000
+(exit 0, load 2.93)
+
+$ taskset -c 16-31 O0/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 32.54299629166667 ns a call, total 49200000
+(exit 0, load 2.93)
+
+$ taskset -c 16-31 O0/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 33.696394166666664 ns a call, total 49200000
+(exit 0, load 2.93)
+
+$ taskset -c 16-31 O0/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 70.49449020833333 ns a call, total 49200000
+(exit 0, load 2.86)
+
+$ taskset -c 16-31 O0/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 31.331416166666667 ns a call, total 49200000
+(exit 0, load 2.86)
+
+$ taskset -c 16-31 O0/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.551241083333334 ns a call, total 49200000
+(exit 0, load 2.86)
+
+$ taskset -c 16-31 O0/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 33.460928583333335 ns a call, total 49200000
+(exit 0, load 2.86)
+
+$ taskset -c 16-31 O0/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 157.08502741666666 ns a call, total 49200000
+(exit 0, load 6.63)
+
+$ taskset -c 16-31 O0/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 337.4471275833333 ns a call, total 49200000
+(exit 0, load 13.52)
+
+$ taskset -c 16-31 O0/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 152.03552345833333 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 33.41468941666667 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 32.768836125 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 30.326360458333333 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 66.660152875 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 33.938927875 ns a call, total 49200000
+(exit 0, load 12.60)
+
+$ taskset -c 16-31 O0/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.619137333333335 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O0/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 31.594505375 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O0/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 30.070835 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O0/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 66.98105866666667 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O1/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 23.91158325 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O1/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 23.428075291666666 ns a call, total 49200000
+(exit 0, load 11.75)
+
+$ taskset -c 16-31 O1/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.7264645 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 21.610801416666668 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 48.36288445833333 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 26.236202958333333 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 23.679020291666667 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.543128291666665 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 21.975834333333335 ns a call, total 49200000
+(exit 0, load 10.97)
+
+$ taskset -c 16-31 O1/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 47.62574045833333 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 23.810326 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 23.540572583333333 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 28.217959875 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 23.848176041666665 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 47.5613055 ns a call, total 49200000
+(exit 0, load 10.25)
+
+$ taskset -c 16-31 O1/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 25.067005708333333 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 23.591249166666667 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.629262083333334 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 22.082634583333334 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 46.10979341666667 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 23.842309416666666 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 25.741595416666666 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 24.033811125 ns a call, total 49200000
+(exit 0, load 9.59)
+
+$ taskset -c 16-31 O1/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 22.22752075 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 45.507883875 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 26.394827708333334 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 25.410959666666667 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.863664291666666 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.56135254166667 ns a call, total 49200000
+(exit 0, load 8.98)
+
+$ taskset -c 16-31 O1/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 48.538142875 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 24.068263416666667 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.6779565 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 27.449321125 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 22.877930125 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 45.34332716666667 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 23.996612625 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.781074708333332 ns a call, total 49200000
+(exit 0, load 8.42)
+
+$ taskset -c 16-31 O1/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 26.519980375 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 22.286697208333333 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 45.29273404166667 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 23.88705375 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.401377166666666 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.626515041666668 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 22.414999666666667 ns a call, total 49200000
+(exit 0, load 7.91)
+
+$ taskset -c 16-31 O1/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 46.04858358333333 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 24.10842029166667 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.664750833333333 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 24.595946333333334 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.740245125 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 46.73306041666667 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 31.797170541666667 ns a call, total 49200000
+(exit 0, load 7.43)
+
+$ taskset -c 16-31 O1/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.729785791666668 ns a call, total 49200000
+(exit 0, load 7.00)
+
+$ taskset -c 16-31 O1/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 31.630537041666667 ns a call, total 49200000
+(exit 0, load 7.00)
+
+$ taskset -c 16-31 O1/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 27.94135525 ns a call, total 49200000
+(exit 0, load 7.00)
+
+$ taskset -c 16-31 O1/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 65.179356625 ns a call, total 49200000
+(exit 0, load 7.00)
+
+$ taskset -c 16-31 O1/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 33.58955683333333 ns a call, total 49200000
+(exit 0, load 7.00)
+
+$ taskset -c 16-31 O1/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 32.0592125 ns a call, total 49200000
+(exit 0, load 6.60)
+
+$ taskset -c 16-31 O1/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 35.60494620833333 ns a call, total 49200000
+(exit 0, load 6.60)
+
+$ taskset -c 16-31 O1/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 28.780095291666665 ns a call, total 49200000
+(exit 0, load 6.60)
+
+$ taskset -c 16-31 O1/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 67.10110908333333 ns a call, total 49200000
+(exit 0, load 6.60)
+
+$ taskset -c 16-31 O1/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 32.501650833333336 ns a call, total 49200000
+(exit 0, load 6.60)
+
+$ taskset -c 16-31 O1/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 36.081596041666664 ns a call, total 49200000
+(exit 0, load 6.31)
+
+$ taskset -c 16-31 O1/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 32.75698466666667 ns a call, total 49200000
+(exit 0, load 6.31)
+
+$ taskset -c 16-31 O1/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 28.76267208333333 ns a call, total 49200000
+(exit 0, load 6.31)
+
+$ taskset -c 16-31 O1/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 66.81239741666667 ns a call, total 49200000
+(exit 0, load 6.31)
+
+$ taskset -c 16-31 O1/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 32.03724929166667 ns a call, total 49200000
+(exit 0, load 6.31)
+
+$ taskset -c 16-31 O1/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.625550291666666 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 35.47689825 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 28.0235585 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 65.36046991666667 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 34.275109416666666 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.646185875 ns a call, total 49200000
+(exit 0, load 5.96)
+
+$ taskset -c 16-31 O1/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 32.733137 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O1/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 33.939066708333335 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O1/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 67.19390779166666 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O2/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 22.630374625 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O2/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 22.95776375 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O2/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 23.250827791666666 ns a call, total 49200000
+(exit 0, load 5.65)
+
+$ taskset -c 16-31 O2/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 24.721842375 ns a call, total 49200000
+(exit 0, load 5.35)
+
+$ taskset -c 16-31 O2/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 55.25703825 ns a call, total 49200000
+(exit 0, load 5.35)
+
+$ taskset -c 16-31 O2/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 69.54871408333334 ns a call, total 49200000
+(exit 0, load 5.35)
+
+$ taskset -c 16-31 O2/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 64.19464941666666 ns a call, total 49200000
+(exit 0, load 7.65)
+
+$ taskset -c 16-31 O2/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 53.46107583333333 ns a call, total 49200000
+(exit 0, load 7.65)
+
+$ taskset -c 16-31 O2/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 51.30427604166667 ns a call, total 49200000
+(exit 0, load 7.65)
+
+$ taskset -c 16-31 O2/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 110.58806854166667 ns a call, total 49200000
+(exit 0, load 26.41)
+
+$ taskset -c 16-31 O2/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 52.599723375 ns a call, total 49200000
+(exit 0, load 26.41)
+
+$ taskset -c 16-31 O2/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 67.85855158333334 ns a call, total 49200000
+(exit 0, load 26.41)
+
+$ taskset -c 16-31 O2/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 53.28949316666667 ns a call, total 49200000
+(exit 0, load 27.10)
+
+$ taskset -c 16-31 O2/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 64.26506595833334 ns a call, total 49200000
+(exit 0, load 27.10)
+
+$ taskset -c 16-31 O2/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 122.88778104166667 ns a call, total 49200000
+(exit 0, load 27.10)
+
+$ taskset -c 16-31 O2/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 50.437026833333334 ns a call, total 49200000
+(exit 0, load 27.82)
+
+$ taskset -c 16-31 O2/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 52.789758375 ns a call, total 49200000
+(exit 0, load 27.82)
+
+$ taskset -c 16-31 O2/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 38.499805 ns a call, total 49200000
+(exit 0, load 27.82)
+
+$ taskset -c 16-31 O2/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 23.372226166666668 ns a call, total 49200000
+(exit 0, load 27.82)
+
+$ taskset -c 16-31 O2/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 49.67159470833333 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main plain direct 2 2000 0
+plain direct 2: 2000 rounds of 12000 calls, 23.691629583333334 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main arg direct 2 2000 0
+arg direct 2: 2000 rounds of 12000 calls, 22.514908541666667 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main arm direct 2 2000 0
+arm direct 2: 2000 rounds of 12000 calls, 25.65182 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main place direct 2 2000 0
+place direct 2: 2000 rounds of 12000 calls, 22.540577458333335 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main arena direct 2 2000 0
+arena direct 2: 2000 rounds of 12000 calls, 48.15735479166667 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 23.556210625 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 23.070085541666668 ns a call, total 49200000
+(exit 0, load 25.83)
+
+$ taskset -c 16-31 O2/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 23.709782083333334 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 27.021900416666668 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 48.54728725 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 23.119385375 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 22.786071625 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 23.146555916666667 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 24.115829 ns a call, total 49200000
+(exit 0, load 24.08)
+
+$ taskset -c 16-31 O2/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 50.219058583333336 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 27.560211166666665 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.04390104166667 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 22.867059333333334 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 24.511322083333333 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 53.1105175 ns a call, total 49200000
+(exit 0, load 22.31)
+
+$ taskset -c 16-31 O2/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 22.841180833333333 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 24.26538654166667 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 23.147340291666666 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 26.66560075 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 48.800132375 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main plain value 2 2000 0
+plain value 2: 2000 rounds of 12000 calls, 22.900929291666667 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main arg value 2 2000 0
+arg value 2: 2000 rounds of 12000 calls, 23.75169275 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main arm value 2 2000 0
+arm value 2: 2000 rounds of 12000 calls, 23.14344575 ns a call, total 49200000
+(exit 0, load 20.68)
+
+$ taskset -c 16-31 O2/main place value 2 2000 0
+place value 2: 2000 rounds of 12000 calls, 23.754769416666665 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main arena value 2 2000 0
+arena value 2: 2000 rounds of 12000 calls, 48.118204541666664 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 31.125646041666666 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 31.744696083333334 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 34.675455416666665 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 29.304083625 ns a call, total 49200000
+(exit 0, load 19.19)
+
+$ taskset -c 16-31 O2/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 66.90073466666666 ns a call, total 49200000
+(exit 0, load 17.81)
+
+$ taskset -c 16-31 O2/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 30.168531083333335 ns a call, total 49200000
+(exit 0, load 17.81)
+
+$ taskset -c 16-31 O2/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 30.719788583333333 ns a call, total 49200000
+(exit 0, load 17.81)
+
+$ taskset -c 16-31 O2/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 30.916918083333332 ns a call, total 49200000
+(exit 0, load 17.81)
+
+$ taskset -c 16-31 O2/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 29.509525666666665 ns a call, total 49200000
+(exit 0, load 17.81)
+
+$ taskset -c 16-31 O2/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 69.41064616666667 ns a call, total 49200000
+(exit 0, load 16.54)
+
+$ taskset -c 16-31 O2/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 33.78440341666666 ns a call, total 49200000
+(exit 0, load 16.54)
+
+$ taskset -c 16-31 O2/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 29.909559458333334 ns a call, total 49200000
+(exit 0, load 16.54)
+
+$ taskset -c 16-31 O2/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 31.020007458333332 ns a call, total 49200000
+(exit 0, load 16.54)
+
+$ taskset -c 16-31 O2/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 29.38660129166667 ns a call, total 49200000
+(exit 0, load 16.54)
+
+$ taskset -c 16-31 O2/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 69.951761375 ns a call, total 49200000
+(exit 0, load 15.54)
+
+$ taskset -c 16-31 O2/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 29.84512325 ns a call, total 49200000
+(exit 0, load 15.54)
+
+$ taskset -c 16-31 O2/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 32.875300375 ns a call, total 49200000
+(exit 0, load 15.54)
+
+$ taskset -c 16-31 O2/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 30.313090333333335 ns a call, total 49200000
+(exit 0, load 15.54)
+
+$ taskset -c 16-31 O2/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 29.249593458333333 ns a call, total 49200000
+(exit 0, load 15.54)
+
+$ taskset -c 16-31 O2/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 68.04120470833334 ns a call, total 49200000
+(exit 0, load 14.46)
+
+$ taskset -c 16-31 O2/main plain closure 2 2000 0
+plain closure 2: 2000 rounds of 12000 calls, 30.367237666666668 ns a call, total 49200000
+(exit 0, load 14.46)
+
+$ taskset -c 16-31 O2/main arg closure 2 2000 0
+arg closure 2: 2000 rounds of 12000 calls, 30.108831291666668 ns a call, total 49200000
+(exit 0, load 14.46)
+
+$ taskset -c 16-31 O2/main arm closure 2 2000 0
+arm closure 2: 2000 rounds of 12000 calls, 30.214858875 ns a call, total 49200000
+(exit 0, load 14.46)
+
+$ taskset -c 16-31 O2/main place closure 2 2000 0
+place closure 2: 2000 rounds of 12000 calls, 30.282355 ns a call, total 49200000
+(exit 0, load 14.46)
+
+$ taskset -c 16-31 O2/main arena closure 2 2000 0
+arena closure 2: 2000 rounds of 12000 calls, 67.93598025 ns a call, total 49200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js plain direct 2 500 0
+plain direct 2: 500 rounds of 12000 calls, 58.021011 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arg direct 2 500 0
+arg direct 2: 500 rounds of 12000 calls, 48.966455833333335 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arm direct 2 500 0
+arm direct 2: 500 rounds of 12000 calls, 50.433155 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js place direct 2 500 0
+place direct 2: 500 rounds of 12000 calls, 53.05365533333333 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arena direct 2 500 0
+arena direct 2: 500 rounds of 12000 calls, 77.62406616666667 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js plain direct 2 500 0
+plain direct 2: 500 rounds of 12000 calls, 51.31033033333333 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arg direct 2 500 0
+arg direct 2: 500 rounds of 12000 calls, 56.94091366666667 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arm direct 2 500 0
+arm direct 2: 500 rounds of 12000 calls, 49.774147166666665 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js place direct 2 500 0
+place direct 2: 500 rounds of 12000 calls, 46.408721666666665 ns a call, total 13200000
+(exit 0, load 13.54)
+
+$ taskset -c 16-31 node app.js arena direct 2 500 0
+arena direct 2: 500 rounds of 12000 calls, 66.35774616666667 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js plain direct 2 500 0
+plain direct 2: 500 rounds of 12000 calls, 50.01367033333333 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arg direct 2 500 0
+arg direct 2: 500 rounds of 12000 calls, 49.52896466666667 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arm direct 2 500 0
+arm direct 2: 500 rounds of 12000 calls, 57.1298105 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js place direct 2 500 0
+place direct 2: 500 rounds of 12000 calls, 53.29514233333333 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arena direct 2 500 0
+arena direct 2: 500 rounds of 12000 calls, 65.8661375 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js plain direct 2 500 0
+plain direct 2: 500 rounds of 12000 calls, 57.43006283333333 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arg direct 2 500 0
+arg direct 2: 500 rounds of 12000 calls, 49.21392733333333 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arm direct 2 500 0
+arm direct 2: 500 rounds of 12000 calls, 50.3488275 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js place direct 2 500 0
+place direct 2: 500 rounds of 12000 calls, 52.8133355 ns a call, total 13200000
+(exit 0, load 12.69)
+
+$ taskset -c 16-31 node app.js arena direct 2 500 0
+arena direct 2: 500 rounds of 12000 calls, 65.91204333333333 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js plain direct 2 500 0
+plain direct 2: 500 rounds of 12000 calls, 50.08988383333333 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arg direct 2 500 0
+arg direct 2: 500 rounds of 12000 calls, 57.43017283333333 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arm direct 2 500 0
+arm direct 2: 500 rounds of 12000 calls, 50.2193255 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js place direct 2 500 0
+place direct 2: 500 rounds of 12000 calls, 53.15661816666667 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arena direct 2 500 0
+arena direct 2: 500 rounds of 12000 calls, 81.486173 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js plain value 2 500 0
+plain value 2: 500 rounds of 12000 calls, 59.210278 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arg value 2 500 0
+arg value 2: 500 rounds of 12000 calls, 52.41537 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arm value 2 500 0
+arm value 2: 500 rounds of 12000 calls, 58.86454716666667 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js place value 2 500 0
+place value 2: 500 rounds of 12000 calls, 56.20613616666667 ns a call, total 13200000
+(exit 0, load 11.84)
+
+$ taskset -c 16-31 node app.js arena value 2 500 0
+arena value 2: 500 rounds of 12000 calls, 79.443252 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js plain value 2 500 0
+plain value 2: 500 rounds of 12000 calls, 52.24673033333333 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js arg value 2 500 0
+arg value 2: 500 rounds of 12000 calls, 59.64481966666666 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js arm value 2 500 0
+arm value 2: 500 rounds of 12000 calls, 51.075774833333334 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js place value 2 500 0
+place value 2: 500 rounds of 12000 calls, 49.072314 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js arena value 2 500 0
+arena value 2: 500 rounds of 12000 calls, 70.03805333333334 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js plain value 2 500 0
+plain value 2: 500 rounds of 12000 calls, 52.232710166666664 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js arg value 2 500 0
+arg value 2: 500 rounds of 12000 calls, 51.276257 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js arm value 2 500 0
+arm value 2: 500 rounds of 12000 calls, 52.1426335 ns a call, total 13200000
+(exit 0, load 11.13)
+
+$ taskset -c 16-31 node app.js place value 2 500 0
+place value 2: 500 rounds of 12000 calls, 50.505030166666664 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arena value 2 500 0
+arena value 2: 500 rounds of 12000 calls, 68.88229333333334 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js plain value 2 500 0
+plain value 2: 500 rounds of 12000 calls, 59.142829166666665 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arg value 2 500 0
+arg value 2: 500 rounds of 12000 calls, 51.885288 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arm value 2 500 0
+arm value 2: 500 rounds of 12000 calls, 51.9873675 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js place value 2 500 0
+place value 2: 500 rounds of 12000 calls, 55.2580305 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arena value 2 500 0
+arena value 2: 500 rounds of 12000 calls, 79.50859633333333 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js plain value 2 500 0
+plain value 2: 500 rounds of 12000 calls, 52.20915016666667 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arg value 2 500 0
+arg value 2: 500 rounds of 12000 calls, 51.978069833333336 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js arm value 2 500 0
+arm value 2: 500 rounds of 12000 calls, 51.760727 ns a call, total 13200000
+(exit 0, load 10.40)
+
+$ taskset -c 16-31 node app.js place value 2 500 0
+place value 2: 500 rounds of 12000 calls, 49.88880866666667 ns a call, total 13200000
+(exit 0, load 9.81)
+
+$ taskset -c 16-31 node app.js arena value 2 500 0
+arena value 2: 500 rounds of 12000 calls, 68.39109366666666 ns a call, total 13200000
+(exit 0, load 9.81)
+
+$ taskset -c 16-31 node Probes/convention.mjs 20000000 9
+wasm indirect plain: 20000000 calls, min 2.135 ns, median 2.173 ns a call
+wasm direct plain: 20000000 calls, min 0.366 ns, median 0.368 ns a call
+wasm indirect param: 20000000 calls, min 2.236 ns, median 2.278 ns a call
+wasm direct param: 20000000 calls, min 0.367 ns, median 0.368 ns a call
+wasm indirect global: 20000000 calls, min 3.715 ns, median 3.984 ns a call
+wasm direct global: 20000000 calls, min 0.414 ns, median 0.415 ns a call
+(exit 0, load 9.81)
+
+$ taskset -c 16-31 python3 Probes/register.py 200000000 9
+x64 value plain: 200000000 calls, min 0.904 ns, median 0.923 ns a call
+x64 value arg: 200000000 calls, min 0.906 ns, median 0.924 ns a call
+x64 value reg: 200000000 calls, min 0.902 ns, median 0.923 ns a call
+(exit 0, load 9.18)
+ 12:25:37  up 4 days 21:46,  1 user,  load average: 9.18, 18.51, 52.92

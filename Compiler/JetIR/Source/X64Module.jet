@@ -288,7 +288,8 @@ IR_X64_SHARED_PAYLOAD: 64
 // layout: debug row r describes m.types[r]; the rows they name follow. A
 // String is a pointer to its header [data, byte length, cap]; a List its
 // inline header [len, cap, data], data pointing at its element row
-// (IRModule.list_elements); a struct or tuple its members at their offsets
+// (IRModule.list_elements), and a Map the same header, data pointing at its
+// entry tuple row; a struct or tuple its members at their offsets
 // (IRModule.debug_members); an enum, union, Option or Result its variants
 // (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
 // pointer to its runtime handle's two exact Ints (JetRuntime
@@ -382,7 +383,7 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
             X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
         }
         .Aggregate -> {
-            if ir_untag(ty.ty) == .List(_) {
+            if ir_untag(ty.ty) == .List(_) || ir_untag(ty.ty) == .Map(_, _, _) {
                 target: m.list_elements.get(row) ?? -1
                 data: ir_x64_debug_pointer(tables, target)
                 members: [X64DebugMember]{X64DebugMember{name: "len", offset: 0, ty: shared.word}, X64DebugMember{name: "cap", offset: 8, ty: shared.word}, X64DebugMember{name: "data", offset: 16, ty: data}}

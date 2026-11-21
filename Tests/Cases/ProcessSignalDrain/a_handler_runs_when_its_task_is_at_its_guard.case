@@ -1,0 +1,30 @@
+# A subscribed SIGINT raised while the receiving task's stack is within one
+# frame of its guard runs its handler on the thread's alternate signal stack:
+# the program finds the deepest recursion a copy of itself survives under an
+# address-space cap, then has a copy raise SIGINT at that depth. The copy
+# prints that its subscription received the signal and exits 0; a handler
+# entered on the task's own stack would fault in the guard and end it by
+# SIGSEGV (exit 139). Each tier builds into the default directory and runs
+# that build, before the next tier replaces it.
+requires: os-name:linux
+fixture: AHandlerRunsWhenItsTaskIsAtItsGuard.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step: jet build -O0 main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "the handler ran: true\nraised at the guard, exit 0\n"
+
+step: jet build -O1 main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "the handler ran: true\nraised at the guard, exit 0\n"
+
+step: jet build -O2 main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "the handler ran: true\nraised at the guard, exit 0\n"

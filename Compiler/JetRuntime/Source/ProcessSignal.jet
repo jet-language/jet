@@ -32,11 +32,13 @@ rt_process_signal_interrupts_address: fn() -> I64 {
 }
 
 // musl's signal(signal, handler): rt_sigaction with SA_RESTART | SA_RESTORER,
-// an empty mask and the mark restorer. -1 when the kernel refuses.
+// an empty mask and the mark restorer, plus SA_ONSTACK so the handler runs on
+// the thread's alternate stack even when the interrupted stack is at its
+// guard. -1 when the kernel refuses.
 process_signal_install: fn(signal: I64, handler: I64) -> I64 {
     status := I64{0}
     #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail") {
-        status = os_syscall_stack4_i64(I64{13}, signal, handler, I64{335544320}, rt_process_signal_restore_address(), I64{0}, I64{8})
+        status = os_syscall_stack4_i64(I64{13}, signal, handler, I64{469762048}, rt_process_signal_restore_address(), I64{0}, I64{8})
     }
     if (status < I64{0}) -> I64{-1} else -> I64{0}
 }
@@ -334,7 +336,7 @@ signal_hub_install: fn(hub: I64, number: I64) -> I64 {
     }
     if (status < I64{0}) { return status }
     #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail") {
-        status = os_syscall_stack4_i64(I64{13}, number, rt_signal_mark_address(), I64{335544320}, rt_process_signal_restore_address(), I64{0}, I64{8})
+        status = os_syscall_stack4_i64(I64{13}, number, rt_signal_mark_address(), I64{469762048}, rt_process_signal_restore_address(), I64{0}, I64{8})
     }
     status
 }
