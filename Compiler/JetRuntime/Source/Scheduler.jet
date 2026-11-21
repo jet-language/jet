@@ -897,6 +897,12 @@ scheduler_body_enter: fn() -> I64 {
 
 scheduler_body_leave: fn(saved: I64) { sync_store(wrapping(thread_base() + I64{64}), saved) }
 
+// Whether any task, parallel or realtime body has entered: stop domain 2
+// exists only inside one (rt_task_panic_publish_recorded). A program that
+// runs none may stop on a main thread with no TCB (Thread.jet
+// jet_rt_thread_init), whose control a stop must not read.
+scheduler_body_ever_entered: fn() -> Bool { task_panic_code != I64{0} }
+
 // Lower.jet lower_poll_call_enter/leave bracket a checked operation whose
 // immediate terminator is a Propagate poll: inside a body (bit 1) the call
 // arms bit 2 for its duration; leave restores the caller's word exactly.
