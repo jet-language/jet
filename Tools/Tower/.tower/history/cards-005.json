@@ -39195,6 +39195,111 @@
       "completedAt": "2026-11-17T22:32:46.981Z",
       "questions": [],
       "retiredAt": "2026-11-20T23:01:36.011Z"
+    },
+    {
+      "id": "c0fqrrpk",
+      "num": 6805,
+      "title": "Share, clipboard and drag and drop on Linux and the web; drop zones reach app screens from core.ui.host",
+      "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G7).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e19",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1-c3 met on p281/p282 (802105d3a4, bd564de961)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c3 Linux half landed: 7743a58f30 (p266). Case NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging_on_linux passes on batch compiler p266. The web half waits on #6556 c9."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c3 prerequisite landed: dev 834ae6b799 (Type{V} per generic instance via NodeKind.TypePath, cycle p261). On batch compiler p261: golden Reflection/GenericTypeValues 3/0 (o0, o1, o2; the hand-written .out matched on its first run), TypeValues 3/0, ReflectPaths 3/0, ui type_used_as_value 1/0, BodyCodec --check rc=0. CoreReach.jet fails 1 test (the routed-module literal 'identity'), and fails the same way on p260, so the failure predates this SUB. drop_zone is next, from Speed-3-3's handoff."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Speed-3-3 paused for ballot rework (owner priority). Unlanded: SUB Speed-3-3-type-value-generic, the c3 prerequisite (Type{V} per generic instance via NodeKind.TypePath), in cycle p261. Drafted, ready to submit after it lands: drop_zone (c3), with the rebased files in $JET_SCRATCH_ROOT/lanes/Speed-3-3/merge/rb/dz and merge/dz3 and the stage in stage/keep/tv-tree; its case needs the Core.rows exports and Type{V} in the seed. HANDOFF.md in that lane holds the steps."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 Linux half landed: dev 1723acbd02 (Speed-3-3-6805-c1-share, cycle p259). On batch compiler p259: cases NativeApp/share_copies_the_link_on_linux 1/0. The Web Share API half waits on #6556 c9."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 Linux half landed: dev aa80e241d2 (Speed-3-3-6805-c2-clipboard). On batch compiler p258: cases NativeApp/clipboard_round_trips_on_linux 1/0, UIBackend/wayland_windows_copy_and_paste_through_the_clipboard 1/0, NativeApp 19/0. The web half (user-gesture paste, refused read gives None) and the clipboard_round_trips_on_every_target case wait on #6556 c9."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Correction to the previous log: D-PRIM-TYPEKEY2=A (types as values) amends TYPEKEY1, so c3's run-time identity is the Prelude Type value: Type{V} for a generic V, where each instance gets its own identity, and no separate reflect.TypeKey (I8). Speed-3-3 builds it, and drop_zone uses Type{V}."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c3 depends on D-PRIM-TYPEKEY1=A (ratified, unbuilt): drop_zone<T> needs T's run-time identity inside a generic fn. On p255, V.reflect() in a generic fn is E0107, reflect.of(v) on a generic V is E0112, and Encode/Decode are structural (a Task decodes as a same-shaped Note). Speed-3-3 builds reflect.key<T>() as part of c3, after #6809 c1, and drop_zone lands one cycle after it."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. macOS, Windows, iOS and Android work moved to #6988 (G13)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.share uses the Web Share API in a browser that has it. On Linux and in other browsers it copies the link and says so. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_web_share_api_or_copies` on Linux and the web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in c7edef5faa (p279), fixed by 802105d3a4 (p281). On the p281 batch compiler 443a0e13e5, `jet test Compiler --profile cases --filter NativeApp/share_uses_the_web_share_api_or_copies` passes 1/1, with Linux steps and web page steps (Web Share API, and the copy fallback).",
+          "at": "2026-11-17T23:23:58.702Z"
+        },
+        {
+          "n": 2,
+          "text": "native.copy_text and native.paste_text work on Linux (Wayland and X11) and the web. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target` on Linux and the web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in c7edef5faa (p279), fixed by 802105d3a4 (p281). On the p281 batch compiler 443a0e13e5, `jet test Compiler --profile cases --filter NativeApp/clipboard_round_trips_on_every_target` passes 1/1, with Linux steps and a web page: paste outside a gesture gives None, and paste inside a click round-trips.",
+          "at": "2026-11-17T23:24:01.228Z"
+        },
+        {
+          "n": 3,
+          "text": "ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2 SC 2.5.7). Proof: `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging` on Linux and the web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in bd564de961 (p282). On the p282 batch compiler, `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging` passes 1/1 on Linux and the web, and the switched ui snapshot app_device_bare_import_target passes 1/1.",
+          "at": "2026-11-17T23:46:32.295Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:13:47.698Z",
+      "updated": "2026-11-17T23:46:47.073Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T23:46:47.073Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T00:16:03.207Z"
     }
   ]
 }
