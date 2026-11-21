@@ -5781,21 +5781,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 594,
+      "line": 621,
       "column": 13,
       "reason": "the testkit signals the child of its own step child, as the row's `@signal_child` asks"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 688,
+      "line": 715,
       "column": 5,
       "reason": "the testkit stops its own step child at a resource guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 948,
+      "line": 975,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -12539,9 +12539,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetSema/Tests/XMLCheckerRootsFixtures.jet | 13:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XMLCheckerRootsFixtures.jet | 14:9 | "nested tail retains its value grammar" |
 | Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 57:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 594:13 | "the testkit signals the child of its own step child, as the row's `@signal_child` asks" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 688:5 | "the testkit stops its own step child at a resource guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 948:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 621:13 | "the testkit signals the child of its own step child, as the row's `@signal_child` asks" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 715:5 | "the testkit stops its own step child at a resource guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 975:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 193:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 370:5 | "the case explicitly authorizes signaling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
