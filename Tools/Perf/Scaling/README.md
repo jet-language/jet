@@ -63,7 +63,7 @@ Every baseline, rung and profile compile is atomically checkpointed. Repeat
 the identical command to resume without retrying completed rungs (including
 failures); changed options or compilers require a new work directory.
 `--work-dir` contains evidence only (receipts, reports, traces and logs).
-Generated projects, compiler stores/output and `perf.data` go under
+Generated projects, compiler stores/output and `profile.jettrace` go under
 `--build-root` (default `$JET_SCRATCH_ROOT/scaling-gate`), keyed by evidence
 directory; each point records its `build_dir` for artifact cleanup after landing.
 Re-render a profile with `node Tools/Perf/Scaling/Profile.mjs BUILD_DIR TRACE_FILE PHASE...`,
@@ -169,7 +169,8 @@ and projected to 1M lines. Floors are the per-phase budgets of
 `Tools/Perf/Budget/budget.json` at its 30M lines/s `target` column (each row's
 ns per line as a lines/s rate) and the target end to end; a phase under its
 floor names the cards that own its root. `--profile` re-runs the top rung of a
-failing series under perf and
+failing series under `jet perf attach -- <compile>`, which samples its CPU
+from outside it with no other profiler, and
 attributes samples per phase to source functions (`profile.mjs`). Exit 0
 pass, 1 failure, 2 invalid invocation; the receipt is JSON in `--work-dir`.
 

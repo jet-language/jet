@@ -1079,6 +1079,37 @@ Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
 attaches to a busy `jet check` for 3 seconds.
 
+The trace also keeps when each sample was taken, as the `timeline` receipt
+section (type `JetPerfTimeline`): `functions`, every function the samples
+were in, each as a `functions` row; `nodes`, their call tree, two numbers a
+node, its function's index and its parent's (-1 for a stack's outermost
+frame); and `samples`, two numbers a sample, the earliest first, its
+microseconds since `origin_unix_ns` and its innermost node (-1 for a stack
+with no named frame). The samples' clock is the monotonic one, read with
+the wall clock when the sampling starts, so a sample's wall time is
+`origin_unix_ns` plus its offset, and a tool lines the samples up with the
+phases of a `--trace-out` trace. Past 1,048,576 samples the timeline drops
+the rest, counted in `dropped`, and the `functions` section still counts
+them.
+
+`jet perf attach -- <command>` samples a command the same way, from outside
+it, from its first instruction to its end (D-PERF-TARGET1): jet starts the
+command with the kernel's task clock opened on it on each online CPU, with
+`inherit`, so every thread and process it starts is sampled too, and an
+`execve` names its later samples by the new executable. The command keeps
+jet's terminal; a word without a `/` is looked up on `PATH`. After it ends
+the attach prints the `functions` lines and the trace's path, the trace
+holds the `functions` and `timeline` sections, its run window is the
+command's whole run, and it exits with the command's exit code. A process
+names its frames when its first sample is read, every 20 ms, so a process
+that ends sooner may leave its samples `unnamed`. When the kernel won't
+sample it, the attach is `Jet.DriverOperationFailed` (exit 1) and the
+command doesn't run. `jet perf attach --quiet --out
+profile.jettrace -- jet check Compiler` profiles the compiler compiling
+itself, its timeline split by the phases of its `--trace-out` trace, as
+Tools/Perf/Scaling/Profile.mjs does.
+Tests/Cases/Perf/attach_samples_a_command.case is the worked example.
+
 `jet perf attach --lens=counts -- <command>` counts a command's work from
 its start (D-PERF-TARGET1): jet starts the command, opens two of the
 kernel's counters on it before it runs, user-mode instructions and cycles,
@@ -1106,9 +1137,8 @@ refused this user the counters; set the sysctl kernel.perf_event_paranoid
 to 2 or lower`. A count missing the start would mislead, so `--lens=counts`
 on a pid is refused (`Jet.UnknownFlag`, exit 2) with the `--` form as its
 fix; so are `--for=`, `--zones=`, `--source` and `--lens=alloc` with a
-command, a command without `--lens=counts`, and a pid with a command
-(`Jet.AttachWhichProcess`). A program that can't be started is
-`Jet.DriverOperationFailed` (exit 1).
+command, and a pid with a command (`Jet.AttachWhichProcess`). A program
+that can't be started is `Jet.DriverOperationFailed` (exit 1).
 Tests/Cases/Perf/attach_counts_a_command.case is the worked example.
 
 `jet perf attach --lens=syscalls -- <command>` traces each system call of a

@@ -476,21 +476,20 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     }
     if command == .Val(words) {
         if pid == .Val(first) {
-            return jet_cli_perf_attach_which("`jet perf attach` was given process `{first}` and a command after `--`", "attach to the running process with `jet perf attach {first}`, or count the command with `jet perf attach --lens=counts -- <command>`", color)
+            return jet_cli_perf_attach_which("`jet perf attach` was given process `{first}` and a command after `--`", "attach to the running process with `jet perf attach {first}`, or sample the command with `jet perf attach -- <command>`", color)
         }
         if words.len() == 0 {
-            return jet_cli_perf_error("`jet perf attach --` names no command", "write the command after `--`: `jet perf attach --lens=counts -- <command>`", color)
+            return jet_cli_perf_error("`jet perf attach --` names no command", "write the command after `--`: `jet perf attach -- <command>`", color)
         }
         if for_ms > 0 || zones_ms > 0 || source != None || alloc || follow {
-            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, as `--follow` does, and a command after `--` runs from its start to its end", "drop them to count or trace the command, or start it and attach to its pid", color)
+            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, as `--follow` does, and a command after `--` runs from its start to its end", "drop them to sample, count or trace the command, or start it and attach to its pid", color)
         }
         if syscalls {
             return jet_cli_perf_attach_syscalls(words.move(), counts, out, allowlist, quiet, color)
         }
-        if !counts {
-            return jet_cli_perf_error("`jet perf attach -- <command>` takes `--lens=counts` or `--lens=syscalls`", "run `jet perf attach --lens=counts -- {words.join(" ")}` to count it, `--lens=syscalls` to trace its system calls, or start the command and attach to its pid", color)
-        }
-        return jet_cli_perf_attach_command(words, out, allowlist, quiet, color)
+        if counts -> return jet_cli_perf_attach_command(words, out, allowlist, quiet, color)
+        // No lens: the kernel samples the command's CPU from outside it.
+        return jet_cli_perf_attach_sampled(words.move(), out, allowlist, quiet, color)
     }
     if syscalls {
         return jet_cli_perf_report("E2102", "`--lens=syscalls` traces a command from its start, and a running process has started already", "run `jet perf attach --lens=syscalls -- <command>`", color)
@@ -682,8 +681,11 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         // its threads' CPU from outside it.
         window_ms: if for_ms > 0 -> for_ms else -> JET_CLI_PERF_OUTSIDE_WINDOW_MS
         taken: jet_cli_perf_outside_sample(target_pid, window_ms) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
-        loop line in jet_cli_perf_outside_lines(taken.section.value) -> hot = "{hot}{line}\n"
-        capture.receipts.push(taken.section)
+        loop line in jet_cli_perf_outside_lines(taken.sections.functions.value) {
+            hot = "{hot}{line}\n"
+        }
+        capture.receipts.push(taken.sections.functions)
+        capture.receipts.push(taken.sections.timeline)
         sampled = Val(taken.window)
         read = [String]{"the CPU of its threads and its children's, sampled from outside for {window_ms} ms"}
         observed = true

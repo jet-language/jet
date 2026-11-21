@@ -76,10 +76,10 @@ USAGE: [String]{
     "  --ladder SHAPE=A,B,..  explicit ladder for one shape",
     "  --domain-ladder A,B,.. domain ladder in code lines (default 125000,250000,500000,1000000)",
     "  --memory-max 20G  --timeout 1800  --stop-after SECONDS (skip larger rungs after a slower one)",
-    "  --profile              perf-profile the top rung of every failing series (Tools/Perf/Scaling/Profile)",
+    "  --profile              CPU-profile the top rung of every failing series with jet perf (Tools/Perf/Scaling/Profile)",
     "  --layout files|single  repeatable; default both (a multi-file failure is a gate failure)",
     "  --work-dir DIR  --receipt FILE  --seed S",
-    "  --build-root DIR       projects/stores/compiler outputs/perf.data (default $JET_SCRATCH_ROOT/scaling-gate)",
+    "  --build-root DIR       projects/stores/compiler outputs/profile.jettrace (default $JET_SCRATCH_ROOT/scaling-gate)",
     "  --mode timing|counters counter-only mode gates deterministic work, not time/RSS/floors",
     "  --jobs N              parallel counter-mode compiles (default 1); timing stays serial",
     "Receipts checkpoint every baseline, rung and profile compile; rerunning the same",
@@ -223,7 +223,7 @@ ProfiledPhase: struct {
 }
 
 ProfileResult: struct {
-    perf_data: String,
+    trace: String,
     compile_ok: Bool,
     phases: [String:ProfiledPhase],
 }
@@ -722,8 +722,8 @@ memory_bytes: fn(text: String) -> Int? Never! {
 // ----------------------------------------------------------------- measure
 
 // The compile of `built` into `dir`, ready to start: a fresh project and store
-// under the build root (projects, stores, emitted Rust, outputs and perf.data
-// stay off the evidence tree), output to dir/stdout.log and dir/stderr.log.
+// under the build root (projects, stores, emitted Rust, outputs and profile
+// traces stay off the evidence tree), output to dir/stdout.log and dir/stderr.log.
 prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: String, profiled: Bool) -> Rung Err! {
     files.remove_all(dir) ?? ()
     files.create_dir_all(dir)
@@ -1103,9 +1103,9 @@ measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: Str
     Ok()
 }
 
-// Re-run the largest passing rung under perf and attribute its samples to
-// the failing phases (Profile.jet): the responsible functions with their
-// source.
+// Re-run the largest passing rung under `jet perf attach` and attribute its
+// samples to the failing phases (Profile.jet): the responsible functions
+// with their source.
 profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, n: Int, receipt: &Receipt, at: Int) -> ProfileResult Err! {
     dir: where(config, compiler, shape.name, layout, "{n}-profile")
     phases: combinatorics.unique(receipt.series[at].failures.filter(fn(failure) { failure.kind == "growth" }).map(fn(failure) { (failure.phase ?? "").copy() }))
@@ -1115,10 +1115,10 @@ profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String
     }
     point: receipt.series[at].profile_point ?? return Err("no profile compile")
     profiled := [String:ProfiledPhase]{}
-    loop phase in profile(point.build_dir, files.join(dir, "trace.json"), phases, config.repo) {
+    loop phase in profile(point.build_dir, files.join(dir, "trace.json"), phases) {
         profiled[phase.phase.copy()] = ProfiledPhase{samples: phase.samples, own: phase.own.copy(), inclusive: phase.inclusive.copy()}
     }
-    Ok(ProfileResult{perf_data: files.join(point.build_dir, "perf.data"), compile_ok: point.ok, phases: profiled})
+    Ok(ProfileResult{trace: files.join(point.build_dir, "profile.jettrace"), compile_ok: point.ok, phases: profiled})
 }
 
 // The failures of a point that did not pass: a timeout or a failed compile,
