@@ -1004,10 +1004,11 @@ SemaCheckContext: struct {
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None},
     // The debugger's position probes inside the function being checked
-    // (EvalProbe.jet). A lambda body checked inside it reaches the same walk.
-    // The handle stays the same through a check, so a probe's mark and
-    // rollback leave it as it is.
-    eval_walk: Shared<SemaEvalWalk>?{None},
+    // (EvalProbe.jet). A context copied for a nested check walks on a fork
+    // of it, whose answers come back with the copy's facts
+    // (sema_eval_walk_take_back). A probe's mark and rollback leave it as
+    // it is.
+    eval_walk: SemaEvalWalk{SemaEvalWalk{}},
     // (Rust `arithmetic_policy_stack`): the active lexical
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Overflow(mode)` marker. Closures checked inside the body keep it.
@@ -1654,7 +1655,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
-        eval_walk: source.eval_walk,
+        eval_walk: sema_eval_walk_fork(source.eval_walk),
         arithmetic_policy: source.arithmetic_policy,
         runtime_policy: source.runtime_policy,
         compiler_generated: source.compiler_generated,

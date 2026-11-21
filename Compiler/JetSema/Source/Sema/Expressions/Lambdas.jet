@@ -2239,6 +2239,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // so a move of the name inside the body is the lambda's own last use.
     takes_valid: if inline_loop -> true else -> sema_ownership_check_take_captures(state, lambda, lambda_scopes, diagnostics)
     lambda_context := sema_check_context_snapshot(context)
+    // A debugger probe inside the body answers through the enclosing walk.
+    defer sema_eval_walk_take_back(context, lambda_context)
     // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
     // changes the collection an enclosing loop reads is refused there too.
     lambda_context.iter_borrowed = context.iter_borrowed.copy()

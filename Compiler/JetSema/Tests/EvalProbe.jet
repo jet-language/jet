@@ -18,7 +18,6 @@ use {
         SemaSourceOrigin,
         SemaSourceSegment,
         sema_collect_comptime_declarations,
-        sema_eval_probe_answers,
         sema_eval_probe_parse,
         sema_eval_probes,
         sema_eval_probe_function,
@@ -72,7 +71,7 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) ->
         }
         probes.push(SemaEvalProbe{module_identity: main_id, offset: ask.offset, expressions: expressions})
     }
-    handle: sema_eval_probes(probes)
+    eval_probes: sema_eval_probes(probes)
     facts: SemaBuildFacts{package_name: "eval-probe", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "eval-probe", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
@@ -90,7 +89,7 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) ->
         failures.push("the declaration pass lost its registration graph")
         return run
     }
-    if asks.len() > 0 -> graph.eval_probes = Val(handle)
+    if asks.len() > 0 -> graph.eval_probes = Val(eval_probes)
     checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
     run.facts = "{checked.modules:Debug}\n{checked.diagnostics:Debug}"
     loop diagnostic in checked.diagnostics {
@@ -98,7 +97,7 @@ eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) ->
             run.errors.push("{diagnostic.code}: {diagnostic.what}")
         }
     }
-    run.answers = sema_eval_probe_answers(handle)
+    run.answers = checked.eval_answers.move()
     run
 }
 

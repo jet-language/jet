@@ -98,6 +98,7 @@ SemaModuleBodyRows: struct {
     compute_facts: [SemaComputeFunctionFacts],
     exact_int_reachable: Bool,
     copy_events: [SemaCopyEvent],
+    eval_answers: [SemaEvalProbeAnswer],
     diagnostics: [Diagnostic],
     complete: Bool,
     failure_facts: [SemaFunctionFailureFacts],
@@ -221,6 +222,7 @@ sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], indexes: [Int]
                     compute_facts: result.compute_facts.move(),
                     exact_int_reachable: result.exact_int_reachable,
                     copy_events: result.copy_events.move(),
+                    eval_answers: result.eval_answers.move(),
                     diagnostics: result.diagnostics.move(),
                     complete: result.complete,
                     failure_facts: result.failure_facts.move(),
@@ -238,6 +240,7 @@ sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], indexes: [Int]
             result.compute_facts = [SemaComputeFunctionFacts]{}
             result.exact_int_reachable = false
             result.copy_events = [SemaCopyEvent]{}
+            result.eval_answers = [SemaEvalProbeAnswer]{}
             result.diagnostics = [Diagnostic]{}
             result.complete = true
             result.failure_facts = [SemaFunctionFailureFacts]{}
@@ -280,6 +283,7 @@ sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], indexes: [Int],
             result.compute_facts = put.compute_facts.move()
             result.exact_int_reachable = put.exact_int_reachable
             result.copy_events = put.copy_events.move()
+            result.eval_answers = put.eval_answers.move()
             result.diagnostics = put.diagnostics.move()
             result.complete = put.complete
             result.failure_facts = put.failure_facts.move()
