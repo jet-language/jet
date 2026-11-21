@@ -1984,16 +1984,23 @@ x64_process_stop: fn(pid: Int) {
 // Ignore SIGINT and SIGQUIT while a child runs in the foreground, as
 // system(3) does: the terminal signals the child, which decides.
 x64_process_wait_foreground: fn(pid: Int) -> Int {
-    action: os_map(32, OS_PROT_READ + OS_PROT_WRITE)
-    if !os_failed(action) {
-        #Unsafe("a kernel sigaction with handler SIG_IGN on a fresh page") {
-            os_store_word(action, 1)
-            _ := os_syscall(OS_SYS_RT_SIGACTION, 2, action, 0, 8, 0, 0)
-            _ := os_syscall(OS_SYS_RT_SIGACTION, 3, action, 0, 8, 0, 0)
-        }
-        _ := os_unmap(action, 32)
-    }
+    loader_foreground()
     x64_process_wait(pid)
+}
+
+// Ignore SIGINT and SIGQUIT from here on: a child in the foreground takes
+// the terminal's.
+loader_foreground: fn() {
+    action: os_map(32, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(action) {
+        return
+    }
+    #Unsafe("a kernel sigaction with handler SIG_IGN on a fresh page") {
+        os_store_word(action, 1)
+        _ := os_syscall(OS_SYS_RT_SIGACTION, 2, action, 0, 8, 0, 0)
+        _ := os_syscall(OS_SYS_RT_SIGACTION, 3, action, 0, 8, 0, 0)
+    }
+    _ := os_unmap(action, 32)
 }
 
 // End this process the way wait status `status` says its child ended: the
@@ -3194,4 +3201,251 @@ x64_sampler_close: fn(sampler: &X64Sampler) {
         loader_close(sampled.fd)
     }
     sampler.threads = [X64SampledThread]{}
+}
+
+// ---------------------------------------------------------------------------
+// A counted command (x64_counted_run): the kernel's user-mode instruction
+// and cycle counters (PERF_TYPE_HARDWARE's PERF_COUNT_HW_INSTRUCTIONS and
+// PERF_COUNT_HW_CPU_CYCLES), each opened disabled, with `inherit`,
+// exclude_kernel, exclude_hv and enable_on_exec, so they start at the
+// command's execve and every thread and child process it starts adds into
+// them. A read gives the count, then the time the counter was enabled and
+// the time it ran (PERF_FORMAT_TOTAL_TIME_ENABLED | _RUNNING).
+LOADER_PERF_TYPE_HARDWARE: 0
+
+LOADER_PERF_COUNT_HW_CPU_CYCLES: 0
+
+LOADER_PERF_COUNT_HW_INSTRUCTIONS: 1
+
+LOADER_PERF_COUNT_FLAGS: 0x1063
+
+LOADER_PERF_COUNT_READ_FORMAT: 3
+
+// The words of a counted run's page: a zeroed kernel sigaction (SIG_DFL)
+// at its start, the failed execve's result, the go byte, the wait status,
+// the rusage (struct rusage: ru_utime, ru_stime, then ru_maxrss in KiB), a
+// counter's read, then the counters' attributes.
+LOADER_COUNTED_ERRNO: 32
+
+LOADER_COUNTED_GO: 40
+
+LOADER_COUNTED_STATUS: 48
+
+LOADER_COUNTED_RUSAGE: 64
+
+LOADER_COUNTED_READ: 256
+
+LOADER_COUNTED_ATTR: 512
+
+// What x64_counted_run saw of a command. `status` is its wait status, -1
+// when it never ran, and `failure` says why ("" when it ran). Each count is
+// None when the kernel couldn't count it: `errno` is the error the kernel
+// refused a counter with (0 when it took both). A count the kernel shared
+// with other events ran part of the time and is scaled to the whole
+// (`scaled`). `cpu_ns` is the user and system time the reap reports and
+// `peak_rss_bytes` its maximum resident set, both folding in every child
+// the command waited for.
+X64Counted: struct {
+    status: Int,
+    failure: String,
+    instructions: Int?,
+    cycles: Int?,
+    errno: Int,
+    scaled: Bool,
+    cpu_ns: Int,
+    peak_rss_bytes: Int,
+}
+
+// One counter's total: None when it never ran.
+LoaderCount: struct {
+    value: Int?,
+    scaled: Bool,
+}
+
+// Run the image file `path` with `argv` (argv[0] included) and the
+// environment `env` (as X64Launch.env), counted from its first
+// instruction: a forked child waits on a pipe while this process opens the
+// counters on its pid, then execs. The command shares this process's
+// standard files, and this process ignores SIGINT and SIGQUIT while it
+// runs, as x64_process_wait_foreground does. The counters are read once the
+// command is reaped.
+x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted {
+    counted := X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0}
+    exec: loader_exec_block(path, argv, env)
+    if exec.failure != "" {
+        counted.failure = exec.failure
+        return counted
+    }
+    page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(page) {
+        _ := os_unmap(exec.block, exec.size)
+        counted.failure = "mapping the counted run's page failed (errno {-page})"
+        return counted
+    }
+    go := 0
+    report := 0
+    #Unsafe("each pipe2 writes its two descriptors to the fresh page's status word, which is read before the next") {
+        go = loader_pipe(page + LOADER_COUNTED_STATUS)
+        report = loader_pipe(page + LOADER_COUNTED_STATUS)
+    }
+    child := -1
+    if !os_failed(go) && !os_failed(report) {
+        // The words the child uses, made before the fork.
+        go_read: I64{go & 0xffffffff}
+        go_write: I64{(go >> 32) & 0xffffffff}
+        report_read: I64{report & 0xffffffff}
+        report_write: I64{(report >> 32) & 0xffffffff}
+        words: I64{page}
+        program_path: I64{exec.path}
+        program_argv: I64{exec.argv}
+        program_envp: I64{exec.envp}
+        program_mask: I64{exec.block}
+        #Unsafe("fork copies this thread alone; the child makes only system calls on words computed before the fork and on its copy of the page, allocating nothing, so no lock another thread held at the fork can stop it; execve reads the argument block") {
+            child = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
+            if child == 0 {
+                loader_counted_child(go_read, go_write, report_read, report_write, words, program_path, program_argv, program_envp, program_mask)
+            }
+        }
+    }
+    _ := os_unmap(exec.block, exec.size)
+    if !os_failed(go) -> loader_close(go & 0xffffffff)
+    if !os_failed(report) -> loader_close((report >> 32) & 0xffffffff)
+    if os_failed(go) || os_failed(report) || os_failed(child) {
+        if !os_failed(go) -> loader_close((go >> 32) & 0xffffffff)
+        if !os_failed(report) -> loader_close(report & 0xffffffff)
+        _ := os_unmap(page, OS_PAGE_SIZE)
+        counted.failure = "fork failed (errno {-child})"
+        if os_failed(report) {
+            counted.failure = "making the counted run's pipe failed (errno {-report})"
+        }
+        if os_failed(go) -> counted.failure = "making the counted run's pipe failed (errno {-go})"
+        return counted
+    }
+    instructions_fd := 0
+    cycles_fd := 0
+    #Unsafe("the attributes go to the fresh page's attribute words") {
+        instructions_fd = loader_counter_open(page, child, LOADER_PERF_COUNT_HW_INSTRUCTIONS)
+        cycles_fd = loader_counter_open(page, child, LOADER_PERF_COUNT_HW_CPU_CYCLES)
+    }
+    if os_failed(instructions_fd) -> counted.errno = -instructions_fd else if os_failed(cycles_fd) {
+        counted.errno = -cycles_fd
+    }
+    // The go byte; a child that never gets it reads the pipe's end and
+    // exits 127 unrun.
+    sent := 0
+    #Unsafe("the go byte of this process's page to the child's pipe") {
+        sent = os_syscall(OS_SYS_WRITE, (go >> 32) & 0xffffffff, page + LOADER_COUNTED_GO, 1, 0, 0, 0)
+    }
+    loader_close((go >> 32) & 0xffffffff)
+    if sent != 1 -> counted.failure = "starting the command failed (errno {-sent})"
+    // The report pipe closes at the child's execve; a failed execve sends
+    // its result first.
+    got := -OS_EINTR
+    #Unsafe("read fills the failed execve's word of this process's page") {
+        loop got == -OS_EINTR {
+            got = os_syscall(OS_SYS_READ, report & 0xffffffff, page + LOADER_COUNTED_ERRNO, 8, 0, 0, 0)
+        }
+        if got == 8 {
+            counted.failure = "execve of {path} failed (errno {-os_load_word(page + LOADER_COUNTED_ERRNO)})"
+        }
+    }
+    loader_close(report & 0xffffffff)
+    loader_foreground()
+    reaped := -OS_EINTR
+    #Unsafe("wait4 writes the int status and the rusage to this process's page") {
+        loop reaped == -OS_EINTR {
+            reaped = os_syscall(OS_SYS_WAIT4, child, page + LOADER_COUNTED_STATUS, 0, page + LOADER_COUNTED_RUSAGE, 0, 0)
+        }
+        if reaped == child {
+            counted.status = os_load_word(page + LOADER_COUNTED_STATUS) & 0xffffffff
+            rusage: page + LOADER_COUNTED_RUSAGE
+            counted.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
+            counted.peak_rss_bytes = os_load_word(rusage + 32) * 1024
+        }
+    }
+    if reaped != child && counted.failure == "" {
+        counted.failure = "waiting for the command failed (errno {-reaped})"
+    }
+    if counted.failure != "" -> counted.status = -1
+    instructions := LoaderCount{value: None, scaled: false}
+    cycles := LoaderCount{value: None, scaled: false}
+    #Unsafe("each read goes to the fresh page's read words") {
+        instructions = loader_counter_read(page, instructions_fd)
+        cycles = loader_counter_read(page, cycles_fd)
+    }
+    counted.instructions = instructions.value
+    counted.cycles = cycles.value
+    counted.scaled = instructions.scaled || cycles.scaled
+    _ := os_unmap(page, OS_PAGE_SIZE)
+    counted
+}
+
+// A pipe2 with O_CLOEXEC, its two int descriptors written to the word at
+// `word`: the read end in the low 32 bits and the write end in the high,
+// or the failed call's result.
+#Unsafe("pipe2 writes two int descriptors to the caller's word `word`, read at once")
+loader_pipe: fn(word: Int) -> Int {
+    made: os_syscall(OS_SYS_PIPE2, word, LOADER_O_CLOEXEC, 0, 0, 0, 0)
+    if os_failed(made) -> return made
+    os_load_word(word)
+}
+
+// The counted command's child, just forked. It closes this process's pipe
+// ends `go_write` and `report_read` and waits for the go byte on
+// `go_read`; the pipe's end instead (this process ended or gave up) ends it
+// unrun. Then it restores SIGPIPE, which a Jet program ignores, to its
+// default, unblocks every signal and execs; a failed execve sends its result
+// on `report_write`, which a successful one closes. It allocates nothing,
+// so it may run in a fork.
+#Unsafe("close, read, rt_sigaction, rt_sigprocmask, execve, write and exit_group of the child's own descriptors and itself; `page` is its copy of the counted run's page, whose start is a zeroed sigaction, and execve reads the argument block")
+loader_counted_child: fn(go_read: I64, go_write: I64, report_read: I64, report_write: I64, page: I64, path: I64, argv: I64, envp: I64, mask: I64) {
+    _ := os_syscall_i64(I64{OS_SYS_CLOSE}, go_write, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_CLOSE}, report_read, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    got := I64{-OS_EINTR}
+    loop got == (I64{-OS_EINTR}) {
+        got = os_syscall_i64(I64{OS_SYS_READ}, go_read, page + I64{LOADER_COUNTED_GO}, I64{1}, I64{0}, I64{0}, I64{0})
+    }
+    if got != 1 {
+        _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    _ := os_syscall_i64(I64{OS_SYS_CLOSE}, go_read, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, page, I64{0}, I64{8}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, mask, I64{0}, I64{8}, I64{0}, I64{0})
+    result: os_syscall_i64(I64{OS_SYS_EXECVE}, path, argv, envp, I64{0}, I64{0}, I64{0})
+    os_store_i64(page + I64{LOADER_COUNTED_ERRNO}, result)
+    _ := os_syscall_i64(I64{OS_SYS_WRITE}, report_write, page + I64{LOADER_COUNTED_ERRNO}, I64{8}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// Open the counter `config` (PERF_TYPE_HARDWARE) on the stopped child
+// `pid`, its attributes in the counted run's `page`: its descriptor, or the
+// failed call's result.
+#Unsafe("the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads")
+loader_counter_open: fn(page: Int, pid: Int, config: Int) -> Int {
+    attr: page + LOADER_COUNTED_ATTR
+    os_store_word(attr, LOADER_PERF_TYPE_HARDWARE | LOADER_PERF_ATTR_SIZE << 32)
+    os_store_word(attr + 8, config)
+    os_store_word(attr + 32, LOADER_PERF_COUNT_READ_FORMAT)
+    os_store_word(attr + 40, LOADER_PERF_COUNT_FLAGS)
+    os_syscall(LOADER_SYS_PERF_EVENT_OPEN, attr, pid, -1, -1, LOADER_PERF_FLAG_FD_CLOEXEC, 0)
+}
+
+// The total of the counter `fd` (loader_counter_open), which closes: its
+// count scaled to the whole time it was enabled when the kernel ran it for
+// only part of it, and None when it never ran or never opened.
+#Unsafe("read fills three words of the caller's counted-run page `page`")
+loader_counter_read: fn(page: Int, fd: Int) -> LoaderCount {
+    count := LoaderCount{value: None, scaled: false}
+    if os_failed(fd) -> return count
+    words: page + LOADER_COUNTED_READ
+    got: os_syscall(OS_SYS_READ, fd, words, 24, 0, 0, 0)
+    value: os_load_word(words)
+    enabled: os_load_word(words + 8)
+    running: os_load_word(words + 16)
+    if got == 24 && running > 0 {
+        count.scaled = running < enabled
+        count.value = Val(if count.scaled -> value * enabled /% running else -> value)
+    }
+    loader_close(fd)
+    count
 }

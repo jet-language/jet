@@ -1,0 +1,33 @@
+# `jet perf attach --lens=counts -- <command>` counts a command's work from
+# its start: jet starts the command with the kernel's user-mode instruction
+# and cycle counters opened on it before it runs, with `inherit`, so the
+# child process the command starts adds into them. The command here is a
+# shell whose subshell, a forked child, spins 200000 turns of a shell loop,
+# at least a few hundred instructions a turn, so the count is far above the
+# 100 million the case asks for, which the shell alone, without its child,
+# never reaches (bash's `sh -c 'exit 3'` counts about 9 million).
+# The command's exit code, 3, is the attach's. The attach prints the counts
+# line, and the trace keeps the totals as its `counts` receipt section,
+# which `jet perf view` shows as the same line.
+requires: os-name:linux
+requires: tool:sh
+requires: probe sh -c 'set -- /sys/bus/event_source/devices/cpu*; test -e "$1"' # the CPU's own counters
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may count its own processes
+env: NO_COLOR=1
+step: jet perf attach --lens=counts --out spin.jettrace -- sh -c '(i=0; while [ $i -lt 200000 ]; do i=$((i+1)); done); exit 3'
+exit: 3 # the command's own exit code
+stderr: ~ "counts instructions:u=" # the counts line
+stderr: ~ " cycles:u=" # with the cycles
+stderr: ~ " cpu_ns=" # the CPU its reap reported
+stderr: ~ " peak_rss_bytes=" # and its peak memory
+stderr: ~ "Trace: " # then the trace
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.status = "counted" # the kernel counted it
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.instructions_u > 100000000 # the child's loop included
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.cycles_u > 0 # and its cycles
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.cpu_ns > 0 # the CPU its reap reported
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.peak_rss_bytes > 0 # the largest resident set of its processes
+json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.wall_ns > 0 # from its start to its reap
+json: file spin.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+step: jet perf view spin.jettrace
+exit: 0
+stdout: ~ "counts instructions:u=" # the view prints the same line

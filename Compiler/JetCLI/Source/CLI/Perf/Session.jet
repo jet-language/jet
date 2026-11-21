@@ -355,7 +355,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
 // which of its functions its CPU was in (Outside.jet). With `--lens=alloc`,
 // the trace also holds a heap snapshot the program takes while it runs
 // (jet_cli_perf_attach_heap).
-jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     pid := Int?{None}
     out := String?{None}
     source := String?{None}
@@ -372,17 +372,24 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     sampling_us := Int?{None}
     // The functions an outside sampling found the program's CPU in.
     hot := ""
+    // `--lens=counts`, and the command after `--` it counts.
+    counts := false
+    command := [String]?{None}
     skip := false
     loop (index, arg) in args {
         if skip {
             skip = false
             next
         }
+        if arg == "--" {
+            command = Val(jet_cli_tail(args, index + 1))
+            break
+        }
         if arg.starts_with("--lens=") {
-            if arg != "--lens=alloc" {
-                return jet_cli_perf_error("`{arg}` names a lens a running program can't start: attach takes the `alloc` lens alone", "attach with `--lens=alloc` for a heap snapshot, or with no lens for the flight ring", color)
+            if arg != "--lens=alloc" && arg != "--lens=counts" {
+                return jet_cli_perf_error("`{arg}` names a lens attach doesn't take: it takes `alloc` on a running program, and `counts` on a command after `--`", "attach with `--lens=alloc` for a heap snapshot, `--lens=counts -- <command>` to count a command's work, or no lens for the flight ring", color)
             }
-            alloc = true
+            if arg == "--lens=alloc" -> alloc = true else -> counts = true
             next
         }
         if skip {
@@ -450,6 +457,24 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             return jet_cli_perf_attach_which("`jet perf attach` was given two process ids, `{first}` and `{value}`", "attach to one of them at a time: `jet perf attach {first} --source <file.jet>`", color)
         }
         pid = Val(value)
+    }
+    if command == .Val(words) {
+        if pid == .Val(first) {
+            return jet_cli_perf_attach_which("`jet perf attach` was given process `{first}` and a command after `--`", "attach to the running process with `jet perf attach {first}`, or count the command with `jet perf attach --lens=counts -- <command>`", color)
+        }
+        if words.len() == 0 {
+            return jet_cli_perf_error("`jet perf attach --` names no command", "write the command after `--`: `jet perf attach --lens=counts -- <command>`", color)
+        }
+        if for_ms > 0 || zones_ms > 0 || source != None || alloc {
+            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, and a command after `--` runs from its start to its end", "drop them to count the command, or start it and attach to its pid", color)
+        }
+        if !counts {
+            return jet_cli_perf_error("`jet perf attach -- <command>` takes `--lens=counts`", "run `jet perf attach --lens=counts -- {words.join(" ")}`, or start the command and attach to its pid", color)
+        }
+        return jet_cli_perf_attach_command(words, out, allowlist, quiet, color)
+    }
+    if counts {
+        return jet_cli_perf_error("`--lens=counts` counts a command from its start, and a running process has started already", "run `jet perf attach --lens=counts -- <command>`", color)
     }
     target_pid: pid ?? return jet_cli_perf_attach_which("`jet perf attach` names no process", "name the process by its pid: `jet perf attach <pid> --source <file.jet>`", color)
     if alloc && source == None {

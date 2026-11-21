@@ -181,9 +181,11 @@ per second.
 
 `--against SEED` is the train speed gate: the compiler `JET` against the seed
 it was built with, each compiling the corpus in each mode, `--runs` rounds that
-alternate which compiler goes first. Every compile runs under
-`perf stat -e instructions:u,cycles:u`. The gate judges per mode the CPU time,
-user-mode instructions and the process CPU of each top-level phase of at least
+alternate which compiler goes first. Every compile runs under `jet perf
+attach --lens=counts` of the `--tool` jet (default `JET`), which counts its
+user-mode instructions and cycles with no outside profiler and reports its
+CPU time. The gate judges per mode the CPU time, user-mode instructions and
+the process CPU of each top-level phase of at least
 0.5 s, never wall time or lines per second, which load moves. A quantity fails
 when its median per-round ratio is over +10% within a 10-point spread, or when
 every round is over +10%. A wider spread, fewer than three rounds (one binary
@@ -203,13 +205,14 @@ records the cell.
 `--batch PREVIOUS --current CURRENT` is the batch build's speed gate. It
 reads two batch builds of `jet build --profile dev Compiler`, each a
 directory with the build's trace (`trace.txt`), GNU `time -v`'s report
-(`time.txt`), `perf stat -x , -e instructions:u`'s count of the build
-(`perf.txt`) and the compiler the build made
-(`tree/Compiler/JetCLI/.jet/build/jet`). It judges only what load cannot move
-much. First, the builds' user-mode instructions: one ratio CURRENT /
+(`time.txt`), the trace `jet perf attach --lens=counts --out
+counts.jettrace` wrote of the build (`counts.jettrace`) and the compiler the
+build made (`tree/Compiler/JetCLI/.jet/build/jet`). It judges only what load
+cannot move much. First, the builds' user-mode instructions: one ratio
+CURRENT /
 PREVIOUS, failing over +10% (the two builds compile different trees). Then an
 A/B of the two built compilers, each compiling CURRENT's tree in each
-`--modes` mode (default `check`) under `perf stat -e instructions:u,cycles:u`,
+`--modes` mode (default `check`) under `jet perf attach --lens=counts`,
 `--runs` rounds (default 3) that alternate which goes first, kept in `--work`.
 On that one input, instructions fail over +3%; cycles follow the `--against`
 rules (+10%, a 10-point spread, three rounds). CPU, traced CPU (every

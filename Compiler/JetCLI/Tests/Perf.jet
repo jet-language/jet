@@ -1,7 +1,7 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
-    jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
+    jet_backend.[X64Counted, X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, x64_jetline_rows]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
         JET_CLI_PERF_SAMPLE_US,
@@ -48,6 +48,9 @@ use {
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
         jet_cli_perf_cites_corrupt,
+        jet_cli_perf_counts_capture,
+        jet_cli_perf_counts_exit,
+        jet_cli_perf_counts_lines,
         jet_cli_perf_dropped_label,
         jet_cli_perf_file_pid,
         jet_cli_perf_flame_profile,
@@ -2147,4 +2150,34 @@ jet_cli_perf_test_line_row: fn(digest: String, at: Int, name: String) -> TracePr
     assert(by_name.stdout.starts_with("run profile:cpu samples=3 share=75% level=O2, inlined into entry on line 12; "), by_name.stdout)
     listed: jet_cli_perf_instructions_view(trace, "run.jettrace", "step", "json", false)
     assert(listed.stdout.contains(`"holder":"run"`) && listed.stdout.contains(`"within":"entry"`), listed.stdout)
+}
+
+// The `counts` lines of the trace a counted command's capture writes, read
+// back through the trace check.
+perf_counts_test_lines: fn(counted: X64Counted, paranoid: Int?) -> [String] {
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    capture := jet_cli_perf_counts_capture(counted, 40000000000, paranoid)
+    trace: verify_jettrace(jet_cli_perf_capture_bytes(capture, "attach", [String]{"attach", "--lens=counts", "--", "jet", "build"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    lines := jet_cli_perf_counts_lines(trace)
+    lines.push(jet_cli_perf_profile_summary(trace) ?? "no profile")
+    lines
+}
+
+#Test("a counted command's trace keeps its counts, and its view prints them as one line") {
+    counted: X64Counted{status: 3 << 8, failure: "", instructions: Val(81204417733), cycles: Val(29511803012), errno: 0, scaled: false, cpu_ns: 31877000000, peak_rss_bytes: 5120000000}
+    lines: perf_counts_test_lines(counted, Val(2))
+    assert_eq(lines[0], "counts instructions:u=81204417733 cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000")
+    assert(lines[1].ends_with(" window=exit run_wall=40000000000ns run_cpu=31877000000ns"), lines[1])
+    // Counts the kernel ran for part of the command only are scaled to the whole, and say so.
+    shared: X64Counted{status: 0, failure: "", instructions: Val(1000), cycles: Val(2000), errno: 0, scaled: true, cpu_ns: 5, peak_rss_bytes: 4096}
+    assert_eq(perf_counts_test_lines(shared, Val(2))[0], "counts instructions:u=1000 cycles:u=2000 cpu_ns=5 peak_rss_bytes=4096 scaled")
+    // A kernel that refuses the counters still runs the command, and the line says why it has no counts.
+    refused: X64Counted{status: 0, failure: "", instructions: None, cycles: None, errno: 13, scaled: false, cpu_ns: 5, peak_rss_bytes: 4096}
+    assert_eq(perf_counts_test_lines(refused, Val(3))[0], "counts unavailable errno=13 perf_event_paranoid=3 cpu_ns=5 peak_rss_bytes=4096 · the kernel refused this user the counters; set the sysctl kernel.perf_event_paranoid to 2 or lower")
+    absent: X64Counted{status: 0, failure: "", instructions: None, cycles: None, errno: 2, scaled: false, cpu_ns: 5, peak_rss_bytes: 4096}
+    assert_eq(perf_counts_test_lines(absent, None)[0], "counts unavailable errno=2 perf_event_paranoid=none cpu_ns=5 peak_rss_bytes=4096 · this machine has no user-mode instruction and cycle counters, as a virtual machine without them")
+    // The attach exits with the command's exit code, or 128 plus the signal that ended it.
+    assert_eq(jet_cli_perf_counts_exit(3 << 8), 3)
+    assert_eq(jet_cli_perf_counts_exit(9), 137)
 }

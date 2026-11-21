@@ -9,11 +9,11 @@
 //       [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]
 //       [--budget COLUMN] [--runs N]
 //   JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED
-//       [--perf PATH] [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST]
+//       [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST]
 //       [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR]
 //       [--out FILE] [--tool PATH]
 //   jet Tools/Perf/CompileThroughput/Throughput.jet --batch PREVIOUS
-//       --current CURRENT [--runs N] [--modes LIST] [--perf PATH]
+//       --current CURRENT [--runs N] [--modes LIST]
 //       [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS]
 //       [--work DIR] [--out FILE]
 //   JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --lane quick|full
@@ -73,11 +73,14 @@
 // same corpus in each mode, --runs rounds (default 3). A round compiles
 // with SEED then JET, the next with JET then SEED, so both see the same
 // machine, after --warmups unmeasured compiles of each per mode (default
-// 1), so no round pays alone for a cold cache; every compile runs under `perf stat -e instructions:u,cycles:u` (--perf,
-// default `perf` on PATH), in <work>/{seed,new}-<mode>.<n>. The gate judges
-// only what load cannot move much: per mode, CPU (user + system), user-mode
-// instructions, and each top-level phase's process CPU at or above 0.5 s in
-// either compiler. Wall time and lines/s are reported, never judged. Each
+// 1), so no round pays alone for a cold cache; every compile runs under
+// `jet perf attach --lens=counts` of --tool (default JET), which counts its
+// user-mode instructions and cycles and reports its CPU, in
+// <work>/{seed,new}-<mode>.<n>, its trace there as `counts.jettrace`. The
+// gate judges only what load cannot move much: per mode, CPU (user +
+// system, as the attach's reap counts it), user-mode instructions, and
+// each top-level phase's process CPU at or above 0.5 s in either compiler.
+// Wall time and lines/s are reported, never judged. Each
 // quantity's per-round ratio JET / SEED gives its median and spread (largest
 // less smallest ratio): FAIL when the median is over +10% and the spread is
 // within 10 points, or when every round is over +10%; INCONCLUSIVE when the
@@ -94,16 +97,17 @@
 // builds of `jet build --profile dev Compiler`, the previous batch's
 // (directory PREVIOUS) and this one's (CURRENT). Each directory holds the
 // build's trace (`trace.txt`, from --trace), GNU `time -v`'s report on it
-// (`time.txt`), `perf stat -x , -e instructions:u`'s count of it
-// (`perf.txt`) and the compiler the batch built
-// (`tree/Compiler/JetCLI/.jet/build/jet`). It judges only what load cannot
-// move much. First, the builds' user-mode instructions: one ratio CURRENT /
-// PREVIOUS that fails over +10%, since the two builds compile different trees
-// and a batch's own sources move the count. Second, an interleaved A/B of
+// (`time.txt`), the trace `jet perf attach --lens=counts --out
+// counts.jettrace` wrote of it (`counts.jettrace`), and the compiler the
+// batch built (`tree/Compiler/JetCLI/.jet/build/jet`). It judges only what
+// load cannot move much. First, the builds' user-mode instructions: one
+// ratio CURRENT / PREVIOUS that fails over +10%, since the two builds
+// compile different trees and a batch's own sources move the count.
+// Second, an interleaved A/B of
 // the two built compilers. It runs --runs rounds (default 3), alternating
 // which compiler goes first. In each round both compile CURRENT's tree in
-// each --modes mode (default check) under
-// `perf stat -e instructions:u,cycles:u` (--perf), in
+// each --modes mode (default check) under the current compiler's
+// `jet perf attach --lens=counts`, as the --against form runs them, in
 // <work>/{previous,current}-<mode>.<n>; --cpus, --threads, --memory and
 // --timeout are as in the first form, and CompilerPackages.jet runs with the
 // current compiler. Per mode the A/B judges instructions, failing over +3%
@@ -227,9 +231,8 @@ Options: struct {
     baseline: String,
     write_baseline: String,
     profile: String,
-    // The speed gate's seed jet ("" outside the gate) and perf.
+    // The speed gate's seed jet ("" outside the gate).
     against: String,
-    perf: String,
     // The batch gate's previous and current build directories ("" outside
     // it).
     batch: String,
@@ -333,8 +336,8 @@ usage: fn(message: String) -> Never {
     term.eprint("Throughput.jet: {message}")
     term.eprint("usage: JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
     term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
-    term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
-    term.eprint("       jet Tools/Perf/CompileThroughput/Throughput.jet --batch PREVIOUS --current CURRENT [--runs N] [--modes LIST] [--perf PATH] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE]")
+    term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
+    term.eprint("       jet Tools/Perf/CompileThroughput/Throughput.jet --batch PREVIOUS --current CURRENT [--runs N] [--modes LIST] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE]")
     process.exit(64)
 }
 
@@ -367,7 +370,7 @@ parse_cpus: fn(text: String) -> [Int] {
 parse_list: fn(text: String) -> [String] { text.split(",").map(fn(m) { m.trim() }).to_list() }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf", batch: "", current: ""}
+    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", batch: "", current: ""}
     index := 0
     modes_given := false
     loop index < args.len() {
@@ -410,7 +413,6 @@ parse_options: fn(args: [String]) -> Options {
             flag == "--write-baseline" -> options.write_baseline = value
             flag == "--profile" -> options.profile = value
             flag == "--against" -> options.against = value
-            flag == "--perf" -> options.perf = value
             flag == "--batch" -> options.batch = value
             flag == "--current" -> options.current = value
             else -> usage("unknown option {flag}")
@@ -657,7 +659,8 @@ slot_dir: fn(options: Options, compiler: String, mode: String, repeat: Int) -> S
 }
 
 // One compile of the corpus by `jet`. In a speed gate (`compiler` set) it
-// runs under `perf stat`, which counts its user-mode instructions and cycles.
+// runs under `jet perf attach --lens=counts` of --tool, which counts its
+// user-mode instructions and cycles (trace_counts) and its CPU.
 measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identity: String, compiler: String, mode: String, repeat: Int) -> Run {
     base: slot_dir(options, compiler, mode, repeat)
     files.remove_all(base) ?? ()
@@ -665,7 +668,7 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     store: files.join(base, "store")
     cache: files.join(base, "cache")
     trace_file: files.join(base, "trace.jsonl")
-    counts_file: files.join(base, "perf.csv")
+    counts_file: files.join(base, "counts.jettrace")
     failed := Run{mode: mode, repeat: repeat, compiler: compiler, rc: 1, wall_ns: 0, cpu_ns: 0, instructions: -1, cycles: -1, peak_bytes: 0, lines: lines, trace: None, note: "", budget: ""}
     loop dir in ([String]{project, store, cache}) {
         files.create_dir_all(dir) ?? {
@@ -677,7 +680,7 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
         failed.note = problem
         return failed
     }
-    argv := if compiler == "" -> [String]{jet} else -> [String]{options.perf, "stat", "-x", ",", "-e", "instructions:u,cycles:u", "-o", counts_file, "--", jet}
+    argv := if compiler == "" -> [String]{jet} else -> [String]{options.tool, "perf", "attach", "--lens=counts", "--quiet", "--out", counts_file, "--", jet}
     argv.extend(mode_args(mode, options.threads))
     spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
     if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
@@ -699,25 +702,45 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     note := ""
     if rc != 0 -> note = receipt.errors.trim().partition("\n").head
     if trace == None -> note = "{note} (no trace)".trim()
-    counts: if compiler == "" -> "" else -> files.read(counts_file) ?? ""
-    run := Run{mode: mode, repeat: repeat, compiler: compiler, rc: rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), instructions: perf_count(counts, "instructions"), cycles: perf_count(counts, "cycles"), peak_bytes: receipt.peak_memory_bytes ?? 0, lines: lines, trace: trace, note: note, budget: ""}
+    counted: if compiler == "" -> Counts{} else -> trace_counts(files.read(counts_file) ?? "")
+    run := Run{mode: mode, repeat: repeat, compiler: compiler, rc: rc, wall_ns: wall, cpu_ns: counted.cpu_ns ?? ((receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0)), instructions: counted.instructions_u ?? -1, cycles: counted.cycles_u ?? -1, peak_bytes: receipt.peak_memory_bytes ?? 0, lines: lines, trace: trace, note: note, budget: ""}
     if options.budget != "" && run.trace == .Val(measured) {
         run.budget = check_budget(options, base, lines, wall - traced_ns(measured))
     }
     run
 }
 
-// An event's count in `perf stat -x ,` output (`count,unit,event,…` rows),
-// the event named without its `:u` modifier; -1 when it has none, as for
-// `<not counted>`.
-perf_count: fn(text: String, event: String) -> Int {
-    loop line in text.split("\n") {
-        fields: line.split(",").to_list()
-        if fields.len() > 2 && fields[2].starts_with(event) {
-            return Int.parse(fields[0].trim()) ?? -1
-        }
+// A `jet perf attach --lens=counts` trace's `counts` receipt section: the
+// command's user-mode instructions and cycles (null where the machine
+// couldn't count them) and its CPU, user and system, every child it waited
+// for included.
+Counts: struct {
+    instructions_u: Int?{None},
+    cycles_u: Int?{None},
+    cpu_ns: Int?{None},
+}
+
+CountsSection: struct {
+    name: String,
+    value: Counts,
+}
+
+CountsContent: struct {
+    receipt_sections: [CountsSection],
+}
+
+CountsTrace: struct {
+    content: CountsContent,
+}
+
+// The counts of the `.jettrace` text `text`; none when it holds no `counts`
+// section, as when the attach never ran the command.
+trace_counts: fn(text: String) -> Counts {
+    trace: json.decode<CountsTrace>(text) ?? return Counts{}
+    loop section in trace.content.receipt_sections {
+        if section.name == "counts" -> return section.value
     }
-    -1
+    Counts{}
 }
 
 // The --budget verdict of one mode: Tools/Perf/Budget/Check over its trace per
@@ -1091,8 +1114,6 @@ gate_compiler_line: fn(label: String, jet: String, identity: String) -> String {
 run_gate: fn(options: Options, jet: String, identity: String) -> Int {
     seed: files.absolute(options.against) ?? usage("cannot resolve --against {options.against}")
     if !files.is_file(seed) -> usage("--against {seed} is not a file")
-    probe: process.cmd([String]{options.perf, "--version"}).output_limit(GIB).run() ?? usage("cannot run --perf {options.perf}: {err}")
-    if probe.code != 0 -> usage("`{options.perf} --version` exited {probe.code}")
     seed_identity: identity_of(seed)
     named: [String]{gate_compiler_line("candidate", files.absolute(jet) ?? jet, identity), gate_compiler_line("seed", seed, seed_identity)}
     loop line in named -> print(line)
@@ -1156,8 +1177,8 @@ AB_INSTRUCTIONS_LIMIT: 1.03
 
 // One batch build as its directory records it: CPU (user + system), wall,
 // peak memory and exit status from time.txt, user-mode instructions from
-// perf.txt (-1 when not counted), and every process's top-level phases from
-// trace.txt.
+// counts.jettrace (-1 when not counted), and every process's top-level
+// phases from trace.txt.
 BatchBuild: struct {
     cpu_ns: Int,
     wall_ns: Int,
@@ -1237,20 +1258,22 @@ build_phases: fn(text: String) -> [Phase] {
     phases
 }
 
-// A batch build from its time.txt, trace.txt and perf.txt text; None when
-// the report lacks the CPU, wall or exit status line.
-batch_build: fn(report: String, trace: String, counts: String) -> BatchBuild? {
+// A batch build from its time.txt and trace.txt text and its user-mode
+// instructions (-1 when not counted); None when the report lacks the CPU,
+// wall or exit status line.
+batch_build: fn(report: String, trace: String, instructions: Int) -> BatchBuild? {
     user: clock_ns(time_value(report, "User time (seconds)") ?? return None) ?? return None
     system: clock_ns(time_value(report, "System time (seconds)") ?? return None) ?? return None
     wall: clock_ns(time_value(report, "Elapsed (wall clock) time (h:mm:ss or m:ss)") ?? return None) ?? return None
     status: Int.parse(time_value(report, "Exit status") ?? return None) ?? return None
     peak_kb: Int.parse(time_value(report, "Maximum resident set size (kbytes)") ?? "0") ?? 0
-    Val(BatchBuild{cpu_ns: user + system, wall_ns: wall, peak_bytes: peak_kb * 1024, status: status, instructions: perf_count(counts, "instructions"), phases: build_phases(trace)})
+    Val(BatchBuild{cpu_ns: user + system, wall_ns: wall, peak_bytes: peak_kb * 1024, status: status, instructions: instructions, phases: build_phases(trace)})
 }
 
 // The build DIR records; None, with the reason on stderr, when time.txt or
 // trace.txt is missing or unreadable, or the build failed. A missing
-// perf.txt leaves the instructions uncounted.
+// counts.jettrace, or one without a count, leaves the instructions
+// uncounted.
 batch_dir: fn(dir: String) -> BatchBuild? {
     report: files.read(files.join(dir, "time.txt")) ?? {
         term.eprint("Throughput.jet: cannot read {dir}/time.txt: {err}")
@@ -1260,11 +1283,11 @@ batch_dir: fn(dir: String) -> BatchBuild? {
         term.eprint("Throughput.jet: cannot read {dir}/trace.txt: {err}")
         return None
     }
-    counts: files.read(files.join(dir, "perf.txt")) ?? {
-        term.eprint("Throughput.jet: cannot read {dir}/perf.txt: {err}")
+    counts: files.read(files.join(dir, "counts.jettrace")) ?? {
+        term.eprint("Throughput.jet: cannot read {dir}/counts.jettrace: {err}")
         ""
     }
-    build: batch_build(report, trace, counts) ?? {
+    build: batch_build(report, trace, trace_counts(counts).instructions_u ?? -1) ?? {
         term.eprint("Throughput.jet: {dir}/time.txt is not a `time -v` report")
         return None
     }
@@ -1361,7 +1384,7 @@ combined_verdict: fn(verdicts: [String]) -> String {
 // The batch A/B: the jet PREVIOUS built against the jet CURRENT built, each
 // compiling CURRENT's tree in each mode, --runs rounds that alternate which
 // goes first. Prints the compiles and the judged rows; returns their
-// verdict (gate_verdict), INCONCLUSIVE when a jet or perf is missing.
+// verdict (gate_verdict), INCONCLUSIVE when a jet is missing.
 batch_ab: fn(options: Options) -> String {
     previous_dir: files.absolute(options.batch) ?? options.batch
     current_dir: files.absolute(options.current) ?? options.current
@@ -1372,14 +1395,6 @@ batch_ab: fn(options: Options) -> String {
             term.eprint("Throughput.jet: no batch-built jet at {jet}")
             return "INCONCLUSIVE"
         }
-    }
-    probe: process.cmd([String]{options.perf, "--version"}).output_limit(GIB).run() ?? {
-        term.eprint("Throughput.jet: cannot run --perf {options.perf}: {err}")
-        return "INCONCLUSIVE"
-    }
-    if probe.code != 0 {
-        term.eprint("Throughput.jet: `{options.perf} --version` exited {probe.code}")
-        return "INCONCLUSIVE"
     }
     ab := options.copy()
     ab.tree = files.join(current_dir, "tree")
@@ -2831,11 +2846,21 @@ gate_rounds: fn(new_cpu: [Float], new_instructions: Int, new_bodies_ms: Int) -> 
     assert_eq(gate_verdict([GateRow]{}, [Run]{}), "INCONCLUSIVE")
     fresh: gate_row("O0", "phase comptime.precheck", [Paired]{Paired{seed: 0, new: 19000000000}, Paired{seed: 0, new: 18000000000}, Paired{seed: 0, new: 18500000000}}, GATE_PHASE_FLOOR_NS, GATE_LIMIT)
     assert_eq(fresh.status, "FAIL (new work)")
-    counts: "# started on Thu\n\n1234567,,instructions:u,9000,100.00,,\n7654321,,cycles:u,9000,100.00,,\n"
-    assert_eq(perf_count(counts, "instructions"), 1234567)
-    assert_eq(perf_count(counts, "cycles"), 7654321)
-    assert_eq(perf_count("<not counted>,,instructions:u,0,0.00,,\n", "instructions"), -1)
-    assert_eq(perf_count("", "cycles"), -1)
+    counted: trace_counts(planted_counts("1234567", "7654321"))
+    assert_eq(counted.instructions_u, Val(1234567))
+    assert_eq(counted.cycles_u, Val(7654321))
+    assert_eq(counted.cpu_ns, Val(31877000000))
+    // A machine that couldn't count leaves both null.
+    refused: trace_counts(planted_counts("null", "null"))
+    assert_eq(refused.instructions_u, None)
+    assert_eq(refused.cycles_u, None)
+    assert_eq(trace_counts("").instructions_u, None)
+}
+
+// A planted `jet perf attach --lens=counts` trace of a compile, its counts
+// `instructions` and `cycles` as JSON.
+planted_counts: fn(instructions: String, cycles: String) -> String {
+    "{{\"content\":{{\"profile\":{{}},\"receipt_sections\":[{{\"digest\":\"d\",\"name\":\"counts\",\"type_name\":\"JetPerfCounts\",\"value\":{{\"cpu_ns\":31877000000,\"cycles_u\":{cycles},\"errno\":null,\"instructions_u\":{instructions},\"paranoid\":2,\"peak_rss_bytes\":5120000000,\"reason\":null,\"scaled\":false,\"status\":\"counted\",\"wall_ns\":9000}}}}]}},\"schema\":\"jet.trace\",\"trace_id\":\"t\",\"version\":1}}"
 }
 
 #Test("one unchanged binary against itself gets no phase verdict, and the log names the jets it timed") {
@@ -2872,36 +2897,31 @@ batch_trace: fn(finalize_ms: Int, record_ms: Int, record_thread_ms: Int) -> Stri
     }.join("\n")
 }
 
-// A planted perf.txt of a build: `perf stat -x ,` with its instructions.
-batch_counts: fn(instructions: Int) -> String {
-    "# started on Thu\n\n{instructions},,instructions:u,9000,100.00,,\n"
-}
-
 #Test("the batch gate judges the builds' instructions and reports their CPU and every process's phases") {
-    previous: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), batch_counts(1000000000000)) ?? panic("previous")
+    previous: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), 1000000000000) ?? panic("previous")
     assert_eq(previous.cpu_ns, 160000000000)
     assert_eq(previous.wall_ns, 138090000000)
     assert_eq(previous.peak_bytes, 2097152)
     assert_eq(previous.instructions, 1000000000000)
     assert_eq(previous.phases.map(fn(p) { "{p.kind}={p.cpu_ns /% 1000000}/{p.thread_cpu_ns /% 1000000}/{p.wall_ns /% 1000}" }).join(","), "core-record: jet-bare/sema.finalize=60000/60000/3000,build.step=300/300/8000,sema.finalize=70000/70000/3000")
-    steady: batch_build(batch_report("155.00", "10.00", 0), batch_trace(74000, 62000, 62000), batch_counts(1020000000000)) ?? panic("steady")
+    steady: batch_build(batch_report("155.00", "10.00", 0), batch_trace(74000, 62000, 62000), 1020000000000) ?? panic("steady")
     steady_rows: batch_rows(previous, steady)
     assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "instructions=pass,cpu=-,traced cpu=-,phase core-record: jet-bare/sema.finalize=-,phase build.step=below floor,phase sema.finalize=-")
     assert_eq(batch_cells(steady_rows[0]).join(" "), "instructions 1000000000000 1020000000000 2.0% pass")
     assert_eq(batch_cells(steady_rows[1]).join(" "), "cpu 160.00 165.00 3.1% -")
     // CPU and a phase far past +10% are load's to move: reported, never judged.
-    loaded: batch_build(batch_report("190.00", "10.00", 0), batch_trace(70000, 90000, 90000), batch_counts(1010000000000)) ?? panic("loaded")
+    loaded: batch_build(batch_report("190.00", "10.00", 0), batch_trace(70000, 90000, 90000), 1010000000000) ?? panic("loaded")
     loaded_rows: batch_rows(previous, loaded)
     assert_eq(loaded_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "instructions=pass,cpu=-,traced cpu=-,phase core-record: jet-bare/sema.finalize=-,phase build.step=below floor,phase sema.finalize=-")
-    risen: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), batch_counts(1120000000000)) ?? panic("risen")
+    risen: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), 1120000000000) ?? panic("risen")
     assert_eq(batch_rows(previous, risen)[0].status, "FAIL")
-    uncounted: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), "") ?? panic("uncounted")
+    uncounted: batch_build(batch_report("150.00", "10.00", 0), batch_trace(70000, 60000, 60000), -1) ?? panic("uncounted")
     uncounted_rows: batch_rows(previous, uncounted)
     assert_eq(uncounted_rows[0].status, "INCONCLUSIVE (not measured)")
     assert_eq(batch_cells(uncounted_rows[0]).join(" "), "instructions 1000000000000 - - INCONCLUSIVE (not measured)")
     assert_eq(batch_row("phase comptime.precheck", 0, 900000000, GATE_PHASE_FLOOR_NS).status, "new")
     assert_eq(batch_row("phase core-record: jet-bare/load", 900000000, 0, GATE_PHASE_FLOOR_NS).status, "gone")
-    assert_eq(batch_build("\tUser time (seconds): 1.0\n", "", "") == None, true)
+    assert_eq(batch_build("\tUser time (seconds): 1.0\n", "", -1) == None, true)
     assert_eq(clock_ns("1:02:18.5"), Val(3738500000000))
     assert_eq(combined_verdict([String]{"PASS", "INCONCLUSIVE"}), "INCONCLUSIVE")
     assert_eq(combined_verdict([String]{"INCONCLUSIVE", "FAIL"}), "FAIL")

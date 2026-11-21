@@ -1066,6 +1066,38 @@ Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
 attaches to a busy `jet check` for 3 seconds.
 
+`jet perf attach --lens=counts -- <command>` counts a command's work from
+its start (D-PERF-TARGET1): jet starts the command, opens two of the
+kernel's counters on it before it runs, user-mode instructions and cycles,
+with `inherit`, so every thread and child process it starts adds into them,
+then lets it run and reads them once it has reaped it. The command keeps
+jet's terminal; a word without a `/` is looked up on `PATH`. After it ends
+the attach prints `counts instructions:u=81204417733
+cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000`, then
+the trace's path. `cpu_ns` is the user and system time the reap reports,
+every child the command waited for included, and `peak_rss_bytes` is the
+largest resident set any one of its processes reached, not a sum. The
+totals are the whole command's, not one row per process. The trace holds
+them, with the wall time from start to reap (`wall_ns`), as the `counts`
+receipt section (type `JetPerfCounts`), its run window is the command's
+whole run, and `jet perf view` prints the same line. The attach exits with
+the command's exit code, or 128 plus the signal that ended it. Where the
+kernel shares the counters with other events they ran part of the time,
+the counts are scaled to the whole, `scaled` is true and the line ends
+` scaled`. Where the kernel won't count (`perf_event_paranoid` above 2, or
+a machine without the counters, as a virtual machine may be) the command
+still runs: `status` is `unavailable`, with the kernel's `errno`, the
+`paranoid` level and the `reason`, and the line reads `counts unavailable
+errno=13 perf_event_paranoid=3 cpu_ns=… peak_rss_bytes=… · the kernel
+refused this user the counters; set the sysctl kernel.perf_event_paranoid
+to 2 or lower`. A count missing the start would mislead, so `--lens=counts`
+on a pid is refused (`Jet.UnknownFlag`, exit 2) with the `--` form as its
+fix; so are `--for=`, `--zones=`, `--source` and `--lens=alloc` with a
+command, a command without `--lens=counts`, and a pid with a command
+(`Jet.AttachWhichProcess`). A program that can't be started is
+`Jet.DriverOperationFailed` (exit 1).
+Tests/Cases/Perf/attach_counts_a_command.case is the worked example.
+
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the
 attach's first read of the program (its live snapshot) and closes after its
