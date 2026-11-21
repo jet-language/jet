@@ -1,0 +1,57 @@
+# The Scheduler runtime test fragment (Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet)
+# runs as a program under its own C host, Compiler/JetRuntime/Tests/scheduler-fixture.c. These are
+# the plain transport's steps (Tools/Agent/CompilerRegistries.jet drive and scheduler_verdict), as
+# in the_wait_cycle_fragment_runs_as_a_program.case. The host hands the fragment its callbacks'
+# addresses; the fragment's checks run in the real scheduler: 10000 spawn/join rounds, a group
+# join with a quiesce right after it, 1000 times, cancel and stop delivery, timers, bounded group
+# admission and the process exit's handlers. It passes on pools of 1, 2 and 8 carriers. A failed
+# check exits 1. With `root-panic` the host publishes a cancel's panic on the root, which ends the
+# process with 70 and the panic's report.
+requires: os-name:linux
+requires: tool:cc
+requires: tool:as
+mkdir: native/Source
+step unit: jet {root}/Compiler/Toolchain/RuntimePack.jet --root {root}/Compiler unit raw --test Scheduler
+timeout: 600s
+exit: 0
+copy: raw/unit.jet native/Source/Fixture.jet
+copy: raw/package.jet native/package.jet
+copy: {root}/Compiler/JetRuntime/lifecycle.list lifecycle.full
+capture: lifecycle = text file.filter(!^= "jet_rt_alloc_check_init ") lifecycle.full
+write: native/lifecycle.list = "{cap:lifecycle}\n"
+step library: jet doc {work}/native/Source/Fixture.jet
+cwd: native/Source
+env: JET_FRONT_LIBRARY_OBJECT_OUTPUT={work}/native/fixture
+env: JET_FRONT_LIBRARY_LIFECYCLE={work}/native/lifecycle.list
+timeout: 1800s
+exit: 0
+file: native/fixture.issues absent # the front lowered every function of the unit
+file: native/fixture.o exists
+write: fault-report.S = "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{root}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n    .section .note.GNU-stack,\"\",@progbits\n"
+step: as --64 -o fault-report.o fault-report.S
+exit: 0
+step: cc -std=c11 -Wall -Wextra -Werror {root}/Compiler/JetRuntime/Tests/scheduler-fixture.c native/fixture.o fault-report.o -lpthread -ldl -lm -o fragment
+exit: 0
+step: {work}/fragment
+env: JET_SCHEDULER_THREADS=1
+timeout: 120s
+exit: 0 # every check passes on one carrier
+stdout: empty
+stderr: empty
+step: {work}/fragment
+env: JET_SCHEDULER_THREADS=2
+timeout: 120s
+exit: 0 # on two
+stdout: empty
+stderr: empty
+step: {work}/fragment
+env: JET_SCHEDULER_THREADS=8
+timeout: 120s
+exit: 0 # and on eight
+stdout: empty
+stderr: empty
+step: {work}/fragment root-panic
+timeout: 120s
+exit: 70 # a panic on the root ends the process
+stdout: empty
+stderr: ~ "Stop: Jet.Panic: `panic: task canceled at a cooperative wait point`" # with the panic's report
