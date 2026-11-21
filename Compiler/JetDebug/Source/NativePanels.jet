@@ -1,0 +1,989 @@
+// The machine state at a stop: `registers`, the selected
+// frame's registers with what each holds, and `memory`, the program's bytes
+// at a local, an address, a register's value or a section. Both only read:
+// nothing here writes a register or a byte. The console, the Canvas Debug
+// view's panels and the editor adapter read them through the same calls.
+use {
+    native_panels_math: core.math
+    jet_backend.[X64DebugEncoding, X64_REGISTER_NAMES, X64_TRACE_EFLAGS, X64_TRACE_FLAG_BITS, X64_TRACE_FLAG_NAMES, X64_TRACE_FP_MXCSR, X64_TRACE_FP_XMM, X64_TRACE_FS_BASE, X64_TRACE_GS_BASE, X64_TRACE_RIP, X64_TRACE_SHOWN, X64_TRACE_SHOWN_ALL, X64_TRACE_VECTORS, x64_hex, x64_trace_fp_registers, x64_trace_read]
+}
+
+// One row of `registers`: the register's name, whether the frame holds its
+// value (`known`; an outer frame knows only what its caller saved), the
+// value, and for a vector register its high 8 bytes (`wide`). `label` says
+// what it holds: the locals the location lists put in it at the pc, else
+// the local or List item its value is the address of (`-> items[2]`), the
+// code rip is at, or the flags rflags has set.
+NativeRegisterRow: struct {
+    name: String,
+    known: Bool,
+    value: Int,
+    wide: Int{0},
+    vector: Bool{false},
+    label: String{""},
+}
+
+// The frame `registers` and `memory` read: the selected one as the unwinder
+// found it, its caller (for a parameter's entry value; None for an inlined
+// run), the address its facts are looked up at, its inlined run, and
+// whether it is the stopped thread's innermost frame, the one whose vector
+// registers the kernel holds.
+NativePanelFrame: struct {
+    frame: NativeUnwound,
+    caller: NativeUnwound?,
+    lookup: Int,
+    site: Int,
+    innermost: Bool,
+}
+
+// Bytes of the program a local of the frame owns, which `memory` labels and
+// `registers` points at: a local's own (a stack slot, or the header of a
+// List or another aggregate its local points to), or the items of a List's
+// buffer (`stride` > 0, each `name[k]`). `secret` marks a #Secret's, which
+// a dump wrote redacted.
+NativeMemorySpan: struct {
+    address: Int,
+    size: Int,
+    name: String,
+    stride: Int{0},
+    secret: Bool{false},
+}
+
+// `count` bytes of the program from `address` as `memory` shows them: each
+// byte, whether it is mapped, whether it is the debugger's own (its code,
+// a placed condition's or the evaluation room), and whether a dump
+// redacted it (a #Secret local's). `spans` are the frame's locals.
+NativeMemoryView: struct {
+    address: Int,
+    bytes: [U8],
+    mapped: [Bool],
+    debugger: [Bool],
+    secret: [Bool],
+    spans: [NativeMemorySpan],
+}
+
+// The most bytes one `memory` answer shows, at the console and under
+// `--do` alike; a longer read stops there and says where.
+NATIVE_MEMORY_SHOWN: 4096
+
+// The bytes `memory` reads when no COUNT is given.
+NATIVE_MEMORY_DEFAULT: 64
+
+// The values one row of `memory ... as TYPE` holds.
+NATIVE_MEMORY_ROW_VALUES: 8
+
+// A row of bytes, as `sections --bytes` shows them.
+NATIVE_MEMORY_ROW_BYTES: 16
+
+// What `memory` reads, as a refusal names it; an answer starts it with a
+// capital (native_memory_refusal).
+NATIVE_MEMORY_SHAPE: "memory reads WHERE [COUNT] [as TYPE]: WHERE is a local, a field path under one or a List item, `0x` and an address, `$` and a register, or a section, each with an optional `+N` or `-N` of bytes, as `memory items 24`, `memory $rsp+16 4 as Int` or `memory .rodata 64`"
+
+NATIVE_MEMORY_TYPES: "U8, Int, I64, I32, I16, I8, U64, U32, U16, Float or F32"
+
+// The bytes one value of the number type `name` takes; 0 for any other
+// name.
+native_memory_type_size: fn(name: String) -[]> Int {
+    if name == {
+        "U8" | "I8" -> 1
+        "U16" | "I16" -> 2
+        "U32" | "I32" | "F32" -> 4
+        "U64" | "I64" | "Int" | "Float" -> 8
+        else -> 0
+    }
+}
+
+// The frame `registers` and `memory` read: the selected one; None when the
+// stop has no frame.
+native_panel_frame: fn(session: &NativeSession) -> NativePanelFrame? NativeDebugError! {
+    frames: session.unwind() ?? return Err(err)
+    if frames.len() == 0 -> return Ok(None)
+    levels: native_levels(session.image, frames)
+    level: if session.selected < levels.len() -> levels[session.selected] else -> levels[0]
+    Ok(Val(native_panel_level(session, frames, level)))
+}
+
+// The frame of `level` among `frames`.
+native_panel_level: fn(session: &NativeSession, frames: [NativeUnwound], level: NativeLevel) -> NativePanelFrame Never! {
+    index: level.frame
+    caller: if level.site < 0 && index + 1 < frames.len() -> NativeUnwound?{Val(frames[index + 1])} else -> None
+    NativePanelFrame{frame: frames[index], caller: caller, lookup: native_lookup(index, frames[index].pc), site: level.site, innermost: index == 0 && session.focus == None && session.dump == None}
+}
+
+// A frame a place in `memory` is found in, with its function's name, and
+// whether it is outward of the selected one.
+NativePanelJet: struct {
+    at: NativePanelFrame,
+    function: String,
+    moved: Bool,
+}
+
+// The frame a place in `memory` is found in: the selected one when it runs
+// Jet code, else the nearest outward that does; None when no frame does.
+native_panel_jet_frame: fn(session: &NativeSession) -> NativePanelJet? NativeDebugError! {
+    frames: session.unwind() ?? return Err(err)
+    levels: native_levels(session.image, frames)
+    from: if session.selected < levels.len() -> session.selected else -> 0
+    loop index in from..<levels.len() {
+        at: native_panel_level(session, frames, levels[index])
+        function: native_function_at(session.image, at.lookup) ?? next
+        return Ok(Val(NativePanelJet{at: at, function: function.name, moved: index != from}))
+    }
+    Ok(None)
+}
+
+// The memory a stop's places are read from: a dump's, else the program's.
+native_panel_memory: fn(session: &NativeSession) -> NativeMemory Never! {
+    if session.dump == .Val(dumped) -> return dumped.memory
+    NativeMemory{trace: Val(session.trace), blocks: [NativeBlock]{}}
+}
+
+// The selected frame's registers: rax to r15, rip and rflags, and with
+// `all` the vector registers, mxcsr, fs_base and gs_base. A register the
+// frame does not hold is not `known`; the vector registers and mxcsr are
+// known only in the stopped thread's innermost frame of a live program.
+native_registers: fn(session: &NativeSession, all: Bool{false}) -> [NativeRegisterRow] NativeDebugError! {
+    rows := [NativeRegisterRow]{}
+    at := NativePanelFrame?{None}
+    if native_panel_frame(session) == {
+        .Ok(found) -> { at = found }
+        .Err(error) -> return Err(error)
+    }
+    frame: at ?? return Ok(rows)
+    held: native_register_locals(session.image, frame)
+    spans: native_memory_spans(session, frame)
+    loop index in X64_TRACE_SHOWN {
+        known: frame.frame.known[index]
+        value: if known -> frame.frame.registers[index] else -> 0
+        label := held.get(index) ?? ""
+        if known && label == "" {
+            label = if {
+                index == X64_TRACE_RIP -> native_panel_code(session, value)
+                index == X64_TRACE_EFLAGS -> native_panel_flags(value)
+                else -> native_memory_points(spans, value)
+            }
+        }
+        rows.push(NativeRegisterRow{name: native_panel_register_name(index), known: known, value: value, label: label})
+    }
+    if !all -> return Ok(rows)
+    block: if frame.innermost -> x64_trace_fp_registers(session.trace) else -> None
+    loop k in 0..<X64_TRACE_VECTORS {
+        name: "xmm{k}"
+        if block == {
+            .Val(bytes) -> {
+                at_k: X64_TRACE_FP_XMM + 16 * k
+                low: native_number(bytes, at_k, 8, X64DebugEncoding.Signed)
+                high: native_number(bytes, at_k + 8, 8, X64DebugEncoding.Signed)
+                rows.push(NativeRegisterRow{name: name, known: true, value: low, wide: high, vector: true, label: held.get(NATIVE_PANEL_VECTOR + k) ?? ""})
+            }
+            None -> rows.push(NativeRegisterRow{name: name, known: false, value: 0, vector: true})
+        }
+    }
+    mxcsr: if block == .Val(bytes) -> Int?{Val(native_number(bytes, X64_TRACE_FP_MXCSR, 4, X64DebugEncoding.Unsigned))} else -> None
+    rows.push(NativeRegisterRow{name: "mxcsr", known: mxcsr != None, value: mxcsr ?? 0})
+    loop index in X64_TRACE_SHOWN_ALL {
+        known: frame.frame.known[index]
+        rows.push(NativeRegisterRow{name: native_panel_register_name(index), known: known, value: if known -> frame.frame.registers[index] else -> 0})
+    }
+    Ok(rows)
+}
+
+// native_register_locals' key for vector register k: this plus k, past
+// every index of the kernel's register block.
+NATIVE_PANEL_VECTOR: 1000
+
+// The locals of `at`'s inlined run the location lists put in a register at
+// its pc, by the register's index in the kernel's register block (a vector
+// register's by NATIVE_PANEL_VECTOR plus its number), names joined by ", ".
+native_register_locals: fn(image: NativeImage, at: NativePanelFrame) -> [Int:String] Never! {
+    held := [Int:String]{}
+    function: native_function_at(image, at.lookup) ?? return held
+    loop variable in function.variables {
+        if variable.site != at.site || variable.list < 0 -> next
+        located: native_variable_covering(image, variable, at.lookup) ?? next
+        dwarf: native_location_register(image.loclists, located.from, located.to)
+        index: if {
+            dwarf < 0 -> -1
+            dwarf < NATIVE_DEBUG_DWARF_REGISTERS.len() -> NATIVE_DEBUG_DWARF_REGISTERS[dwarf]
+            dwarf >= NATIVE_PANEL_DWARF_XMM0 && dwarf < NATIVE_PANEL_DWARF_XMM0 + 16 -> NATIVE_PANEL_VECTOR + dwarf - NATIVE_PANEL_DWARF_XMM0
+            else -> -1
+        }
+        if index < 0 -> next
+        held[index] = if held.get(index) == .Val(names) -> "{names}, {variable.name}" else -> variable.name
+    }
+    held
+}
+
+// The DWARF number of xmm0; xmm1 to xmm15 follow it.
+NATIVE_PANEL_DWARF_XMM0: 17
+
+// The code at `pc`, as `fib+14`; "" for an address no code is known at.
+native_panel_code: fn(session: &NativeSession, pc: Int) -> String Never! {
+    rows: native_listing_window(session, pc, 0, 1)
+    if rows.len() == 0 || !rows[0].valid -> return ""
+    rows[0].symbol
+}
+
+// The flags set in `value`, by name in bit order.
+native_panel_flags: fn(value: Int) -[]> String {
+    set := [String]{}
+    loop (k, bit) in X64_TRACE_FLAG_BITS {
+        if (value >> bit) & 1 == 1 -> set.push(X64_TRACE_FLAG_NAMES[k])
+    }
+    set.join(" ")
+}
+
+// The arrow label of a register holding `value`: the local or List item
+// whose bytes start there, else "".
+native_memory_points: fn(spans: [NativeMemorySpan], value: Int) -[]> String {
+    loop span in spans {
+        if value < span.address || value >= span.address + span.size -> next
+        offset: value - span.address
+        if span.stride == 0 {
+            if offset == 0 -> return "-> {span.name}"
+            next
+        }
+        if offset % span.stride == 0 -> return "-> {span.name}[{offset.div_euclid(span.stride)}]"
+    }
+    ""
+}
+
+// The bytes the frame's locals own (NativeMemorySpan), in their order.
+native_memory_spans: fn(session: &NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
+    spans := [NativeMemorySpan]{}
+    function: native_function_at(session.image, at.lookup) ?? return spans
+    memory: native_panel_memory(session)
+    loop variable in function.variables {
+        if variable.site != at.site || variable.list < 0 -> next
+        path: NativeWatchPath{root: variable.name, fields: [String]{}, index: -1, refusal: ""}
+        found: native_watch_place(session.image, memory, at.frame, at.lookup, at.site, path)
+        if found.refusal != "" -> next
+        own: native_memory_own(session.image, memory, at.frame, found) ?? next
+        size: native_type_size(session.image, own.ty)
+        if size <= 0 -> next
+        secret: native_panel_secret(session.image, variable.ty)
+        spans.push(NativeMemorySpan{address: own.address, size: size, name: variable.name, secret: secret})
+        list: native_memory_list(session.image, memory, own) ?? next
+        if list.length > 0 && list.stride > 0 {
+            spans.push(NativeMemorySpan{address: list.data, size: list.length * list.stride, name: variable.name, stride: list.stride, secret: secret})
+        }
+    }
+    spans
+}
+
+// Whether type `ty` is #Secret's, whose bytes a dump redacts.
+native_panel_secret: fn(image: NativeImage, ty: Int) -> Bool Never! {
+    native_dump_secret(native_type_name(image, ty))
+}
+
+// The bytes a place native_watch_place found shows as its own: through the
+// pointer an aggregate's local holds to its header, else the place's own;
+// None for a value held in a register, which has no address, or a pointer
+// that can't be read.
+native_memory_own: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, found: NativeWatchPlace) -> {address: Int, ty: Int}? Never! {
+    held: if found.register >= 0 -> Int?{Val(frame.registers[found.register])} else -> None
+    passed: native_watch_through(image, memory, found.ty, found.address, held) ?? return None
+    if passed.held != None -> return None
+    Val({address: passed.address, ty: passed.ty})
+}
+
+// The List whose header `own` names: its length, capacity, buffer and the
+// size of one item; None for no List, or a header that can't be read.
+native_memory_list: fn(image: NativeImage, memory: NativeMemory, own: {address: Int, ty: Int}) -> {length: Int, cap: Int, data: Int, stride: Int, element: Int}? Never! {
+    list: native_watch_list(image, own.ty)
+    if list.element < 0 -> return None
+    header: native_debug_bytes(memory, own.address, list.size) ?? return None
+    cap: if list.cap >= 0 -> native_number(header, list.cap, 8, X64DebugEncoding.Signed) else -> -1
+    Val({length: native_number(header, list.length, 8, X64DebugEncoding.Signed), cap: cap, data: native_number(header, list.data, 8, X64DebugEncoding.Signed), stride: native_type_size(image, list.element), element: list.element})
+}
+
+// `count` bytes of the program from `address`, as NativeMemoryView has
+// them. A live program's are read a mapping at a time; a byte past a
+// mapping's end is tried again at the next page. The bytes under the
+// debugger's trap bytes, placed jumps and zone probes are the program's own.
+native_memory_view: fn(session: &NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
+    bytes := loop _ in 0..<count -> U8{0}
+    mapped := loop _ in 0..<count -> false
+    if session.dump == {
+        .Val(dumped) -> {
+            loop block in dumped.memory.blocks {
+                length: if block.from >= 0 -> block.size else -> block.bytes.len()
+                low: if block.address > address -> block.address else -> address
+                high: if block.address + length < address + count -> block.address + length else -> address + count
+                if low >= high -> next
+                loop byte_at in low..<high {
+                    bytes[byte_at - address] = if block.from >= 0 -> dumped.memory.backing[block.from + byte_at - block.address] else -> block.bytes[byte_at - block.address]
+                    mapped[byte_at - address] = true
+                }
+            }
+        }
+        None -> {
+            done := 0
+            loop done < count {
+                got: if address + done > 0 -> x64_trace_read(session.trace, address + done, count - done) ?? [U8]{} else -> [U8]{}
+                loop (k, byte) in got {
+                    bytes[done + k] = byte
+                    mapped[done + k] = true
+                }
+                done += got.len()
+                if got.len() == 0 {
+                    page: (address + done).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE + NATIVE_FIX_PAGE
+                    done = if page - address > count -> count else -> page - address
+                }
+            }
+            session.restore_code(address, bytes)
+        }
+    }
+    debugger := loop _ in 0..<count -> false
+    if session.dump == None {
+        loop placed in session.placed {
+            native_memory_mark(debugger, address, placed.low, placed.high - placed.low)
+        }
+        if session.eval_room != 0 {
+            native_memory_mark(debugger, address, session.eval_room, NATIVE_EVAL_ROOM_SIZE + session.eval_code)
+        }
+    }
+    owned: if at == .Val(frame) -> native_memory_spans(session, frame) else -> [NativeMemorySpan]{}
+    secret := loop _ in 0..<count -> false
+    if session.dump != None {
+        loop span in owned {
+            if span.secret -> native_memory_mark(secret, address, span.address, span.size)
+        }
+    }
+    NativeMemoryView{address: address, bytes: bytes, mapped: mapped, debugger: debugger, secret: secret, spans: owned}
+}
+
+// Mark in `marks`, which stand for the bytes from `address`, those of the
+// `size` bytes from `from`.
+native_memory_mark: fn(marks: &[Bool], address: Int, from: Int, size: Int) Never! {
+    low: if from > address -> from else -> address
+    high: if from + size < address + marks.len() -> from + size else -> address + marks.len()
+    if low >= high {
+        return
+    }
+    loop byte_at in low..<high -> marks[byte_at - address] = true
+}
+
+// `registers [--all]` at the console: one row a register (native_registers).
+native_registers_answer: fn(session: &NativeSession, operand: String) -> NativeAnswer NativeDebugError! {
+    if operand != "" && operand != "--all" {
+        return Ok(NativeAnswer{text: "`registers` takes `--all` or nothing, as `registers --all`\n", refused: true})
+    }
+    rows: native_registers(session, all: operand == "--all") ?? return Err(err)
+    if rows.len() == 0 -> return Ok(NativeAnswer{text: "No frame to read registers in\n"})
+    text := ""
+    loop row in rows -> text = "{text}{native_register_text(row)}\n"
+    Ok(NativeAnswer{text: text})
+}
+
+// One row of `registers`: the name, the value in hex, a small value in
+// decimal too, and its label; `not saved` for a register the frame
+// doesn't hold.
+native_register_text: fn(row: NativeRegisterRow) -[]> String {
+    name: native_listing_pad(row.name, 7)
+    if !row.known -> return "{name}not saved"
+    if row.vector {
+        low: "{native_panels_math.from_bits(row.value)}"
+        high: "{native_panels_math.from_bits(row.wide)}"
+        shown: "{name}0x{native_panel_hex(row.wide)}{native_panel_hex(row.value)}  {low}  {high}"
+        return if row.label == "" -> shown else -> "{shown}  {row.label}"
+    }
+    small: row.name != "rflags" && row.value >= -2147483648 && row.value < 2147483648
+    decimal: if small -> "{row.value}" else -> ""
+    hex: "{name}0x{native_panel_hex(row.value)}"
+    if row.label == "" -> return if decimal == "" -> hex else -> "{hex}  {decimal}"
+    "{hex}  {native_listing_pad(decimal, 12)}{row.label}"
+}
+
+// `value` as 16 hex digits, the word's bits as they are.
+native_panel_hex: fn(value: Int) -[]> String {
+    digits: "0123456789abcdef"
+    shown := ""
+    loop k in 0..<16 {
+        nibble: (value >> (4 * (15 - k))) & 15
+        shown = "{shown}{digits.slice(nibble, nibble + 1)}"
+    }
+    shown
+}
+
+// What `memory` was asked: WHERE, the number of values (-1: none given),
+// their type and its size, and whether `as TYPE` named it (else the bytes
+// show as hex and text); or why the operand asks nothing (`refusal`).
+NativeMemoryAsk: struct {
+    place: String,
+    count: Int,
+    type_name: String,
+    size: Int,
+    typed: Bool{false},
+    refusal: String{""},
+}
+
+native_memory_refused: fn(refusal: String) -[]> NativeMemoryAsk {
+    NativeMemoryAsk{place: "", count: -1, type_name: "", size: 0, refusal: refusal}
+}
+
+// The operand of `memory`: WHERE, then COUNT, then `as TYPE`. WHERE may
+// hold spaces inside an index (`xs[i + 1]`).
+native_memory_ask: fn(operand: String) -> NativeMemoryAsk Never! {
+    words := [String]{}
+    loop part in operand.split(" ") {
+        if part != "" -> words.push("{part}")
+    }
+    type_name := "U8"
+    typed: words.len() >= 2 && words[words.len() - 2] == "as"
+    if typed {
+        type_name = words[words.len() - 1]
+        _ := words.pop()
+        _ := words.pop()
+    }
+    size: native_memory_type_size(type_name)
+    if size == 0 {
+        return native_memory_refused("`{type_name}` is not a number type; memory reads as {NATIVE_MEMORY_TYPES}")
+    }
+    if words.len() == 0 -> return native_memory_refused(NATIVE_MEMORY_SHAPE)
+    place := words[0]
+    next_word := 1
+    loop place.contains("[") && !place.contains("]") && next_word < words.len() {
+        place = "{place} {words[next_word]}"
+        next_word += 1
+    }
+    count := -1
+    if next_word < words.len() {
+        count = Int.parse(words[next_word]) ?? 0
+        if count <= 0 {
+            return native_memory_refused("`{words[next_word]}` is no count: COUNT is a positive number of values, as `memory {place} 16`")
+        }
+        next_word += 1
+    }
+    if next_word < words.len() -> return native_memory_refused(NATIVE_MEMORY_SHAPE)
+    NativeMemoryAsk{place: place, count: count, type_name: type_name, size: size, typed: typed}
+}
+
+// WHERE split into its base and the `+N` or `-N` of bytes at its end (0:
+// none). A sign inside an index (`xs[i - 1]`) is the place's.
+native_memory_offset: fn(place: String) -> {base: String, offset: Int} Never! {
+    bytes: place.bytes()
+    loop k in 0..<bytes.len() {
+        at: bytes.len() - 1 - k
+        byte: Int{bytes[at]}
+        if byte == 93 -> break
+        if (byte == 43 || byte == 45) && at > 0 {
+            amount: Int.parse(place.slice(at + 1, place.len())) ?? break
+            return {base: place.slice(0, at), offset: if byte == 45 -> -amount else -> amount}
+        }
+    }
+    {base: place, offset: 0}
+}
+
+// An address in hex (`0x7ffd5e3a1f40`), at most 16 digits; None for any
+// other text.
+native_memory_address: fn(text: String) -[]> Int? {
+    if !text.starts_with("0x") && !text.starts_with("0X") -> return None
+    digits: text.slice(2, text.len())
+    if digits.len() == 0 || digits.len() > 16 -> return None
+    value := 0
+    loop byte in digits.bytes() {
+        digit: Int{byte}
+        nibble: if {
+            digit >= 48 && digit <= 57 -> digit - 48
+            digit >= 97 && digit <= 102 -> digit - 87
+            digit >= 65 && digit <= 70 -> digit - 55
+            else -> {
+                return None
+            }
+        }
+        value = (value << 4) | nibble
+    }
+    Val(value)
+}
+
+// Where a `memory` read starts and what it is: its address, the heading
+// its answer opens with, the most bytes it may read (-1: no end, else a
+// section's end), and the frame its labels come from. A WHERE that names
+// nothing readable is answered by `answer` alone (`refused` when it is a
+// refusal).
+NativeMemoryAim: struct {
+    address: Int,
+    heading: String,
+    limit: Int,
+    at: NativePanelFrame?,
+    answer: String{""},
+    refused: Bool{false},
+}
+
+native_memory_answered: fn(text: String, refused: Bool{true}) -[]> NativeMemoryAim {
+    NativeMemoryAim{address: 0, heading: "", limit: -1, at: None, answer: text, refused: refused}
+}
+
+// Where `place` (WHERE, its offset split off) starts in the stopped
+// program. `path` is the place a local's WHERE names (native_memory_name).
+native_memory_aim: fn(session: &NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
+    split: native_memory_offset(place)
+    base: split.base
+    selected := NativePanelFrame?{None}
+    if native_panel_frame(session) == {
+        .Ok(found) -> { selected = found }
+        .Err(error) -> return Err(error)
+    }
+    if base.starts_with("$") {
+        name: base.slice(1, base.len())
+        frame: selected ?? return Ok(native_memory_answered("No frame to read `{base}` in\n"))
+        index: native_panel_register(name) ?? return Ok(native_memory_answered("No register `{base}`; memory reads {NATIVE_PANEL_REGISTER_NAMES}\n"))
+        if !frame.frame.known[index] {
+            return Ok(native_memory_answered("`{base}` is not saved in this frame; `registers` shows what it holds\n"))
+        }
+        value: frame.frame.registers[index]
+        heading: if split.offset == 0 -> "{base} = {x64_hex(value)}" else -> "{place}, {base} = {x64_hex(value)}"
+        return Ok(NativeMemoryAim{address: value + split.offset, heading: heading, limit: -1, at: selected})
+    }
+    if native_memory_address(base) == .Val(address) {
+        return Ok(NativeMemoryAim{address: address + split.offset, heading: place, limit: -1, at: selected})
+    }
+    if base.starts_with(".") -> return native_memory_section(session, base, split.offset, selected)
+    native_memory_place(session, place, path)
+}
+
+// The local, field or List item WHERE of `ask` names, its offset split
+// off; "" when WHERE is a register, an address or a section. The caller
+// reads it as a watch's place (NativeSession.watch_path), and a dump's
+// console as a dump's (native_dump_watch_path).
+native_memory_name: fn(ask: NativeMemoryAsk) -> String Never! {
+    if ask.refusal != "" -> return ""
+    base: native_memory_offset(ask.place).base
+    if base.starts_with("$") || base.starts_with(".") || native_memory_address(base) != None {
+        return ""
+    }
+    base
+}
+
+// The registers `memory` reads by name, as the refusal of another names
+// them.
+NATIVE_PANEL_REGISTER_NAMES: "$rax, $rbx, $rcx, $rdx, $rsi, $rdi, $rbp, $rsp, $r8 to $r15, $rip, $rflags, $fs_base and $gs_base"
+
+// The index in the kernel's register block of the register `name`.
+native_panel_register: fn(name: String) -[]> Int? {
+    loop index in X64_TRACE_SHOWN {
+        if native_panel_register_name(index) == name -> return Val(index)
+    }
+    loop index in X64_TRACE_SHOWN_ALL {
+        if native_panel_register_name(index) == name -> return Val(index)
+    }
+    None
+}
+
+// The section `name` of the program's image, `offset` bytes in: refused
+// when the image has none of that name, or two, or doesn't load it.
+native_memory_section: fn(session: &NativeSession, name: String, offset: Int, at: NativePanelFrame?) -> NativeMemoryAim NativeDebugError! {
+    elf: native_image_bytes(native_image_of(session)) ?? return Err(err)
+    named := [NativeImageSection]{}
+    loop section in native_image_sections(elf) {
+        if section.name == name -> named.push(section)
+    }
+    if named.len() == 0 {
+        return Ok(native_memory_answered("No section `{name}`; `sections` lists them\n"))
+    }
+    if named.len() > 1 {
+        addresses: loop section in named -> x64_hex(section.address)
+        many: if named.len() == 2 -> "Two" else -> "{named.len()}"
+        listed: "{addresses[0..<addresses.len() - 1].join(", ")} and {addresses[addresses.len() - 1]}"
+        return Ok(native_memory_answered("{many} sections are named `{name}`, at {listed}; give memory an address\n"))
+    }
+    section: named[0]
+    if section.address == 0 || !section.flags.contains("A") {
+        return Ok(native_memory_answered("`{name}` is not loaded; sections {name} --bytes shows it\n"))
+    }
+    if offset < 0 || offset >= section.size {
+        return Ok(native_memory_answered("`{name}` holds {section.size} bytes, so {offset} is outside it\n"))
+    }
+    Ok(NativeMemoryAim{address: section.address + offset, heading: "{name}, {section.size} bytes", limit: section.size - offset, at: at})
+}
+
+// The local, field or List item `place` names (`path`, found as a watch
+// finds it), in the selected frame or, when that runs no Jet code, the
+// nearest frame outward that does. A local held in a register has no
+// address; a local the image can't show answers as `locals` shows it.
+native_memory_place: fn(session: &NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
+    found_frame := NativePanelJet?{None}
+    if native_panel_jet_frame(session) == {
+        .Ok(found) -> { found_frame = found }
+        .Err(error) -> return Err(error)
+    }
+    jet: found_frame ?? return Ok(native_memory_answered("No Jet frame to find `{place}` in; {NATIVE_MEMORY_SHAPE}\n"))
+    split: native_memory_offset(place)
+    if path.refusal != "" {
+        return Ok(native_memory_answered("{native_memory_refusal(path.refusal)}\n"))
+    }
+    memory: native_panel_memory(session)
+    at: jet.at
+    found: native_watch_place(session.image, memory, at.frame, at.lookup, at.site, path)
+    if found.refusal != "" {
+        if path.fields.len() == 0 && path.index < 0 {
+            loop local in native_frame_locals(session.image, memory, at.frame, at.lookup, at.site, at.caller) {
+                if local.name == path.root && (local.value == NATIVE_DEBUG_UNAVAILABLE || local.value == NATIVE_DEBUG_NOT_KEPT) {
+                    return Ok(native_memory_answered("{local.name} = {local.value}\n", refused: false))
+                }
+            }
+        }
+        return Ok(native_memory_answered("{native_memory_refusal(found.refusal)}\n"))
+    }
+    own: native_memory_own(session.image, memory, at.frame, found) ?? {
+        if found.register < 0 {
+            return Ok(native_memory_answered("`{split.base}` can't be read here\n"))
+        }
+        register: native_panel_register_name(found.register)
+        value: at.frame.registers[found.register]
+        return Ok(native_memory_answered("`{split.base}` is held in {register}, {x64_hex(value)}, so it has no address; `memory ${register}` reads where that value points\n", refused: false))
+    }
+    where: if jet.moved -> ", in {jet.function}, the nearest Jet frame" else -> ""
+    size: native_type_size(session.image, own.ty)
+    shown := "{native_type_name(session.image, own.ty)}, {size} bytes"
+    if native_memory_list(session.image, memory, own) == .Val(list) {
+        capacity: if list.cap >= 0 -> " cap={list.cap}" else -> ""
+        shown = "len={list.length}{capacity} buffer={x64_hex(list.data)}"
+    }
+    Ok(NativeMemoryAim{address: own.address + split.offset, heading: "{place}: {shown}{where}", limit: -1, at: Val(at)})
+}
+
+// A watch's refusal of a place, as `memory` says it: its own shape in
+// place of a watch's, and starting with a capital.
+native_memory_refusal: fn(refusal: String) -[]> String {
+    text: if refusal.contains(NATIVE_WATCH_SHAPE) -> refusal.replace(NATIVE_WATCH_SHAPE, NATIVE_MEMORY_SHAPE) else -> "{refusal}"
+    if text == "" -> return text
+    "{text.slice(0..<1).to_upper()}{text.slice(1..<text.len())}"
+}
+
+// The name of the register at `index` of the kernel's register block: a
+// general-purpose register's is the encoder's, found by its DWARF number as
+// the listing's (native_listing_text) is.
+native_panel_register_name: fn(index: Int) -[]> String {
+    loop (dwarf, slot) in NATIVE_DEBUG_DWARF_REGISTERS {
+        if slot == index && dwarf < NATIVE_PLACE_REGS.len() {
+            return X64_REGISTER_NAMES[NATIVE_PLACE_REGS[dwarf]]
+        }
+    }
+    if {
+        index == X64_TRACE_RIP -> "rip"
+        index == X64_TRACE_EFLAGS -> "rflags"
+        index == X64_TRACE_FS_BASE -> "fs_base"
+        index == X64_TRACE_GS_BASE -> "gs_base"
+        else -> "register {index}"
+    }
+}
+
+// `memory WHERE [COUNT] [as TYPE]` at the console: a heading naming what
+// WHERE is, then rows of 16 bytes (hex, then text) or, `as` a number type,
+// rows of NATIVE_MEMORY_ROW_VALUES values. `??` is a byte no mapping
+// holds, `##` one a dump redacted; the debugger's own bytes show as
+// `[debugger]`. Each row names the locals and List items that start in it.
+// An answer stops at a section's end, and at NATIVE_MEMORY_SHOWN bytes,
+// and says where.
+native_memory_answer: fn(session: &NativeSession, ask: NativeMemoryAsk, path: NativeWatchPath) -> NativeAnswer NativeDebugError! {
+    if ask.refusal != "" {
+        return Ok(NativeAnswer{text: "{native_memory_refusal(ask.refusal)}\n", refused: true})
+    }
+    aim: native_memory_aim(session, ask.place, path) ?? return Err(err)
+    if aim.answer != "" -> return Ok(NativeAnswer{text: aim.answer, refused: aim.refused})
+    asked: if ask.count > 0 -> ask.count else -> NATIVE_MEMORY_DEFAULT.div_euclid(ask.size)
+    values := asked
+    after := ""
+    if aim.limit >= 0 && values * ask.size > aim.limit {
+        values = aim.limit.div_euclid(ask.size)
+        if ask.count > 0 {
+            after = "the section ends at {x64_hex(aim.address + aim.limit)}: {values} of {asked} values shown\n"
+        }
+    }
+    if values * ask.size > NATIVE_MEMORY_SHOWN {
+        values = NATIVE_MEMORY_SHOWN.div_euclid(ask.size)
+        after = "cut at {x64_hex(aim.address + values * ask.size)}: {values * ask.size} of {asked * ask.size} bytes shown; memory shows at most {NATIVE_MEMORY_SHOWN} at once\n"
+    }
+    if values == 0 {
+        return Ok(NativeAnswer{text: "{x64_hex(aim.address)}  {aim.heading}\nthe section ends before one {ask.type_name}\n"})
+    }
+    view: native_memory_view(session, aim.at, aim.address, values * ask.size)
+    rows: if ask.typed -> native_memory_value_rows(session, view, ask.type_name, ask.size) else -> native_memory_byte_rows(session, view)
+    redacted: if session.dump != None -> "the dump was written redacted: ## marks a #Secret local's bytes, and its zeroed copies read 00\n" else -> ""
+    Ok(NativeAnswer{text: "{x64_hex(aim.address)}  {aim.heading}\n{rows}{after}{redacted}"})
+}
+
+// The bytes of `view` in rows of NATIVE_MEMORY_ROW_BYTES, as `sections
+// --bytes` shows a section's: the address, the bytes in hex, then as text.
+// A run of the debugger's own bytes is one `[debugger]` row, and a row no
+// mapping holds says so.
+native_memory_byte_rows: fn(session: &NativeSession, view: NativeMemoryView) -> String Never! {
+    text := ""
+    count: view.bytes.len()
+    start := 0
+    loop start < count {
+        address: view.address + start
+        if view.debugger[start] {
+            stop := start
+            loop stop < count && view.debugger[stop] -> stop += 1
+            text = "{text}{x64_hex(address)}  {NATIVE_LISTING_DEBUGGER}, {stop - start} bytes\n"
+            start = stop
+            next
+        }
+        end := start
+        loop end < count && end < start + NATIVE_MEMORY_ROW_BYTES && !view.debugger[end] -> end += 1
+        hex := [String]{}
+        shown := [U8]{}
+        mapped := false
+        loop k in start..<end {
+            if {
+                view.secret[k] -> {
+                    hex.push("##")
+                    shown.push(U8{0x23})
+                }
+                !view.mapped[k] -> {
+                    hex.push("??")
+                    shown.push(U8{0x3f})
+                }
+                else -> {
+                    byte: view.bytes[k]
+                    value: Int{byte}
+                    mapped = true
+                    hex.push(native_panel_hex(value).slice(14, 16))
+                    shown.push(if value >= 0x20 && value < 0x7f -> byte else -> U8{0x2e})
+                }
+            }
+        }
+        labels: native_memory_row_labels(session, view, address, view.address + end)
+        body: if mapped -> "{native_listing_pad(hex.join(" "), 49)}{String.from_bytes(shown) ?? ""}" else -> "{hex.join(" ")}  (not mapped)"
+        text = if labels == "" -> "{text}{x64_hex(address)}  {body}\n" else -> "{text}{x64_hex(address)}  {body}  {labels}\n"
+        start = end
+    }
+    text
+}
+
+// The values of `view` as `type_name` (`size` bytes each), in rows of
+// NATIVE_MEMORY_ROW_VALUES. A value with an unmapped byte shows as `??`,
+// one a dump redacted as `##`, one in the debugger's own bytes as
+// `[debugger]`.
+native_memory_value_rows: fn(session: &NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
+    text := ""
+    values: view.bytes.len().div_euclid(size)
+    row := 0
+    loop row < values {
+        end: if row + NATIVE_MEMORY_ROW_VALUES < values -> row + NATIVE_MEMORY_ROW_VALUES else -> values
+        shown := [String]{}
+        loop value in row..<end {
+            at: value * size
+            unmapped := false
+            secret := false
+            debugger := false
+            loop k in at..<at + size {
+                if !view.mapped[k] -> unmapped = true
+                if view.secret[k] -> secret = true
+                if view.debugger[k] -> debugger = true
+            }
+            shown.push(
+                if {
+                    debugger -> NATIVE_LISTING_DEBUGGER
+                    secret -> "##"
+                    unmapped -> "??"
+                    else -> native_memory_value(view.bytes, at, type_name, size)
+                },
+            )
+        }
+        address: view.address + row * size
+        labels: native_memory_row_labels(session, view, address, view.address + end * size)
+        body: "{x64_hex(address)}  {shown.join("  ")}"
+        text = if labels == "" -> "{text}{body}\n" else -> "{text}{body}  {labels}\n"
+        row = end
+    }
+    text
+}
+
+// The value of type `type_name` (`size` bytes) at `at` of `bytes`.
+native_memory_value: fn(bytes: [U8], at: Int, type_name: String, size: Int) -> String Never! {
+    if type_name == {
+        "Float" -> "{native_panels_math.from_bits(native_number(bytes, at, 8, X64DebugEncoding.Signed))}"
+        "F32" -> "{native_panels_math.f32_from_bits(U32{native_number(bytes, at, 4, X64DebugEncoding.Unsigned)})}"
+        "U64" -> native_memory_unsigned(native_number(bytes, at, 8, X64DebugEncoding.Signed))
+        "U8" | "U16" | "U32" -> "{native_number(bytes, at, size, X64DebugEncoding.Unsigned)}"
+        else -> "{native_number(bytes, at, size, X64DebugEncoding.Signed)}"
+    }
+}
+
+// The 64 bits of `word` as an unsigned number.
+native_memory_unsigned: fn(word: Int) -[]> String {
+    if word >= 0 -> return "{word}"
+    // word as unsigned is 2 * half + low, half its top 63 bits.
+    half: (word >> 1) & 0x7fff_ffff_ffff_ffff
+    "{half.div_euclid(5)}{half % 5 * 2 + (word & 1)}"
+}
+
+// What starts in the bytes [low, high) of the program: the frame's locals
+// and List items whose bytes do (`items[2..4]` for a run of items), and a
+// fix's jump.
+native_memory_row_labels: fn(session: &NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
+    labels := [String]{}
+    loop span in view.spans {
+        if span.stride == 0 {
+            if span.address >= low && span.address < high -> labels.push(span.name)
+            next
+        }
+        first := -1
+        last := -1
+        loop item in 0..<span.size.div_euclid(span.stride) {
+            start: span.address + item * span.stride
+            if start >= high -> break
+            if start < low -> next
+            if first < 0 -> first = item
+            last = item
+        }
+        if first < 0 -> next
+        labels.push(if first == last -> "{span.name}[{first}]" else -> "{span.name}[{first}..{last}]")
+    }
+    loop fixed in session.fixed {
+        if fixed.was >= low && fixed.was < high {
+            labels.push("fix's jump to {x64_hex(fixed.address)}")
+        }
+    }
+    labels.join(", ")
+}
+
+// The Jet word for a gdb command the console doesn't take, as its answer
+// says it; None for any other command.
+// `x/FMT WHERE` reads as `memory WHERE COUNT [as TYPE]`, COUNT 1 when FMT
+// gives none.
+native_gdb_word: fn(command: String) -[]> String? {
+    trimmed: command.trim()
+    word: trimmed.before(" ")
+    operand: if trimmed.contains(" ") -> trimmed.after(" ").trim() else -> ""
+    if word == "info" {
+        return if operand == {
+            "registers" | "reg" | "r" -> Val("registers")
+            "all-registers" -> Val("registers --all")
+            "breakpoints" | "break" | "b" | "watchpoints" -> Val("breaks")
+            "threads" -> Val("tasks")
+            "locals" | "args" -> Val("locals")
+            "frame" -> Val("frame")
+            "sharedlibrary" | "files" -> Val("segments")
+            else -> None
+        }
+    }
+    if word == "dprintf" -> return Val("log FILE:LINE \"TEXT {{EXPR}}\"")
+    if word == "x" || word.starts_with("x/") {
+        if operand == "" -> return Val("memory WHERE [COUNT] [as TYPE]")
+        format: if word.starts_with("x/") -> word.slice(2, word.len()) else -> ""
+        count := 0
+        letter := ""
+        unit := ""
+        loop byte in format.bytes() {
+            code: Int{byte}
+            if code >= 48 && code <= 57 && letter == "" && unit == "" {
+                count = count * 10 + code - 48
+                next
+            }
+            text: String.from_bytes([U8]{byte}) ?? ""
+            if text == {
+                "b" | "h" | "w" | "g" -> { unit = text }
+                else -> { letter = text }
+            }
+        }
+        if letter == "i" -> return Val("disassemble")
+        if letter == "s" -> return Val("print or memory {operand}")
+        size: if {
+            unit == "b" || letter == "c" -> 1
+            unit == "h" -> 2
+            unit == "w" -> 4
+            unit == "g" || letter == "a" -> 8
+            letter == "f" -> 8
+            else -> 4
+        }
+        type_name: if {
+            letter == "f" && size == 4 -> "F32"
+            letter == "f" -> "Float"
+            letter == "d" && size == 8 -> "Int"
+            letter == "d" -> "I{size * 8}"
+            size == 1 -> "U8"
+            else -> "U{size * 8}"
+        }
+        counted: if count > 0 -> count else -> 1
+        typed: if type_name == "U8" -> "" else -> " as {type_name}"
+        return Val("memory {operand} {counted}{typed}")
+    }
+    None
+}
+
+// The console's answer to the gdb command `command`, refused: its Jet word.
+native_gdb_answer: fn(command: String) -[]> String? {
+    jet: native_gdb_word(command) ?? return None
+    Val("`{command.trim()}` is gdb's; Jet's word is `{jet}`\n")
+}
+
+#Test("memory reads WHERE, then COUNT, then `as TYPE`") {
+    plain: native_memory_ask("items 24")
+    assert_eq(plain.place, "items")
+    assert_eq(plain.count, 24)
+    assert_eq(plain.size, 1)
+    typed: native_memory_ask("$r12 3 as Int")
+    assert_eq(typed.place, "$r12")
+    assert_eq(typed.count, 3)
+    assert_eq(typed.type_name, "Int")
+    assert_eq(typed.size, 8)
+    spaced: native_memory_ask("xs[i + 1] as F32")
+    assert_eq(spaced.place, "xs[i + 1]")
+    assert_eq(spaced.count, -1)
+    assert_eq(spaced.size, 4)
+    assert_eq(native_memory_ask("items 0").refusal, "`0` is no count: COUNT is a positive number of values, as `memory items 16`")
+    assert_eq(native_memory_ask("items as Text").refusal, "`Text` is not a number type; memory reads as {NATIVE_MEMORY_TYPES}")
+    assert_eq(native_memory_ask("").refusal, NATIVE_MEMORY_SHAPE)
+    assert_eq(native_memory_ask("items 2 3").refusal, NATIVE_MEMORY_SHAPE)
+}
+
+#Test("a WHERE ends in an offset of bytes, which an index's sign is not") {
+    assert_eq(native_memory_offset("$rsp+16").base, "$rsp")
+    assert_eq(native_memory_offset("$rsp+16").offset, 16)
+    assert_eq(native_memory_offset(".rodata-8").offset, -8)
+    assert_eq(native_memory_offset("xs[i-1]").base, "xs[i-1]")
+    assert_eq(native_memory_offset("xs[i-1]").offset, 0)
+    assert_eq(native_memory_offset("xs[2]+8").offset, 8)
+    assert_eq(native_memory_address("0x7ffd5e3a1f40"), Int?{Val(0x7ffd5e3a1f40)})
+    assert_eq(native_memory_address("0xffffffffffffffff"), Int?{Val(-1)})
+    assert_eq(native_memory_address("0x"), Int?{None})
+    assert_eq(native_memory_address("4096"), Int?{None})
+}
+
+#Test("a register row shows hex, a small value in decimal and its label") {
+    assert_eq(native_register_text(NativeRegisterRow{name: "rbx", known: true, value: 41, label: "total"}), "rbx    0x0000000000000029  41          total")
+    assert_eq(native_register_text(NativeRegisterRow{name: "rax", known: true, value: 41}), "rax    0x0000000000000029  41")
+    assert_eq(native_register_text(NativeRegisterRow{name: "r12", known: true, value: 0x7f3a1c002010, label: "-> items[0]"}), "r12    0x00007f3a1c002010              -> items[0]")
+    assert_eq(native_register_text(NativeRegisterRow{name: "r8", known: false, value: 0}), "r8     not saved")
+    assert_eq(native_register_text(NativeRegisterRow{name: "rflags", known: true, value: 0x246, label: native_panel_flags(0x246)}), "rflags 0x0000000000000246              PF ZF IF")
+    assert_eq(native_register_text(NativeRegisterRow{name: "rax", known: true, value: -1}), "rax    0xffffffffffffffff  -1")
+}
+
+#Test("a register points at a local's bytes or an item of a List's buffer") {
+    spans: [NativeMemorySpan]{NativeMemorySpan{address: 0x1000, size: 8, name: "total"}, NativeMemorySpan{address: 0x2000, size: 24, name: "items", stride: 8}}
+    assert_eq(native_memory_points(spans, 0x1000), "-> total")
+    assert_eq(native_memory_points(spans, 0x1004), "")
+    assert_eq(native_memory_points(spans, 0x2010), "-> items[2]")
+    assert_eq(native_memory_points(spans, 0x2018), "")
+    assert_eq(native_memory_points(spans, 0x2004), "")
+}
+
+#Test("a value reads as its number type") {
+    bytes: [U8]{U8{0xfb}, U8{0xff}, U8{0xff}, U8{0xff}, U8{0xff}, U8{0xff}, U8{0xff}, U8{0xff}}
+    assert_eq(native_memory_value(bytes, 0, "Int", 8), "-5")
+    assert_eq(native_memory_value(bytes, 0, "U64", 8), "18446744073709551611")
+    assert_eq(native_memory_value(bytes, 0, "U8", 1), "251")
+    assert_eq(native_memory_value(bytes, 0, "I16", 2), "-5")
+    assert_eq(native_memory_unsigned(-1), "18446744073709551615")
+    assert_eq(native_memory_unsigned(42), "42")
+}
+
+#Test("a gdb word answers with its Jet word") {
+    assert_eq(native_gdb_word("info registers"), String?{Val("registers")})
+    assert_eq(native_gdb_word("info all-registers"), String?{Val("registers --all")})
+    assert_eq(native_gdb_word("info breakpoints"), String?{Val("breaks")})
+    assert_eq(native_gdb_word("info threads"), String?{Val("tasks")})
+    assert_eq(native_gdb_word("x/16xb $rsp"), String?{Val("memory $rsp 16")})
+    assert_eq(native_gdb_word("x/3dg $r12"), String?{Val("memory $r12 3 as Int")})
+    assert_eq(native_gdb_word("x/2fg $rsp"), String?{Val("memory $rsp 2 as Float")})
+    assert_eq(native_gdb_word("x $rsp"), String?{Val("memory $rsp 1 as U32")})
+    assert_eq(native_gdb_word("x/4i $rip"), String?{Val("disassemble")})
+    assert_eq(native_gdb_word("dprintf main.jet:4,\"%d\\n\",x"), String?{Val("log FILE:LINE \"TEXT {{EXPR}}\"")})
+    assert_eq(native_gdb_word("frobnicate"), String?{None})
+    assert_eq(native_gdb_answer("info registers"), String?{Val("`info registers` is gdb's; Jet's word is `registers`\n")})
+}

@@ -570,6 +570,9 @@ NativeSession: struct {
     // that task's frames; None unwinds the stop's. Nothing runs while it is
     // set.
     focus: [Int]?{None},
+    // Whether `focus` is a parked task's saved registers (NativeTaskRow
+    // .saved), of which only the callee-saved ones, rip and rsp are its.
+    focus_saved: Bool{false},
     // The watches, which number with the breakpoints; the change the last
     // watch stop saw (`total: 0 -> 2`); and what the next report says first
     // (a watch dropped when its frame returned).
@@ -2449,12 +2452,14 @@ NativeSession: struct {
         loop task in tasks.move() {
             on: native_task_thread(threads, task)
             registers := [Int]?{None}
+            saved := false
             if {
                 on >= 0 -> registers = Val(threads[on].registers)
                 task.fiber != 0 && threads.len() > 0 -> {
-                    saved: native_debug_word(self.trace, task.fiber + NATIVE_DEBUG_FIBER_SAVED) ?? 0
-                    if saved != 0 {
-                        registers = native_task_registers(threads[0].registers, memory, saved)
+                    word: native_debug_word(self.trace, task.fiber + NATIVE_DEBUG_FIBER_SAVED) ?? 0
+                    if word != 0 {
+                        registers = native_task_registers(threads[0].registers, memory, word)
+                        saved = registers != None
                     }
                 }
             }
@@ -2464,7 +2469,7 @@ NativeSession: struct {
                 else -> "running"
             }
             current: on >= 0 && threads[on].id == stopped
-            rows.push(NativeTaskRow{task: task.move(), state: state, current: current, registers: registers.move()})
+            rows.push(NativeTaskRow{task: task.move(), state: state, current: current, registers: registers.move(), saved: saved})
         }
         Ok(rows)
     }
@@ -2482,11 +2487,14 @@ NativeSession: struct {
     // task has none yet).
     focus_task: fn(&self, task: Int) -> Bool NativeDebugError! {
         self.focus = None
+        self.focus_saved = false
         rows: self.task_rows() ?? return Err(err)
         loop row in rows.move() {
             if row.task.id != task -> next
+            saved: row.saved
             if row.registers.move() == .Val(found) {
                 self.focus = Val(found)
+                self.focus_saved = saved
                 return Ok(true)
             }
             return Ok(false)
@@ -2778,7 +2786,9 @@ NativeSession: struct {
             "disassemble" | "disas" -> {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)
             }
-            "symbols" | "segments" -> text = native_image_listing(self.binary, word) ?? return Err(err)
+            "symbols" | "segments" -> {
+                text = native_image_listing(self.binary, word) ?? return Err(err)
+            }
             "sections" -> {
                 answer: native_image_sections_answer(self.binary, operand, whole: self.scripted) ?? return Err(err)
                 if answer.refused {
@@ -2786,10 +2796,26 @@ NativeSession: struct {
                 }
                 text = answer.text
             }
+            "registers" -> {
+                answer: native_registers_answer(self, operand) ?? return Err(err)
+                return Ok(NativeDebugStep{text: answer.text, stop: stop, refused: answer.refused})
+            }
+            "memory" -> {
+                ask: native_memory_ask(operand)
+                name: native_memory_name(ask)
+                path: if name != "" -> self.watch_path(name) else -> native_watch_path_refusal("")
+                answer: native_memory_answer(self, ask, path) ?? return Err(err)
+                return Ok(NativeDebugStep{text: answer.text, stop: stop, refused: answer.refused})
+            }
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> return Ok(NativeDebugStep{text: "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}", stop: stop, refused: true})
+            else -> {
+                if native_gdb_answer(trimmed) == .Val(answer) {
+                    return Ok(NativeDebugStep{text: answer, stop: stop, refused: true})
+                }
+                return Ok(NativeDebugStep{text: "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}", stop: stop, refused: true})
+            }
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }
@@ -3849,6 +3875,14 @@ NativeSession: struct {
             return native_debug_bytes(dumped.memory, address, count) ?? [U8]{}
         }
         bytes := x64_trace_read(self.trace, address, count) ?? [U8]{}
+        self.restore_code(address, bytes)
+        bytes
+    }
+
+    // Put back, in `bytes` read from `address` of the live program, its
+    // own bytes under the debugger's trap bytes, placed conditions' jumps
+    // and zone probes.
+    restore_code: fn(self, address: Int, bytes: &[U8]) Never! {
         changed: self.originals()
         loop at in 0..<bytes.len() {
             if changed.get(address + at) == .Val(byte) -> bytes[at] = U8{byte}
@@ -3857,7 +3891,6 @@ NativeSession: struct {
             at: probe - address
             if at >= 0 && at < bytes.len() -> bytes[at] = U8{byte}
         }
-        bytes
     }
 
     // Let the program go on as `how` says; a run with a watch on a local
@@ -5749,7 +5782,7 @@ NativeSession: struct {
     // The current thread's frames, innermost first (unwind_from), or the
     // focused task's (`focus`).
     unwind: fn(self) -> [NativeUnwound] NativeDebugError! {
-        if self.focus == .Val(focused) -> return self.unwind_from(focused)
+        if self.focus == .Val(focused) -> return self.unwind_from(focused, parked: self.focus_saved)
         registers: self.registers() ?? return Err(err)
         self.unwind_from(registers)
     }
@@ -5759,12 +5792,13 @@ NativeSession: struct {
     // (native_debug_frame_row): a Jet function's, the runtime's and a fixed
     // function's alike, so a frame paused in its prologue, at its `ret` or
     // at the tail jump that ends it unwinds as one in its body. A dump's
-    // registers are only those its task's row knows (native_dump_known).
-    // The stack's words above the innermost frame are read at once
-    // (stack_word).
-    unwind_from: fn(self, start: [Int]) -> [NativeUnwound] NativeDebugError! {
+    // registers are only those its task's row knows (native_dump_known),
+    // and a parked task's (`parked`) only those its fiber saved
+    // (native_task_known). The stack's words above the innermost frame are
+    // read at once (stack_word).
+    unwind_from: fn(self, start: [Int], parked: Bool{false}) -> [NativeUnwound] NativeDebugError! {
         registers := loop value in start -> value
-        known := loop _ in 0..<registers.len() -> true
+        known := if parked -> native_task_known(registers.len()) else -> loop _ in 0..<registers.len() -> true
         if self.dump == .Val(dumped) -> known = native_dump_known(dumped, self.task)
         low: registers[X64_TRACE_RSP]
         window: if self.dump == None && low > 0 -> x64_trace_read(self.trace, low, NATIVE_DEBUG_STACK_WINDOW) ?? [U8]{} else -> [U8]{}
@@ -6560,7 +6594,7 @@ native_eval_image_of: fn(elf: [U8], runtime: &&[U8]) -> Shared<NativeEvalImage> 
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, sections [NAME...] [--bytes], tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
@@ -6880,12 +6914,14 @@ NativeTask: struct {
 // A task as `tasks` lists it (NativeSession.task_rows): the registry's row,
 // its state as shown, whether this stop is in it, and the registers its
 // stack unwinds from: its thread's, or those its fiber saved when it
-// parked; None for a task with no stack yet (a queued one).
+// parked (`saved`, native_task_registers); None for a task with no stack
+// yet (a queued one).
 NativeTaskRow: struct {
     task: NativeTask,
     state: String,
     current: Bool,
     registers: [Int]?,
+    saved: Bool{false},
 }
 
 // A thread of the stopped program as `tasks` matches it to a task: its id,
@@ -6946,6 +6982,25 @@ native_task_registers: fn(template: [Int], memory: NativeMemory, saved: Int) -> 
     registers[X64_TRACE_RIP] = words[0] + NATIVE_DEBUG_FIBER_POPS
     registers[X64_TRACE_RSP] = saved + 8 * words.len()
     Val(registers)
+}
+
+// Which of `count` registers a parked fiber's (native_task_registers) are
+// its own: those its switch saved, rip and rsp.
+native_task_known: fn(count: Int) -> [Bool] Never! {
+    known := loop _ in 0..<count -> false
+    loop register in NATIVE_DEBUG_FIBER_SAVES -> known[register] = true
+    known[X64_TRACE_RIP] = true
+    known[X64_TRACE_RSP] = true
+    known
+}
+
+#Test("a parked task's frame knows the registers its switch saved, rip and rsp") {
+    // rbx is 5 of the kernel's register block, rax 10.
+    known: native_task_known(27)
+    assert(known[5])
+    assert(known[X64_TRACE_RIP])
+    assert(known[X64_TRACE_RSP])
+    assert(!known[10])
 }
 
 // A task's state as the registry keeps it (JetFoundation LiveSnapshot.jet).
@@ -7397,21 +7452,24 @@ native_watch_through: fn(image: NativeImage, memory: NativeMemory, ty: Int, addr
     Val({ty: kind, address: at, held: value})
 }
 
-// The inline header of the List type `ty`: the offsets of its length and
-// data words, its size, and its element type (-1 when `ty` is no List).
-native_watch_list: fn(image: NativeImage, ty: Int) -> {length: Int, data: Int, size: Int, element: Int} Never! {
-    none: {length: 0, data: 0, size: 0, element: -1}
+// The inline header of the List type `ty`: the offsets of its length,
+// capacity (-1: none named) and data words, its size, and its element type
+// (-1 when `ty` is no List).
+native_watch_list: fn(image: NativeImage, ty: Int) -> {length: Int, cap: Int, data: Int, size: Int, element: Int} Never! {
+    none: {length: 0, cap: -1, data: 0, size: 0, element: -1}
     found: image.types.get(ty) ?? return none
     if found.tag != NATIVE_TAG_STRUCT || found.group < 0 || !found.name.starts_with("[") || !found.name.ends_with("]") {
         return none
     }
     length := -1
+    cap := -1
     data := -1
     element := -1
     size := 0
     loop member in image.members[found.group] {
         if member.offset + 8 > size -> size = member.offset + 8
         if member.name == "len" -> length = member.offset
+        if member.name == "cap" -> cap = member.offset
         if member.name == "data" {
             data = member.offset
             pointer: image.types.get(member.ty) ?? next
@@ -7419,7 +7477,7 @@ native_watch_list: fn(image: NativeImage, ty: Int) -> {length: Int, data: Int, s
         }
     }
     if length < 0 || data < 0 -> return none
-    {length: length, data: data, size: size, element: element}
+    {length: length, cap: cap, data: data, size: size, element: element}
 }
 
 // A place that can't be watched, and why.

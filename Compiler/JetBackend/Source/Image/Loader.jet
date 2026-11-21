@@ -2127,6 +2127,17 @@ LOADER_PTRACE_GETREGS: 12
 
 LOADER_PTRACE_SETREGS: 13
 
+// The kernel's x86-64 floating-point block (user_fpregs_struct), 512 bytes:
+// mxcsr at X64_TRACE_FP_MXCSR and xmm0 to xmm15, 16 bytes each, from
+// X64_TRACE_FP_XMM.
+LOADER_PTRACE_GETFPREGS: 14
+
+X64_TRACE_FP_BYTES: 512
+
+X64_TRACE_FP_MXCSR: 24
+
+X64_TRACE_FP_XMM: 160
+
 LOADER_PTRACE_SETOPTIONS: 0x4200
 
 LOADER_PTRACE_GETEVENTMSG: 0x4201
@@ -2201,6 +2212,9 @@ X64_TRACE_RSI: 13
 
 X64_TRACE_RDI: 14
 
+// The thread's FS base, its thread pointer.
+X64_TRACE_FS_BASE: 21
+
 // The thread's GS base, whose first word a Jet thread keeps its TCB's
 // address in (JetRuntime Thread.jet thread_base): on a carrier running a
 // fiber, the fiber's TCB.
@@ -2208,6 +2222,27 @@ X64_TRACE_GS_BASE: 22
 
 // The system call a thread stopped in, or -1 when it stopped outside one.
 X64_TRACE_ORIG_RAX: 15
+
+// The registers a stop shows (`jet debug`'s `registers`), in the order it
+// shows them, by their index in the register block: rax to r15, rip and
+// rflags. `--all` adds the vector registers and then X64_TRACE_SHOWN_ALL,
+// the FS and GS bases. The debugger names each from the encoder's register
+// names (JetDebug NativePanels.jet native_panel_register_name). Another
+// native host brings its own table.
+X64_TRACE_SHOWN: [Int]{10, 5, 11, 12, 13, 14, 4, 19, 9, 8, 7, 6, 3, 2, 1, 0, 16, 18}
+
+X64_TRACE_SHOWN_ALL: [Int]{21, 22}
+
+X64_TRACE_EFLAGS: 18
+
+// The vector registers of the floating-point block: xmm0 to xmm15.
+X64_TRACE_VECTORS: 16
+
+// The flags of rflags a stop names when set, by bit: carry, parity,
+// adjust, zero, sign, trap, interrupt, direction and overflow.
+X64_TRACE_FLAG_BITS: [Int]{0, 2, 4, 6, 7, 8, 9, 10, 11}
+
+X64_TRACE_FLAG_NAMES: [String]{"CF", "PF", "AF", "ZF", "SF", "TF", "IF", "DF", "OF"}
 
 // The offset of the debug registers in the kernel's per-thread user area
 // (struct user, u_debugreg) that PTRACE_PEEKUSER and PTRACE_POKEUSER read
@@ -2856,6 +2891,21 @@ x64_trace_registers: fn(trace: X64Trace) -> [Int]? {
         }
     }
     registers
+}
+
+// The trace's stopped thread's floating-point block, X64_TRACE_FP_BYTES
+// bytes in the kernel's layout; None when the kernel refused.
+x64_trace_fp_registers: fn(trace: X64Trace) -> [U8]? {
+    bytes := [U8]{}
+    #Unsafe("the helper's PTRACE_GETFPREGS writes the 512-byte block at LOADER_TRACE_BYTES of the trace's scratch page, inside it, and the block is copied from there") {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETFPREGS, trace.thread, 0, trace.scratch + LOADER_TRACE_BYTES, 0, 0)) {
+            if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(trace.scratch + LOADER_TRACE_BYTES), X64_TRACE_FP_BYTES) {
+                bytes = [U8]{}
+            }
+        }
+    }
+    if bytes.len() != X64_TRACE_FP_BYTES -> return None
+    Val(bytes)
 }
 
 // Set the trace's stopped thread's registers to `registers` (as

@@ -7,11 +7,15 @@
 # backtrace, its typed locals, every task's stack (the three sleeping ones
 # too), the flight ring's last events, each with its task and its place,
 # and the stopped function's code, read from the image, its pc marked.
-# A task handle that `detach` consumed shows as consumed. A Secret is never
-# on disk: every run of its bytes is zeroed as the dump is written, its
-# literal's in the image's copy too, and the console shows it redacted. An
-# image copy changed in place, the same size, no longer hashes to the build
-# the dump names, and `jet debug` refuses it, naming both builds.
+# `registers` reads the dump's own: rip is the pc `disas` marks, and no
+# vector register is in a dump. A parked task's frame knows only the
+# registers its switch saved. `memory` shows a Secret local's bytes as
+# `##`. A task handle that `detach` consumed shows as consumed. A Secret
+# is never on disk: every run of its bytes is zeroed as the dump is
+# written, its literal's in the image's copy too, and the console shows it
+# redacted. An image copy changed in place, the same size, no longer
+# hashes to the build the dump names, and `jet debug` refuses it, naming
+# both builds.
 requires: os-name:linux
 fixture: CrashDumpOpensTyped.fixture
 env: NO_COLOR=1
@@ -56,6 +60,22 @@ stdout: !~ "<Unavailable>" # every local of both frames shows what it holds
 stdout: ~ "sample  task 1  at check crash.jet:9" # a sample names its task and its first Jet frame
 stdout: !~ "sample  \n" # no event is left without a place
 capture: build = text stdout.after_first("Build: ").split(",", 0)
+step: jet debug {cap:dump} --do disas --do registers --do 'registers --all'
+exit: 0
+capture: pc = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc}  " # the dump's registers: rip is the pc disas marks
+stdout.filter(^= "rip    0x").line(0): ~ "  check+" # in check's code
+stdout: ~ "\nxmm0   not saved\n" # a dump holds no vector register
+stdout: ~ "\nmxcsr  not saved\n" # nor the vector unit's control
+step: jet debug {cap:dump} --do 'frame 1' --do 'memory key 16'
+exit: 0
+stdout: ~ "  key: " # the Secret local's own bytes
+stdout: ~ "  ## ## ## ## ## ## ## ##" # read as the dump redacted them
+stdout: ~ "the dump was written redacted: ## marks a #Secret local's bytes, and its zeroed copies read 00\n" # and the answer says so
+step: jet debug {cap:dump} --do 'task 2' --do registers
+exit: 0
+stdout: ~ "\nrax    not saved\n" # a parked task's switch saved no rax
+stdout: ~ "\nrbx    0x" # but saved rbx
 poke: {cap:image} at mid xor "01"
 step: jet debug {cap:dump}
 exit: 1

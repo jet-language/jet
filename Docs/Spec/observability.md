@@ -1545,6 +1545,38 @@ D-DBG-VERBS1=A names the commands:
   one that names a side debug file names it under its rows (`debug info:
   main.debug`), and a big-endian image is refused. It reads the file at a
   stop and in a dump alike.
+- `registers [--all]` reads the selected frame's registers
+  (D-DEBUG-PANELS1), one row each: the name in a column of 7, the value
+  as 16 hex digits, the value in decimal when it fits in 32 bits, then a
+  label. A register a local lives in names it (`r13    0x000000000000003f
+  63          total`); one that points at a local's bytes or a List's item
+  says `-> items[0]`; rip names its code (`sum+1341`) and rflags its set
+  flags (`PF ZF IF`). An outer frame knows rip, rsp and what its callee
+  saved; any other register reads `not saved`, as do those a dump didn't
+  write and those a parked task's switch didn't save. `--all` adds xmm0 to
+  xmm15, mxcsr, fs_base and gs_base; the vector registers are known only
+  in the innermost frame of a live stop.
+- `memory WHERE [COUNT] [as TYPE]` reads the program's bytes. WHERE is a
+  local, a field path under one or a List item (`items[2]`), `0x` and an
+  address, `$` and a register (`$rsp`), or a section (`.rodata`), each
+  with an optional `+N` or `-N` of bytes. A local's bytes are those its
+  header points at; the heading names WHERE, its type and size, or a
+  List's `len=3 cap=5 buffer=0x…`. Rows hold 16 bytes in hex, then as
+  text, as `sections --bytes` does; `as TYPE` (U8, Int, I64, I32, I16, I8,
+  U64, U32, U16, Float or F32) prints COUNT values instead, 8 a row. Each
+  row names the locals and List items that start in it. The default is 64
+  bytes, and the console shows at most 4096, `--do` included, and says
+  where it cut. A read past a section's end stops there and says so. `??`
+  marks a byte no mapping holds, `##` a #Secret local's bytes in a dump,
+  and a run of the debugger's own code is one `[debugger]` row; the bytes
+  under a breakpoint read as the program's own. A local held in a
+  register has no address: the answer names the register and its value,
+  and `memory $r13` reads where that value points. In a dump an index must
+  be a number. gdb's words answer with Jet's, refused: `info registers`
+  with `registers`, `x/16xb $rsp` with `memory $rsp 16`, `info
+  breakpoints` with `breaks`.
+  Tests/Cases/Debug/registers_and_memory_at_a_stop.case is the worked
+  example.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
