@@ -4,8 +4,7 @@ use {
     jet_foundation.[
         OutputKind,
         ResolvedOutput,
-        type_name,
-        failure_contract_shown_type,
+        failure_contract_shown_name,
         failure_contract_source,
         diagnostic_render_all,
         SourceFile,
@@ -45,7 +44,7 @@ jet_cli_output_report: fn(query: JetDriverOutputQueryResult, output: ResolvedOut
     // Output.source_path is the registration module key (`run`); the report
     // names the declaring file the projection loaded.
     source_path: projection.physical_path
-    failure: type_name(failure_contract_shown_type(output.failure_contract))
+    failure: failure_contract_shown_name(output.failure_contract)
     failure_source: failure_contract_source(output.failure_contract)
     effects: jet_cli_sorted_set(output.effects)
     authority: jet_cli_application_authority(query.compile, None)

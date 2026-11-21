@@ -1,0 +1,12 @@
+# Claim: `jet inspect output` names the entry's whole failure contract. An
+# entry written `-> Never Err!` fails as `Never Err!`; the name keeps the
+# `Err` that a `Never` success would otherwise hide, in text and in JSON.
+fixture: InspectOutputSpellsTheDefaultErrorBesideNever.fixture
+env: NO_COLOR=1
+step: jet inspect output launch.jet
+exit: 0
+stdout: ~ "Failure contract: Never Err! (explicit Err!)\n" # the name spells the Err beside Never
+step: jet inspect output launch.jet --json
+exit: 0
+stdout: ~ "\"failure_contract\":\"Never Err!\"" # the JSON name spells it too
+stdout: ~ "\"failure_source\":\"explicit Err!\"" # the source is unchanged
