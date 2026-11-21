@@ -2124,6 +2124,15 @@ LOADER_PTRACE_SETOPTIONS: 0x4200
 
 LOADER_PTRACE_GETEVENTMSG: 0x4201
 
+// The siginfo of the signal a stopped thread is about to take
+// (x64_trace_fault_address), and the offsets of its si_code and si_addr
+// there.
+LOADER_PTRACE_GETSIGINFO: 0x4202
+
+LOADER_SIGINFO_CODE: 8
+
+LOADER_SIGINFO_ADDRESS: 16
+
 LOADER_PTRACE_DETACH: 17
 
 // Trace a running thread without stopping it, and stop a thread so traced
@@ -2211,11 +2220,11 @@ X64_TRACE_R9: 8
 X64_TRACE_RAX: 10
 
 // The scratch page of a trace, which its helper shares: the register block
-// at 0, the word a call returns through at LOADER_TRACE_WORD, the call the
-// helper makes at LOADER_TRACE_CALL (its number and six arguments, then the
-// words at LOADER_TRACE_RESULT, LOADER_TRACE_SIGNAL and LOADER_TRACE_MASK),
-// process_vm_readv's two iovecs at LOADER_TRACE_IOV and the bytes it reads
-// from LOADER_TRACE_BYTES.
+// (or a siginfo) at 0, the word a call returns through at
+// LOADER_TRACE_WORD, the call the helper makes at LOADER_TRACE_CALL (its
+// number and six arguments, then the words at LOADER_TRACE_RESULT,
+// LOADER_TRACE_SIGNAL and LOADER_TRACE_MASK), process_vm_readv's two iovecs
+// at LOADER_TRACE_IOV and the bytes it reads from LOADER_TRACE_BYTES.
 LOADER_TRACE_WORD: 256
 
 // The timespec x64_trace_wait_within sleeps on, in this process.
@@ -2885,6 +2894,26 @@ x64_trace_event_message: fn(trace: X64Trace) -> Int? {
         }
     }
     message
+}
+
+// The address the fault signal the trace's stopped thread is about to take
+// names (its siginfo's si_addr): for SIGSEGV and SIGBUS the address the
+// faulting instruction touched, for SIGILL and SIGFPE the instruction's
+// own. None when the kernel refused (the thread takes no signal) or the
+// signal is one a process sent (si_code 0 or below), which names no
+// address.
+x64_trace_fault_address: fn(trace: X64Trace) -> Int? {
+    address := Int?{None}
+    #Unsafe("the helper's PTRACE_GETSIGINFO writes the 128-byte siginfo at the start of the trace's scratch page") {
+        if !os_failed(x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_GETSIGINFO, trace.thread, 0, trace.scratch, 0, 0)) {
+            // si_code is a 32-bit int: one a process sent reads negative.
+            code: Int{os_load_i64(I64{trace.scratch + LOADER_SIGINFO_CODE})} & 0xffffffff
+            if code > 0 && code < 0x80000000 {
+                address = Val(Int{os_load_i64(I64{trace.scratch + LOADER_SIGINFO_ADDRESS})})
+            }
+        }
+    }
+    address
 }
 
 // Wait for the traced thread `thread` alone to stop or end: its wait status,

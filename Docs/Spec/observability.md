@@ -1173,7 +1173,9 @@ task or channel handle its code consumed (a task's `detach`) as
 `<consumed>`, here and in live sessions.
 The runtime's frames between the stop and the program are stepped out of
 by the image's call frame information (`.eh_frame`), so a register they
-saved holds its value in the program's frames.
+saved holds its value in the program's frames. A dump's `bt` numbers its
+Jet frames alone: the stopping thread's registers are those of the routine
+that wrote the dump, whose frames are the capture's.
 A parameter the code no longer keeps where a frame stopped reads the value
 its caller passed, as the call recorded it (a DWARF call site parameter,
 read through `DW_OP_entry_value`); when the call recorded none, or the body
@@ -1357,9 +1359,14 @@ D-DBG-VERBS1=A names the commands:
   traps. The placed code keeps no state per thread or task, so the first hit
   on a thread or task that starts later runs on without a trap like any
   other hit.
-- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
-  toward the callers and `down` back. `locals` and `print <expr>` (`p`)
-  read the selected frame until the program moves.
+- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it, #0 the
+  innermost. At a fault or a stopping exit inside a runtime routine, the
+  routines' frames come first (`#0  jet_rt_mem_move  at 0x407203`), up
+  to the Jet frame the stop selected; `frame` shows one with the
+  instruction it is at, a caller's call. The program's entry and the
+  routines below the innermost Jet frame aren't shown. `up` moves toward
+  the callers and `down` back. `locals` and `print <expr>` (`p`) read the
+  selected frame until the program moves.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by

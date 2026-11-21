@@ -236,7 +236,14 @@ dump (observability.md) at the faulting instruction, where `jet debug
 Under `jet debug` the fault stops the program first, before its signal
 reaches it, as a breakpoint does: every thread stops, and the session reads
 `Program received SIGNAME  file:line  in function()` at the innermost Jet
-frame, whose stack `bt`, `locals`, `tasks` and `disas` read. The next run
+frame, which is selected. Under it, `through …` names the runtime routines
+it faulted in, outermost first, by their function symbols as the report
+names them, and `fault address 0x40  pc 0x407203 <jet_rt_mem_move+163>  rep
+movs BYTE PTR [rdi],BYTE PTR [rsi]` the address the fault touched (a
+SIGSEGV's or SIGBUS's) and the faulting instruction. `bt` numbers those
+routines' frames above the Jet frames (`#0  jet_rt_mem_move  at
+0x407203`), so `frame`, `up` and `down` select them
+too; `locals`, `tasks` and `disas` read the stack. The next run
 command delivers the signal, so the report above runs and ends the program
 (`Program stopped by SIGNAME`, or the stack overflow's status 70); the
 report's re-raise goes on unstopped. The DAP adapter reports the stop as an

@@ -2,7 +2,9 @@
 # stopped it, with the stack and locals that ended it whole: the stop pauses
 # as it reaches the process root, before the frames that stopped unwind.
 # `Int{7 / 2}` stops with the numeric law's stop, whether the program holds
-# core.math or not, and its report names the line that stopped.
+# core.math or not, and its report names the line that stopped. The runtime
+# routines the stop ran through are named by their symbols, and `bt` lists
+# their frames first.
 fixture: StoppingExitPausesWithTheStackWhole.fixture
 env: NO_COLOR=1
 env: PATH={work}/no-tools
@@ -11,7 +13,10 @@ stdin: stopping_exit_pauses_with_the_stack_whole.stdin
 exit: 0 # the program's own status is reported; the session ends cleanly
 stdout+stderr: ~ "Program exiting with status 70  prog.jet:4  in half()" # the pause names the stopping frame
 stdout+stderr: ~ "4 |     Int{share}        <- here" # and shows its line
-stdout+stderr: ~ "#0  half()  at prog.jet:4\n#1  run()  at prog.jet:9" # `bt` reads the stack that ended the program
+stdout+stderr: ~ "  through jet_fraction_to_int > " # the pause names the runtime routines the stop ran through, outermost first
+stdout+stderr: ~ "  jet_fraction_to_int  at 0x" # `bt` lists their frames above the stack that ended the program
+stdout+stderr: ~ "  half()  at prog.jet:4\n#" # whose frames it reads whole
+stdout+stderr: ~ "  run()  at prog.jet:9\n" # up to run's call
 stdout+stderr: ~ "share: Fraction = 7/2\ntotal: Int = 7" # `locals` reads the values that stopped it
 stdout+stderr: ~ "Jet.ArithmeticOrBoundsFailure" # the stop is the numeric law's, not a defect
 stdout+stderr: ~ "--> prog.jet:4" # the report names the line that stopped, though a runtime routine stopped it
