@@ -75,17 +75,18 @@ wide_run: fn(origin: Int, seed: Int, steps: Int) -> Run {
 
 // One round, the narrow task doing `narrow_tenths` tenths of its work and
 // each wide one `wide_tenths` of its own: the narrow task's run, then the
-// wide ones'. (Named apart from its zone: check.jet finds the zone's ranking
-// by its name.)
+// wide ones'. The wide tasks are spawned at one site, so the lens sees them
+// share one body, which the narrow task's is not (check.jet tells the narrow
+// task by it). (Named apart from its zone: check.jet finds the zone's
+// ranking by its name.)
 play_round: fn(seed: Int, narrow_tenths: Int, wide_tenths: Int) -> [Run] {
     _round: perf.zone("round")
     origin: time.instant().start_ns
     first: task narrow_run(origin, seed, STEPS * narrow_tenths /% 10)
-    second: task wide_run(origin, seed + 1, STEPS * 8 * wide_tenths /% 100)
-    third: task wide_run(origin, seed + 2, STEPS * 8 * wide_tenths /% 100)
-    fourth: task wide_run(origin, seed + 3, STEPS * 8 * wide_tenths /% 100)
+    wides: loop offset in 1..<4 -> task wide_run(origin, seed + offset, STEPS * 8 * wide_tenths /% 100)
     none: Run{start: 0, end: 0, total: 0}
-    runs: [Run]{first.join() ?? none, second.join() ?? none, third.join() ?? none, fourth.join() ?? none}
+    runs := [Run]{first.join() ?? none}
+    loop handle in wides -> runs.push(handle.join() ?? none)
     if runs[0].total + runs[1].total + runs[2].total + runs[3].total < 0 -> print("negative")
     runs
 }
