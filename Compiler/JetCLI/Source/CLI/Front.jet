@@ -1409,7 +1409,11 @@ jet_cli_check_profile: fn(jet_argv: [String], files: [String], sources: [String]
 }
 
 // `jet doc [--out <dir>] [<file>]`: the entry resolves as `jet check` resolves
-// it; `--out` is taken against the working directory.
+// it; `--out` is taken against the working directory. At a workspace root
+// (bare, or aimed at its directory) it documents each member that can run, or
+// each one `-p <member>` picks, as its own child `jet doc <member>` (Host.jet
+// jet_cli_test_workspace); `--out <dir>` puts each member's pages under
+// `<dir>/<member>`.
 jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
     out := String?{None}
     if jet_argv.any(fn(item) { item == "--out" || item.starts_with("--out=") }) {
@@ -1418,6 +1422,15 @@ jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
             return jet_cli_fail("E2104", "`jet doc --out` needs a directory", jet_cli_why("E2104"), "name the directory for the pages: `jet doc --out docs`", color, JET_DRIVER_EXIT_USAGE)
         }
         out = Val(jet_cli_report_path(jet_cli_report_cwd(), written))
+    }
+    if args.len() < 2 || cli_files.is_dir(args[1]) {
+        directory: if args.len() < 2 -> cli_files.cwd() ?? "." else -> args[1]
+        notices := [String]{}
+        if jet_cli_workspace_fan_out_members(directory, "doc", jet_argv, !jet_argv.contains("--show-default"), color, notices) == {
+            .Members(names, directories) -> return jet_cli_workspace_runs_plan("doc", jet_argv, jet_cli_target_at(jet_argv, "doc"), names, directories, out, color, quiet)
+            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+            .Absent -> {}
+        }
     }
     entry: jet_cli_check(jet_argv, args, "doc", color, quiet, None, json)
     if entry == {
@@ -1944,11 +1957,20 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
                 .Absent -> {}
             }
         }
-        // A `workspace.jet` root without `-p` builds the workspace: each member,
-        // then the index's own plan (InspectBuild.jet jet_cli_build_workspace_members).
+        // A workspace root without `-p` builds the workspace: each member, then
+        // the index's own plan (InspectBuild.jet jet_cli_build_workspace_members).
+        // A `package.jet` index does when more than one member builds; with one,
+        // the bare build resolves to that member.
         if jet_cli_option_value(jet_argv, "-p") == None {
             if jet_cli_workspace_source(directory, color) == .Index(index_path) {
-                if jet_cli_file_name(index_path) == JET_CLI_WORKSPACE_FILE {
+                whole := jet_cli_file_name(index_path) == JET_CLI_WORKSPACE_FILE
+                if !whole {
+                    scanned := [String]{}
+                    if jet_cli_workspace_fan_out_members(directory, "build", [String]{}, !jet_argv.contains("--show-default"), color, scanned) == .Members(_, _) {
+                        whole = true
+                    }
+                }
+                if whole {
                     return jet_cli_build_entry(jet_argv, [String]{"build", index_path}, passthrough, color, quiet, threads, json)
                 }
             }
@@ -2390,8 +2412,8 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
         }
         // A separate value is the flag's, never the target or filter; `--set`
         // writes a package setting the build options read
-        // (jet_cli_setting_flags).
-        if (name == "--profile" || name == "--threads" || name == "--color" || name == "--set") && inline == None {
+        // (jet_cli_setting_flags); `-p` picks a workspace member.
+        if (name == "--profile" || name == "--threads" || name == "--color" || name == "--set" || name == "-p") && inline == None {
             if index + 1 >= jet_argv.len() {
                 return jet_cli_test_option_error("`{name}` needs a value", color)
             }
@@ -2441,9 +2463,10 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
     // `test: fn(t: Test)` file when it declares one, otherwise its stock entry. The
     // entry file loads the whole package, and the harness collects every #Test of
     // every package file. A workspace root tests each member that can run `jet test`,
-    // as its own child `jet test <member>`; its own test.jet declares only the code
-    // suites its test profiles run (TestProfile.jet), as `jet test <root>/test.jet`.
-    // `jet test <root>/workspace.jet` tests the workspace, as `jet test <root>` does.
+    // or each one `-p <member>` picks, as its own child `jet test <member>`; its own
+    // test.jet declares only the code suites its test profiles run (TestProfile.jet),
+    // as `jet test <root>/test.jet`. `jet test <root>/workspace.jet` tests the
+    // workspace, as `jet test <root>` does.
     if positionals.len() > 0 && jet_cli_file_name(positionals[0]) == JET_CLI_WORKSPACE_FILE && cli_files.is_file(positionals[0]) {
         positionals[0] = jet_cli_parent(positionals[0]) ?? "."
     }
@@ -2457,13 +2480,13 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
         // (Host.jet jet_cli_compile_core_test).
         if positionals.len() > 0 {
             if jet_cli_core_test_files(directory) == .Val(core) {
-                return jet_cli_test_workspace_plan(jet_argv, target_at, core.names, core.files, color, quiet)
+                return jet_cli_workspace_runs_plan("test", jet_argv, target_at, core.names, core.files, None, color, quiet)
             }
         }
         workspace_notices := [String]{}
-        if jet_cli_workspace_test_members(directory, !show_default, color, workspace_notices) == {
+        if jet_cli_workspace_fan_out_members(directory, "test", jet_argv, !show_default, color, workspace_notices) == {
             // Each child resolves its member, and writes the notices, itself.
-            .Members(names, directories) -> return jet_cli_test_workspace_plan(jet_argv, target_at, names, directories, color, quiet)
+            .Members(names, directories) -> return jet_cli_workspace_runs_plan("test", jet_argv, target_at, names, directories, None, color, quiet)
             .Refused(plan) -> return jet_cli_with_notices(workspace_notices, plan)
             // Resolution below writes its own notices.
             .Absent -> {}
@@ -2495,26 +2518,63 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
     jet_cli_test_file(jet_argv, file, color, verbose, threads, options, flags, "", quiet)
 }
 
-// Each member's `jet test` words for a workspace `jet test`: `test`, the
-// member directory in place of the workspace target, then every other word
-// of `jet_argv` as written (flags, the filter, words after `--`). A child's
+// Each member's words for a workspace `jet <command>` (`test` or `doc`):
+// `command`, the member directory in place of the workspace target, then
+// every other word of `jet_argv` as written (flags, the filter, words after
+// `--`) but the `-p <member>` picks, which chose the members. With `out` (a
+// `jet doc --out`), each member writes under `<out>/<member>`. A child's
 // streams are captured, so a colored run asks for color.
-jet_cli_test_workspace_plan: fn(jet_argv: [String], target_at: Int, names: [String], directories: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+jet_cli_workspace_runs_plan: fn(command: String, jet_argv: [String], target_at: Int, names: [String], directories: [String], out: String?, color: Bool, quiet: Bool) -> JetCLIPlan Never! {
     rest := [String]{}
+    passed := false
+    skip := false
     loop (index, argument) in jet_argv {
-        if (index == 0 && argument == "test") || index == target_at -> next
+        if skip {
+            skip = false
+            next
+        }
+        if (index == 0 && argument == command) || index == target_at -> next
+        if !passed {
+            if argument == "--" -> passed = true
+            if argument == "-p" || (out != None && argument == "--out") {
+                skip = true
+                next
+            }
+            if argument.starts_with("-p=") || (out != None && argument.starts_with("--out=")) {
+                next
+            }
+        }
         rest.push(argument.copy())
     }
     if color && !rest.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) {
         rest.push("--color=always")
     }
     member_args := [[String]]{}
+    at := 0
     loop directory in directories {
-        args := [String]{"test", directory}
+        // The command word is a literal, so no member's words copy it.
+        args := [String]{if command == "doc" -> "doc" else -> "test", directory}
+        if out == .Val(pages) -> args.push("--out={jet_cli_entry_join(pages, names[at])}")
         loop argument in rest -> args.push(argument)
         member_args.push(args)
+        at += 1
     }
     JetCLIPlan.TestWorkspace{names: names, member_args: member_args, envs: [[String]]{}, executable: "", heading: "member", results: "", tiers: [String]{}, quiet: quiet}
+}
+
+// Where the target of `jet <command> [flags] [<target>]` is in `jet_argv`:
+// the first word after the command that is no flag and no separate flag
+// value, before any `--`; -1 when there is none.
+jet_cli_target_at: fn(jet_argv: [String], command: String) -> Int Never! {
+    index := if jet_argv.len() > 0 && jet_argv[0] == command -> 1 else -> 0
+    loop index < jet_argv.len() {
+        argument: jet_argv[index]
+        if argument == "--" -> return -1
+        if !argument.starts_with("-") -> return index
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> index += 1
+        index += 1
+    }
+    -1
 }
 
 // One test file (or a package entry file): the harness collects every #Test the file and

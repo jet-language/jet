@@ -1,0 +1,39 @@
+# At the root of a three-member workspace, `-p <member>` narrows `jet check`,
+# `jet test`, `jet doc` and `jet build` to the member it names, and `-p`
+# given twice to both; `jet run -p` starts that member's program. Naming a
+# member that is missing, or that cannot run the command, is refused with
+# the members that can.
+fixture: Fixtures/WorkspaceRoot
+env: NO_COLOR=1
+step: jet check -p beta
+exit: 0
+stderr: ~ "beta/run.jet` has no problems" # only the picked member is checked
+stderr: !~ "alpha/run.jet"
+stderr: !~ "gamma/run.jet"
+step: jet test -p gamma
+exit: 0
+stdout: ~ "gamma: pass" # only the picked member's tests run
+stdout: !~ "alpha: pass"
+stdout: !~ "beta: pass"
+step: jet test -p alpha -p gamma
+exit: 0
+stdout: ~ "alpha: pass" # each picked member's tests run
+stdout: ~ "gamma: pass"
+stdout: !~ "beta: pass"
+step: jet doc -p alpha
+exit: 0
+file: alpha/.jet/doc/index.html is-file # only the picked member is documented
+file: beta/.jet/doc absent
+file: gamma/.jet/doc absent
+step: jet build -p beta
+exit: 0
+file: beta/.jet/build/run is-file # only the picked member is built
+file: alpha/.jet/build absent
+file: gamma/.jet/build absent
+step: jet test -p nope
+exit: 2
+stderr: ~ "No workspace member named `nope`" # a name no member has is refused
+stderr: ~ "Pick one of: alpha, beta, gamma" # naming the members to pick from
+step: jet run -p alpha
+exit: 0
+stdout: = "alpha program\n"
