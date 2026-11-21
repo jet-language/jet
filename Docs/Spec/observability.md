@@ -399,7 +399,14 @@ pays its own before its joiner sees it, all of them: a pause can end owing
 a delay a line's sample counted meanwhile, so the end pauses again until
 it owes none. Left owing, that delay would be one no thread paid, since
 its joiner is forgiven it, and the experiment would still take it off its
-time, so every gain would read high. A thread another thread wakes from
+time, so every gain would read high. A task that paused also runs
+slower than its pauses account for: measured against the same body's
+tasks in baselines, its run time less its pauses is a few microseconds
+longer. The runtime measures that tax per body from the run's own tasks,
+the running median of a baseline task's run time less its pauses against
+that of a task that paused in another experiment, and counts it as paid
+at the paying task's end, which pauses that much less. Left in, it would
+make every gain read low. A thread another thread wakes from
 a park owes nothing for the delays inserted while it was parked, as in
 Coz: its waker paid them. Charged them, a thread that joins short tasks
 would pause for them again on the program's critical path. Other delays
