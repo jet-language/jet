@@ -1,0 +1,116 @@
+// Every corpus the scaling gate and the compile-throughput cell time is real
+// Jet: each registered shape (Corpora.jet `shapes()`, the stress shapes then
+// the domains) in each layout at a small size, and the `mixed` profile, is
+// written into a new directory and checked by `$JET check`. A corpus that
+// expects no diagnostic checks clean: exit 0, no error or warning line. The
+// `diagnostics` shape reports exactly its expected count of errors and no
+// warning. The gate and the cell never time a failing compile (it is a
+// compile failure), so a generator that stops emitting valid Jet fails here
+// first, by name.
+//
+// Usage: jet Tools/Perf/Scaling/CheckCorpora NEW_DIRECTORY
+// Prints one line per corpus, then the count that checked as expected. Exit
+// 0: every corpus did; 1: one did not (each is named on stderr); 2: invalid
+// invocation.
+package: {
+    name: "scaling_check_corpora"
+    version: "0.0.1"
+    deps: {
+        jet_scaling_corpora: ../Corpora,
+    }
+}
+
+use {
+    jet_scaling_corpora.[corpus, layouts, mixed_sources, shapes, write_files]
+    files: core.files
+    process: core.process
+}
+
+// The sizes: N for a stress shape, code lines for a domain and for `mixed`.
+// Every domain emits each of its kinds at any size, so a small domain corpus
+// still holds every declaration its common part uses.
+STRESS_N: 8
+
+DOMAIN_LINES: 1500
+
+MIXED_LINES: 1500
+
+SEED: 3
+
+// What `jet check` of one package reported.
+Checked: struct {
+    code: Int,
+    errors: Int,
+    warnings: Int,
+    first: String,
+}
+
+check: fn(jet: String, dir: String) -> Checked Err! {
+    receipt: process.cmd([String]{jet, "check", dir}).env("NO_COLOR", "1").run() ?? return Err("cannot run {jet}: {err}")
+    checked := Checked{code: receipt.code, errors: 0, warnings: 0, first: ""}
+    loop line in "{receipt.output}\n{receipt.errors}".split("\n") {
+        error: line.starts_with("Error")
+        warning: line.starts_with("Warning")
+        if error -> checked.errors += 1
+        if warning -> checked.warnings += 1
+        if (error || warning) && checked.first == "" -> checked.first = line.copy()
+    }
+    Ok(checked)
+}
+
+// Why `checked` is not what a corpus expecting `expected` errors reports, or
+// "" when it is.
+verdict: fn(expected: Int, checked: Checked) -> String {
+    seen: "exit {checked.code}, {checked.errors} errors, {checked.warnings} warnings"
+    if checked.warnings > 0 -> return "{seen}; first: {checked.first}"
+    if expected == 0 && (checked.code != 0 || checked.errors > 0) {
+        return "{seen}; first: {checked.first}"
+    }
+    if expected > 0 && (checked.code == 0 || checked.errors != expected) {
+        return "{seen}; expected exactly {expected} errors"
+    }
+    ""
+}
+
+// Writes the package `package` as `name` under `work`, checks it and prints
+// its line; returns the failure line, or "" when it checked as expected.
+judge: fn(jet: String, work: String, name: String, package: [String:String], expected: Int) -> String Err! {
+    dir: files.join(work, name)
+    write_files(package, dir)
+    why: verdict(expected, check(jet, dir))
+    shown: if why == "" -> "ok" else -> why.copy()
+    print("{name}: {shown}")
+    if why == "" -> "" else -> "{name} ({dir}): {why}"
+}
+
+check_all: fn(jet: String, work: String) -> [String] Err! {
+    if files.exists(work) -> return Err("Output already exists: {work}")
+    failures := [String]{}
+    count := 0
+    loop shape in shapes() {
+        n: if shape.kind == .Stress -> STRESS_N else -> DOMAIN_LINES
+        loop layout in layouts() {
+            built: corpus(shape, n, SEED, layout)
+            why: judge(jet, work, "{shape.name}-{layout}", built.files, built.diagnostics)
+            if why != "" -> failures.push(why)
+            count += 1
+        }
+    }
+    why: judge(jet, work, "mixed", mixed_sources(MIXED_LINES, SEED).files, 0)
+    if why != "" -> failures.push(why)
+    count += 1
+    print("{count - failures.len()} of {count} corpora check as expected")
+    Ok(failures)
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 1 {
+        process.fail(2, "Usage: jet Tools/Perf/Scaling/CheckCorpora NEW_DIRECTORY")
+    }
+    jet: process.env_get("JET") ?? "jet"
+    failures: check_all(jet, args[0]) ?? process.fail(2, err.message)
+    if failures.len() > 0 {
+        process.fail(1, failures.map(fn(failure) { "FAIL {failure}" }).join("\n"))
+    }
+}

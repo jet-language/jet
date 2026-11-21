@@ -50,7 +50,10 @@ the gate. Run `jet` compilers through `Tools/Agent/JetEnv.jet` (rustc on PATH);
 the single `RunGate.mjs` command above is the landing counter proof: it covers
 every stress and domain shape, both layouts, and all rungs, with bounded
 parallel compiles. Counter mode gates deterministic work counters and compile
-outcomes, not contended time/RSS or lines/s floors. A timed-out rung fails with
+outcomes, not contended time/RSS or lines/s floors. A rung's compile counts
+only when it succeeds with no diagnostic, or, for the `diagnostics` shape,
+reports exactly its expected error count; any other rung is a compile failure,
+never a timing point. A timed-out rung fails with
 its open phase. Other compile failures retain the last observed open phase when
 available, without being classified as timeouts. Both modes attempt
 every rung despite earlier compile failures, retaining each rung's failure. Timing
@@ -126,6 +129,14 @@ embedded, compiler, scientific, generic-lib, generated) at 125k/250k/500k/1M
 code lines. Adding a shape is one builder function plus a registry row; see
 the header comments of `corpora.mjs` and `domains.mjs`. `mixed` (`mixed.mjs`)
 remains the compile-throughput cell's pinned program.
+
+`jet Tools/Perf/Scaling/CheckCorpora NEW_DIR` writes every registered shape
+in both layouts at a small size, and `mixed`, and checks each with `$JET
+check`: a corpus checks clean (no error, no warning), and `diagnostics`
+reports exactly its expected errors. The case
+`Tests/Cases/ScalingCorpora/every_scaling_corpus_checks_clean.case` runs it,
+so a language change that the generators do not follow fails there, before
+the gate has nothing left to time.
 
 Per rung the gate records wall/user/RSS (GNU time), per-phase wall from the
 `JET_TRACE_FILE` phase spans, the trace's span and item counts

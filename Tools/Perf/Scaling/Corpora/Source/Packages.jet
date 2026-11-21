@@ -28,7 +28,7 @@ write_files: fn(package: [String:String], directory: String) -[FS, Env]> String 
 // JavaScript's `\W` is ASCII-only, hence the spelled-out class.
 manifest: fn(name: String) -> String {
     safe: (rx.compile("[^A-Za-z0-9_]") ?? panic("the name pattern compiles: {err}")).replace(name, "_")
-    "name: \"{safe}\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
+    "name: \"{safe}\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: main.run }} }}\n"
 }
 
 // How a draw maps the 32-bit stream onto a range: scaled as the float

@@ -254,7 +254,7 @@ function unit(m, u, r, stats) {
       '        found: table.get(probe)',
       `        accumulator = (accumulator + round + (found.map(fn(value) { value * 2 }) ?? ${fallback})) % ${MODULUS}`,
       '    }',
-      `    adjust: fn(value: Int) { (value * ${factor} + ${constantValue}) % ${MODULUS} }`,
+      `    adjust: fn(value: Int) -> Int { (value * ${factor} + ${constantValue}) % ${MODULUS} }`,
       '    accumulator = adjust(accumulator)',
       '    first: probes.first()',
       `    accumulator = (accumulator + (first.map(fn(value) { value + ${offset} }) ?? 0)) % ${MODULUS}`,
@@ -383,7 +383,7 @@ function sectionHeader(m) {
   ];
 }
 
-const PACKAGE_MANIFEST = 'name: "mixed_bench"\nversion: "0.1.0"\nedition: "2026"\noutputs: { app: .Executable{ entry: run } }\n';
+const PACKAGE_MANIFEST = 'name: "mixed_bench"\nversion: "0.1.0"\nedition: "2026"\noutputs: { app: .Executable{ entry: main.run } }\n';
 
 // The package for `codeLines` code lines: package.jet plus main.jet, filled
 // section by section, unit by unit, until main.jet reaches the target.
