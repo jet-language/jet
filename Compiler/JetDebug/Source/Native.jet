@@ -1104,17 +1104,26 @@ NativeSession: struct {
     // `locals` shows it, its DebugView included: reading a value runs no
     // code, so a dump and an inlined frame answer it too, and the local's
     // type need not be one a compiled function can take (`[Int String!]`).
+    // A local whose location doesn't cover the stop is unavailable there:
+    // compiled code would read the same nothing, so it's refused here, with
+    // or without a compiler, never shown as some other value.
     evaluate: fn(&self, text: String) -> NativeEvalValue NativeEvalRefused! {
         name: text.trim()
         if native_eval_is_name(name) {
             shown: self.locals() ?? return Err(native_eval_refused(err.detail))
+            unavailable := false
             loop local in shown {
-                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE || local.value == NATIVE_DEBUG_NOT_KEPT {
+                if local.name != name || local.value == NATIVE_DEBUG_NOT_KEPT -> next
+                if local.value == NATIVE_DEBUG_UNAVAILABLE {
+                    unavailable = true
                     next
                 }
                 truth: local.type_name == "Bool" && local.value == "true"
                 said: "{local.value}"
                 return Ok(NativeEvalValue{shown: local.value, type_name: local.type_name, text: said, truth: truth})
+            }
+            if unavailable {
+                return Err(native_eval_refused("local `{name}` has no readable value at this stop"))
             }
         }
         if self.dump != None {
