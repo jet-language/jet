@@ -109,10 +109,19 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton.profile.overhead_status = "measured"
     assert(jettrace_test_error(skeleton).contains("measured profile overhead must include overhead_ns"))
     skeleton.profile.overhead_ns = Val(U64{3})
+    // The overhead's two parts are there exactly when it is, and sum to it.
+    assert(jettrace_test_error(skeleton).contains("overhead_runtime_ns and overhead_kernel_ns are there exactly when overhead_ns is"))
+    skeleton.profile.overhead_runtime_ns = Val(U64{2})
+    skeleton.profile.overhead_kernel_ns = Val(U64{0})
+    assert(jettrace_test_error(skeleton).contains("overhead_runtime_ns and overhead_kernel_ns must sum to overhead_ns"))
+    skeleton.profile.overhead_kernel_ns = Val(U64{1})
     _: jettrace_test_valid(skeleton)
     skeleton.profile.overhead_status = "not_measured"
     assert(jettrace_test_error(skeleton).contains("unmeasured profile overhead cannot include overhead_ns"))
     skeleton.profile.overhead_ns = None
+    assert(jettrace_test_error(skeleton).contains("overhead_runtime_ns and overhead_kernel_ns are there exactly when overhead_ns is"))
+    skeleton.profile.overhead_runtime_ns = None
+    skeleton.profile.overhead_kernel_ns = None
     skeleton.profile.rows[0].source.sha256 = "b".repeat(64)
     assert(jettrace_test_error(skeleton).contains("does not match content.source_identity"))
     skeleton.profile.rows[0].source.sha256 = "a".repeat(64)

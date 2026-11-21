@@ -5,7 +5,7 @@ jettrace_optional_unsigned: fn(value: CanonicalJSON, label: String) -> U64? JetT
 }
 
 jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJSON) JetTraceError! {
-    fields: jettrace_object_keys(value, "content.profile", [String]{"counters", "coverage", "method", "overhead_ns", "overhead_reason", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
+    fields: jettrace_object_keys(value, "content.profile", [String]{"counters", "coverage", "method", "overhead_kernel_ns", "overhead_ns", "overhead_reason", "overhead_runtime_ns", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
     method: jettrace_text(fields[jettrace_get(fields, "method")].value, "content.profile.method")
     if method != "sampling" -> return Err(jettrace_error("content.profile.method must be sampling"))
     // The memory lens lists every counter of TRACE_COUNTERS; a profile it did
@@ -63,6 +63,18 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
     }
     if overhead_status != "measured" && overhead != None {
         return Err(jettrace_error("unmeasured profile overhead cannot include overhead_ns"))
+    }
+    // The overhead's two parts, the runtime's and the kernel's, are there
+    // exactly when the overhead is, and sum to it.
+    runtime: jettrace_optional_unsigned(fields[jettrace_get(fields, "overhead_runtime_ns")].value, "content.profile.overhead_runtime_ns")
+    kernel: jettrace_optional_unsigned(fields[jettrace_get(fields, "overhead_kernel_ns")].value, "content.profile.overhead_kernel_ns")
+    if (runtime == None) != (overhead == None) || (kernel == None) != (overhead == None) {
+        return Err(jettrace_error("content.profile.overhead_runtime_ns and overhead_kernel_ns are there exactly when overhead_ns is"))
+    }
+    if overhead == .Val(total) && runtime == .Val(ran) && kernel == .Val(took) {
+        if ran > total || total - ran != took {
+            return Err(jettrace_error("content.profile.overhead_runtime_ns and overhead_kernel_ns must sum to overhead_ns"))
+        }
     }
     _: jettrace_text(fields[jettrace_get(fields, "overhead_reason")].value, "content.profile.overhead_reason")
     _: jettrace_text(fields[jettrace_get(fields, "reason")].value, "content.profile.reason")

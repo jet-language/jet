@@ -103,6 +103,11 @@ TraceCounter: struct {
     errno: U64?,
 }
 
+// A profile's overhead is `overhead_ns`, the sum of its two parts: what the
+// runtime spent sampling (its handlers, its ring drains and the signals it
+// asked for), measured, and what the kernel spent taking and writing the
+// samples, estimated from timed samples. All three are None exactly when the
+// overhead is not `measured`.
 TraceProfile: struct {
     method: String,
     counters: [TraceCounter],
@@ -112,6 +117,8 @@ TraceProfile: struct {
     row_limit: U64,
     rows_truncated: Bool,
     overhead_ns: U64?,
+    overhead_runtime_ns: U64?,
+    overhead_kernel_ns: U64?,
     overhead_status: String,
     overhead_reason: String,
     reason: String,
@@ -131,6 +138,8 @@ trace_profile_unsupported: fn(reason: String) -> TraceProfile Never! {
         row_limit: U64{4096},
         rows_truncated: false,
         overhead_ns: None,
+        overhead_runtime_ns: None,
+        overhead_kernel_ns: None,
         overhead_status: "not_applicable",
         overhead_reason: "source sampling was not available",
         reason: reason.copy(),
@@ -431,7 +440,7 @@ trace_profile_to_json: fn(value: TraceProfile) -> CanonicalJSON JetTraceError! {
     loop counter in value.counters -> counters.push(trace_counter_to_json(counter))
     rows := [CanonicalJSON]{}
     loop row in value.rows -> rows.push(trace_profile_row_to_json(row))
-    jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters.move())), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters.move())), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_kernel_ns", jettrace_optional_uint(value.overhead_kernel_ns)), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_runtime_ns", jettrace_optional_uint(value.overhead_runtime_ns)), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
 }
 
 trace_sample_to_json: fn(value: TraceSample) -> CanonicalJSON JetTraceError! {

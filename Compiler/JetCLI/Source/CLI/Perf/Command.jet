@@ -1117,8 +1117,9 @@ jet_cli_perf_first_sample: fn(trace: CanonicalJSON) -> JetCLIPerfSample? Never! 
 }
 
 // `profile method=… status=… coverage=… rows=… clocks=… overhead=… window=… run_wall=… run_cpu=…`,
-// and `run_cpu_resolution=…` where an attach's window counted its CPU in
-// ticks (its `window` receipt section).
+// with a measured overhead's two parts after `overhead=`
+// (jet_cli_perf_overhead_parts), and `run_cpu_resolution=…` where an
+// attach's window counted its CPU in ticks (its `window` receipt section).
 jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     profile: jet_cli_perf_profile(trace) ?? return None
     status: jet_cli_perf_field_text(profile, "status") ?? return None
@@ -1137,7 +1138,26 @@ jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     window: jet_cli_perf_field_text(profile, "window_status") ?? return None
     run_wall: if jet_cli_perf_field_integer(profile, "window_wall_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
     run_cpu: if jet_cli_perf_field_integer(profile, "window_cpu_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
-    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead} window={window} run_wall={run_wall} run_cpu={run_cpu}{jet_cli_perf_cpu_resolution(trace)}")
+    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead}{jet_cli_perf_overhead_parts(profile)} window={window} run_wall={run_wall} run_cpu={run_cpu}{jet_cli_perf_cpu_resolution(trace)}")
+}
+
+// ` runtime=0.54% kernel=1.42%`: a measured overhead's two parts, what the
+// runtime spent sampling and what the kernel spent taking and writing the
+// samples, each a share of the run window's CPU time; in nanoseconds where
+// the profile has no window CPU time; empty where the overhead was not
+// measured.
+jet_cli_perf_overhead_parts: fn(profile: View<CanonicalJSONField>) -> String Never! {
+    runtime: jet_cli_perf_overhead_part(profile, "overhead_runtime_ns") ?? return ""
+    kernel: jet_cli_perf_overhead_part(profile, "overhead_kernel_ns") ?? return ""
+    cpu: jet_cli_perf_overhead_part(profile, "window_cpu_ns") ?? U64{0}
+    if cpu == (U64{0}) -> return " runtime={runtime}ns kernel={kernel}ns"
+    " runtime={jet_cli_perf_hundredths(runtime, cpu)} kernel={jet_cli_perf_hundredths(kernel, cpu)}"
+}
+
+// The profile's nanoseconds under `key`, None when it has none.
+jet_cli_perf_overhead_part: fn(profile: View<CanonicalJSONField>, key: String) -> U64? Never! {
+    digits: jet_cli_perf_field_integer(profile, key) ?? return None
+    checked(U64{Int.parse(digits) ?? return None})
 }
 
 // ` run_cpu_resolution=10ms`, say, where the trace's `window` receipt

@@ -228,23 +228,31 @@ the rings, drained but not kept, and 0 dropped by the kernel, which found no
 room in a ring`). Under another sampler it is the process's CPU time over
 the sampling interval.
 The
-profile's overhead is `measured`: `overhead_ns` is the CPU time the
+profile's overhead is `measured`, in two parts that `overhead_ns` sums.
+`overhead_runtime_ns`, the runtime's part, is measured: the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
 time a busy machine kept them preempted) plus, for each signal that carried
 a sample, the kernel's delivery and return, which the runtime times as
 sampling starts by
-sending its own thread 64 signals, plus, under a perf event, the kernel's
+sending its own thread 64 signals; under a perf event a drain timer's
+signals are already in the handlers' time. `overhead_kernel_ns`, the
+kernel's part, is estimated: under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
 deep stack, as the median of three back-to-back pairs of a round with that
 sampler on and one with it off, on the thread's monotonic clock less the
 time it waited on a run queue (its schedstat), so the interrupt's time
-counts and a busy machine's other programs do not. Every 1024 drains of the
+counts and a busy machine's other programs do not; under the CPU timer it
+is 0. Every 1024 drains of the
 starting thread's ring (2 s of its CPU time) its drain timer times one more
 shallow pair with the thread's own sampler held off, and each sample drained
 from then on is charged the median of the last five timings, so the charge
 follows the machine's load and clock as the run goes on; `overhead_reason`
-gives it as a share of the CPU time sampled.
+gives the sum as a share of the CPU time sampled. All three are `null` when
+the overhead is `not_measured` or `not_applicable`. `jet perf view` prints
+the parts after it as shares of the run window's CPU time
+(`overhead=measured runtime=0.54% kernel=1.42%`), in nanoseconds when the
+profile has no window CPU time.
 `jet perf view` sums the rows per function with its share of the
 samples and the CPU time they stand for, at the `interval_us` the trace's
 `perf` receipt section names (none without one),
