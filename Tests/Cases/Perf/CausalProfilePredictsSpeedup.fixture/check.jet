@@ -12,12 +12,13 @@
 // point, each of the two lines the lens ranked has a predicted interval
 // that meets the line's measured one, and the lens ranked one of them at
 // least. A line's measured interval spans both measurements' 90% intervals
-// of their median, since the machine's CPUs, and with them the line's gain,
-// drift from the one measurement to the other, and the profiled run lies
-// between them. A ranked line's interval is at most WIDEST wide, the lens's
-// own bound for ranking a line, so no interval passes by being vague; and a
-// measured speedup above BOUND, which no line 30% faster can give, is
-// refused as a measurement gone wrong, so none passes by being wild.
+// of their gain, by rate as the lens predicts it, since the machine's CPUs,
+// and with them the line's gain, drift from the one measurement to the
+// other, and the profiled run lies between them. A ranked line's interval
+// is at most WIDEST wide, the lens's own bound for ranking a line, so no
+// interval passes by being vague; and a measured speedup above BOUND, which
+// no line 30% faster can give, is refused as a measurement gone wrong, so
+// none passes by being wild.
 //
 // The argument before the trace names the tier. The outcome's own line,
 // with its numbers and the receipt's fit (its octaves' residuals, slope
@@ -63,7 +64,7 @@ CLOCK_MOST: 100
 // measurement gone wrong, and is refused.
 BOUND: 300
 
-// One hand measurement: each line's median gain with its 90% interval, in
+// One hand measurement: each line's gain by rate with its 90% interval, in
 // tenths of a percent, the runqueue wait its threads took, in thousandths
 // of their run time, and the means of the highest and the lowest clock of
 // their CPUs, in MHz.
@@ -268,7 +269,7 @@ report_lens: fn(tier: String, trace: String) {
 // was read.
 clock_drop: fn(high: Int, low: Int) -> Int { if high > 0 -> (high - low) * 1000 /% high else -> 0 }
 
-// What is wrong with the measured median `gain` of the `function` line
+// What is wrong with the measured `gain` of the `function` line
 // when the line cannot have given it (BOUND); "" when nothing is.
 check_bound: fn(function: String, gain: Int) -> String {
     if gain > BOUND {

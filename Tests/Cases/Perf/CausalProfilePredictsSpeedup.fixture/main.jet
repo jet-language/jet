@@ -13,16 +13,17 @@
 // with the narrow task doing seven-tenths of its work, as if its line were
 // 30% faster, and with each wide task doing seven-tenths of its own, one
 // round of each in turn. It writes to FILE how much sooner a round came for
-// the narrow line and for the wide one, each as the low end of its median's
-// 90% interval, the median and the high end, in tenths of a percent, then
-// the runqueue wait its threads took in thousandths of their run time, and
-// the means of the highest and the lowest clock, in MHz, of the CPUs its
-// threads that ran last ran on, read after each three rounds (0 for both
-// where the kernel has no cpufreq). The wait and the clocks are the same
-// measures the lens takes of its run. A second line gives, for the plain
-// rounds, the narrow-fast ones and the wide-fast ones in turn, the medians
-// of where a round's time went (ROUND_PARTS), which check.jet sets beside
-// the lens's own timings of its rounds' tasks.
+// the narrow line and for the wide one, by the rate the lens predicts (the
+// rounds over the time they took), each as the low end of its 90% interval,
+// the gain and the high end, in tenths of a percent, then the runqueue wait
+// its threads took in thousandths of their run time, and the means of the
+// highest and the lowest clock, in MHz, of the CPUs its threads that ran
+// last ran on, read after each three rounds (0 for both where the kernel
+// has no cpufreq). The wait and the clocks are the same measures the lens
+// takes of its run. A second line gives, for the plain rounds, the
+// narrow-fast ones and the wide-fast ones in turn, the medians of where a
+// round's time went (ROUND_PARTS), which check.jet sets beside the lens's
+// own timings of its rounds' tasks.
 use {
     files: core.files
     perf: core.perf
@@ -32,14 +33,11 @@ use {
 
 STEPS: 400000
 
-// The rounds `measure` times in each of its three arms.
-ROUNDS: 249
-
-// How many ranks either side of the median the ends of its 90% interval
-// lie among ROUNDS sorted values: 1.645 * sqrt(ROUNDS) / 2, rounded. This
-// is the order-statistic interval, which holds whatever the rounds'
-// distribution is.
-MEDIAN_RANKS: 13
+// The rounds `measure` times in each of its three arms. A loaded machine
+// gives a few rounds long stalls, and a rate counts them in full, so its
+// interval narrows only with many rounds: a thousand hold it to about a
+// percent where 249 left three.
+ROUNDS: 1000
 
 narrow: fn(seed: Int, steps: Int) -> Int {
     total := seed
@@ -174,11 +172,43 @@ clocks: fn(runs: &[String:Int]) -> [Int] {
     [Int]{high, low}
 }
 
-// A sorted line's gains as the low end of its median's interval, the median
-// and the high end.
-median_interval: fn(gains: [Int]) -> String {
-    middle: ROUNDS /% 2
-    "{gains[middle - MEDIAN_RANKS]} {gains[middle]} {gains[middle + MEDIAN_RANKS]}"
+// The integer square root of `value`, rounded down; 0 below 1.
+isqrt: fn(value: Int) -> Int {
+    if value <= 0 -> return 0
+    root := value
+    next := (root + 1) /% 2
+    loop next < root {
+        root = next
+        next = (root + value /% root) /% 2
+    }
+    root
+}
+
+// How much sooner a round came in the `fast` arm than in the `plain` one,
+// by their rates (each arm's rounds over the time they took, as the lens
+// counts a point's rate): 1 less the ratio of the arms' summed times. Then
+// the low end of its 90% interval, the gain and the high end, in tenths of
+// a percent. Each fast round is paired with the plain round of its three,
+// so the interval is the ratio estimator's: 1.645 standard errors, from the
+// residuals of each fast round less the ratio times its plain one.
+mean_interval: fn(plain: [Int], fast: [Int]) -> String {
+    count: plain.len()
+    plain_sum := 0
+    fast_sum := 0
+    loop index in 0..<count {
+        plain_sum += plain[index]
+        fast_sum += fast[index]
+    }
+    ppm: fast_sum * 1000000 /% plain_sum
+    squares := 0
+    loop index in 0..<count {
+        residual: fast[index] - ppm * plain[index] /% 1000000
+        squares += residual * residual
+    }
+    error_ppm: isqrt(squares /% (count * (count - 1))) * 1000000 /% (plain_sum /% count)
+    gain: 1000 - ppm /% 1000
+    half: error_ppm * 1645 /% 1000000
+    "{gain - half} {gain} {gain + half}"
 }
 
 run: fn() {
@@ -188,14 +218,14 @@ run: fn() {
         // Rounds in threes, the program as it is, with the narrow line sped
         // up and with the wide one sped up, each first in turn. A sped-up
         // round is paired with the plain round beside it, so the machine's
-        // load, which drifts over the run, falls alike on both: each
-        // three's speedups, and the median of them, in tenths of a percent.
-        // The wait the threads took meanwhile tells whether the rounds had
-        // their CPUs or contended for them, and the clocks of their CPUs
-        // whether those that idled clocked down. Each arm's rounds' parts
-        // go to its own lists.
-        narrow_gains := [Int]{}
-        wide_gains := [Int]{}
+        // load, which drifts over the run, falls alike on both. The wait
+        // the threads took meanwhile tells whether the rounds had their
+        // CPUs or contended for them, and the clocks of their CPUs whether
+        // those that idled clocked down. Each arm's rounds' parts go to its
+        // own lists.
+        plains := [Int]{}
+        narrows := [Int]{}
+        wides := [Int]{}
         plain_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
         narrow_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
         wide_parts := loop part in 0..<ROUND_PARTS -> [Int]{}
@@ -217,8 +247,9 @@ run: fn() {
                     else -> wide_fast = timed(index, 10, 7, wide_parts)
                 }
             }
-            narrow_gains.push(1000 - narrow_fast * 1000 /% plain)
-            wide_gains.push(1000 - wide_fast * 1000 /% plain)
+            plains.push(plain)
+            narrows.push(narrow_fast)
+            wides.push(wide_fast)
             read: clocks(runs)
             if read[0] > 0 && read[1] > 0 {
                 khz_high += read[0]
@@ -231,9 +262,7 @@ run: fn() {
         wait: if run_ns > 0 -> (after[1] - before[1]) * 1000 /% run_ns else -> 0
         high_mhz: if clocked > 0 -> khz_high /% clocked /% 1000 else -> 0
         low_mhz: if clocked > 0 -> khz_low /% clocked /% 1000 else -> 0
-        narrow_gains.sort()
-        wide_gains.sort()
-        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait} {high_mhz} {low_mhz}\n{medians(plain_parts)} {medians(narrow_parts)} {medians(wide_parts)}\n") ?? panic("cannot write {word}")
+        files.write(word, "{mean_interval(plains, narrows)} {mean_interval(plains, wides)} {wait} {high_mhz} {low_mhz}\n{medians(plain_parts)} {medians(narrow_parts)} {medians(wide_parts)}\n") ?? panic("cannot write {word}")
         print("measured")
         return
     }
