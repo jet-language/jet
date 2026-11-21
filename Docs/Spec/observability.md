@@ -1579,7 +1579,8 @@ D-DBG-VERBS1=A names the commands:
   example. The Canvas Debug view shows the same reads in its Registers,
   Memory and Disassembly panels (canvas-protocol.md, "Debug session");
   canvas_debug_machine_panels_read_registers_memory_and_code.case is
-  theirs.
+  theirs. The editor adapter reads them too: a Registers scope and
+  `readMemory` (below).
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
@@ -1654,8 +1655,8 @@ program stopped, and it runs on. The end of stdin ends the session once the
 requests waiting for a stop are answered. A replay's runs are made as
 recorded, without stopping for requests.
 `stackTrace` with `showRawFrames: true` adds the machine frames, each named
-`[raw] <function>` with its `instructionPointerReference`, whose one scope,
-`[raw] Locals`, holds its pc and canonical frame address; a `showRawFrames`
+`[raw] <function>` with its `instructionPointerReference`, whose `[raw]
+Locals` scope holds its pc and canonical frame address; a `showRawFrames`
 that is not true or false is E2236 (`jet.invalidArguments`). A frame id or
 variable reference names the stop it was made at: once the program runs
 again it is E2238 (`jet.staleReference`). The error's `jetCode` names the
@@ -1692,6 +1693,23 @@ instruction and instruction breakpoints are not offered, so the editor
 steps by line from its disassembly view.
 Tests/Cases/Debug/dap_disassemble_lists_the_stop.case is the worked
 example.
+
+Every frame, a Jet frame or a `[raw]` one, has a Registers scope
+(`presentationHint: "registers"`), whose variables are the `registers`
+rows of that frame: each register's `value` in hex, a small value's
+decimal and its label (`0x0000000000000029  41  total`), or `not saved`.
+A local with bytes of its own (a stack slot, or the header an aggregate's
+local points to) carries their address as its `memoryReference`, and
+`initialize` answers `supportsReadMemoryRequest`, so an editor's hex view
+opens on it. `readMemory` answers `count` bytes from `memoryReference` plus
+`offset` as `memory` reads them, the program's own bytes under the
+debugger's traps and jumps: its `data` (base64) runs up to the first byte
+it cannot read, and `unreadableBytes` counts those after it that it cannot
+read either, which the editor skips. A `memoryReference` that is no hex
+address, or a `count` past 65536, is E2236. A register is no place a watch
+takes: `dataBreakpointInfo` on one has no data id. Nothing writes a
+register or a byte. Tests/Cases/Debug/dap_reads_registers_and_memory.case
+is the worked example.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the

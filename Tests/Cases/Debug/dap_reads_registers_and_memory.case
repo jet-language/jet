@@ -1,0 +1,98 @@
+# Over `jet debug --dap`, `initialize` answers `supportsReadMemoryRequest`,
+# and each frame has a Registers scope beside its Locals: the console's
+# `registers` rows. In the -O2 image, stopped on line 8 of `sum`, r13 holds
+# `total` (63) and its row names it; rip's names the code in `sum`; in
+# run's frame a register the call didn't save is `not saved`. A local with
+# bytes of its own carries their address as its `memoryReference`:
+# `readMemory` there reads `depth`, 0, as eight zero bytes, and `items`'s
+# header in full. Address 0 reads nothing, every byte unreadable. A
+# reference that is no hex address, or a count past 65536, is E2236, and a
+# register has no data id. The fixture is the console case's: line 8 is
+# sum's `if depth`. No other debugger is on PATH.
+requires: os-name:linux
+fixture: RegistersAndMemoryAtAStop.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+session dap content-length: jet debug --dap {work}/.jet/build/prog
+env: PATH={work}/no-tools
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.body.supportsReadMemoryRequest = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/.jet/build/prog\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":8}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].name = "sum"
+json: stdout doc $.body.stackFrames[0].line = 8
+json: stdout doc $.body.stackFrames[1].name = "run"
+capture: sum_frame stdout doc $.body.stackFrames[0].id
+capture: run_frame stdout doc $.body.stackFrames[1].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:sum_frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+json: stdout doc $.body.scopes[0].name = "Locals" # the locals stay first
+json: stdout doc $.body.scopes[1].name = "Registers"
+json: stdout doc $.body.scopes[1].presentationHint = "registers"
+capture: sum_locals stdout doc $.body.scopes[0].variablesReference
+capture: sum_registers stdout doc $.body.scopes[1].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:sum_registers}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="r13"][0].value = "0x000000000000003f  63  total" # hex, decimal and the local it holds
+stdout: ~ "\"name\":\"rip\",\"value\":\"0x" # rip's row
+stdout: ~ "  sum+" # names the code it is at
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:sum_locals}}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="depth"][0].value = "0"
+capture: depth_bytes stdout doc $.body.variables[?name="depth"][0].memoryReference
+capture: items_bytes stdout doc $.body.variables[?name="items"][0].memoryReference
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"readMemory\",\"arguments\":{\"memoryReference\":\"{cap:depth_bytes}\",\"count\":8}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.address = "{cap:depth_bytes}"
+json: stdout doc $.body.data = "AAAAAAAAAAA=" # depth's eight bytes, 0
+json: stdout doc $.body.unreadableBytes = 0
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"readMemory\",\"arguments\":{\"memoryReference\":\"{cap:items_bytes}\",\"count\":24}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.unreadableBytes = 0 # the List's header reads in full
+stdout: ~ "\"data\":\"" # as base64
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"readMemory\",\"arguments\":{\"memoryReference\":\"0x0\",\"count\":8}}"
+recv dap until $.request_seq = 11 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.data = "" # no mapping holds address 0
+json: stdout doc $.body.unreadableBytes = 8
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"readMemory\",\"arguments\":{\"memoryReference\":\"4096\",\"count\":8}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "\"jetCode\":\"E2236\"" # a reference is a hex address
+send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"readMemory\",\"arguments\":{\"memoryReference\":\"{cap:depth_bytes}\",\"count\":70000}}"
+recv dap until $.request_seq = 13 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "field count must be from 0 to 65536" # one read is at most 65536 bytes
+send dap: "{\"seq\":14,\"type\":\"request\",\"command\":\"dataBreakpointInfo\",\"arguments\":{\"variablesReference\":{cap:sum_registers},\"name\":\"r13\"}}"
+recv dap until $.request_seq = 14 timeout 30s every 100ms
+json: stdout doc $.success = true
+stdout: ~ "a register is no Jet place to watch" # no data id for a register
+send dap: "{\"seq\":15,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:run_frame}}}"
+recv dap until $.request_seq = 15 timeout 30s every 100ms
+capture: run_registers stdout doc $.body.scopes[1].variablesReference
+send dap: "{\"seq\":16,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:run_registers}}}"
+recv dap until $.request_seq = 16 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.variables[?name="rax"][0].value = "not saved" # the call didn't save it
+stdout: ~ "  run+" # run's rip is in run
+send dap: "{\"seq\":17,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 30s
+stdout: ~ "\"output\":\"63" # the program ran on and printed its sum
+send dap: "{\"seq\":18,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 18 timeout 30s every 100ms
+close dap
+exit: 0

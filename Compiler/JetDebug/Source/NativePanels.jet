@@ -100,14 +100,22 @@ native_panel_frame: fn(session: &NativeSession) -> NativePanelFrame? NativeDebug
     if frames.len() == 0 -> return Ok(None)
     levels: native_levels(session.image, frames)
     level: if session.selected < levels.len() -> levels[session.selected] else -> levels[0]
-    Ok(Val(native_panel_level(session, frames, level)))
+    Ok(Val(native_panel_level(session, frames, level.frame, level.site)))
 }
 
-// The frame of `level` among `frames`.
-native_panel_level: fn(session: &NativeSession, frames: [NativeUnwound], level: NativeLevel) -> NativePanelFrame Never! {
-    index: level.frame
-    caller: if level.site < 0 && index + 1 < frames.len() -> NativeUnwound?{Val(frames[index + 1])} else -> None
-    NativePanelFrame{frame: frames[index], caller: caller, lookup: native_lookup(index, frames[index].pc), site: level.site, innermost: index == 0 && session.focus == None && session.dump == None}
+// The machine frame `index` of the stop's task, as the editor adapter's
+// `[raw]` frames list them; None past its outermost.
+native_panel_machine: fn(session: &NativeSession, index: Int) -> NativePanelFrame? NativeDebugError! {
+    frames: session.unwind() ?? return Err(err)
+    if index < 0 || index >= frames.len() -> return Ok(None)
+    Ok(Val(native_panel_level(session, frames, index, -1)))
+}
+
+// The machine frame `index` among `frames`, at the inlined run `site` (-1:
+// its function's own code).
+native_panel_level: fn(session: &NativeSession, frames: [NativeUnwound], index: Int, site: Int) -> NativePanelFrame Never! {
+    caller: if site < 0 && index + 1 < frames.len() -> NativeUnwound?{Val(frames[index + 1])} else -> None
+    NativePanelFrame{frame: frames[index], caller: caller, lookup: native_lookup(index, frames[index].pc), site: site, innermost: index == 0 && session.focus == None && session.dump == None}
 }
 
 // A frame a place in `memory` is found in, with its function's name, and
@@ -125,7 +133,7 @@ native_panel_jet_frame: fn(session: &NativeSession) -> NativePanelJet? NativeDeb
     levels: native_levels(session.image, frames)
     from: if session.selected < levels.len() -> session.selected else -> 0
     loop index in from..<levels.len() {
-        at: native_panel_level(session, frames, levels[index])
+        at: native_panel_level(session, frames, levels[index].frame, levels[index].site)
         function: native_function_at(session.image, at.lookup) ?? next
         return Ok(Val(NativePanelJet{at: at, function: function.name, moved: index != from}))
     }
