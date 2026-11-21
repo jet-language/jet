@@ -38,7 +38,7 @@
 // image's, or jet_core.o's in a full link (JetCLI Host.jet).
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_index, name_intern, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, name_table_sized, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -163,16 +163,29 @@ IR_DEBUG_CELL_PREFIX: "jet_debug_cell_"
 // the program runs by them (ir_debug_cells_bind).
 ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
     named := [X64DataExport]{}
-    counts := [String:Int]{}
+    // The symbols the cells make, each export's symbol id, and how many
+    // cells make each symbol, by id (id 0, the empty name, none).
+    symbols := name_table_sized(64)
+    ids := [Int]{}
+    counts := [Int]{0}
     loop cell in name_rows_sorted(m.constant_rows) {
         if cell.local < 0 || !ir_core_cell_key(cell.key) || m.core_cells.get(cell.local) != None {
             next
         }
         symbol: ir_core_symbol_in(IR_DEBUG_CELL_PREFIX, cell.key)
-        counts[symbol] = (counts.get(symbol) ?? 0) + 1
+        id: name_index(name_intern(symbols, symbol))
+        if id == counts.len() -> counts.push(0)
+        counts[id] = counts[id] + 1
+        ids.push(id)
         named.push(X64DataExport{data: cell.local, symbol: symbol})
     }
-    loop export in named.move() if counts.get(export.symbol) == Val(1) -> export
+    kept := [X64DataExport]{}
+    at := 0
+    loop export in named.move() {
+        if counts[ids[at]] == 1 -> kept.push(export)
+        at += 1
+    }
+    kept
 }
 
 // Names the running image's own writable cells for an evaluation's
