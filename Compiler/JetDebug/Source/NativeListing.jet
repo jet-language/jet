@@ -30,7 +30,8 @@ NativeListingAsk: struct {
 // `<- here`, under where each of the frame's locals lives there. NAME: each
 // function of the line table `break` names so (code a fix replaced gives
 // way to the code that runs it now) and each run of it inlined into another
-// function, else each sized `.symtab` symbol of that name. A line: the rows
+// function, else each sized `.symtab` symbol of that name and each function
+// of the line table a `.symtab` symbol of that name starts. A line: the rows
 // of each function of the file that hold it, the pieces the optimizer moved
 // away included. `file` is the console's source, read as `lines`.
 native_disassemble: fn(session: &NativeSession, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
@@ -99,6 +100,15 @@ native_disassemble: fn(session: &NativeSession, operand: String, file: String, l
                 next
             }
             text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, -1, symbol.address, symbol.address + symbol.size, symbol.name, ask, file, lines)}"
+        }
+        // A `.symtab` name of a line table function (`main.run__entry` for
+        // `entry`) lists the symbol's bytes under that name, with the
+        // function's lines.
+        loop symbol in native_listing_named(session, spec) {
+            index: x64_jetline_find(session.image.lines, symbol.address)
+            if index < 0 || session.image.lines.functions[index].low != symbol.address -> next
+            high: if symbol.size > 0 -> symbol.address + symbol.size else -> session.image.lines.functions[index].high
+            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, symbol.address, high, spec, ask, file, lines)}"
         }
         if text == "" -> return Ok("No function `{spec}`\n")
         return Ok(text)
@@ -227,6 +237,19 @@ native_listing_symbols: fn(session: &NativeSession) -> [X64ListingSymbol] Never!
     native_listing_table(session, symbols, starts)
     symbols.sort_by(fn(left: X64ListingSymbol, right: X64ListingSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
     symbols
+}
+
+// The `.symtab` symbols named `name`; none without the image's symbols
+// (NativeSession.eval_facts).
+native_listing_named: fn(session: &NativeSession, name: String) -> [X64ListingSymbol] Never! {
+    found := [X64ListingSymbol]{}
+    facts_cell: session.eval_facts() ?? return found
+    facts: facts_cell.guard_read()
+    slot: facts.value.symbols.slots.get(name) ?? return found
+    loop symbol in facts.value.symbols.named[slot] {
+        found.push(X64ListingSymbol{address: symbol.address, size: symbol.size, name: "{name}"})
+    }
+    found
 }
 
 // Adds each sized `.symtab` symbol to `symbols` but those at `starts`.

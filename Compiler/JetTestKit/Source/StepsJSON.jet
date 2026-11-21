@@ -243,7 +243,13 @@ kit_steps_json_has: fn(value: Dyn, expected: Dyn) -> String? {
     }
 }
 
-kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: String, count: Int) -> String? {
+// A JSON value's text in a failure, as the canonical encoder spells it.
+kit_steps_json_text: fn(value: Dyn) -> String { json.to_string(value) ?? "an unencodable value" }
+
+// The failure of `value`, selected at `path`, against `op` and `expected`,
+// None when it holds. A failed comparison names the path, the operator, the
+// bound and the actual value.
+kit_steps_json_leaf: fn(value: Dyn, path: String, op: String, expected: Dyn, expected_type: String, count: Int) -> String? {
     if op == "has" -> return kit_steps_json_has(value, expected)
     if op == "any~" -> return kit_steps_json_any_contains(value, expected_type)
     if op == "!has" {
@@ -314,7 +320,7 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
         left: kit_steps_json_number(value) ?? return Val("JSON comparison needs numbers")
         right: kit_steps_json_number(expected) ?? return Val("JSON comparison needs numbers")
         matches: if op == ">" -> left > right else if op == ">=" -> left >= right else if op == "<" -> left < right else -> left <= right
-        return if matches -> None else -> Val("JSON numeric comparison failed")
+        return if matches -> None else -> Val("JSON numeric comparison failed: {path} {op} {kit_steps_json_text(expected)}: actual {kit_steps_json_text(value)}")
     }
     if op == "=" {
         if kit_steps_json_equal(value, expected) -> return None
@@ -343,7 +349,7 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
     }
     size: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
     if (op == "#=" && size != count) || (op == "#>=" && size < count) {
-        return Val("JSON count differs: expected {op} {count}, got {size}")
+        return Val("JSON count differs: {path} {op} {count}: actual {size}")
     }
     None
 }
@@ -360,7 +366,7 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
     }
     selected: kit_steps_json_values(text, mode, path) ?? {
         if op == "!=" {
-            return kit_steps_json_leaf(Dyn.Null, op, json.parse(kit_steps_arithmetic(literal) ?? literal) ?? return Val("invalid expected JSON"), "", 0)
+            return kit_steps_json_leaf(Dyn.Null, path, op, json.parse(kit_steps_arithmetic(literal) ?? literal) ?? return Val("invalid expected JSON"), "", 0)
         }
         return Val("JSON parse or path failed: {path}")
     }
@@ -399,14 +405,15 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
                 }
             }
         }
-        return if kit_steps_json_distinct(values) == count -> None else -> Val("JSON distinct count differs")
+        distinct: kit_steps_json_distinct(values)
+        return if distinct == count -> None else -> Val("JSON distinct count differs: {path} {op} {count}: actual {distinct}")
     }
     loop value in selected {
-        failure: kit_steps_json_leaf(value, op, expected, expected_type, count)
+        failure: kit_steps_json_leaf(value, path, op, expected, expected_type, count)
         if op.starts_with("#") && op != "#==" && op != "#distinct=" {
             size: kit_steps_json_size(value) ?? return Val("JSON count needs an array or object")
             if !kit_steps_compare(size, kit_steps_byte_slice(op, 1, op.count_bytes()), count) {
-                return Val("JSON count comparison failed")
+                return Val("JSON count comparison failed: {path} {op} {count}: actual {size}")
             }
             next
         }

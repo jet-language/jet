@@ -210,6 +210,34 @@ x64_jetline_text: fn(bytes: [U8], at: Int) -> String Never! {
     String.from_bytes(bytes[at..<end - 1]) ?? ""
 }
 
+// Per function of `functions`, the function a generated entry stands for,
+// -1 for every other: a generated entry (JetIR Build.jet
+// ir_entry_function) is named `entry`, at the file and declaration line of
+// the entry it runs, so it stands for the first function not named `entry`
+// with its file, directory and declaration line. `jet debug` (JetDebug
+// NativeFacts.jet native_main_entry) starts a run at the function it
+// stands for, and `jet perf` (JetCLI Perf/SourceSampling.jet) counts a
+// sample in its own code outside the source, as a compiler-emitted
+// helper's.
+x64_jetline_entry_runs: fn(functions: [X64JetlineFunction]) -> [Int] Never! {
+    runs := [Int]{}
+    // An image holds a generated entry per program it links, so each
+    // scans the functions once.
+    loop entry in functions {
+        found := -1
+        if entry.name == "entry" {
+            loop (index, function) in functions {
+                if function.name != "entry" && function.decl == entry.decl && function.file == entry.file && function.dir == entry.dir {
+                    found = index
+                    break
+                }
+            }
+        }
+        runs.push(found)
+    }
+    runs
+}
+
 #Test("a function's rows keep their call rows, which only a place lookup reads") {
     rows: [X64LineRow]{
         X64LineRow{at: 0, line: 5},
@@ -247,4 +275,14 @@ x64_jetline_text: fn(bytes: [U8], at: Int) -> String Never! {
     }
     assert_eq(seen, 5)
     assert_eq(row.at, 0x100c)
+}
+
+#Test("a generated entry stands for the function at its file and line") {
+    run: X64JetlineFunction{low: 0x1000, high: 0x1010, name: "run", file: "short.jet", dir: "/w", decl: 2, rows: 0, rows_end: 0}
+    entry: X64JetlineFunction{low: 0x2000, high: 0x2010, name: "entry", file: "short.jet", dir: "/w", decl: 2, rows: 0, rows_end: 0}
+    helper: X64JetlineFunction{low: 0x3000, high: 0x3010, name: "helper", file: "short.jet", dir: "/w", decl: 4, rows: 0, rows_end: 0}
+    // An `entry` with no function at its file and line is the program's own.
+    alone: X64JetlineFunction{low: 0x4000, high: 0x4010, name: "entry", file: "other.jet", dir: "/w", decl: 2, rows: 0, rows_end: 0}
+    assert_eq(x64_jetline_entry_runs([X64JetlineFunction]{entry, helper, run, alone}), [Int]{2, -1, -1, -1})
+    assert_eq(x64_jetline_entry_runs([X64JetlineFunction]{}), [Int]{})
 }

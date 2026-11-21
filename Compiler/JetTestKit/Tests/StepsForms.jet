@@ -101,6 +101,11 @@ use {
     assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
     wrong: "step first: printf a\nstep second: printf a\nstdout: != first # original predicate\n"
     assert_eq(cases_test_advanced(root, "equal", wrong).verdict.status, "FAIL")
+    // A failed count names its operator, its bound and the actual count.
+    lines: cases_test_advanced(root, "lines", "step: printf 'a\\\\nb\\\\n'\nstdout: lines >= 3 # original predicate\n").verdict
+    assert(lines.detail.contains("stream predicate lines failed: >= 3: actual 2"))
+    count: cases_test_advanced(root, "count", "step: printf abab\nstdout: count ab = 1 # original predicate\n").verdict
+    assert(count.detail.contains("stream predicate count failed: = 1: actual 2"))
     files.remove_all(root) ?? panic("remove forms capture scratch")
 }
 

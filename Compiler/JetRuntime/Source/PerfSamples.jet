@@ -321,18 +321,22 @@ perf_samples_buffer := I64{0}
 // The rings' tallies, words of the record buffer after the lost records'
 // (perf_samples_tally): the samples the drains took from the rings
 // (perf_samples_ring_sample), the picoseconds the kernel took to write
-// them (perf_precise_cost), and how many of them the kernel's callchain
-// cut at perf_precise_depth entries.
+// them (perf_precise_cost), how many of them the kernel's callchain cut at
+// perf_precise_depth entries, and the count of the event each ended
+// thread's sampler took them by, in that event's units, which the sampler
+// added as it closed (perf_precise_end).
 PERF_SAMPLES_RING_COUNT: I64{3}
 
 PERF_SAMPLES_RING_PS: I64{4}
 
 PERF_SAMPLES_RING_CUT: I64{5}
 
+PERF_SAMPLES_RING_EVENTS: I64{6}
+
 // The words of the record buffer past its PERF_SAMPLES_DEPTH + 1 and its
 // counters' slots: the handlers' nanoseconds, the blocked lock waits, the
-// lost records and the rings' three tallies.
-PERF_SAMPLES_TALLIES: I64{6}
+// lost records and the rings' four tallies.
+PERF_SAMPLES_TALLIES: I64{7}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
 // start could not map them; the process's CPU time in nanoseconds when
@@ -486,6 +490,10 @@ PERF_PRECISE_LOCK: I64{2048}
 // The control page's word after the lock: the id, plus one, of the timer
 // that drains the ring (perf_precise_attach), 0 for none.
 PERF_PRECISE_TIMER: I64{2056}
+
+// The control page's word after the timer's, which a read of the
+// sampler's count fills (perf_precise_count) while its ring's lock is held.
+PERF_PRECISE_COUNT: I64{2064}
 
 // The bytes of the thread's stack, from rsp up, each sample copies, for
 // the call frame information's steps out of frames that keep no frame
@@ -1353,17 +1361,20 @@ perf_precise_ring_bytes: fn() -> I64 {
 
 // Close sampler `fd`, delete its ring's drain timer (PERF_PRECISE_TIMER)
 // and unmap its ring, its table slot cleared first, so that a signal still
-// pending finds no ring. The ring is unmapped once no drain holds it; once
-// the exit drains every ring (perf_precise_rings_drain), which may have
-// read it from the table before it was cleared, it stays mapped for the
-// process's last moments.
+// pending finds no ring. Once the ring's lock is held, the sampler's count
+// of its event joins the tally (PERF_SAMPLES_RING_EVENTS) and the sampler
+// closes, so the exit's count (perf_precise_events), which reads each
+// sampler under its lock, reads none that is closed. The ring is unmapped
+// then; once the exit drains every ring (perf_precise_rings_drain), which
+// may have read it from the table before it was cleared, it stays mapped
+// for the process's last moments, its lock released.
 perf_precise_end: fn(fd: I64) {
     rings: perf_precise_rings
     slot: wrapping(rings + wrapping(fd * I64{8}))
     ring: sync_load(slot)
     sync_store(slot, I64{0})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
     if (ring == I64{0}) {
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
         return
     }
     timer: sync_load(wrapping(ring + PERF_PRECISE_TIMER))
@@ -1374,12 +1385,61 @@ perf_precise_end: fn(fd: I64) {
     // as the exit's swap of that word orders it before its reads of the
     // table, so either the exit finds the slot cleared or this finds the
     // exit.
-    loop sync_cas(wrapping(ring + PERF_PRECISE_LOCK), I64{0}, I64{1}) != (I64{0}) {
+    lock: wrapping(ring + PERF_PRECISE_LOCK)
+    loop sync_cas(lock, I64{0}, I64{1}) != (I64{0}) {
         _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
     }
+    buffer: perf_samples_buffer
+    if (buffer != I64{0}) {
+        _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_EVENTS), perf_precise_count(fd, ring))
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
     if (sync_load(wrapping(rings + PERF_PRECISE_EXITING)) == I64{0}) {
         alloc_unmap(ring, perf_precise_ring_bytes())
+    } else { sync_store(lock, I64{0}) }
+}
+
+// The count so far of the event sampler `fd`, whose ring is `ring`, takes
+// its samples by (read_format 0: one word): the task clock's nanoseconds
+// of the thread's CPU time since it opened, its time in the kernel
+// included though that takes no sample, or a precise source's cycles. Read
+// into the ring's PERF_PRECISE_COUNT word while its lock is held; 0 when
+// the read fails.
+perf_precise_count: fn(fd: I64, ring: I64) -> I64 {
+    word: wrapping(ring + PERF_PRECISE_COUNT)
+    if (host_call(I64{0}, fd, word, I64{8}) != I64{8}) { return I64{0} }
+    rt_text_word(word)
+}
+
+// The count of the event every sampler took its samples by
+// (perf_precise_count), summed: the ended threads' tally
+// (PERF_SAMPLES_RING_EVENTS), then each live sampler's, read under its
+// ring's lock while its slot still holds the ring, so that none closes
+// meanwhile (perf_precise_end). The exit reads it once every ring is
+// drained (perf_precise_rings_drain), so no ring it reads is unmapped. A
+// thread that ends while it reads may count in neither, never in both: the
+// tally is read first. 0 under the timer.
+perf_precise_events: fn(buffer: I64) -> I64 {
+    rings: perf_precise_rings
+    if (rings == I64{0} || buffer == I64{0}) { return I64{0} }
+    total := sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_EVENTS))
+    index := I64{0}
+    loop index < PERF_PRECISE_FDS {
+        slot: wrapping(rings + wrapping(index * I64{8}))
+        ring: sync_load(slot)
+        if (ring != I64{0}) {
+            lock: wrapping(ring + PERF_PRECISE_LOCK)
+            loop sync_cas(lock, I64{0}, I64{1}) != (I64{0}) {
+                _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+            }
+            if (sync_load(slot) == ring) {
+                total = wrapping(total + perf_precise_count(index, ring))
+            }
+            sync_store(lock, I64{0})
+        }
+        index = wrapping(index + I64{1})
     }
+    total
 }
 
 // Time the kernel's part of one sample of `source`, whose armed sampler
@@ -2058,9 +2118,10 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // (perf_samples_alloc_write), then the records the program made and could
 // not write (perf_samples_lost), then the samples the drains took from the
 // kernel's rings, the kernel's nanoseconds for them as the start timed it
-// (perf_precise_cost), and those whose callchain the kernel cut at
-// perf_precise_depth entries (PERF_SAMPLES_RING_COUNT), all 0 under the
-// timer. A second exit writes a later one. Under the alloc lens the heap
+// (perf_precise_cost), those whose callchain the kernel cut at
+// perf_precise_depth entries (PERF_SAMPLES_RING_COUNT), and the count of
+// the event the samplers took them by (perf_precise_events), all 0 under
+// the timer. A second exit writes a later one. Under the alloc lens the heap
 // snapshot named `exit` comes first (perf_samples_heap), then the
 // allocations' records. An attach's zones window still open closes first
 // (perf_flight_window_end), so the clock record goes to the record socket.
@@ -2083,10 +2144,10 @@ perf_samples_exit: fn() {
     perf_system_exit()
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
-    record: jet_rt_alloc(I64{80}, I64{8})
-    thread_zero(record, I64{80})
+    record: jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(record, I64{88})
     perf_samples_alloc_write(fd, wrapping(record + I64{32}))
-    rt_text_store(record, (I64{10} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(record, (I64{11} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
     rt_text_store(wrapping(record + I64{48}), perf_samples_lost())
@@ -2095,9 +2156,10 @@ perf_samples_exit: fn() {
         rt_text_store(wrapping(record + I64{56}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_COUNT)))
         rt_text_store(wrapping(record + I64{64}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS)) / I64{1000})
         rt_text_store(wrapping(record + I64{72}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT)))
+        rt_text_store(wrapping(record + I64{80}), perf_precise_events(buffer))
     }
-    perf_samples_send(fd, record, I64{80})
-    jet_rt_free(record, I64{80}, I64{8})
+    perf_samples_send(fd, record, I64{88})
+    jet_rt_free(record, I64{88}, I64{8})
     perf_topdown_exit()
 }
 

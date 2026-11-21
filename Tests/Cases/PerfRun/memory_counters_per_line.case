@@ -21,7 +21,7 @@ step: jet perf run --lens=cpu,memory walk.jet --out {work}/walk.jettrace
 exit: 0
 stdout: = "lines=35184363700224 pages=35184363700224 hops=35183996698624\n"
 json: file walk.jettrace doc $.content.profile.method = "sampling"
-json: file walk.jettrace doc $.content.profile.rows[?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the counters
+json: file walk.jettrace doc $.content.profile.rows[?clock="cpu"][?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the counters
 json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 2
 json: file walk.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[1] = "memory"
 json: file walk.jettrace doc $.content.profile.counters #= 4

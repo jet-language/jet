@@ -3,12 +3,16 @@
 // the CPU time of each thread of it and of the processes it started (a
 // `jet check`'s compile-time work runs in one) from outside them
 // (x64_sampler_open), and each process's own executable names its samples'
-// frames, so the attach shows which functions their CPU was in.
+// frames, so the attach shows which functions their CPU was in, where each
+// is declared, which package of the program each sample was working for,
+// how its samples' stacks fold into a flame graph and how many of the
+// stacks unwound whole.
 use {
     perf_files: core.files
     perf_time: core.time
-    jet_backend.[X64ImageFunction, X64Samples, x64_image_function_find, x64_image_functions, x64_sampler_close, x64_sampler_drain, x64_sampler_open]
+    jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction, X64Samples, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_read, x64_sampler_close, x64_sampler_drain, x64_sampler_open]
     jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
+    jet_ir.[ir_runtime_intrinsic_specs]
 }
 
 // The CPU time of one thread between two of its samples: a millisecond.
@@ -26,6 +30,49 @@ JET_CLI_PERF_OUTSIDE_PROCESSES: 64
 
 // The first four bytes of an ELF image, `\x7fELF`, as a little-endian word.
 JET_CLI_PERF_OUTSIDE_ELF: 0x464c457f
+
+// The function every process's first stack starts in: the program's `main`,
+// which the image's entry calls.
+JET_CLI_PERF_OUTSIDE_MAIN: "main"
+
+// The functions every other stack of a Jet process starts in: a thread's
+// first function and a task's fiber's, each a runtime function whose
+// address the compiler seeds a fresh stack with (JetIR's
+// ir_runtime_intrinsic_specs), which JET_CLI_PERF_OUTSIDE_ENTRIES_CHECKED
+// holds it to. A sample whose outermost frame is in one of these or in
+// JET_CLI_PERF_OUTSIDE_MAIN was unwound whole.
+JET_CLI_PERF_OUTSIDE_ENTRIES: [String]{"jet_rt_thread_entry", "jet_rt_fiber_entry"}
+
+JET_CLI_PERF_OUTSIDE_ENTRIES_CHECKED: #run jet_cli_perf_outside_entries_checked()
+
+// JET_CLI_PERF_OUTSIDE_ENTRIES, once each is the symbol of one of the
+// compiler's runtime function addresses; a build whose runtime renamed one
+// stops here.
+jet_cli_perf_outside_entries_checked: fn() -> [String] Never! {
+    seeded := [String]{}
+    loop spec in ir_runtime_intrinsic_specs() {
+        if spec.shape == .FunctionAddress(symbol, _) -> seeded.push(symbol)
+    }
+    loop entry in JET_CLI_PERF_OUTSIDE_ENTRIES {
+        if !seeded.contains(entry) {
+            panic("Perf/Outside.jet's stack entry {entry} is no runtime function address the compiler seeds (ir_runtime_intrinsic_specs)")
+        }
+    }
+    JET_CLI_PERF_OUTSIDE_ENTRIES
+}
+
+// The frames of a sample's call chain the kernel gives unless
+// /proc/sys/kernel/perf_event_max_stack says otherwise.
+JET_CLI_PERF_OUTSIDE_DEPTH: 127
+
+// A folded stack is kept when it holds at least one sample in this many;
+// a rarer one's samples fold into its caller's.
+JET_CLI_PERF_OUTSIDE_STACK_SHARE: 100
+
+// The call tree's key of a node's child: the node's index plus one times
+// this, plus the child's row. More rows than this never come from one
+// attach.
+JET_CLI_PERF_OUTSIDE_ROW_KEY: 16777216
 
 // A range of a sampled process's code that an image of its executable file
 // holds, as it is mapped: from `start` to `end` in the process, and `delta`
@@ -49,22 +96,56 @@ JetCLIPerfOutsideSegment: struct {
 // An ELF image of an executable file the sampled processes run, the file's
 // own or one it holds as a part (x64_executable_add_parts), as a jet holds
 // the runtime image its compile-time work runs: the file's `path`, the
-// image's functions, sorted by start, and its loadable segments.
+// image's functions, sorted by start, its loadable segments, and its
+// location table (`.debug_jetline`), with no function when it has none.
 JetCLIPerfOutsideImage: struct {
     path: String,
     functions: [X64ImageFunction],
     segments: [JetCLIPerfOutsideSegment],
+    lines: X64Jetline,
 }
 
 // A function the samples were in and its samples: `own`, those whose
 // innermost frame is in it, and `total`, those with it anywhere on their
 // stack; `seen` is the last sample counted in its total, so a function a
-// stack holds twice counts once.
+// stack holds twice counts once. `file` and `line` are its declaration's,
+// from its image's location table ("" and 0 when that holds none),
+// `package` the package of the program `file` lies in ("" for none, as
+// for Core's sources), and `root` whether it is JET_CLI_PERF_OUTSIDE_MAIN
+// or one of JET_CLI_PERF_OUTSIDE_ENTRIES.
 JetCLIPerfOutsideRow: struct {
     name: String,
     own: Int,
     total: Int,
     seen: Int,
+    file: String,
+    line: Int,
+    package: String,
+    root: Bool,
+}
+
+// The samples' call tree: each node a function (`rows`, its row) called
+// from its parent node (`parents`, -1 for a stack's outermost frame) and
+// the samples whose stack runs through it (`totals`); `children` finds a
+// node's child by its key (JET_CLI_PERF_OUTSIDE_ROW_KEY).
+JetCLIPerfOutsideTree: struct {
+    rows: [Int],
+    parents: [Int],
+    totals: [Int],
+    children: [Int:Int],
+}
+
+// A folded stack: its functions from the outermost, `;` between them, and
+// the samples whose stack it is.
+JetCLIPerfOutsideStack: struct {
+    stack: String,
+    samples: Int,
+}
+
+// A package of the program and the samples working for it.
+JetCLIPerfOutsidePackage: struct {
+    package: String,
+    samples: Int,
 }
 
 // Sample process `pid`, and the processes it started, for `window_ms` and
@@ -72,11 +153,20 @@ JetCLIPerfOutsideRow: struct {
 // (type `JetPerfFunctions`): the `samples` taken of the `threads` of its
 // `processes`, one each `period_ns` of a thread's CPU time over
 // `window_ms`; the samples the kernel `lost`; those whose innermost frame
-// no function of its process's executable holds (`unnamed`); and the
-// functions the samples were in, by name, the most samples whose innermost
-// frame is in it (`self`) first, then the most with it anywhere on their
-// stack (`total`), at most JET_CLI_PERF_OUTSIDE_ROWS. Err says why the
-// kernel won't sample it or its executable can't name the frames.
+// no function of its process's executable holds (`unnamed`); the functions
+// the samples were in, by name, the most samples whose innermost frame is
+// in it (`self`) first, then the most with it anywhere on their stack
+// (`total`), at most JET_CLI_PERF_OUTSIDE_ROWS, each with its
+// declaration's `file` and `line` when its image's location table names
+// them; the samples by the `packages` they worked for, the package of each
+// one's innermost frame in a package of the program ("" for a sample with
+// none: the runtime's own work, Core's, or code no image names), the most
+// first; the `stacks` (jet_cli_perf_outside_folded); and how far each
+// sample's stack was unwound: `unwound` to JET_CLI_PERF_OUTSIDE_MAIN or a
+// function of JET_CLI_PERF_OUTSIDE_ENTRIES, `cut` at the kernel's frame limit
+// (jet_cli_perf_outside_depth), or `broken` anywhere else, where a frame
+// pointer was lost. Err says why the kernel won't sample it or its
+// executable can't name the frames.
 jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.Asm]> TraceReceiptSection JetCLIReadError! {
     family: jet_cli_perf_outside_family(pid)
     threads := [Int]{}
@@ -125,12 +215,24 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
     // Each row's index by its function's name.
     named_rows := [String:Int]{}
     unnamed := 0
+    depth: jet_cli_perf_outside_depth()
+    unwound := 0
+    cut := 0
+    broken := 0
+    // The samples of each package, by its name.
+    working := [String:Int]{}
+    tree := JetCLIPerfOutsideTree{rows: [Int]{}, parents: [Int]{}, totals: [Int]{}, children: [Int:Int]{}}
     at := 0
     sample := 0
     loop at + 1 < taken.words.len() {
         process: owner[taken.words[at], or: -1]
         count: taken.words[at + 1]
+        // The sample's named frames' rows, the innermost first.
+        chain := [Int]{}
+        // Whether the last frame read, the outermost, is in a root.
+        rooted := false
         loop k in 0..<count {
+            rooted = false
             if process < 0 {
                 if k == 0 -> unnamed += 1
                 break
@@ -148,17 +250,39 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
             row: named_rows[name, or: rows.len()]
             if row == rows.len() {
                 named_rows[name] = row
-                rows.push(JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1})
+                rows.push(jet_cli_perf_outside_row(name, images[image].lines, pc + processes[process][range].delta))
             }
             if k == 0 -> rows[row].own = rows[row].own + 1
             if rows[row].seen != sample {
                 rows[row].seen = sample
                 rows[row].total = rows[row].total + 1
             }
+            rooted = rows[row].root
+            chain.push(row)
         }
+        if {
+            rooted -> unwound += 1
+            count >= depth -> cut += 1
+            else -> broken += 1
+        }
+        package := ""
+        loop row in chain {
+            if rows[row].package != "" {
+                package = "{rows[row].package}"
+                break
+            }
+        }
+        working[package] = working[package, or: 0] + 1
+        jet_cli_perf_outside_tree_add(tree, chain)
         at += 2 + count
         sample += 1
     }
+    stacks: jet_cli_perf_outside_folded(tree, rows, taken.samples)
+    packages := [JetCLIPerfOutsidePackage]{}
+    loop (package, samples) in working {
+        packages.push(JetCLIPerfOutsidePackage{package: "{package}", samples: samples})
+    }
+    packages.sort_by(fn(left: JetCLIPerfOutsidePackage, right: JetCLIPerfOutsidePackage) { (right.samples <=> left.samples).then(left.package <=> right.package) })
     rows.sort_by(fn(left: JetCLIPerfOutsideRow, right: JetCLIPerfOutsideRow) {
         if left.own != right.own -> return right.own <=> left.own
         right.total <=> left.total
@@ -167,29 +291,166 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
     functions := [CanonicalJSON]{}
     loop k in 0..<kept {
         row: rows[k]
-        functions.push(
-            CanonicalJSON.Object(
-                [CanonicalJSONField]{
-                    {key: "name", value: CanonicalJSON.String(row.name)},
-                    {key: "self", value: CanonicalJSON.Integer("{row.own}")},
-                    {key: "total", value: CanonicalJSON.Integer("{row.total}")},
-                },
-            ),
-        )
+        fields := [CanonicalJSONField]{
+            {key: "name", value: CanonicalJSON.String(row.name)},
+            {key: "self", value: CanonicalJSON.Integer("{row.own}")},
+            {key: "total", value: CanonicalJSON.Integer("{row.total}")},
+        }
+        if row.file != "" {
+            fields.push({key: "file", value: CanonicalJSON.String(row.file)})
+            fields.push({key: "line", value: CanonicalJSON.Integer("{row.line}")})
+        }
+        functions.push(CanonicalJSON.Object(fields.move()))
     }
     value: CanonicalJSON.Object(
         [CanonicalJSONField]{
+            {key: "broken", value: CanonicalJSON.Integer("{broken}")},
+            {key: "cut", value: CanonicalJSON.Integer("{cut}")},
             {key: "functions", value: CanonicalJSON.Array(functions.move())},
             {key: "lost", value: CanonicalJSON.Integer("{taken.lost}")},
+            {
+                key: "packages",
+                value: CanonicalJSON.Array(
+                    loop each in packages -> CanonicalJSON.Object(
+                        [CanonicalJSONField]{
+                            {key: "package", value: CanonicalJSON.String(each.package)},
+                            {key: "samples", value: CanonicalJSON.Integer("{each.samples}")},
+                        },
+                    ),
+                ),
+            },
             {key: "period_ns", value: CanonicalJSON.Integer("{JET_CLI_PERF_OUTSIDE_PERIOD_NS}")},
             {key: "processes", value: CanonicalJSON.Integer("{family.len()}")},
             {key: "samples", value: CanonicalJSON.Integer("{taken.samples}")},
+            {
+                key: "stacks",
+                value: CanonicalJSON.Array(
+                    loop each in stacks -> CanonicalJSON.Object(
+                        [CanonicalJSONField]{
+                            {key: "samples", value: CanonicalJSON.Integer("{each.samples}")},
+                            {key: "stack", value: CanonicalJSON.String(each.stack)},
+                        },
+                    ),
+                ),
+            },
             {key: "threads", value: CanonicalJSON.Integer("{sampled}")},
             {key: "unnamed", value: CanonicalJSON.Integer("{unnamed}")},
+            {key: "unwound", value: CanonicalJSON.Integer("{unwound}")},
             {key: "window_ms", value: CanonicalJSON.Integer("{window_ms}")},
         },
     )
     Ok(TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value})
+}
+
+// The row of function `name`, whose code holds link address `link` of an
+// image with location table `lines`: its declaration's file, line and
+// package when the table names the function there.
+jet_cli_perf_outside_row: fn(name: String, lines: X64Jetline, link: Int) -> JetCLIPerfOutsideRow Never! {
+    row := JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: name == JET_CLI_PERF_OUTSIDE_MAIN}
+    loop entry in JET_CLI_PERF_OUTSIDE_ENTRIES {
+        if entry == row.name -> row.root = true
+    }
+    found: x64_jetline_find(lines, link)
+    if found < 0 -> return row
+    function: lines.functions[found]
+    row.file = jet_cli_perf_outside_path(function.dir, function.file)
+    row.line = function.decl
+    // Core's sources (`<corelib>/…`) are the library a package calls, so a
+    // sample in them works for its caller's package.
+    if row.file != "" && !row.file.starts_with("<") {
+        row.package = jet_cli_perf_symbol_package(row.file)
+    }
+    row
+}
+
+// The source `file` a location table names, under its compilation
+// directory `dir`, with its `.` and `..` steps taken:
+// `Compiler/JetSema/Source/Statements.jet` for `../JetSema/Source/
+// Statements.jet` under `Compiler/JetCLI`. A path already absolute, or
+// Core's `<corelib>/…`, stands as it is.
+jet_cli_perf_outside_path: fn(dir: String, file: String) -> String Never! {
+    if file == "" -> return ""
+    full: if file.starts_with("/") || file.starts_with("<") || dir == "" || dir == "." -> "{file}" else -> "{dir}/{file}"
+    parts := [String]{}
+    loop (index, part) in full.split("/").to_list() {
+        if part == "." || (part == "" && index > 0) -> next
+        if part == ".." && parts.len() > 0 && parts[parts.len() - 1] != ".." && parts[parts.len() - 1] != "" {
+            _: parts.pop()
+            next
+        }
+        parts.push("{part}")
+    }
+    parts.join("/")
+}
+
+// The most frames the kernel gives a sample's call chain:
+// /proc/sys/kernel/perf_event_max_stack, else JET_CLI_PERF_OUTSIDE_DEPTH. A
+// chain that long was cut there.
+jet_cli_perf_outside_depth: fn() -[FS.Read]> Int Never! {
+    text: perf_files.read("/proc/sys/kernel/perf_event_max_stack") ?? return JET_CLI_PERF_OUTSIDE_DEPTH
+    Int.parse(text.trim()) ?? JET_CLI_PERF_OUTSIDE_DEPTH
+}
+
+// Add a sample's stack, its frames' rows `chain` (the innermost first), to
+// `tree`.
+jet_cli_perf_outside_tree_add: fn(tree: &JetCLIPerfOutsideTree, chain: [Int]) Never! {
+    node := -1
+    at := chain.len()
+    loop at > 0 {
+        at -= 1
+        key: (node + 1) * JET_CLI_PERF_OUTSIDE_ROW_KEY + chain[at]
+        child := tree.children[key, or: -1]
+        if child < 0 {
+            child = tree.rows.len()
+            tree.children[key] = child
+            tree.rows.push(chain[at])
+            tree.parents.push(node)
+            tree.totals.push(0)
+        }
+        tree.totals[child] = tree.totals[child] + 1
+        node = child
+    }
+}
+
+// The folded stacks of `tree`, whose functions are `rows`, in the
+// flame-graph tools' form: each stack its functions from the outermost,
+// `;` between them, and the samples whose stack it is. A stack that holds
+// fewer than one of the `samples` in JET_CLI_PERF_OUTSIDE_STACK_SHARE is
+// folded into the one it was called from, and is left out when it has
+// none, so the attach stays small however deep its stacks run. Sorted by
+// stack.
+jet_cli_perf_outside_folded: fn(tree: JetCLIPerfOutsideTree, rows: [JetCLIPerfOutsideRow], samples: Int) -> [JetCLIPerfOutsideStack] Never! {
+    // A node's samples less those of its kept children; a parent's index
+    // is below its children's.
+    own := [Int]{}
+    kept := [Bool]{}
+    loop (node, total) in tree.totals {
+        keep: total * JET_CLI_PERF_OUTSIDE_STACK_SHARE >= samples
+        kept.push(keep)
+        own.push(total)
+        parent: tree.parents[node]
+        if keep && parent >= 0 -> own[parent] = own[parent] - total
+    }
+    stacks := [JetCLIPerfOutsideStack]{}
+    loop (node, keep) in kept {
+        if !keep || own[node] <= 0 -> next
+        // The stack's functions, the innermost first.
+        names := [String]{}
+        at := node
+        loop at >= 0 {
+            names.push("{rows[tree.rows[at]].name}")
+            at = tree.parents[at]
+        }
+        text := ""
+        k := names.len()
+        loop k > 0 {
+            k -= 1
+            text = if text == "" -> "{names[k]}" else -> "{text};{names[k]}"
+        }
+        stacks.push(JetCLIPerfOutsideStack{stack: text, samples: own[node]})
+    }
+    stacks.sort_by(fn(left: JetCLIPerfOutsideStack, right: JetCLIPerfOutsideStack) { left.stack <=> right.stack })
+    stacks
 }
 
 // Process `pid` and the processes it started, and theirs, from each
@@ -242,9 +503,10 @@ jet_cli_perf_outside_process: fn(pid: Int, images: &[JetCLIPerfOutsideImage]) -[
 }
 
 // The ELF image at offset `base` of the executable file `file`, which
-// mappings name `path`: its loadable segments and its functions, read
-// from its start to the end of its section headers, which its .symtab and
-// .strtab lie before. Err says why it has none.
+// mappings name `path`: its loadable segments, its functions and its
+// location table, read from its start to the end of its section headers,
+// which its .symtab, .strtab and .debug_jetline lie before. Err says why it
+// has no function.
 jet_cli_perf_outside_image: fn(file: String, path: String, base: Int) -[FS.Read]> JetCLIPerfOutsideImage JetCLIReadError! {
     head: perf_files.read_at(file, base, 64) ?? return Err(jet_cli_read_error("can't be read: {jet_cli_io_error_text(err)}"))
     if head.len() < 64 || jet_cli_perf_outside_word(head, 0, 4) != JET_CLI_PERF_OUTSIDE_ELF {
@@ -264,7 +526,8 @@ jet_cli_perf_outside_image: fn(file: String, path: String, base: Int) -[FS.Read]
     bytes: perf_files.read_at(file, base, end) ?? return Err(jet_cli_read_error("can't be read: {jet_cli_io_error_text(err)}"))
     read: x64_image_functions(bytes)
     if read.failure != "" -> return Err(jet_cli_read_error("names no function: {read.failure}"))
-    Ok(JetCLIPerfOutsideImage{path: path, functions: read.functions.move(), segments: segments})
+    lines: x64_jetline_read(bytes) ?? X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}
+    Ok(JetCLIPerfOutsideImage{path: path, functions: read.functions.move(), segments: segments, lines: lines})
 }
 
 // The offsets in the executable file `file` of the ELF executables it holds
@@ -371,8 +634,12 @@ jet_cli_perf_outside_range: fn(ranges: [JetCLIPerfOutsideRange], pc: Int) -> Int
 
 // The `functions` section's lines (jet_cli_perf_outside_sample):
 // `functions samples=1003 processes=2 threads=35 window_ms=1000 lost=0
-// unnamed=241`, then each function it keeps, each share of the samples:
-// `  41.6% self  68.2% total · unit.rt_text_append_owner`.
+// unnamed=241`; how far the stacks were unwound, `stacks unwound=990
+// cut=9 broken=4`; then each function it keeps, each share of the
+// samples, and where it is declared when that is known: `  41.6% self
+// 68.2% total · Statements.sema_stmt_check at
+// Compiler/JetSema/Source/Statements.jet:212`; then the samples by
+// package, as a run's profile prints them (jet_cli_perf_package_lines).
 jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     fields: jettrace_object_view(value, "receipt functions") ?? return lines
@@ -383,13 +650,28 @@ jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
     lost: jet_cli_perf_field_integer(fields, "lost") ?? "0"
     unnamed: jet_cli_perf_field_integer(fields, "unnamed") ?? "0"
     lines.push("functions samples={samples} processes={processes} threads={threads} window_ms={window} lost={lost} unnamed={unnamed}")
-    at: jet_cli_perf_key(fields, "functions") ?? return lines
-    rows: jettrace_array(fields[at].value, "receipt functions.functions") ?? return lines
-    loop row in rows {
-        own: jet_cli_perf_member_number(row, "self") ?? 0
-        total: jet_cli_perf_member_number(row, "total") ?? 0
-        name: jet_cli_perf_member_text(row, "name") ?? "?"
-        lines.push("  {jet_cli_perf_outside_share(own, samples)} self  {jet_cli_perf_outside_share(total, samples)} total · {name}")
+    unwound: jet_cli_perf_field_integer(fields, "unwound") ?? "0"
+    cut: jet_cli_perf_field_integer(fields, "cut") ?? "0"
+    broken: jet_cli_perf_field_integer(fields, "broken") ?? "0"
+    lines.push("stacks unwound={unwound} cut={cut} broken={broken}")
+    if jet_cli_perf_key(fields, "functions") == .Val(at) {
+        if jettrace_array(fields[at].value, "receipt functions.functions") == .Ok(rows) {
+            loop row in rows {
+                own: jet_cli_perf_member_number(row, "self") ?? 0
+                total: jet_cli_perf_member_number(row, "total") ?? 0
+                name: jet_cli_perf_member_text(row, "name") ?? "?"
+                place: if jet_cli_perf_member_text(row, "file") == .Val(file) -> " at {file}:{jet_cli_perf_member_number(row, "line") ?? 0}" else -> ""
+                lines.push("  {jet_cli_perf_outside_share(own, samples)} self  {jet_cli_perf_outside_share(total, samples)} total · {name}{place}")
+            }
+        }
+    }
+    if jet_cli_perf_key(fields, "packages") == .Val(at) {
+        if jettrace_array(fields[at].value, "receipt functions.packages") == .Ok(rows) {
+            parts: loop row in rows -> {dir: jet_cli_perf_member_text(row, "package") ?? "", weight: jet_cli_perf_member_number(row, "samples") ?? 0}
+            period: jet_cli_perf_member_number(value, "period_ns") ?? 0
+            interval: if period > 0 -> Val(period /% 1000) else -> None
+            loop line in jet_cli_perf_package_lines(parts, samples, interval) -> lines.push(line)
+        }
     }
     lines
 }
@@ -404,10 +686,86 @@ jet_cli_perf_outside_share: fn(part: Int, whole: Int) -> String Never! {
 // The lines of the trace's `functions` receipt section, none when it has
 // none (jet_cli_perf_outside_lines).
 jet_cli_perf_function_lines: fn(trace: CanonicalJSON) -> [String] Never! {
-    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    value: jet_cli_perf_outside_section(trace) ?? return [String]{}
+    jet_cli_perf_outside_lines(value)
+}
+
+// The trace's `functions` receipt section's value, None when it has none.
+jet_cli_perf_outside_section: fn(trace: CanonicalJSON) -> CanonicalJSON? Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return None
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
-        if section.name == "functions" -> return jet_cli_perf_outside_lines(section.value)
+        if section.name == "functions" -> return Val(section.value)
     }
-    [String]{}
+    None
+}
+
+// The flame graph of a `functions` section's folded stacks (`value`, the
+// section's value): their call tree, a line a function, depth first and the
+// heaviest call first, each its depth (0 for a stack's outermost frame), its
+// name, its share of the samples and a bar of it: `3
+// Expressions.sema_check_expression 61.4% ########################`. None
+// without its stacks.
+jet_cli_perf_outside_flame: fn(value: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    samples: jet_cli_perf_member_number(value, "samples") ?? return lines
+    fields: jettrace_object_view(value, "receipt functions") ?? return lines
+    at: jet_cli_perf_key(fields, "stacks") ?? return lines
+    rows: jettrace_array(fields[at].value, "receipt functions.stacks") ?? return lines
+    // The call tree: each node's function, its parent (-1 for an outermost
+    // frame) and its samples; `children` finds a node's child by
+    // "<node>\n<function>".
+    names := [String]{}
+    parents := [Int]{}
+    totals := [Int]{}
+    children := [String:Int]{}
+    loop row in rows {
+        stack: jet_cli_perf_member_text(row, "stack") ?? next
+        count: jet_cli_perf_member_number(row, "samples") ?? next
+        node := -1
+        loop name in stack.split(";").to_list() {
+            key: "{node}\n{name}"
+            child := children[key, or: -1]
+            if child < 0 {
+                child = names.len()
+                children[key] = child
+                names.push("{name}")
+                parents.push(node)
+                totals.push(0)
+            }
+            totals[child] = totals[child] + count
+            node = child
+        }
+    }
+    calls := [[Int]]{}
+    loop _ in 0..<names.len() -> calls.push([Int]{})
+    roots := [Int]{}
+    loop (node, parent) in parents {
+        if parent < 0 -> roots.push(node) else -> calls[parent].push(node)
+    }
+    // Depth first: the nodes still to show, the next on top, each with its
+    // depth.
+    pending := [Int]{}
+    depths := [Int]{}
+    jet_cli_perf_outside_flame_push(pending, depths, roots, totals, 0)
+    loop pending.len() > 0 {
+        node: pending.pop() ?? break
+        depth: depths.pop() ?? break
+        width: totals[node] * 40 /% (if samples > 0 -> samples else -> 1)
+        lines.push("{depth} {names[node]} {jet_cli_perf_outside_share(totals[node], samples)} {jet_cli_perf_bar(width)}")
+        jet_cli_perf_outside_flame_push(pending, depths, calls[node], totals, depth + 1)
+    }
+    lines
+}
+
+// Push `nodes` onto the depth-first `pending` at `depth`, so the one with
+// the most samples is shown first.
+jet_cli_perf_outside_flame_push: fn(pending: &[Int], depths: &[Int], nodes: [Int], totals: [Int], depth: Int) Never! {
+    order := [Int]{}
+    loop node in nodes -> order.push(node)
+    order.sort_by(fn(left: Int, right: Int) { (totals[left] <=> totals[right]).then(right <=> left) })
+    loop node in order {
+        pending.push(node)
+        depths.push(depth)
+    }
 }

@@ -1,7 +1,10 @@
 # Port of tests/jet_perf_trace_parts/capture_run.rs:158-197; source verbatim.
 # ORACLE-LITERAL short.out from line181; structured fields reproduce identity tuple lines184-194.
-# Three actual runs each check the exact two ordered identities; volatile profile fields are not compared.
-# The fixture is in jet fmt form, so `run: fn` and its body are one line: its range is 2:1 to 2:29.
+# Three actual runs each keep the same two rows, whether or not a CPU-time sample landed in `run`:
+# a `cpu` row of `run` at line 2, then the one `wall` row of the run's observations of `run`. No
+# other row: the generated entry's own samples count outside the source, as the runtime's and the
+# standard library's do; volatile counts are not compared.
+# The fixture is in jet fmt form, so `run: fn` and its body are one line: the wall row's range is 2:1 to 2:29.
 # PENDING-GRAMMAR(batch-four): os-name alternatives.
 requires: os-name:linux|android
 fixture: Fixtures/Short
@@ -11,51 +14,42 @@ stdout: = short.out
 json: file short-0.jettrace doc $.content.profile.status = "captured"
 json: file short-0.jettrace doc $.content.profile.window_status = "exit"
 json: file short-0.jettrace doc $.content.profile.rows #= 2
-json: file short-0.jettrace doc $.content.profile.rows[0].clock = "wall"
-json: file short-0.jettrace doc $.content.profile.rows[0].symbol.name = "run"
-json: file short-0.jettrace doc $.content.profile.rows[0].source.start_line = 2
-json: file short-0.jettrace doc $.content.profile.rows[0].source.start_column = 1
-json: file short-0.jettrace doc $.content.profile.rows[0].source.end_line = 2
-json: file short-0.jettrace doc $.content.profile.rows[0].source.end_column = 29
-json: file short-0.jettrace doc $.content.profile.rows[1].clock = "cpu"
-json: file short-0.jettrace doc $.content.profile.rows[1].symbol.name = "run"
-json: file short-0.jettrace doc $.content.profile.rows[1].source.start_line = 2
-json: file short-0.jettrace doc $.content.profile.rows[1].source.start_column = 1
-json: file short-0.jettrace doc $.content.profile.rows[1].source.end_line = 2
-json: file short-0.jettrace doc $.content.profile.rows[1].source.end_column = 29
+json: file short-0.jettrace doc $.content.profile.rows[1].clock = "wall"
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"] #= 1
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"][0].symbol.name = "run"
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_line = 2
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_column = 1
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_line = 2
+json: file short-0.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_column = 29
+json: file short-0.jettrace doc $.content.profile.rows[?clock="cpu"][?symbol.name="run"][?source.start_line=2] #= 1
+json: file short-0.jettrace doc $.content.profile.rows[?symbol.name="entry"] #= 0
 step: jet perf run short.jet --out {work}/short-1.jettrace
 exit: 0
 stdout: = short.out
 json: file short-1.jettrace doc $.content.profile.status = "captured"
 json: file short-1.jettrace doc $.content.profile.window_status = "exit"
 json: file short-1.jettrace doc $.content.profile.rows #= 2
-json: file short-1.jettrace doc $.content.profile.rows[0].clock = "wall"
-json: file short-1.jettrace doc $.content.profile.rows[0].symbol.name = "run"
-json: file short-1.jettrace doc $.content.profile.rows[0].source.start_line = 2
-json: file short-1.jettrace doc $.content.profile.rows[0].source.start_column = 1
-json: file short-1.jettrace doc $.content.profile.rows[0].source.end_line = 2
-json: file short-1.jettrace doc $.content.profile.rows[0].source.end_column = 29
-json: file short-1.jettrace doc $.content.profile.rows[1].clock = "cpu"
-json: file short-1.jettrace doc $.content.profile.rows[1].symbol.name = "run"
-json: file short-1.jettrace doc $.content.profile.rows[1].source.start_line = 2
-json: file short-1.jettrace doc $.content.profile.rows[1].source.start_column = 1
-json: file short-1.jettrace doc $.content.profile.rows[1].source.end_line = 2
-json: file short-1.jettrace doc $.content.profile.rows[1].source.end_column = 29
+json: file short-1.jettrace doc $.content.profile.rows[1].clock = "wall"
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"] #= 1
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"][0].symbol.name = "run"
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_line = 2
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_column = 1
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_line = 2
+json: file short-1.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_column = 29
+json: file short-1.jettrace doc $.content.profile.rows[?clock="cpu"][?symbol.name="run"][?source.start_line=2] #= 1
+json: file short-1.jettrace doc $.content.profile.rows[?symbol.name="entry"] #= 0
 step: jet perf run short.jet --out {work}/short-2.jettrace
 exit: 0
 stdout: = short.out
 json: file short-2.jettrace doc $.content.profile.status = "captured"
 json: file short-2.jettrace doc $.content.profile.window_status = "exit"
 json: file short-2.jettrace doc $.content.profile.rows #= 2
-json: file short-2.jettrace doc $.content.profile.rows[0].clock = "wall"
-json: file short-2.jettrace doc $.content.profile.rows[0].symbol.name = "run"
-json: file short-2.jettrace doc $.content.profile.rows[0].source.start_line = 2
-json: file short-2.jettrace doc $.content.profile.rows[0].source.start_column = 1
-json: file short-2.jettrace doc $.content.profile.rows[0].source.end_line = 2
-json: file short-2.jettrace doc $.content.profile.rows[0].source.end_column = 29
-json: file short-2.jettrace doc $.content.profile.rows[1].clock = "cpu"
-json: file short-2.jettrace doc $.content.profile.rows[1].symbol.name = "run"
-json: file short-2.jettrace doc $.content.profile.rows[1].source.start_line = 2
-json: file short-2.jettrace doc $.content.profile.rows[1].source.start_column = 1
-json: file short-2.jettrace doc $.content.profile.rows[1].source.end_line = 2
-json: file short-2.jettrace doc $.content.profile.rows[1].source.end_column = 29
+json: file short-2.jettrace doc $.content.profile.rows[1].clock = "wall"
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"] #= 1
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"][0].symbol.name = "run"
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_line = 2
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"][0].source.start_column = 1
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_line = 2
+json: file short-2.jettrace doc $.content.profile.rows[?clock="wall"][0].source.end_column = 29
+json: file short-2.jettrace doc $.content.profile.rows[?clock="cpu"][?symbol.name="run"][?source.start_line=2] #= 1
+json: file short-2.jettrace doc $.content.profile.rows[?symbol.name="entry"] #= 0

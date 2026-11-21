@@ -130,8 +130,6 @@ DN_RUN_CLASSES: [String]{"comparison", "interop", "gap"}
 
 DN_WHY_SYSCALLS: "traces the system calls a jet command or a built program makes with strace; no jet tool traces another process's system calls"
 
-DN_WHY_FAULT: "makes perf_event_open fail with strace's fault injection to reach jet perf's refusal; jet perf has no way to run as if the kernel refused it"
-
 DN_WHY_IMAGE: "reads a built image's disassembly, symbol table or program headers with objdump; no jet command reads a built image's code or tables"
 
 DN_WHY_INTEROP: "the outside tool is the subject, reading the DWARF, symbols or perf map Jet writes for it"
@@ -158,8 +156,6 @@ DN_RUNS_KEPT: [DnRunKept]{
     {path: "Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case", harness: "zone layout", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
     {path: "Tests/Cases/Perf/zone_sites_are_patched_jumps.case", harness: "zone sites", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
     {path: "Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case", harness: "zone strip", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/SimdWitness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier.case", harness: "SIMD witness", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/SingleThreadRc", harness: "single-thread counts", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
     {path: "Tests/Cases/CLICompilerSpeed/jet_run_of_a_small_program_starts_only_the_compile_thread.case", harness: "compile threads", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/CLICompilerSpeed/jet_run_opens_its_own_file_once.case", harness: "file opens", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/ControlAndData/process_exit_leaves_heap_to_kernel_after_user_cleanup.case", harness: "exit munmaps", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
@@ -167,8 +163,6 @@ DN_RUNS_KEPT: [DnRunKept]{
     {path: "Tests/Cases/JetpackJetOS/nixos_migration_publish_stage_is_private_and_collision_safe.case", harness: "migration publish files", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/Report/ordinary_build_opens_no_network_connection.case", harness: "no network", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/TaskgroupStack/a_joined_task_runs_on_the_joining_thread.case", harness: "joining thread", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/PerfRun/no_counters_reports_unavailable.case", harness: "a host without counters", class: "gap", until: "#6995 c18", why: DN_WHY_FAULT},
-    {path: "Tests/Cases/PerfRun/topdown_unavailable_names_the_refusal.case", harness: "a host without topdown", class: "gap", until: "#6995 c18", why: DN_WHY_FAULT},
 }
 
 // The outside tool `word` names, bare or as a path, or None.
@@ -286,6 +280,44 @@ dn_run_kind: fn(path: String, text: String) -[]> String {
     ""
 }
 
+// A case step's command with each kit placeholder (`{work}`, `{jet}`: braces
+// around one word) spelled as its bare word. The kit expands a placeholder to
+// one argument, so it starts no command: `{jet} perf run` is jet's profiler.
+dn_case_command: fn(text: String) -[]> String {
+    bytes: text.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        end: dn_placeholder_end(bytes, at)
+        if {
+            end > at -> {
+                loop byte in bytes[at + 1..<end] -> out.push(byte)
+                at = end + 1
+            }
+            else -> {
+                out.push(bytes[at])
+                at += 1
+            }
+        }
+    }
+    String.from_bytes(out) ?? text.copy()
+}
+
+// Where the `}` that closes a placeholder opening at `at` is, or `at` when no
+// placeholder opens there.
+dn_placeholder_end: fn(bytes: [U8], at: Int) -[]> Int {
+    open: Int{bytes[at]}
+    if open != 123 -> return at
+    close := at + 1
+    loop close < bytes.len() {
+        byte: Int{bytes[close]}
+        if byte == 125 -> return if close > at + 1 -> close else -> at
+        if byte == 32 || DN_RUN_BREAKS.contains(byte) -> return at
+        close += 1
+    }
+    at
+}
+
 // The outside tool one line of a `kind` file runs, or None. Comment lines and
 // a markdown file's prose run nothing.
 dn_line_tool: fn(kind: String, line: String, fenced: Bool) -[]> String? {
@@ -301,7 +333,7 @@ dn_line_tool: fn(kind: String, line: String, fenced: Bool) -[]> String? {
     if kind != "case" -> return dn_shell_tool(line)
     if !bare.starts_with("step") -> return None
     step: bare.split_once(":") ?? return None
-    dn_shell_tool(step.after)
+    dn_shell_tool(dn_case_command(step.after))
 }
 
 // Every run of an outside tool in `text`, as `path:line: tool`.
@@ -428,6 +460,9 @@ dn_kept_problems: fn(rows: [DnRunKept], found: [String]) -[]> [String] {
     assert(dn_literal_tool("    hidden: [String]{{\"lldb\", \"gdb\"}}") == None)
     assert(dn_literal_tool("    if comm == \"perf\" -> return true") == None)
     assert(dn_literal_tool("    reason: \"perf unavailable\"") == None)
+    assert(dn_line_tool("case", "step: {{work}}/helper/main {{jet}} perf run --lens=cpu walk.jet", false) == None)
+    assert(dn_line_tool("case", "step: strace -f -e inject=perf_event_open:error=ENOENT {{jet}} perf run walk.jet", false) == Val("strace"))
+    assert(dn_line_tool("case", "step: sh -c '{{ objdump -d {{work}}/main; }}'", false) == Val("objdump"))
     assert(dn_run_kind("Tests/Cases/X/a.case", "") == "case")
     assert(dn_run_kind("Tools/Gauntlet/Entries/X/Fixtures/fake-perf", "#!/bin/sh\nexit 0\n") == "shell")
     assert(dn_run_kind("Tools/X/data", "plain\n") == "")

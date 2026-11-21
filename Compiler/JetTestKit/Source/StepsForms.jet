@@ -189,12 +189,14 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
     mode: assertion.mode
     if !kit_steps_batch_form(mode) && mode != "lines-array" -> return None
     matches := false
+    // What a failed count compared: its operator, bound and actual count.
+    compared := ""
     if mode == "delta" {
         left: Int.parse(actual) ?? return Val(kit_expect_verdict("FAIL", "delta subject is not an integer"))
         right: Int.parse(value) ?? return Val(kit_expect_verdict("FAIL", "delta reference is not an integer"))
         bound: Int.parse(extra) ?? return Val(kit_expect_verdict("ERROR", "delta bound is not an integer"))
         within: if left < 0 && right >= 0 -> left >= -bound && right <= bound + left else if right < 0 && left >= 0 -> right >= -bound && left <= bound + right else if left >= right -> left - right <= bound else -> right - left <= bound
-        return Val(if within -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "integer absolute difference exceeds bound"))
+        return Val(if within -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "integer absolute difference exceeds bound: |{left} - {right}| <= {bound} is false"))
     }
     if mode == "machine-output" {
         failure: kit_steps_machine_output(actual, assertion.alternatives)
@@ -239,16 +241,22 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
         expected: kit_steps_line_count_target(value, assertion, state.history) ?? return Val(kit_expect_verdict("ERROR", "numeric RHS unavailable"))
         measured: if mode == "len" -> actual.bytes().len() else -> kit_steps_lines(actual)
         matches = kit_steps_compare(measured, extra, expected)
+        compared = ": {extra} {expected}: actual {measured}"
     } else if mode == "count" {
         target: kit_steps_runtime_expand(assertion.extra, context, state) ?? return Val(kit_expect_verdict("ERROR", "count RHS token unavailable"))
         expected: kit_steps_numeric(target) ?? return Val(kit_expect_verdict("ERROR", "invalid numeric count RHS"))
-        matches = kit_steps_compare(kit_steps_occurrences(actual, value), assertion.alternatives[0], expected)
+        occurrences: kit_steps_occurrences(actual, value)
+        matches = kit_steps_compare(occurrences, assertion.alternatives[0], expected)
+        compared = ": {assertion.alternatives[0]} {expected}: actual {occurrences}"
     } else if mode == "each" {
         expected: kit_steps_numeric(value) ?? return Val(kit_expect_verdict("ERROR", "invalid list RHS"))
         matches = true
         loop line in kit_steps_rust_lines(actual) {
             number: Int.parse(line) ?? return Val(kit_expect_verdict("FAIL", "list item is not an integer"))
-            if !kit_steps_compare(number, extra, expected) -> matches = false
+            if !kit_steps_compare(number, extra, expected) && matches {
+                matches = false
+                compared = ": {extra} {expected}: actual {number}"
+            }
         }
     } else if mode == "count-lines" {
         count := 0
@@ -258,7 +266,9 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             if kit_steps_line_atom(transformed, extra, value) -> count += 1
         }
         target: kit_steps_runtime_expand(assertion.alternatives[assertion.alternatives.len() - 1], context, state) ?? return Val(kit_expect_verdict("ERROR", "line-count RHS unavailable"))
-        matches = count == (kit_steps_numeric(target) ?? -1)
+        wanted: kit_steps_numeric(target) ?? -1
+        matches = count == wanted
+        compared = ": = {wanted}: actual {count}"
     } else if mode == "each-line" {
         matches = true
         loop line in kit_steps_rust_lines(actual) {
@@ -304,5 +314,5 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             previous = at
         }
     }
-    Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {mode} failed"))
+    Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {mode} failed{compared}"))
 }

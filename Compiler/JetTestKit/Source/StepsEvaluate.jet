@@ -60,7 +60,7 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
         paths: kit_steps_entries(path, words) ?? return kit_expect_verdict("ERROR", "{err}")
         expected: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "entries count token unavailable")
         matches: kit_steps_compare(paths.len(), assertion.mode, Int.parse(expected) ?? -1)
-        return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "entries count comparison failed")
+        return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "entries count comparison failed: {assertion.path} {assertion.mode} {expected}: actual {paths.len()}")
     }
     if assertion.stream.contains("|") {
         first := assertion
@@ -163,17 +163,24 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
             if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
             info: files.stat(path) ?? return kit_expect_verdict("ERROR", "file metadata: {err}")
             matches := false
+            actual_text := ""
+            expected_text := value
             if assertion.mode == "size" {
+                expected_text = "{extra} {kit_steps_arithmetic(value) ?? value}"
+                actual_text = "{info.size}"
                 matches = kit_steps_compare(info.size, extra, Int.parse(kit_steps_arithmetic(value) ?? value) ?? -1)
             } else if assertion.mode == "mode" {
+                actual_text = kit_steps_octal_text(info.mode % 4096)
                 matches = info.mode % 4096 == (kit_steps_octal(value) ?? -1)
             } else if assertion.mode == "permissions" {
-                matches = if sys.family() == "windows" -> "{info.readonly}" == value else -> kit_steps_octal_text(info.mode % 4096) == value
+                actual_text = if sys.family() == "windows" -> "{info.readonly}" else -> kit_steps_octal_text(info.mode % 4096)
+                matches = actual_text == value
             } else {
                 bytes: files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file digest read: {err}")
-                matches = crypto.sha256(bytes).hex() == value
+                actual_text = crypto.sha256(bytes).hex()
+                matches = actual_text == value
             }
-            return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file {assertion.mode} comparison failed")
+            return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file {assertion.mode} comparison failed: {assertion.path} {expected_text}: actual {actual_text}")
         }
         if !assertion.rhs_literal && (assertion.mode == "==" || assertion.mode == "!=") {
             other: kit_steps_work_path(value, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "file relation escapes work directory")
@@ -289,15 +296,21 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
         .None -> {}
     }
     matches := false
+    // What a failed count compared: its bound and actual count.
+    compared := ""
     if assertion.mode == "~" || assertion.mode == "~i" -> matches = actual.contains(value) else if assertion.mode == "!~" || assertion.mode == "!~i" {
         matches = !actual.contains(value)
     } else if assertion.mode == "^=" { matches = actual.starts_with(value) } else if assertion.mode == "line" {
         matches = kit_steps_line(actual, value, extra) != None
     } else if assertion.mode == "count" {
-        matches = kit_steps_occurrences(actual, value) == (Int.parse(extra) ?? -1)
+        occurrences: kit_steps_occurrences(actual, value)
+        matches = occurrences == (Int.parse(extra) ?? -1)
+        compared = ": = {extra}: actual {occurrences}"
     } else if assertion.mode == "lines" {
         expected: kit_steps_line_count_target(value, assertion, state.history) ?? return kit_expect_verdict("ERROR", "line-count label missing")
-        matches = kit_steps_lines(actual) == expected
+        lines: kit_steps_lines(actual)
+        matches = lines == expected
+        compared = ": = {expected}: actual {lines}"
     } else if assertion.mode == "before" {
         left: kit_steps_byte_index(actual, value) ?? -1
         right: kit_steps_byte_index(actual, extra) ?? -1
@@ -314,7 +327,7 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
             }
         }
     } else { return kit_expect_verdict("REFUSED", "unsupported assertion: {assertion.mode}") }
-    if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {assertion.mode} failed")
+    if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {assertion.mode} failed{compared}")
 }
 
 kit_steps_exit_test: fn(assertion: KitAssertion, state: KitStepState) -> KitVerdict {

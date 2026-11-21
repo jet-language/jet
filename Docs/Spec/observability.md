@@ -163,14 +163,26 @@ a line's `path`, `line` and `function`, the `helper` named in Jet's terms
 (`stop poll` for every `jet_ir_stop_` poll, another helper its name past
 `jet_ir_` with spaces for `_`) and its `samples`, the most first; `jet
 explain --cost` names the stop poll each loop and each recursive call keeps
-as a cost fact on its line.
+as a cost fact on its line. The generated `entry` function that calls the
+program's `run` is compiler-emitted too: a sample in its own code counts
+outside the sources, as no line of it is theirs, and it is no frame of a
+sample under it, while the lines of `run` inlined into it keep theirs.
 `coverage` is `complete` when every sample landed in those sources and
 `partial` when some ran in the runtime or the toolchain's library, which the
 `reason` counts and, for samples outside every Jet function, names by the
 image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
-the session kept, and counts any sample in Jet code that kept no stack. The
+the session kept, and counts any sample in Jet code that kept no stack.
+Under the task clock that count is the task clocks' own, read from each
+thread's sampler as it closes and from every live one at exit: the CPU time
+each thread ran while sampled, over the period, so the runtime's start and
+exit outside the samplers give none; the kernel's share of it takes no
+sample (`it kept 392 of the 393 samples that 49 ms of CPU time on the
+threads' task clocks while sampled gives, of which time in the kernel takes
+none`). Under another sampler it is the process's CPU time over the
+sampling interval.
+The
 profile's overhead is `measured`: `overhead_ns` is the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
 time a busy machine kept them preempted) plus, for each signal that carried
@@ -191,14 +203,18 @@ allocations (`line 7 samples=12 cpu_us=1500 inclusive=40 allocations=300`;
 `cpu_us` only for a line with samples of its own). When the rows span more
 than one package (the directory that holds a source's `Source/`, else the
 source's own), `cpu by package` follows: each package's samples, CPU time and
-share, heaviest first, at most 12, so a profile of `jet build Compiler` gives
-the compiler's time by phase (`Compiler/JetIR samples=652042
-cpu_us=81505250 share=57%`). A run whose
-samples never reach its sources (a short program, `jet perf test`, `jet
-perf attach`) keeps the observation rows, which attribute to the parsed `run:
-fn` declaration (`fn` through its closing brace) and do not separate the
-functions that `run` calls; their `inclusive_count` and `allocation_count` are
-null.
+share, heaviest first, at most 12, the samples of no package as `(none)`, so
+a profile of `jet build Compiler` gives the compiler's time by phase
+(`Compiler/JetIR samples=652042 cpu_us=81505250 share=57%`); an outside
+`jet perf attach` prints its samples by package the same way. Every profile
+of a run that published observations ends in their `wall` row, which
+attributes to the parsed `run: fn` declaration (`fn` through its closing
+brace), whether or not any CPU-time sample landed in the sources, so a run
+too short for one keeps the same shape as one where some did; the `reason`
+says what the row is. A run whose samples never reach its sources (a short
+program, `jet perf test`, `jet perf attach`) keeps the `cpu` row of the
+observations that timed its CPU before it. Neither separates the functions
+that `run` calls; their `inclusive_count` and `allocation_count` are null.
 
 Unless the run is a causal experiment or a flight recording, each thread
 samples by a perf event of its own where `perf_event_paranoid` allows one. At
@@ -924,12 +940,27 @@ each one it holds as a part, as a jet holds the runtime image its
 compile-time process runs. Code that no image holds (a compile-time
 process's compiled functions) is counted as `unnamed`. It prints the
 `functions` lines before the trace's path (`functions samples=N
-processes=2 threads=35 window_ms=1000 lost=0 unnamed=N`, then a line a
-function, its share of the samples whose innermost frame it is, `self`,
-and with it anywhere on the stack, `total`: `41.6% self  68.2% total ·
-unit.rt_text_append_owner`), and the trace holds them as the
-`functions` receipt section (type `JetPerfFunctions`), which `jet perf
-view` shows. A hung `jet check` or `jet debug` started plainly is profiled
+processes=2 threads=35 window_ms=1000 lost=0 unnamed=N`), then how far each
+sample's stack was unwound (`stacks unwound=990 cut=9 broken=4`: to `main`
+or a thread's or a task's first function, cut at the kernel's frame limit
+`/proc/sys/kernel/perf_event_max_stack`, or broken where a frame pointer
+was lost), then a line a function, its share of the samples whose
+innermost frame it is, `self`, and with it anywhere on the stack, `total`,
+and its declaration's file and line when its image's `.debug_jetline` names
+them: `41.6% self  68.2% total · Statements.sema_stmt_check at
+Compiler/JetSema/Source/Statements.jet:212`. When the samples worked for
+more than one package (each sample's innermost frame in a package of the
+program; Core's frames work for their caller's), `cpu by package` follows,
+in the form a run's profile prints it, so an attach to a running compiler
+splits its time by phase (`Compiler/JetSema samples=612 cpu_us=612000
+share=61%`, the samples of no package as `(none)`). The trace holds all of
+it as the `functions` receipt section (type `JetPerfFunctions`), with the
+samples' folded stacks (`stacks`: each stack's functions from the
+outermost, `;` between them, and its samples, a stack under one sample in
+100 folded into its caller's), which `jet perf view` shows, the stacks as
+the flame graph's call tree (`0 main 100.0% ####…`, a line a function,
+depth first and the heaviest call first). A hung `jet check` or `jet debug`
+started plainly is profiled
 this way. When the kernel won't sample it (another user's process, or
 `perf_event_paranoid` above 2), the attach is E2124 with the flag to start
 it with.
@@ -1263,7 +1294,8 @@ stdin is empty too. D-DBG-VERBS1=A names the commands:
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by
-  its Jet name, or a runtime routine by its symbol; `disas LINE`,
+  its Jet name or its symbol (`disas main.run__entry` lists `entry`), or a
+  runtime routine by its symbol; `disas LINE`,
   `disas FILE:LINE` and `disas FILE:A-B` list only the rows of those lines.
   `--bytes` adds each instruction's encoding. The heading names the
   function, its lines, the build's level, its address and size

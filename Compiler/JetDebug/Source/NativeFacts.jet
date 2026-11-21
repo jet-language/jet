@@ -5,7 +5,7 @@
 // their location lists and their types. The reader knows exactly the
 // abbreviations and forms that writer emits; a unit using any other form
 // ends the read of that unit.
-use jet_backend.[X64DebugEncoding, X64DebugEnumerator, X64DebugMember, X64DebugSource, X64DebugType, X64DebugTypeKind, X64DebugVariant, X64Jetline, X64JetlineFunction, X64ModuleDebug, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_dwarf_sources_parse, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
+use jet_backend.[X64DebugEncoding, X64DebugEnumerator, X64DebugMember, X64DebugSource, X64DebugType, X64DebugTypeKind, X64DebugVariant, X64Jetline, X64JetlineFunction, X64ModuleDebug, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_dwarf_sources_parse, x64_jetline_entry_runs, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
 
 // The DW_TAG codes of the DIEs the reader keeps; it skips every other.
 NATIVE_TAG_ENUM: 0x04
@@ -1278,9 +1278,9 @@ native_image_entry: fn(image: NativeImage, codes: [NativeCode]) -> Int Never! {
 // main's calls lead to `lea rdi, [rip + entry]`, the address it passes
 // jet_rt_main; a main that owns the run calls the entry after its runtime
 // calls. The first call or `lea` target that starts one of `functions`; -1
-// at any other instruction before it. A generated entry function (JetIR
-// Build.jet ir_entry_function, named `entry`, at the file and line of the
-// entry it runs) stands for that entry when the image keeps it whole.
+// at any other instruction before it. A generated entry function stands for
+// the entry it runs (Jetline.jet x64_jetline_entry_runs) when the image
+// keeps it whole.
 native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> Int Never! {
     at := if (code.len() > 0 && code[0] == U8{0x53}) -> 1 else -> 0
     loop at < code.len() {
@@ -1298,14 +1298,8 @@ native_main_entry: fn(code: [U8], low: Int, functions: [X64JetlineFunction]) -> 
         }
         loop (index, found) in functions {
             if found.low != target -> next
-            if found.name == "entry" {
-                loop (other, run) in functions {
-                    if other != index && run.name != "entry" && run.file == found.file && run.dir == found.dir && run.decl == found.decl {
-                        return other
-                    }
-                }
-            }
-            return index
+            stands: x64_jetline_entry_runs(functions)[index]
+            return if stands >= 0 -> stands else -> index
         }
     }
     -1

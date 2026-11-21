@@ -79,7 +79,9 @@ kit_steps_json_filter_matches: fn(value: Dyn, filter: KitJSONFilter) -> Bool {
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
     }
     loop actual in values {
-        if kit_steps_json_leaf(actual, op, expected, text, 0) == None -> return true
+        if kit_steps_json_leaf(actual, "$.{filter.key}", op, expected, text, 0) == None {
+            return true
+        }
     }
     false
 }
@@ -208,13 +210,15 @@ kit_steps_json_relation: fn(actual: String, assertion: KitAssertion, history: [K
         }
         return Val("JSON relation values are equal to {label}")
     }
-    if left.len() != right.len() -> return Val("JSON relation selection lengths differ")
+    if left.len() != right.len() {
+        return Val("JSON relation selection lengths differ: {assertion.json_path} selects {left.len()} values, {right.len()} in {label}")
+    }
     loop i in 0..<left.len() {
         if assertion.json_op == "#==" || assertion.json_op == "#>=" {
             a: kit_steps_json_size(left[i]) ?? return Val("JSON count relation needs an array or object")
             b: kit_steps_json_size(right[i]) ?? return Val("JSON count relation needs an array or object")
             if (assertion.json_op == "#==" && a != factor * b) || (assertion.json_op == "#>=" && a < factor * b) {
-                return Val("JSON count relation differs")
+                return Val("JSON count relation differs: {assertion.json_path} {assertion.json_op} {factor * b} ({assertion.value}): actual {a}")
             }
         } else if !kit_steps_json_equal(left[i], right[i]) {
             return Val("JSON relation values differ")

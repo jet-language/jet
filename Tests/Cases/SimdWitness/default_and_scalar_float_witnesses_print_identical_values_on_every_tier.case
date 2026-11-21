@@ -1,8 +1,5 @@
-# tests/simd_witness.rs::default_and_scalar_float_witnesses_print_identical_values_on_every_tier at tests/simd_witness.rs:246; hand-port (default_run is `jet run` (it ran twice, once labeled interpreter); build_and_run_full is `jet build` + the binary; assert_native_simd_artifact rebuilt the generated Rust at opt-level 3, so the packed-arithmetic objdump check reads the `jet build --release` binary; assert_web_simd_artifacts_run is `jet build --target web` + `node app.js`)
+# tests/simd_witness.rs::default_and_scalar_float_witnesses_print_identical_values_on_every_tier at tests/simd_witness.rs:246; hand-port (default_run is `jet run` (it ran twice, once labeled interpreter); build_and_run_full is `jet build` + the binary; assert_native_simd_artifact rebuilt the generated Rust at opt-level 3, so the packed-arithmetic check lists `auto` in `jet debug` on the `jet build --release` binary; assert_web_simd_artifacts_run is `jet build --target web` + `node app.js`)
 fixture: DefaultAndScalarFloatWitnessesPrintIdenticalValuesOnEveryTier.fixture
-# The packed-arithmetic claim reads the release binary with `objdump`; a host without it
-# cannot prove the claim, so the row skips there rather than passing without it.
-requires: tool:objdump
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
@@ -21,8 +18,16 @@ step native: built
 exit: 0 # tests/simd_witness.rs:103
 stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
 when arch x86_64
-step: objdump -d .jet/build/main
-exit: 0 # tests/simd_witness.rs:128
+# The release build again with its debug information, which `jet debug`
+# reads to list `auto`'s code; the code is the release build's. No
+# disassembler is on PATH.
+step: jet build --release --debug-info=true main.jet
+exit: 0
+step: jet debug .jet/build/main
+env: PATH={work}/no-tools
+stdin: default_and_scalar_float_witnesses_print_identical_values_on_every_tier.stdin
+exit: 0
+stdout: ~ "(Jet) disas auto\nauto" # `auto`'s code, as release inlines it
 stdout: ~any mulpd vmulpd addpd vaddpd # tests/simd_witness.rs:134 packed arithmetic stays in the release binary
 end when
 step: jet build --target web main.jet
