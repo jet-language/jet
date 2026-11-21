@@ -24,7 +24,7 @@ use {
     native_dump_crypto: core.crypto
     native_dump_files: core.files
     native_dump_hex: core.encoding.hex
-    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
+    jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP, x64_image_function_find, x64_image_functions]
 }
 
 // "JETDUMP1", the dump's first word.
@@ -144,7 +144,9 @@ NativeDumpTask: struct {
 // them: the reached memory's (the memory sections'), and the records'
 // (every other byte: its words, the ring, the tasks, the cut ranges and the
 // sections' own words); then its memory budget and the bytes it cut off
-// past it, as the cut section states them.
+// past it, as the cut section states them; and the image's sized functions
+// (x64_image_functions), which name the runtime routine a sample with no
+// Jet frame is in, as `jet perf view` names it.
 NativeDumpOpened: struct {
     session: NativeSession,
     ring: [U8],
@@ -157,6 +159,7 @@ NativeDumpOpened: struct {
     records: Int,
     budget: Int,
     cut_off: Int,
+    routines: [X64ImageFunction],
 }
 
 // Open the dump at `path`, with its image beside it.
@@ -241,11 +244,12 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     // The image's code facts, which name the symbols `disassemble` lists by:
     // a dump session's `binary` is the dump, not the image.
     facts: native_eval_image_of(elf)
+    routines: x64_image_functions(elf).functions
     backing := bytes.move()
     backing.extend(elf.move())
     dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: backing.move(), cut: cut}, registry: registry, image: "{image_file}"}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)}
-    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, build: build, image_file: image_file, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
+    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, build: build, image_file: image_file, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off, routines: routines})
 }
 
 // `build` as the writer names its image beside the dump (PerfSamples.jet
@@ -425,23 +429,25 @@ native_dump_redact: fn(locals: &[NativeLocal]) Never! {
     }
 }
 
-// The flight ring's records, one line each, oldest first.
-native_dump_events: fn(image: NativeImage, ring: [U8]) -> [String] Never! {
+// The flight ring's records, one line each, oldest first; `routines` (the
+// image's sized functions) name where a sample with no Jet frame is.
+native_dump_events: fn(image: NativeImage, ring: [U8], routines: [X64ImageFunction]) -> [String] Never! {
     shown := [String]{}
     at := 0
     loop at + 8 <= ring.len() {
         head: native_dump_word(ring, at)
         words: (head >> 48) & 2047
         if words == 0 || at + 8 * words > ring.len() -> break
-        shown.push(native_dump_event(image, ring, at, words))
+        shown.push(native_dump_event(image, ring, at, words, routines))
         at += 8 * words
     }
     shown
 }
 
 // One record of `words` words at `at` of the ring, as a line: its kind, its
-// task, what it holds, and the innermost Jet frame of its stack.
-native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> String Never! {
+// task, what it holds, and the innermost Jet frame of its stack; a sample
+// with none, the routine of `routines` its address is in.
+native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int, routines: [X64ImageFunction]) -> String Never! {
     head: native_dump_word(ring, at)
     kind: (head >> 59) & 15
     id: head & 281474976710655
@@ -465,7 +471,10 @@ native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> St
             else -> "a thread"
         }
         found: native_dump_where(image, ring, at, id, 1, sites)
-        return "sample  {who}{if found == "" -> "  in the runtime" else -> found}"
+        if found != "" -> return "sample  {who}{found}"
+        routine: x64_image_function_find(routines, id)
+        if routine < 0 -> return "sample  {who}  in the runtime"
+        return "sample  {who}  in the runtime at {routines[routine].name}"
     }
     if kind == NATIVE_DUMP_SPAWN {
         return "spawn   task {id}{native_dump_where(image, ring, at, 0, 1, words)}"
@@ -774,10 +783,11 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
 }
 
 // A CPU-time sample shows its task and where it was: the first Jet frame of
-// its stack, or the runtime when none is; its trailing time, task and count
-// word are no call sites. A cite of the sample before, which no flight ring
-// holds, is a corrupt record. A sampler's end shows its serial and count.
-#Test("a sample event names its task and its place, the runtime when no Jet frame holds it") {
+// its stack, or when none is, the runtime and the routine its address is
+// in; its trailing time, task and count word are no call sites. A cite of
+// the sample before, which no flight ring holds, is a corrupt record. A
+// sampler's end shows its serial and count.
+#Test("a sample event names its task and its place, the runtime's routine when no Jet frame holds it") {
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     // Address 0x1000, one call site, the time, task 3 and sampler 1's count
     // word; the same outside every task under the timer; an address alone,
@@ -789,7 +799,10 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
     loop record in records {
         loop word in record -> ring.extend(native_low_bytes(word, 8))
     }
-    assert_eq(native_dump_events(image, ring), [String]{"sample  task 3  in the runtime", "sample  outside every task  in the runtime", "sample  a thread  in the runtime", "corrupt sample record: its last call site word cites the sample before, which a flight ring never holds", "ended   sampler 1 at count 250000"})
+    routines: [X64ImageFunction]{{start: 0x0f00, size: 0x0200, name: "unit_os_syscall_i64__asm"}}
+    assert_eq(native_dump_events(image, ring, routines), [String]{"sample  task 3  in the runtime at unit_os_syscall_i64__asm", "sample  outside every task  in the runtime at unit_os_syscall_i64__asm", "sample  a thread  in the runtime at unit_os_syscall_i64__asm", "corrupt sample record: its last call site word cites the sample before, which a flight ring never holds", "ended   sampler 1 at count 250000"})
+    // An address no sized function holds names the runtime alone.
+    assert_eq(native_dump_events(image, ring, [X64ImageFunction]{{start: 0x3000, size: 16, name: "elsewhere"}})[1], "sample  outside every task  in the runtime")
 }
 
 // A dump's header words: the magic, the version, then the pid, time, bias,

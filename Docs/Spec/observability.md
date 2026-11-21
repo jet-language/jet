@@ -1194,7 +1194,9 @@ main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
 oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
 `wake`, `clock`, `wait` and `io`. A CPU-time sample also names its task
 (`sample  task 1  at check main.jet:9`, or `outside every task`), and one
-whose stack holds no Jet frame is `in the runtime`. `disassemble` (`disas`)
+whose stack holds no Jet frame is `in the runtime`, at the function its
+address is in as `jet perf view` names it from the image's symbol table
+(`in the runtime at unit_os_syscall_i64__asm`). `disassemble` (`disas`)
 lists code as the live console's does (below), its bytes read from the
 image, the selected frame's pc's row ending `<- here`. A run-control command
 answers that a dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case
