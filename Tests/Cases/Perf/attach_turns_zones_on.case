@@ -5,9 +5,9 @@
 # window, each thread's CPU time sampled every 125 microseconds there as
 # under `jet perf run`, not every 10 ms as its flight ring is. An attach
 # without `--zones=` records none, and charges each of the ring's samples
-# 10 ms. The trace's run window is the attach's window, which holds the
-# zones window: at least the 500 ms asked for and no longer than the attach
-# took, with the program's CPU in it, to the nanosecond.
+# 10 ms. The trace's run window is the zones window, the program's own
+# from its opening to its close: about the 500 ms asked for, never the
+# attach's whole run, with the program's CPU in it, to the nanosecond.
 requires: os-name:linux
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
@@ -27,19 +27,22 @@ capture: took = elapsed
 file: zones.jettrace ~ "\"kind\":\"zone\"" # the window's zones are trace rows
 file: zones.jettrace ~ "\"kind\":\"frame_mark\"" # and its frame marks
 file: zones.jettrace ~ "\"kind\":\"plot\"" # and its plots
-json: file zones.jettrace doc $.content.profile.window_status = "live" # the header's window is the attach's, which the zones were on in
-json: file zones.jettrace doc $.content.profile.window_wall_ns >= 500000000 # its wall time: at least the 500 ms window, not the run since it started
-json: file zones.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # and no more than the attach took, as this case timed it
+json: file zones.jettrace doc $.content.profile.window_status = "live" # the header's window is the zones window, which the program sampled in
+json: file zones.jettrace doc $.content.profile.window_reason ~ "the zones window process " # the program's own window, not the attach's from its first read to its last
+json: file zones.jettrace doc $.content.profile.window_wall_ns >= 400000000 # about the 500 ms asked for: the request stands that long, and the program's publications, every 100 ms, open the window at most one late
+json: file zones.jettrace doc $.content.profile.window_wall_ns <= 750000000 # and close it at the first after the request's removal, within the 250 ms the attach then waits for its row
+json: file zones.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # inside the attach, as this case timed it
 capture: wall file zones.jettrace doc $.content.profile.window_wall_ns
 json: file zones.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in the window: its tick loop ran
 json: file zones.jettrace doc $.content.profile.window_cpu_ns <= 2*{cap:wall} # at most the window's wall on each of its two threads, the loop's and the runtime's observation writer
-json: file zones.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_resolution_ns = 1 # counted by each thread's schedstat, not in ticks
+json: file zones.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "process" # counted by the program's process CPU-time clock
+json: file zones.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_resolution_ns = 1 # to the nanosecond, not in ticks
 json: file zones.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.interval_us = 125 # the window's samples, one per 125 microseconds of CPU time
 json: file zones.jettrace doc $.content.profile.overhead_status = "measured" # the window's handler time and signals against its CPU time
 step: jet perf view zones.jettrace
 exit: 0
 stdout: ~ "zone tick count=" # the zones the window recorded
-stdout: ~ " window=live run_wall=" # the header's window is the attach's
+stdout: ~ " window=live run_wall=" # the header's window is the zones window
 stdout: !~ " run_cpu=0ns" # with the program's CPU in it
 stdout: !~ "run_cpu_resolution=" # counted to the nanosecond
 stdout: ~ " · live.jet:13 " # the window's samples inside them, on the tick loop's line

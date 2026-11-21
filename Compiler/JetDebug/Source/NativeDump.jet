@@ -402,8 +402,8 @@ native_dump_loaded: fn(blocks: &[NativeBlock], elf: [U8], from: Int, bias: Int) 
     }
 }
 
-// The index among `frames` of Jet frame `jet`, as native_debug_backtrace
-// numbers them (0 is the innermost Jet frame); None past the last.
+// The index among `frames` of Jet frame `jet`, as a dump's `bt` numbers
+// them (0 is the innermost Jet frame); None past the last.
 native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
     seen := 0
     loop (index, frame) in frames {
@@ -602,9 +602,13 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
     word: command.before(" ")
     operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
     text: if word == {
+        // A dump numbers its Jet frames alone: the stopping thread's
+        // registers are those of the routine that wrote the dump
+        // (JetRuntime PerfSamples.jet perf_flight_dump), whose frames are
+        // the capture's, not the program's.
         "bt" | "backtrace" -> {
             frames: session.backtrace() ?? return Err(err)
-            native_debug_backtrace(frames)
+            native_debug_backtrace(frames, routines: false)
         }
         "locals" -> {
             locals := native_dump_locals(session) ?? return Err(err)

@@ -1,6 +1,6 @@
 # Port of tests/cli_parts/budget.rs:892-1040.
-# Machine shapes are jet.status/v1 (schema-first, `reports`) and jet.report/v3
-# (`file`, `line`, `col`, `span`); the Rust-era sorted envelope is gone.
+# Machine shapes are jet.status/v1 (schema-first, `reports`) and jet.report/v4
+# (the diagnostic record's `span` and `origin`, then `line`, `col`); the Rust-era sorted envelope is gone.
 fixture: Fixtures/ExactJSON
 step: jet budget check --json
 cwd: valid
@@ -22,13 +22,13 @@ stdout: machine-output = [status]
 stdout: ^= "{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[],\"budget\":{" # the envelope stays schema-first on a compiler failure
 json: stdout doc $.budget.failure_kind = "compiler"
 json: stdout doc $.budget.report = null
-json: stdout doc $.budget.diagnostics[0].schema = "jet.report/v3"
-json: stdout doc $.budget.diagnostics[0].file = "src/run.jet"
+json: stdout doc $.budget.diagnostics[0].schema = "jet.report/v4"
+json: stdout doc $.budget.diagnostics[0].span.file = "src/run.jet"
 json: stdout doc $.budget.diagnostics[0].line : int # the compiler diagnostic is located
 json: stdout doc $.budget.diagnostics[0].col : int # the compiler diagnostic is located
-json: stdout doc $.budget.diagnostics[0].span keys = ["start","end"]
+json: stdout doc $.budget.diagnostics[0].span keys = ["file","start","end"]
 json: stdout doc $.budget.diagnostics[0].span.end : int # the compiler diagnostic has a byte span
-json: stdout doc $.budget.diagnostics[0] !has "source" # v3 carries no Rust-era source object
+json: stdout doc $.budget.diagnostics[0] !has "source" # v4 carries no Rust-era source object
 step: jet budget check --json
 exit: 1
 stderr: empty
@@ -39,8 +39,8 @@ json: stdout doc $.budget.report = null
 json: stdout doc $.budget.report_path = null
 json: stdout doc $.budget.plan = null
 json: stdout doc $.budget.results #= 0
-json: stdout doc $.budget.diagnostics[0].schema = "jet.report/v3"
+json: stdout doc $.budget.diagnostics[0].schema = "jet.report/v4"
 json: stdout doc $.budget.diagnostics[0].code = "E2908"
-json: stdout doc $.budget.diagnostics[0].file = null
+json: stdout doc $.budget.diagnostics[0].origin = null
 json: stdout doc $.budget.diagnostics[0].line = null
 json: stdout doc $.budget.diagnostics[0].span = null

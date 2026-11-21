@@ -1,0 +1,14 @@
+# Claim: `jet doc`'s failure line names a function's whole failure
+# contract. Under the implicit default, a function returning `String`
+# fails as `String Err!`, as one with no return type fails as `Err!`;
+# the signature's `-> String` leaves the `Err` unwritten, the failure
+# line and the JSON `failure_contract` do not. The fixture's `greeting`
+# returns a String, and `run` returns nothing.
+fixture: AValueReturnNamesItsImplicitDefaultFailure.fixture
+env: NO_COLOR=1
+step: jet doc --json {work}/greeting.jet
+exit: 0
+stdout: = a_value_return_names_its_implicit_default_failure.json.expected
+step: jet doc {work}/greeting.jet
+exit: 0
+file: .jet/doc/index.md = a_value_return_names_its_implicit_default_failure.md.expected

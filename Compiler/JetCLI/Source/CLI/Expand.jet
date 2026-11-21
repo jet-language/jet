@@ -3,7 +3,7 @@
 use {
     jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, Type, diagnostic_column_at, diagnostic_line_at, type_name]
-    jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_shown_type, failure_contract_source]
+    jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_shown_name, failure_contract_shown_type, failure_contract_source]
     jet_sema.[sema_derive_distinct_forward_source]
     jet_semindex.[
         SemCallable,
@@ -390,7 +390,7 @@ jet_cli_expand_callable: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [
         failure_source := if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
         if callable.failure_contract == .Val(contract) {
             effective: failure_contract_shown_type(contract)
-            failure = type_name(effective)
+            failure = failure_contract_shown_name(contract)
             failure_source = failure_contract_source(contract)
             names := [String]{}
             if effective == .Result(_, err) {

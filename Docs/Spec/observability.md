@@ -1023,15 +1023,21 @@ did. Where the kernel keeps no schedstat, the CPU is the process's `/proc`
 utime and stime at each end, in clock ticks, and `jet perf view` names that
 resolution after it (`run_cpu=30000000ns run_cpu_resolution=10ms`). The
 trace's `window` receipt section (type `JetPerfAttachWindow`) records the
-CPU's clock (`schedstat` or `ticks`), its resolution in nanoseconds and the
-threads that exited. The `native` row `process_cpu` keeps the program's CPU
-since its run started. An outside sample's window is its samplers' own: it
-opens once the kernel's samplers are open and closes before they are
-closed, and its CPU is the schedstat run time of the threads they sampled,
-the named process's and its children's, so the CPU its samples stand for
-is in the trace. A second of wall time is a second of a busy thread's CPU
-only when the machine has a CPU free for it; under load the same window
-holds fewer samples and as much less CPU.
+CPU's clock (`schedstat`, `ticks` or `process`), its resolution in
+nanoseconds and the threads that exited. The `native` row `process_cpu`
+keeps the program's CPU since its run started. A window whose samples the
+trace holds is their own, so the run window is the CPU they stand for. An
+outside sample's window is its samplers': it opens once the kernel's
+samplers are open and closes before they are closed, and its CPU is the
+schedstat run time of the threads they sampled, the named process's and
+its children's. A `--zones=` window's is the program's: from its opening
+to its close on the program's monotonic clock, as its window row in
+`.spans` names them, about the duration asked for, and its CPU is the
+process's CPU-time clock in it, to the nanosecond, the time of threads
+that exited in it included (clock `process`); the window's reason says
+so. A second of wall time is a second of a busy thread's CPU only when the
+machine has a CPU free for it; under load the same window holds fewer
+samples and as much less CPU.
 
 No record is lost silently. The runtime counts each record a write refused,
 and whenever the count grew the writer keeps a tally record in the ring (a
@@ -1167,7 +1173,9 @@ task or channel handle its code consumed (a task's `detach`) as
 `<consumed>`, here and in live sessions.
 The runtime's frames between the stop and the program are stepped out of
 by the image's call frame information (`.eh_frame`), so a register they
-saved holds its value in the program's frames.
+saved holds its value in the program's frames. A dump's `bt` numbers its
+Jet frames alone: the stopping thread's registers are those of the routine
+that wrote the dump, whose frames are the capture's.
 A parameter the code no longer keeps where a frame stopped reads the value
 its caller passed, as the call recorded it (a DWARF call site parameter,
 read through `DW_OP_entry_value`); when the call recorded none, or the body
@@ -1351,9 +1359,14 @@ D-DBG-VERBS1=A names the commands:
   traps. The placed code keeps no state per thread or task, so the first hit
   on a thread or task that starts later runs on without a trap like any
   other hit.
-- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
-  toward the callers and `down` back. `locals` and `print <expr>` (`p`)
-  read the selected frame until the program moves.
+- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it, #0 the
+  innermost. At a fault or a stopping exit inside a runtime routine, the
+  routines' frames come first (`#0  jet_rt_mem_move  at 0x407203`), up
+  to the Jet frame the stop selected; `frame` shows one with the
+  instruction it is at, a caller's call. The program's entry and the
+  routines below the innermost Jet frame aren't shown. `up` moves toward
+  the callers and `down` back. `locals` and `print <expr>` (`p`) read the
+  selected frame until the program moves.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by

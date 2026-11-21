@@ -1,8 +1,10 @@
-// The one `jet.report/v3` machine projection of a diagnostic
-// (`to_report_with_clears`, `report_clear_counts`, `render_all_json`, and
-// `ReportPath`, `ReportEnvelope.json`; the `build_error` member is
-// `JetErrorReport.to_json`). Every `--json` surface that carries diagnostics
-// serializes them here; the status envelope around them is Status.jet.
+// The one `jet.report/v4` machine projection of a diagnostic: the one
+// CompilerDiagnostic record (DiagnosticRecord, version 3), then the report
+// extension (`to_report_with_clears`, `report_clear_counts`,
+// `render_all_json`, and `ReportPath`, `ReportEnvelope.json`; the
+// `build_error` member is `JetErrorReport.to_json`). Every `--json` surface
+// that carries diagnostics serializes them here; the status envelope around
+// them is Status.jet.
 use {
     cli_files: core.files
     jet_foundation.[
@@ -10,25 +12,29 @@ use {
         DiagnosticBuildError,
         DiagnosticCause,
         DiagnosticCryptoMisuseReason,
-        DiagnosticFixSafety,
         DiagnosticMoment,
         DiagnosticNoFixReasonKind,
         DiagnosticOrigin,
+        DiagnosticRecord,
+        DiagnosticRecordOrigin,
+        DiagnosticRecordSpan,
         DiagnosticSourceTexts,
-        DIAGNOSTIC_LINT,
-        TextEdit,
         diagnostic_from_registry,
         diagnostic_display_name,
-        diagnostic_is_tidy,
+        diagnostic_record,
+        diagnostic_repair_paths,
         diagnostic_source_column,
         diagnostic_source_line,
         diagnostic_source_position,
         diagnostic_source_texts,
+        diagnostic_tier_word,
+        sha256_hex,
     ]
+    jet_eval.[jet_eval_compiler_services_record_origin, jet_eval_compiler_services_record_span, jet_eval_compiler_services_record_value]
     jet_pkg_model.[WorkspaceDeclarationCache]
 }
 
-JET_CLI_REPORT_SCHEMA: "jet.report/v3"
+JET_CLI_REPORT_SCHEMA: "jet.report/v4"
 
 // `std.env.current_dir`: the base that makes a relative report path
 // absolute. `None` when the process has no readable working directory.
@@ -102,7 +108,7 @@ jet_cli_report_root: fn(start: String) -[FS, Env]> String? Never! {
     None
 }
 
-// The jet.report/v3 path of `value` under `base`: relative to the folder jet
+// The report path of `value` under `base`: relative to the folder jet
 // ran in when the file is under it, with a `../` step for each folder up to
 // another file of the project that folder belongs to, and absolute for a file
 // outside that project or when the working directory is unknown.
@@ -159,16 +165,6 @@ jet_cli_report_moment: fn(moment: DiagnosticMoment) -> String Never! {
         .Run -> "run"
         .Test -> "test"
         .Tool -> "tool"
-    }
-}
-
-jet_cli_report_safety: fn(safety: DiagnosticFixSafety) -> String Never! {
-    if safety == {
-        .Formatting -> "formatting"
-        .BehaviorPreserving -> "behavior-preserving"
-        .APIChanging -> "api-changing"
-        .TargetChanging -> "target-changing"
-        .NeedsReview -> "needs-review"
     }
 }
 
@@ -305,49 +301,6 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
     "{{{fields.join(",")}}}"
 }
 
-// How many edits `diagnostic` offers: the primary repair with the edits
-// applied beside it, then any source-derived alternatives.
-jet_cli_report_edit_count: fn(diagnostic: Diagnostic) -> Int Never! {
-    count := 0
-    if diagnostic.edit != None -> count = 1 + diagnostic.fix_edits.len()
-    if diagnostic.structured == .Val(structured) {
-        if structured == {
-            .SuggestedEdits(alternatives) -> count += alternatives.len()
-            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
-        }
-    }
-    count
-}
-
-// The `fix_edits` rows of `diagnostic`, in jet_cli_report_edit_count's
-// order, each naming the file it changes: its own (TextEdit.path), else
-// `report_file`.
-jet_cli_report_edits_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, report_file: String, grade: String) -> [String] Never! {
-    rendered := [String]{}
-    if diagnostic.edit == .Val(edit) {
-        rendered.push(jet_cli_report_edit_json(edit, base, report_file, grade))
-        loop other in diagnostic.fix_edits {
-            rendered.push(jet_cli_report_edit_json(other, base, report_file, grade))
-        }
-    }
-    if diagnostic.structured == .Val(structured) {
-        if structured == {
-            .SuggestedEdits(alternatives) -> {
-                loop alternative in alternatives {
-                    rendered.push(jet_cli_report_edit_json(alternative, base, report_file, grade))
-                }
-            }
-            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
-        }
-    }
-    rendered
-}
-
-jet_cli_report_edit_json: fn(edit: TextEdit, base: JetCLIReportBase?, report_file: String, grade: String) -> String Never! {
-    file: if edit.path == .Val(named) -> jet_cli_json_string(jet_cli_report_file(base, named)) else -> jet_cli_json_string(report_file)
-    "{{\"file\":{file},\"span\":{jet_cli_report_span(edit.span.start, edit.span.end)},\"new_text\":{jet_cli_json_string(edit.new_text)},\"safety\":{grade}}}"
-}
-
 jet_cli_report_same_origin: fn(left: DiagnosticOrigin?, right: DiagnosticOrigin?) -> Bool Never! {
     first: left ?? return right == None
     second: right ?? return false
@@ -393,23 +346,65 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
 // `base` the same way.
 jet_cli_report_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int) -> String Never! {
     sources := diagnostic_source_texts()
-    jet_cli_report_json_with(diagnostic, base, file, source, clears, sources)
+    digest: if jet_cli_report_names_batch(diagnostic) -> sha256_hex(source) else -> ""
+    jet_cli_report_json_with(diagnostic, base, file, source, digest, clears, sources)
+}
+
+// Whether a span of `diagnostic` or of its causes indexes the batch text: one
+// with no origin of its own.
+jet_cli_report_names_batch: fn(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.span != None && diagnostic.origin == None -> return true
+    loop cause in diagnostic.cause {
+        if cause.span != None && cause.origin == None -> return true
+    }
+    false
+}
+
+// The SHA-256 of a batch's `source` when a report names it
+// (jet_cli_report_names_batch), else "": the batch text is hashed once.
+jet_cli_report_batch_digest: fn(diagnostics: [Diagnostic], source: String) -> String Never! {
+    loop diagnostic in diagnostics {
+        if jet_cli_report_names_batch(diagnostic) -> return sha256_hex(source)
+    }
+    ""
+}
+
+// The file and origin a span names: `origin`'s file under `base`, else the
+// batch's (`file`, the batch text's `digest`); handed text ("") names no path.
+jet_cli_report_origin: fn(origin: DiagnosticOrigin?, base: JetCLIReportBase?, file: String, digest: String) -> DiagnosticRecordOrigin Never! {
+    if origin == .Val(placed) {
+        named: jet_cli_report_file(base, placed.path)
+        return DiagnosticRecordOrigin{path: if named.len() > 0 -> String?{Val(named)} else -> String?{None}, source_digest: "{placed.revision}"}
+    }
+    DiagnosticRecordOrigin{path: if file.len() > 0 -> String?{Val("{file}")} else -> String?{None}, source_digest: "{digest}"}
+}
+
+// The record members of a report (CompilerDiagnostic version 3, the one
+// writer jet_eval_compiler_services_record_value), as JSON members.
+jet_cli_report_record_members: fn(record: DiagnosticRecord) -> String Never! {
+    if jet_cli_compiler_checked_value(jet_eval_compiler_services_record_value(record)) == .Object(fields) {
+        return jet_cli_status_fields_json(fields)
+    }
+    panic("internal compiler error: a CompilerDiagnostic value printed as no object")
 }
 
 // jet_cli_report_json over a batch's indexed sources (`sources`, Render.jet):
-// each source a line or column reads is indexed once per batch.
-jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int, sources: &DiagnosticSourceTexts) -> String Never! {
-    // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
-    // the binding `report_file` owns its own.
-    report_file := file.copy()
-    if diagnostic.origin == .Val(origin) -> report_file = jet_cli_report_file(base, origin.path)
-    // A tidy error's kind is its severity (diagnostic_is_tidy).
-    severity: if {
-        diagnostic.severity != DIAGNOSTIC_LINT -> "error"
-        diagnostic_is_tidy(diagnostic) -> "tidy"
-        else -> "warning"
+// each source a line or column reads is indexed once per batch. `digest` is
+// the batch text's (jet_cli_report_batch_digest). A jet.report/v4 report is
+// `schema`, the record, then the report extension.
+jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, digest: String, clears: Int, sources: &DiagnosticSourceTexts) -> String Never! {
+    origin: jet_cli_report_origin(diagnostic.origin, base, file, digest)
+    named: "{origin.path ?? ""}"
+    paths: diagnostic_repair_paths(diagnostic)
+    names: loop path in paths -> jet_cli_report_file(base, path)
+    record: diagnostic_record(diagnostic, named, origin, paths, names)
+    if record.fix_edits.len() > 0 && diagnostic.no_fix_reason != None {
+        panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
     }
-    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"name\":{jet_cli_json_string(diagnostic_display_name(diagnostic.code))},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
+    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},{jet_cli_report_record_members(record)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"name\":{jet_cli_json_string(diagnostic_display_name(diagnostic.code))}"
+    if diagnostic_tier_word(diagnostic) == .Val(tier) {
+        out = "{out},\"tier\":{jet_cli_json_string(tier)}"
+    }
     if diagnostic.applicability == .Val(applicability) {
         grade: if applicability == {
             .Safe -> "safe"
@@ -418,41 +413,29 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
         out = "{out},\"applicability\":{jet_cli_json_string(grade)}"
     }
     out = "{out},\"detail\":{jet_cli_report_optional_string(diagnostic.detail)},\"denial_kind\":{jet_cli_report_optional_string(diagnostic.denial_kind)},\"call_chain\":{jet_cli_report_strings(diagnostic.call_chain)},\"scope_chain\":{jet_cli_report_strings(diagnostic.scope_chain)},\"nearest_granting_scope\":{jet_cli_report_optional_string(diagnostic.nearest_granting_scope)}"
-    file_json: if report_file.len() > 0 -> jet_cli_json_string(report_file) else -> "null"
-    out = "{out},\"file\":{file_json}"
     if diagnostic.span == .Val(span) {
         position: diagnostic_source_position(sources, diagnostic.origin, source)
-        out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
-    } else { out = "{out},\"line\":null,\"col\":null,\"span\":null" }
-    if jet_cli_report_edit_count(diagnostic) > 0 {
-        if diagnostic.no_fix_reason != None {
-            panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
-        }
-        safety: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
-        grade: jet_cli_json_string(jet_cli_report_safety(safety))
-        rendered: jet_cli_report_edits_json(diagnostic, base, report_file, grade)
-        out = "{out},\"fix_edits\":[{rendered.join(",")}]"
-    } else if diagnostic.no_fix_reason == .Val(reason) {
+        out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)}"
+    } else { out = "{out},\"line\":null,\"col\":null" }
+    if diagnostic.no_fix_reason == .Val(reason) {
         out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
-    } else { out = "{out},\"fix_edits\":[]" }
+    }
+    // A cause names its own file and text, as the record does: its origin,
+    // else the batch's when it has a span; one with no location names none.
     causes: loop cause in diagnostic.cause -> {
-        cause_file := "null"
+        cause_span := "null"
+        cause_origin := "null"
         cause_line := "null"
         cause_col := "null"
-        if cause.origin == .Val(cause_origin) {
-            path: jet_cli_report_file(base, cause_origin.path)
-            if path.len() > 0 -> cause_file = jet_cli_json_string(path)
-            if cause.span == .Val(cause_span) {
-                position: diagnostic_source_position(sources, cause.origin, "")
-                cause_line = "{diagnostic_source_line(sources.texts[position], cause_span.start)}"
-                cause_col = "{diagnostic_source_column(sources.texts[position], cause_span.start)}"
-            }
+        if cause.span == .Val(found) {
+            placed: jet_cli_report_origin(cause.origin, base, file, digest)
+            cause_span = jet_cli_status_json(jet_cli_compiler_checked_value(jet_eval_compiler_services_record_span(DiagnosticRecordSpan{file: "{placed.path ?? ""}", start: found.start, end: found.end})))
+            cause_origin = jet_cli_status_json(jet_cli_compiler_checked_value(jet_eval_compiler_services_record_origin(placed)))
+            position: diagnostic_source_position(sources, cause.origin, source)
+            cause_line = "{diagnostic_source_line(sources.texts[position], found.start)}"
+            cause_col = "{diagnostic_source_column(sources.texts[position], found.start)}"
         }
-        cause_span_json: if cause.span == {
-            .Val(cause_span) -> jet_cli_report_span(cause_span.start, cause_span.end)
-            .None -> "null"
-        }
-        "{{\"code\":{jet_cli_json_string(cause.code)},\"file\":{cause_file},\"line\":{cause_line},\"col\":{cause_col},\"span\":{cause_span_json}}}"
+        "{{\"code\":{jet_cli_json_string(cause.code)},\"span\":{cause_span},\"origin\":{cause_origin},\"line\":{cause_line},\"col\":{cause_col}}}"
     }
     out = "{out},\"cause\":[{causes.join(",")}]"
     if diagnostic.labels.len() > 0 {
@@ -485,10 +468,11 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
 jet_cli_reports_json: fn(base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
     report_file: jet_cli_report_file(base, file)
     clears: jet_cli_report_clear_counts(diagnostics)
+    digest: jet_cli_report_batch_digest(diagnostics, source)
     sources := diagnostic_source_texts()
     reports := [String]{}
     loop (index, diagnostic) in diagnostics {
-        reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], sources))
+        reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, digest, clears[index], sources))
     }
     reports
 }

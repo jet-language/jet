@@ -4,8 +4,10 @@
 use {
     jet_foundation.[
         DIAGNOSTIC_ERROR,
-        DIAGNOSTIC_LINT,
         Diagnostic,
+        DiagnosticRecord,
+        DiagnosticRecordOrigin,
+        DiagnosticRecordSpan,
         Func,
         Item,
         ParseResult,
@@ -15,6 +17,8 @@ use {
         TComptimeValue,
         Type,
         ast_program,
+        diagnostic_record,
+        diagnostic_repair_paths,
         type_name,
     ]
     jet_foundation.[SourceFile, TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
@@ -173,6 +177,7 @@ use {
         sema_registration_module_index,
         sema_diagnostic_checked_origins,
         sema_diagnostic_loaded_origins,
+        sema_diagnostic_origin_file_row,
         sema_diagnostic_origin_row,
         sema_source_digest,
         sema_source_location_at,
@@ -182,8 +187,9 @@ use {
     ]
 }
 
-// 2: every CompilerDiagnostic carries its `origin`.
-JET_COMPILER_SERVICES_SCHEMA_VERSION: 2
+// 3: one CompilerDiagnostic record (DiagnosticRecord) with its graded
+// repairs, `fix_edits`, which `jet check --json` reports start with too.
+JET_COMPILER_SERVICES_SCHEMA_VERSION: 3
 
 JetCompilerServicesSourcePreparation: enum {
     Masked(source: String),
@@ -262,49 +268,77 @@ jet_eval_compiler_services_option_span: fn(value: Span?, file: String) -> TCompt
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
-// A diagnostic's origin: the checked snapshot its span indexes, by the file
-// it names (None for text a query was given) and that snapshot's digest
-// (its row of `origins`). A source-free diagnostic has none.
-jet_eval_compiler_services_origin: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
-    row: sema_diagnostic_origin_row(origins, diagnostic)
-    if row < 0 {
-        return TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerDiagnosticOrigin"}}}
-    }
-    jet_eval_compiler_services_origin_value(origins[row].path, origins[row].digest)
+jet_eval_compiler_services_record_span: fn(span: DiagnosticRecordSpan) -> TComptimeValue Never! {
+    jet_eval_compiler_services_span(Span{start: span.start, end: span.end}, span.file)
 }
 
-jet_eval_compiler_services_origin_value: fn(path: String?, digest: String) -> TComptimeValue Never! {
-    TComptimeValue.Present{
-        value: TComptimeValue.Struct{
-            type_name: "CompilerDiagnosticOrigin",
-            fields: [TComptimeField]{
-                TComptimeField{name: "path", value: jet_eval_compiler_services_option_string(path)},
-                TComptimeField{name: "source_digest", value: jet_eval_compiler_services_string(digest)},
-            },
-        },
+// The record of `diagnostic` over its row of `origins`: its span names the
+// row's path ("" for text a query was handed), and each repair the path of
+// its own file's row.
+jet_eval_compiler_services_record: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> DiagnosticRecord Never! {
+    row: sema_diagnostic_origin_row(origins, diagnostic)
+    origin := DiagnosticRecordOrigin?{None}
+    if row >= 0 {
+        path: if origins[row].path == .Val(named) -> String?{Val("{named}")} else -> String?{None}
+        origin = Val(DiagnosticRecordOrigin{path: path, source_digest: "{origins[row].digest}"})
     }
+    paths: diagnostic_repair_paths(diagnostic)
+    names := [String]{}
+    loop path in paths {
+        found: sema_diagnostic_origin_file_row(origins, path)
+        names.push(if found >= 0 -> "{origins[found].path ?? ""}" else -> "{path}")
+    }
+    diagnostic_record(diagnostic, jet_eval_compiler_services_diagnostic_file(diagnostic, origins), origin, paths, names)
 }
 
 // The file a diagnostic's span names: its origin's path (empty for text a
 // query was handed), else the file the diagnostic was reported in.
 jet_eval_compiler_services_diagnostic_file: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> String Never! {
     row: sema_diagnostic_origin_row(origins, diagnostic)
-    if row >= 0 -> return origins[row].path ?? ""
-    diagnostic.source_path ?? ""
+    if row >= 0 -> return "{origins[row].path ?? ""}"
+    "{diagnostic.source_path ?? ""}"
 }
 
-jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
-    severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
+// A CompilerDiagnosticOrigin value; a cause in a report prints its own too.
+jet_eval_compiler_services_record_origin: fn(origin: DiagnosticRecordOrigin) -> TComptimeValue Never! {
+    TComptimeValue.Struct{
+        type_name: "CompilerDiagnosticOrigin",
+        fields: [TComptimeField]{
+            TComptimeField{name: "path", value: jet_eval_compiler_services_option_string(origin.path)},
+            TComptimeField{name: "source_digest", value: jet_eval_compiler_services_string(origin.source_digest)},
+        },
+    }
+}
+
+// The one writer of a CompilerDiagnostic value. `jet inspect compiler` and
+// `jet check --json` print this value too.
+jet_eval_compiler_services_record_value: fn(record: DiagnosticRecord) -> TComptimeValue Never! {
+    span: if record.span == .Val(found) -> TComptimeValue.Present{value: jet_eval_compiler_services_record_span(found)} else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
+    origin: if record.origin == .Val(placed) -> TComptimeValue.Present{value: jet_eval_compiler_services_record_origin(placed)} else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerDiagnosticOrigin"}}}
+    edits := [TComptimeValue]{}
+    loop edit in record.fix_edits {
+        edits.push(
+            TComptimeValue.Struct{
+                type_name: "CompilerFixEdit",
+                fields: [TComptimeField]{
+                    TComptimeField{name: "span", value: jet_eval_compiler_services_record_span(edit.span)},
+                    TComptimeField{name: "new_text", value: jet_eval_compiler_services_string(edit.new_text)},
+                    TComptimeField{name: "safety", value: jet_eval_compiler_services_string(edit.safety)},
+                },
+            },
+        )
+    }
     TComptimeValue.Struct{
         type_name: "CompilerDiagnostic",
         fields: [TComptimeField]{
-            TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
-            TComptimeField{name: "severity", value: jet_eval_compiler_services_string(severity)},
-            TComptimeField{name: "message", value: jet_eval_compiler_services_string(diagnostic.what)},
-            TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
-            TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
-            TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span, jet_eval_compiler_services_diagnostic_file(diagnostic, origins))},
-            TComptimeField{name: "origin", value: jet_eval_compiler_services_origin(diagnostic, origins)},
+            TComptimeField{name: "code", value: jet_eval_compiler_services_string(record.code)},
+            TComptimeField{name: "severity", value: jet_eval_compiler_services_string(record.severity)},
+            TComptimeField{name: "message", value: jet_eval_compiler_services_string(record.message)},
+            TComptimeField{name: "why", value: jet_eval_compiler_services_string(record.why)},
+            TComptimeField{name: "fix", value: jet_eval_compiler_services_string(record.fix)},
+            TComptimeField{name: "span", value: span},
+            TComptimeField{name: "origin", value: origin},
+            TComptimeField{name: "fix_edits", value: TComptimeValue.List{values: edits}},
         },
     }
 }
@@ -314,7 +348,7 @@ jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic, origins:
 jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
     values := [TComptimeValue]{}
     loop diagnostic in diagnostics {
-        values.push(jet_eval_compiler_services_diagnostic_value(diagnostic, origins))
+        values.push(jet_eval_compiler_services_record_value(jet_eval_compiler_services_record(diagnostic, origins)))
     }
     TComptimeValue.List{values: values}
 }
@@ -897,6 +931,25 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         },
     }
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
+}
+
+// A check that stopped before it had a checked graph (a load or resolution
+// failure): its text, syntax and diagnostics, and no checked facts. Nothing
+// was checked, so it lists no function or effect and has no semantic index;
+// a fact read from the syntax alone would claim what no check established.
+jet_eval_compiler_services_failed_check: fn(source: String, syntax: TComptimeValue, diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
+    TComptimeValue.Struct{
+        type_name: "CompilerChecked",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+            TComptimeField{name: "syntax", value: syntax},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics, origins)},
+            TComptimeField{name: "functions", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "effects", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},
+        },
+    }
 }
 
 // The build context's whole-program view, or the first producer fact it lacks.

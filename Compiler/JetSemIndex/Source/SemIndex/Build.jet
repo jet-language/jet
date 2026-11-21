@@ -47,6 +47,7 @@ use {
         derivation_identity,
         derivation_record,
         failure_contract_shown_return,
+        failure_contract_shown_name,
         failure_contract_shown_type,
         failure_contract_of_function,
         failure_contract_source,
@@ -393,7 +394,7 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, ret: Type?, view_
         signature = "{signature} ; policies=[{names.join(", ")}]"
     }
     if callable.failure_contract == .Val(contract) {
-        return "{signature}\nfailure: {type_name(failure_contract_shown_type(contract))} ({failure_contract_source(contract)})"
+        return "{signature}\nfailure: {failure_contract_shown_name(contract)} ({failure_contract_source(contract)})"
     }
     reason: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
     "{signature}\nfailure: unavailable ({reason})"
@@ -2485,7 +2486,7 @@ semindex_outputs: fn(modules: [JetDriverDocModule]) -> [SemOutput] {
                             reference_span: resolved.reference,
                             params: params,
                             return_type: return_type,
-                            failure_contract: type_name(failure_contract_shown_type(resolved.failure_contract)),
+                            failure_contract: failure_contract_shown_name(resolved.failure_contract),
                             failure_source: failure_contract_source(resolved.failure_contract),
                             authority: "safe_jet",
                             effects: resolved.effects,

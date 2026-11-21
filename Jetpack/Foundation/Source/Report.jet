@@ -1,9 +1,10 @@
 // The shared machine-report value model (jet_foundation::Report). Every
 // command `--json` result is one `jet.status/v1` object (`StatusEnvelope`)
-// whose `reports` are `jet.report/v3` findings (`ReportEnvelope`). Both
-// render through Core JSON: each envelope builds one insertion-ordered
-// `Dyn` in the exact Rust field order, and `json.to_string` writes it.
-// Status field values are Core `Dyn` values (Rust `StatusValue`).
+// whose `reports` are `jet.report/v4` findings (`ReportEnvelope`): the
+// compiler's one CompilerDiagnostic record, then the report extension. Both
+// render through Core JSON: each envelope builds one insertion-ordered `Dyn`
+// in the exact field order, and `json.to_string` writes it. Status field
+// values are Core `Dyn` values (Rust `StatusValue`).
 use {
     json: core.encoding.json
     files: core.files
@@ -14,9 +15,9 @@ use {
 
 REPORT_NAME: "jet.report"
 
-REPORT_VERSION: 3
+REPORT_VERSION: 4
 
-REPORT_SCHEMA: "jet.report/v3"
+REPORT_SCHEMA: "jet.report/v4"
 
 STATUS_NAME: "jet.status"
 
@@ -358,48 +359,63 @@ report_lexically_normalize: fn(path: String) -> String Never! {
     joined
 }
 
+// A SourceSpan: byte offsets into the text of `file` ("" for text that came
+// from no file).
 ReportSpan: struct {
+    file: String,
     start: Int,
     end: Int,
 
-    new: fn(start: Int, end: Int) -> ReportSpan Never! { ReportSpan{start: start, end: end} }
+    new: fn(file: String, start: Int, end: Int) -> ReportSpan Never! {
+        ReportSpan{file: file, start: start, end: end}
+    }
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
+        object["file"] = Dyn.Text("{self.file}")
         object["start"] = Dyn.Int(self.start)
         object["end"] = Dyn.Int(self.end)
         Dyn.Object(object)
     }
 }
 
-report_optional_span: fn(span: ReportSpan?) -> Dyn Never! {
-    if span == {
-        .Val(value) -> value.to_tree()
-        .None -> Dyn.Null
+// The checked text a span indexes: the file it was read from and the SHA-256
+// of the exact bytes checked (a CompilerDiagnosticOrigin).
+ReportOrigin: struct {
+    path: String?,
+    source_digest: String,
+
+    to_tree: fn(self) -> Dyn Never! {
+        object := [String:Dyn]{}
+        object["path"] = report_optional_text(self.path)
+        object["source_digest"] = Dyn.Text("{self.source_digest}")
+        Dyn.Object(object)
     }
 }
 
-report_optional_path: fn(path: ReportPath?) -> Dyn Never! {
-    if path == {
-        .Val(file) -> {
-            if file.is_empty() -> return Dyn.Null
-            Dyn.Text(file.as_str())
-        }
-        .None -> Dyn.Null
+// A span and its origin: both null without a span, and the origin null when
+// the report holds no snapshot of its text.
+report_placed_span: fn(object: &[String:Dyn], span: ReportSpan?, origin: ReportOrigin?) Never! {
+    if span == .Val(found) {
+        object["span"] = found.to_tree()
+        object["origin"] = if origin == .Val(placed) -> placed.to_tree() else -> Dyn.Null
+        return
     }
+    object["span"] = Dyn.Null
+    object["origin"] = Dyn.Null
 }
 
-// One ordered cause in a `jet.report/v3` diagnostic. Every location field is
+// One ordered cause in a `jet.report/v4` diagnostic. Every location field is
 // independent; an unknown one stays unknown instead of inheriting the root's.
 ReportCause: struct {
     code: String,
-    file: ReportPath?,
     line: Int?,
     col: Int?,
     span: ReportSpan?,
+    origin: ReportOrigin?,
 
     new: fn(code: String) -> ReportCause Never! {
-        ReportCause{code: code, file: None, line: None, col: None, span: None}
+        ReportCause{code: code, line: None, col: None, span: None, origin: None}
     }
 
     // Code-only access for non-report status projections.
@@ -408,27 +424,25 @@ ReportCause: struct {
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
         object["code"] = Dyn.Text(self.code.copy())
-        object["file"] = report_optional_path(self.file)
+        report_placed_span(object, self.span, self.origin)
         object["line"] = report_optional_int(self.line)
         object["col"] = report_optional_int(self.col)
-        object["span"] = report_optional_span(self.span)
         Dyn.Object(object)
     }
 }
 
+// One graded repair (a CompilerFixEdit): its span names its own file.
 ReportEdit: struct {
-    file: ReportPath,
     span: ReportSpan,
     new_text: String,
     safety: FixSafety,
 
-    new: fn(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
-        ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
+    new: fn(span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
+        ReportEdit{span: span, new_text: new_text, safety: safety}
     }
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
-        object["file"] = Dyn.Text(self.file.as_str())
         object["span"] = self.span.to_tree()
         object["new_text"] = Dyn.Text(self.new_text.copy())
         object["safety"] = Dyn.Text(self.safety.as_str())
@@ -451,22 +465,26 @@ ReportExtension: enum {
 
 // An already rendered build-error JSON document.
 
-// A `jet.report/v3` diagnostic or machine finding.
+// A `jet.report/v4` diagnostic or machine finding: the record members
+// (code, severity, message, why, fix, span, origin, fix_edits), then the
+// report extension. `severity` is `error` or `lint`; a lint's `tier` is
+// `warning` or `tidy`.
 ReportEnvelope: struct {
     schema_name: String,
     schema_version: Int,
     moment: String,
     severity: String,
+    tier: String?,
     code: String,
-    what: String,
+    message: String,
     why: String,
     fix: String,
     applicability: FixApplicability?,
     detail: String?,
-    file: ReportPath?,
     line: Int?,
     col: Int?,
     span: ReportSpan?,
+    origin: ReportOrigin?,
     priv fix_edits: [ReportEdit],
     cause: [ReportCause],
     clears: Int,
@@ -477,22 +495,23 @@ ReportEnvelope: struct {
     scope_chain: [String],
     nearest_granting_scope: String?,
 
-    new: fn(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
+    new: fn(moment: String, severity: String, code: String, message: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{
             schema_name: REPORT_NAME,
             schema_version: REPORT_VERSION,
             moment: moment,
             severity: severity,
+            tier: None,
             code: code,
-            what: what,
+            message: message,
             why: why,
             fix: fix,
             applicability: None,
             detail: None,
-            file: None,
             line: None,
             col: None,
             span: None,
+            origin: None,
             fix_edits: [ReportEdit]{},
             cause: [ReportCause]{},
             clears: 0,
@@ -536,6 +555,15 @@ ReportEnvelope: struct {
         if self.schema_name != REPORT_NAME || self.schema_version != REPORT_VERSION {
             return Err(ReportError.new("report envelope has an unsupported schema identity"))
         }
+        if self.severity != "error" && self.severity != "lint" {
+            return Err(ReportError.new("report severity `{self.severity}` is neither `error` nor `lint`"))
+        }
+        if self.tier == .Val(tier) {
+            if self.severity != "lint" -> return Err(ReportError.new("only a lint has a tier"))
+            if tier != "warning" && tier != "tidy" {
+                return Err(ReportError.new("report tier `{tier}` is neither `warning` nor `tidy`"))
+            }
+        }
         if self.no_fix_reason == {
             .Val(reason) -> {
                 reason.validate()
@@ -548,16 +576,21 @@ ReportEnvelope: struct {
     }
 
     to_tree: fn(self) -> Dyn Never! {
-        self.validate() ?? panic("invalid jet.report/v3 envelope")
+        self.validate() ?? panic("invalid jet.report/v4 envelope")
         object := [String:Dyn]{}
         object["schema"] = Dyn.Text("{self.schema_name}/v{self.schema_version}")
-        object["moment"] = Dyn.Text(self.moment.copy())
-        object["severity"] = Dyn.Text(self.severity.copy())
         object["code"] = Dyn.Text(self.code.copy())
-        object["name"] = Dyn.Text(diagnostic_display_name(self.code))
-        object["what"] = Dyn.Text(self.what.copy())
+        object["severity"] = Dyn.Text(self.severity.copy())
+        object["message"] = Dyn.Text(self.message.copy())
         object["why"] = Dyn.Text(self.why.copy())
         object["fix"] = Dyn.Text(self.fix.copy())
+        report_placed_span(object, self.span, self.origin)
+        edits := [Dyn]{}
+        loop edit in self.fix_edits -> edits.push(edit.to_tree())
+        object["fix_edits"] = Dyn.Array(edits)
+        object["moment"] = Dyn.Text(self.moment.copy())
+        object["name"] = Dyn.Text(diagnostic_display_name(self.code))
+        if self.tier == .Val(tier) -> object["tier"] = Dyn.Text(tier)
         if self.applicability == {
             .Val(applicability) -> { object["applicability"] = Dyn.Text(applicability.as_str()) }
             .None -> {}
@@ -567,24 +600,13 @@ ReportEnvelope: struct {
         object["call_chain"] = report_texts(self.call_chain)
         object["scope_chain"] = report_texts(self.scope_chain)
         object["nearest_granting_scope"] = report_optional_text(self.nearest_granting_scope)
-        object["file"] = report_optional_path(self.file)
         object["line"] = report_optional_int(self.line)
         object["col"] = report_optional_int(self.col)
-        object["span"] = report_optional_span(self.span)
-        if self.fix_edits.len() > 0 {
-            edits := [Dyn]{}
-            loop edit in self.fix_edits -> edits.push(edit.to_tree())
-            object["fix_edits"] = Dyn.Array(edits)
-        } else {
-            if self.no_fix_reason == {
-                .Val(reason) -> {
-                    no_fix := [String:Dyn]{}
-                    no_fix["kind"] = Dyn.Text(reason.kind.as_str())
-                    no_fix["next"] = Dyn.Text(reason.next)
-                    object["no_fix_reason"] = Dyn.Object(no_fix)
-                }
-                .None -> object["fix_edits"] = Dyn.Array([Dyn]{})
-            }
+        if self.no_fix_reason == .Val(reason) {
+            no_fix := [String:Dyn]{}
+            no_fix["kind"] = Dyn.Text(reason.kind.as_str())
+            no_fix["next"] = Dyn.Text(reason.next)
+            object["no_fix_reason"] = Dyn.Object(no_fix)
         }
         causes := [Dyn]{}
         loop cause in self.cause -> causes.push(cause.to_tree())

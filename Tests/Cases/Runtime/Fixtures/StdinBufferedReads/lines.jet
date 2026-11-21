@@ -1,0 +1,15 @@
+use {
+    files: core.files
+    io: core.term
+}
+
+// Copies stdin to stdout a line at a time, then prints on stderr how many
+// read calls the process made (the `syscr` of /proc/self/io): stdin's reads
+// and the few of the process's own start and of this count.
+run: fn() {
+    loop line in io.stdin().lines() -> print(line)
+    counters: files.read("/proc/self/io") ?? panic("read /proc/self/io: {err}")
+    loop entry in counters.split("\n") {
+        if entry.starts_with("syscr: ") -> eprint(entry.slice(7, entry.count_bytes()))
+    }
+}

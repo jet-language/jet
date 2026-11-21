@@ -1,0 +1,70 @@
+use files: core.files
+
+// One opened file of a snapshot, as Jetpack's lease keeps its executables:
+// the handle is optional and the list owns it.
+Snapshot: struct {
+    relative: String,
+    file: FileReader?,
+    size: Int,
+}
+
+// The lease that ends up owning the list.
+Lease: struct {
+    snapshots: [Snapshot],
+    count: Int,
+}
+
+// The opened regular files, in the order given.
+open_snapshots: fn(paths: [String]) -> [Snapshot] {
+    out := [Snapshot]{}
+    loop path in paths {
+        file: files.open(path) ?? panic("open {path}")
+        info: file.stat()
+        if !info.is_file -> next
+        out.push(Snapshot{relative: path, file: Val(file), size: info.size})
+    }
+    out
+}
+
+// Reads the list by value first, as the lease's wrapper setup does.
+count_present: fn(snapshots: [Snapshot]) -> Int {
+    count := 0
+    loop snapshot in snapshots {
+        if snapshot.file != None -> count += 1
+    }
+    count
+}
+
+// Every file's bytes read through its opened handle in place, as Jetpack's
+// lease digests its executables: a handle bound by `&x == .Val(y)`, then
+// used through method calls. Each line: whether every byte was read, and
+// the first byte.
+contents: fn(snapshots: &[Snapshot]) -> [String] IOError! {
+    out := [String]{}
+    loop index in 0..<snapshots.len() {
+        relative: snapshots[index].relative
+        if snapshots[index].file == None -> panic("`{relative}` lost its handle")
+        if &snapshots[index].file == .Val(input) {
+            input.seek(0)
+            bytes := [U8]{}
+            loop {
+                chunk: input.read_bytes(7)
+                if chunk.len() == 0 -> break
+                loop byte in chunk -> bytes.push(byte)
+            }
+            out.push("{relative} {bytes.len() == snapshots[index].size} {bytes[0]}")
+        }
+    }
+    Ok(out)
+}
+
+run: fn() {
+    snapshots := open_snapshots([String]{"main.jet", "package.jet", "data.txt"})
+    present: count_present(snapshots)
+    loop round in 0..<2 {
+        lines: contents(snapshots) ?? panic("contents: {err}")
+        loop line in lines -> print("{round} {line}")
+    }
+    lease: Lease{snapshots: snapshots, count: present}
+    print("lease holds {lease.snapshots.len()} of {lease.count}")
+}

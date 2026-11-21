@@ -1649,7 +1649,7 @@ prints, a `chain` step among them, is the source's, never a
 compiler-generated one. This is the "`jet.report/v1` envelope" that
 D-JET-EXPLAIN-EFFECTS1 names: the machine-output contract of
 D-REPORT-MACHINE1 and D-REPORT-LAW1, under which a command result is one
-`jet.status/v1` record and every report inside it is a `jet.report/v3`
+`jet.status/v1` record and every report inside it is a `jet.report/v4`
 object.
 
 `jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`

@@ -66,17 +66,19 @@ ExplainReport: struct {
         ExplainReport{kind: ExplainReportKind.Conflict, message: message}
     }
 
-    // A `jet.report/v3` finding (code E1340) plus its `kind`.
+    // A `jet.report/v4` finding (code E1340) plus its `kind`: a conflict is an
+    // error, a loss a warning-tier lint.
     to_tree: fn(self) -> Dyn Never! {
         conflict: self.kind == ExplainReportKind.Conflict
-        report: ReportEnvelope.new(
+        report := ReportEnvelope.new(
             "tool",
-            if conflict -> "error" else -> "warning",
+            if conflict -> "error" else -> "lint",
             "E1340",
             self.message,
             if conflict -> "two persisted Hangar facts disagree, so the explanation cannot claim one identity" else -> "a persisted Hangar fact needed by this explanation is unavailable or lossy",
             if conflict -> "repair the conflicting Hangar or provider record, then run `jet explain` again" else -> "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact",
         )
+        if !conflict -> report.tier = Val("warning")
         tree: report.to_tree()
         if tree == {
             .Object(fields) -> {

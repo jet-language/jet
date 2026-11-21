@@ -1,0 +1,16 @@
+# The semantic index derives each written declaration once, credited to it: the struct, each of its three methods and `run` have one record apiece, read from their own text, so no two records share a subject or a source. The codecs and derives the compiler makes at the struct's name have no text of their own and no record.
+fixture: SemanticIndexDerivesEachDeclarationOnce.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 5 # the struct, its three methods and run
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Counter"] #= 1 # the struct's own record, none for what the compiler made at its name
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.start"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.value"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.run"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim ^= "fn:core_compiler.Counter."] #= 3 # the written methods only: no codec method
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].subject #distinct= 5 # each record has its own stable id
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].identity.source #distinct= 5 # and its own declaration's text
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"][0].premises[0] == $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"][0].identity.source # the content premise is the source the record names

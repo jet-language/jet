@@ -1,14 +1,15 @@
-// The `jet.report/v3` projection of CLI diagnostics, ported from
-// `Diagnostic::to_report(&file, "")`. Command `--json` failures put this
-// report inside their `jet.status/v1` envelope. CLI diagnostics carry no
-// source text, so no span becomes a line and column here.
+// The `jet.report/v4` projection of CLI diagnostics: the one
+// CompilerDiagnostic record (diagnostic_record), then the report extension.
+// Command `--json` failures put this report inside their `jet.status/v1`
+// envelope. CLI diagnostics carry no source text, so no span becomes a line
+// and column here.
 
 // Rust `Diagnostic::error(code, what, why, fix, None).to_report(&ReportPath::from_process(""), "")`.
 cli_diagnostic_report: fn(code: String, what: String, why: String, fix: String) -[FS, Env]> ReportEnvelope Never! {
     cli_diagnostic_to_report(diagnostic_from_registry(code, None, what, why, fix), ReportPath.from_process(""))
 }
 
-// Rust `diagnostic.to_report(&file, "")`.
+// The report of `diagnostic`, whose span indexes the text of `file`.
 cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> ReportEnvelope Never! {
     moment: if diagnostic.moment == {
         .Compile -> "compile"
@@ -16,8 +17,19 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
         .Test -> "test"
         .Tool -> "tool"
     }
-    severity: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
-    report := ReportEnvelope.new(moment, severity, diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+    named: file.as_str()
+    snapshot := ReportOrigin?{None}
+    origin := DiagnosticRecordOrigin?{None}
+    if diagnostic.origin == .Val(placed) {
+        path := String?{None}
+        if named != "" -> path = Val(named)
+        snapshot = Val(cli_report_origin(named, placed.revision))
+        origin = Val(DiagnosticRecordOrigin{path: path, source_digest: placed.revision})
+    }
+    paths: diagnostic_repair_paths(diagnostic)
+    record: diagnostic_record(diagnostic, named, origin, paths, paths)
+    report := ReportEnvelope.new(moment, record.severity, record.code, record.message, record.why, record.fix)
+    report.tier = diagnostic_tier_word(diagnostic)
     if diagnostic.applicability == .Val(applicability) {
         report.applicability = Val(if applicability == {
             .Safe -> FixApplicability.Safe
@@ -29,10 +41,14 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
     report.scope_chain = diagnostic.scope_chain
     report.nearest_granting_scope = diagnostic.nearest_granting_scope
     report.detail = diagnostic.detail
-    if !file.is_empty() -> report.file = Val(file)
-    if diagnostic.edit == .Val(edit) {
-        safety: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
-        report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
+    if record.span == .Val(span) {
+        report.span = Val(ReportSpan.new(span.file, span.start, span.end))
+    }
+    if record.origin != None -> report.origin = snapshot
+    if diagnostic.safety == .Val(safety) {
+        loop edit in record.fix_edits {
+            report.push_fix_edit(ReportEdit.new(ReportSpan.new(edit.span.file, edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
+        }
     }
     if diagnostic.no_fix_reason == .Val(reason) {
         kind: if reason.kind == {
@@ -44,10 +60,23 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
     }
     loop cause in diagnostic.cause {
         projected := ReportCause.new(cause.code)
-        if cause.span == .Val(span) -> projected.span = Val(ReportSpan.new(span.start, span.end))
+        if cause.span == .Val(span) {
+            projected.span = Val(ReportSpan.new(named, span.start, span.end))
+            if diagnostic.origin == .Val(placed) {
+                projected.origin = Val(cli_report_origin(named, placed.revision))
+            }
+        }
         report.cause.push(projected)
     }
     report
+}
+
+// The origin a report names: the batch's file, if it has one, and the digest
+// of the bytes it checked.
+cli_report_origin: fn(named: String, digest: String) -> ReportOrigin Never! {
+    path := String?{None}
+    if named != "" -> path = Val("{named}")
+    ReportOrigin{path: path, source_digest: "{digest}"}
 }
 
 cli_report_fix_safety: fn(safety: DiagnosticFixSafety) -> FixSafety Never! {

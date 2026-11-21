@@ -141,10 +141,10 @@ ones are judged. `#Allow(Jet.Name, "why")` silences one lint, tidy error or
 library warning inside its target (an `#Allow` that spells the package
 lowercase `jet` is E0107, whose fix writes `Jet`), and a package may deny a named lint through
 its lint policy, but a diagnostic code is never a policy value. JSON and LSP
-`code` stays the registered code; a `jet.report/v3` diagnostic carries the
-name in its `name` field beside `code`, its `severity` is `error`,
-`warning` or, for a tidy error, `tidy`, and LSP reports a tidy error at Error
-severity.
+`code` stays the registered code; a `jet.report/v4` diagnostic carries the
+name in its `name` field beside `code`, its `severity` is `error` or `lint`,
+a lint's `tier` is `warning` or, for a tidy error, `tidy`, and LSP reports a
+tidy error at Error severity.
 
 Every human report renders from its row through
 `Compiler/JetFoundation/Source/Diagnostics/Render.jet`: `diagnostic_render`,
@@ -236,7 +236,14 @@ dump (observability.md) at the faulting instruction, where `jet debug
 Under `jet debug` the fault stops the program first, before its signal
 reaches it, as a breakpoint does: every thread stops, and the session reads
 `Program received SIGNAME  file:line  in function()` at the innermost Jet
-frame, whose stack `bt`, `locals`, `tasks` and `disas` read. The next run
+frame, which is selected. Under it, `through …` names the runtime routines
+it faulted in, outermost first, by their function symbols as the report
+names them, and `fault address 0x40  pc 0x407203 <jet_rt_mem_move+163>  rep
+movs BYTE PTR [rdi],BYTE PTR [rsi]` the address the fault touched (a
+SIGSEGV's or SIGBUS's) and the faulting instruction. `bt` numbers those
+routines' frames above the Jet frames (`#0  jet_rt_mem_move  at
+0x407203`), so `frame`, `up` and `down` select them
+too; `locals`, `tasks` and `disas` read the stack. The next run
 command delivers the signal, so the report above runs and ends the program
 (`Program stopped by SIGNAME`, or the stack overflow's status 70); the
 report's re-raise goes on unstopped. The DAP adapter reports the stop as an
@@ -253,18 +260,31 @@ a fault reads alike on every tier (D-RT-DEFECT-REPORT1). A report without the
 
 ## Machine reports and causes
 
-The canonical machine envelope is `jet.report/v3`. Each diagnostic carries its
-registered `code` and its `name` (`Jet.ReturnTypeMismatch`, or a library's own
-type path). Its `cause` array is
-nearest-first and contains `code`, `file`, `line`, `col`, and `span` fields.
+The canonical machine envelope is `jet.report/v4` (D-DIAG-ONESHAPE1): the
+compiler's one diagnostic record, CompilerDiagnostic version 3 (`code`,
+`severity`, `message`, `why`, `fix`, `span`, `origin`, `fix_edits`), written by
+the same writer `jet inspect compiler` prints, then the report extension
+(`moment`, `name`, `tier`, `applicability`, `detail`, `denial_kind`,
+`call_chain`, `scope_chain`, `nearest_granting_scope`, `line`, `col`,
+`no_fix_reason`, `cause`, `labels`, `clears`, and a finding's own members).
+A span is `{file, start, end}`; `origin` is `{path, source_digest}`, the
+SHA-256 of the exact bytes checked, so a consumer whose current text hashes
+differently knows the report is stale. A diagnostic with no span has a null
+`span`, `origin`, `line` and `col`. Each `fix_edits` entry is
+`{span, new_text, safety}` and names its own file in `span.file`; `fix_edits`
+is always present, empty when a `no_fix_reason` explains why. Each diagnostic
+carries its registered `code` and its `name` (`Jet.ReturnTypeMismatch`, or a
+library's own type path). Its `cause` array is
+nearest-first and contains `code`, `span`, `origin`, `line`, and `col` fields.
 Repeated codes are not deduplicated. Every field comes from that cause's own
 `DiagnosticCause` and originating source snapshot; unknown fields are `null`
 and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
-A report's `file` fields (the root's, each cause's and each `fix_edits`
-entry's) follow one rule for every code (D-REPORT-PATH1). A file under the
+A report's file names (the root's `span.file` and `origin.path`, each cause's
+and each `fix_edits` entry's) follow one rule for every code
+(D-REPORT-PATH1). A file under the
 folder jet ran in is named relative to that folder. Another file of the
 project that folder belongs to (its workspace, repository or package root) is
 named with `../` steps from it. Any other file keeps its absolute path. A

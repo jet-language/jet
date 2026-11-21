@@ -10,7 +10,7 @@ use {
     native_hex: core.encoding.hex
     native_math: core.math
     native_crypto: core.crypto
-    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_fault_address, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -108,13 +108,16 @@ NativeStopKind: enum {
 // `reason`, exited with `code`, or ended by the signal named in `reason`.
 // A pause at the program's stopping exit has its status in `code` and in
 // `routines` the functions outside Jet source between `frame` and the exit,
-// outermost first (`jet_fraction_to_int > precise_fault > trap_defect_exit`).
+// outermost first (`jet_fraction_to_int > precise_fault > trap_defect_exit`);
+// a fault's pause has its routines so too, and in `fault` the address it
+// touched and the instruction that faulted (NativeSession.fault_text).
 NativeStop: struct {
     kind: NativeStopKind,
     reason: String,
     code: Int,
     frame: NativeFrame?,
     routines: String{""},
+    fault: String{""},
 }
 
 // A breakpoint `jet debug --break` asks for: a Jet source file, by its base
@@ -2335,16 +2338,25 @@ NativeSession: struct {
     }
 
     // The selected thread's frames, innermost first, each inlined run its
-    // own frame above the frame it is inlined into.
+    // own frame above the frame it is inlined into, and the frames above
+    // the innermost Jet frame named (name_routines).
     backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
-        if self.focus == .Val(focused) -> return self.backtrace_from(focused)
-        registers: self.registers() ?? return Err(err)
-        self.backtrace_from(registers)
+        frames := [NativeFrame]{}
+        if {
+            self.focus == .Val(focused) -> frames = self.backtrace_from(focused) ?? return Err(err)
+            else -> {
+                registers: self.registers() ?? return Err(err)
+                frames = self.backtrace_from(registers) ?? return Err(err)
+            }
+        }
+        self.name_routines(frames)
+        Ok(frames)
     }
 
     // The frames of a stack whose innermost registers are `registers`, as
     // backtrace shows them: a caller's own frame at its call's call row
-    // (native_call_row) when the call has one.
+    // (native_call_row) when the call has one. A frame outside Jet source
+    // is `?` unless the image's debug information names it.
     backtrace_from: fn(self, registers: [Int]) -> [NativeFrame] NativeDebugError! {
         frames: self.unwind_from(registers) ?? return Err(err)
         shown := [NativeFrame]{}
@@ -2362,6 +2374,34 @@ NativeSession: struct {
         Ok(shown)
     }
 
+    // Names each frame above the innermost Jet frame of `frames` that the
+    // image's debug information names none (`?`: a runtime routine, which
+    // has none) by the `.symtab` symbol holding its code: the innermost
+    // frame's by its pc, a caller's by its call, the byte before its return
+    // address. Without the image's symbols they stay `?`; a dump's stay so
+    // too, since its `bt` shows its Jet frames alone (native_dump_command).
+    name_routines: fn(&self, frames: &[NativeFrame]) Never! {
+        if self.dump != None {
+            return
+        }
+        unnamed := [Int]{}
+        loop (index, frame) in frames {
+            if native_debug_jet_frame(frame) -> break
+            if frame.function == "?" -> unnamed.push(index)
+        }
+        if unnamed.len() == 0 {
+            return
+        }
+        facts_cell: self.eval_facts() ?? return
+        facts: facts_cell.guard_read()
+        loop index in unnamed {
+            at: if index == 0 -> frames[index].pc else -> frames[index].pc - 1
+            if native_symbol_holding(facts.value.symbols, at) == .Val(name) {
+                frames[index].function = name
+            }
+        }
+    }
+
     // `tasks`: every task of the program by id, with its state, what it
     // waits on and its Jet frames; `*` marks the task this stop is in
     // (task_rows).
@@ -2376,7 +2416,7 @@ NativeSession: struct {
             text = "{text}{mark} {task.id}  {task.label}  {row.state}{wait}{canceled}\n"
             if row.registers == .Val(found) {
                 frames: self.backtrace_from(found) ?? return Err(err)
-                stack: native_debug_backtrace(frames, indent: "    ")
+                stack: native_debug_backtrace(frames, indent: "    ", routines: false)
                 text = "{text}{stack}"
             }
         }
@@ -3555,36 +3595,63 @@ NativeSession: struct {
         Ok(false)
     }
 
-    // `frame <n>`, `up` and `down`: select a Jet frame as `bt` numbers them
-    // (#0 innermost, `up` toward the callers), and show it; `locals` and
-    // `print` read the selected frame until the program moves.
+    // `frame <n>`, `up` and `down`: select a frame as `bt` numbers them
+    // (native_debug_shown: #0 innermost, `up` toward the callers), and show
+    // it; `locals` and `print` read the selected frame until the program
+    // moves. A frame outside Jet source shows as routine_text shows it.
     frame_command: fn(&self, word: String, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
         frames: self.backtrace() ?? return Err(err)
+        shown: native_debug_shown(frames)
         current := 0
-        loop (level, frame) in frames {
-            if level >= self.selected -> break
-            if native_debug_jet_frame(frame) -> current += 1
+        loop level in shown {
+            if level < self.selected -> current += 1
         }
         wanted: if word == {
             "up" -> current + 1
             "down" -> current - 1
             else -> Int.parse(operand) ?? -1
         }
-        seen := 0
-        loop (level, frame) in frames {
-            if !native_debug_jet_frame(frame) -> next
-            if seen == wanted {
-                _: self.select_frame(level) ?? return Err(err)
-                source: self.frame_source(frame, file, lines)
-                locals: self.locals() ?? return Err(err)
-                return Ok("#{wanted}  {frame.function}()  at {frame.file}:{frame.line}\n{frame.line} | {source}\n{native_debug_locals_line(locals)}\n")
+        if wanted >= 0 && wanted < shown.len() {
+            level: shown[wanted]
+            frame: frames[level]
+            _: self.select_frame(level) ?? return Err(err)
+            if !native_debug_jet_frame(frame) {
+                return Ok(self.routine_text(frame, wanted, innermost: level == 0))
             }
-            seen += 1
+            source: self.frame_source(frame, file, lines)
+            locals: self.locals() ?? return Err(err)
+            return Ok("#{wanted}  {frame.function}()  at {frame.file}:{frame.line}\n{frame.line} | {source}\n{native_debug_locals_line(locals)}\n")
         }
         if word == "frame" {
-            return Ok("Frame needs a frame number `bt` shows, 0 to {seen - 1}, as `frame 1`\n")
+            return Ok("Frame needs a frame number `bt` shows, 0 to {shown.len() - 1}, as `frame 1`\n")
         }
         Ok("No frame {if word == "up" -> "above" else -> "below"} #{current}\n")
+    }
+
+    // Frame `number` of `bt`, `frame`, which is outside Jet source (the
+    // innermost frame when `innermost`): its routine and pc as `bt` shows
+    // it, then the instruction it is at, a caller's its call.
+    routine_text: fn(&self, frame: NativeFrame, number: Int, innermost: Bool{false}) -> String Never! {
+        text: native_debug_routine_line(frame, number, "")
+        rows: native_listing_window(self, frame.pc, if innermost -> 0 else -> -1, 1)
+        if rows.len() == 0 || !rows[0].valid -> return text
+        "{text}{native_debug_instruction(rows[0])}\n"
+    }
+
+    // A fault's facts as its stop shows them: the address the fault
+    // touched when the kernel names one (a SIGSEGV's or SIGBUS's), and the
+    // pc that faulted with its instruction.
+    fault_text: fn(&self, signal: Int) -> String Never! {
+        registers: self.registers() ?? return ""
+        pc: registers[X64_TRACE_RIP]
+        rows: native_listing_window(self, pc, 0, 1)
+        at: if rows.len() > 0 && rows[0].valid -> native_debug_instruction(rows[0]) else -> native_debug_hex(pc)
+        if signal == NATIVE_DEBUG_SIGSEGV || signal == NATIVE_DEBUG_SIGBUS {
+            if x64_trace_fault_address(self.trace) == .Val(address) {
+                return "fault address {native_debug_hex(address)}  pc {at}"
+            }
+        }
+        "pc {at}"
     }
 
     // The program's new output, then where `stop` left it.
@@ -3611,6 +3678,7 @@ NativeSession: struct {
                 if stop.reason.starts_with("fault ") {
                     text = "{text}Program received {stop.reason.after("fault ")}  {frame.file}:{frame.line}  in {frame.function}()\n"
                     if stop.routines != "" -> text = "{text}  through {stop.routines}\n"
+                    if stop.fault != "" -> text = "{text}  {stop.fault}\n"
                 }
                 source: self.frame_source(frame, file, lines)
                 locals: self.locals() ?? return Err(err)
@@ -5043,7 +5111,7 @@ NativeSession: struct {
             }
             frames = own.move()
         }
-        stack: native_debug_backtrace(frames, indent: "  ")
+        stack: native_debug_backtrace(frames, indent: "  ", routines: false)
         // The write keeps its innermost Jet frame.
         jet: loop (at, shown) in frames {
             if native_debug_jet_frame(shown) {
@@ -5326,7 +5394,9 @@ NativeSession: struct {
             .Paused -> {
                 if event.exiting > 0 -> return self.in_jet("exiting {event.exiting}", event.exiting)
                 if event.fault > 0 {
-                    return self.in_jet("fault {native_debug_signal_name(event.fault)}", event.fault)
+                    stop := self.in_jet("fault {native_debug_signal_name(event.fault)}", event.fault) ?? return Err(err)
+                    stop.fault = self.fault_text(event.fault)
+                    return Ok(stop)
                 }
                 if event.code < 0 -> return self.paused("pause")
                 registers := self.registers() ?? return Err(err)
@@ -5773,6 +5843,11 @@ NATIVE_ALLOC_ALLOCATIONS: 2
 NATIVE_ALLOC_HIGH_WATER: 5
 
 NATIVE_DEBUG_SIGTRAP: 5
+
+// The faults whose siginfo names the address they touched (fault_text).
+NATIVE_DEBUG_SIGBUS: 7
+
+NATIVE_DEBUG_SIGSEGV: 11
 
 // The CPU's debug address registers (DR0 to DR3) a watch's spans take.
 NATIVE_DEBUG_WATCH_SLOTS: 4
@@ -6645,18 +6720,73 @@ native_debug_locals_typed: fn(locals: [NativeLocal]) -> String Never! {
     text
 }
 
-// The Jet frames, innermost first, each line after `indent`; an inlined
-// frame says so.
-native_debug_backtrace: fn(frames: [NativeFrame], indent: String{""}) -> String Never! {
+// The frames `bt` shows, innermost first, each line after `indent`: those
+// native_debug_shown numbers, or with `routines` false the Jet frames
+// alone (a task's stack in `tasks`). An inlined frame says so.
+native_debug_backtrace: fn(frames: [NativeFrame], indent: String{""}, routines: Bool{true}) -> String Never! {
     text := ""
     index := 0
-    loop frame in frames {
-        if !native_debug_jet_frame(frame) -> next
-        inlined: if frame.inlined -> "  [inlined]" else -> ""
-        text = "{text}{indent}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
+    loop level in native_debug_shown(frames) {
+        frame: frames[level]
+        if {
+            native_debug_jet_frame(frame) -> {
+                inlined: if frame.inlined -> "  [inlined]" else -> ""
+                text = "{text}{indent}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
+            }
+            !routines -> next
+            else -> text = "{text}{native_debug_routine_line(frame, index, indent)}"
+        }
         index += 1
     }
     text
+}
+
+// The indices in `frames` (as backtrace finds them) of the frames `bt`
+// shows and numbers, #0 the innermost: each Jet frame, and each frame
+// above the innermost Jet frame, outside Jet source (the runtime routine a
+// fault or a stopping exit is in, and its callers up to the Jet code that
+// called them). The frames outside Jet source below it (the program's
+// entry, a task's start, a routine between two Jet frames) aren't shown.
+native_debug_shown: fn(frames: [NativeFrame]) -> [Int] Never! {
+    shown := [Int]{}
+    jet := false
+    loop (index, frame) in frames {
+        if native_debug_jet_frame(frame) -> jet = true
+        if jet && !native_debug_jet_frame(frame) -> next
+        shown.push(index)
+    }
+    shown
+}
+
+// `bt`'s line for frame `number`, `frame`, outside Jet source, after
+// `indent`: its routine (`?` when no symbol holds its code) and its pc.
+native_debug_routine_line: fn(frame: NativeFrame, number: Int, indent: String) -> String Never! {
+    "{indent}#{number}  {frame.function}  at {native_debug_hex(frame.pc)}\n"
+}
+
+// An instruction of the program's code as a fault's stop and a routine's
+// frame show it: its address, the code it is in and its offset there,
+// and its text (`0x407203 <jet_rt_mem_move+163>  rep movs BYTE PTR [rdi],BYTE PTR [rsi]`).
+native_debug_instruction: fn(row: NativeListedRow) -> String Never! {
+    if row.symbol == "" -> return "{native_debug_hex(row.address)}  {row.text}"
+    "{native_debug_hex(row.address)} <{row.symbol}>  {row.text}"
+}
+
+// The `.symtab` symbol of `symbols` whose code holds `pc`, the smallest
+// when several do; None when none does.
+native_symbol_holding: fn(symbols: NativeFixSymbols, pc: Int) -> String? Never! {
+    found := String?{None}
+    size := 0
+    loop (name, slot) in symbols.slots {
+        loop symbol in symbols.named[slot] {
+            if pc < symbol.address || pc >= symbol.address + symbol.size -> next
+            if found == None || symbol.size < size {
+                found = Val("{name}")
+                size = symbol.size
+            }
+        }
+    }
+    found
 }
 
 // A move `word` made with no breakpoint, rule or watch, running to `mark`

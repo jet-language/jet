@@ -2,7 +2,7 @@
 # Claim: recovery reclaims an abandoned archive stage and a dead lease and counts both (rs:1468-1477)
 # Claim: a symlinked archive-stage root or lease root is refused and the outside bytes survive (rs:1479-1503)
 # Migrated: the Rust API Store::recover_hangar is `jetpack hangar recover --json`, whose result is STATUS_SCHEMA
-# jet.status/v1 with `recovered`. The refusal is a jet.report/v3 finding. The Rust error text "lease directory"
+# jet.status/v1 with `recovered`. The refusal is a jet.report/v4 finding. The Rust error text "lease directory"
 # (rs:1497) is now "executable lease containers are not a real directory"; the case asserts the lease subject and
 # the not-a-directory refusal. The setup directives and file checks between the runs are the Rust filesystem setup and checks.
 requires: os:unix
@@ -25,7 +25,7 @@ remove: root/hangar/.archive-stage
 symlink: {work}/outside root/hangar/.archive-stage
 step: jetpack hangar recover --json --no-color
 exit: 2 # rs:1485
-stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1485 the refusal finding
+stdout: ~ "\"schema\":\"jet.report/v4\"" # rs:1485 the refusal finding
 stdout: ~ "archive staging" # rs:1486
 stderr: empty # JSON failure leaks no stderr
 file: outside/must-survive = "live data" # rs:1487-1491 outside survives
@@ -35,7 +35,7 @@ remove: root/leases
 symlink: {work}/outside root/leases
 step: jetpack hangar recover --json --no-color
 exit: 2 # rs:1496
-stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1496 the refusal finding
+stdout: ~ "\"schema\":\"jet.report/v4\"" # rs:1496 the refusal finding
 stdout: ~ "lease" # rs:1497 the lease root is the subject
 stdout: ~ "not a real directory" # rs:1497 refused as a non-directory
 stderr: empty # JSON failure leaks no stderr

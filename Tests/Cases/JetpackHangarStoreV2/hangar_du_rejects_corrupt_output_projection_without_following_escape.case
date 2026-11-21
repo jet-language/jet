@@ -1,5 +1,5 @@
 # tests/jetpack_hangar_store_v2.rs::hangar_du_rejects_corrupt_output_projection_without_following_escape at tests/jetpack_hangar_store_v2.rs:1582; hand-port
-# Claim: du --json on the corrupt projection exits 2 with a jet.report/v3 finding (Rust asserted v1; REPORT_SCHEMA is now v3), moment compile, code E1340 and no stderr (rs:1627-1650)
+# Claim: du --json on the corrupt projection exits 2 with a jet.report/v4 finding (Rust asserted v1; REPORT_SCHEMA is now v4), moment compile, code E1340 and no stderr (rs:1627-1650)
 # Claim: the real output stays a directory under the root and the outside bytes survive (rs:1651-1656)
 # Claim: recover --json exits 0 with a jet.status/v1 result (Rust's jet.report/v1 command result is now STATUS_SCHEMA) with action recover, restores meta.json and leaves the outside bytes (rs:1658-1678)
 # Fixture migrated: [INFERENCE] source payload and ingest --ref flag taken from the find_by_reference name du-proof@fixture (rs:1613); source file not read
@@ -23,7 +23,7 @@ file: {cap:entry}/meta.json ~ "\"out\": \"{work}/outside\"" # the projection now
 rename: jetpack/hangar/closure-db/journal jetpack/hangar/closure-db/journal.corrupt-backup
 step: jetpack hangar du --json --no-color
 exit: 2 # rs:1627-1650
-stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1627-1650
+stdout: ~ "\"schema\":\"jet.report/v4\"" # rs:1627-1650
 stdout: ~ "\"moment\":\"compile\"" # rs:1627-1650
 stdout: ~ "\"code\":\"E1340\"" # rs:1627-1650
 stderr: empty # rs:1641-1645 JSON failure leaks no stderr

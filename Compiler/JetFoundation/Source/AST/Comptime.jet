@@ -164,6 +164,18 @@ failure_contract_shown_type: fn(contract: FailureContract) -> Type Never! {
     failure_contract_effective_type(failure_contract_written(contract))
 }
 
+// The name of the failure contract tools show for a callable: its shown
+// route (failure_contract_shown_type) with the error always spelled. A
+// signature's `-> Int` leaves the implicit default `Err` unwritten, but its
+// contract is `Int Err!`, as a unit one's is `Err!`.
+failure_contract_shown_name: fn(contract: FailureContract) -> String Never! {
+    shown: failure_contract_shown_type(contract)
+    if shown == .Result(ok, err) && err == (Type.Named{name: "Err"}) && ok != (Type.Named{name: "Unit"}) {
+        return "{type_marked_name(ok)} Err!"
+    }
+    type_name(shown)
+}
+
 // The return a signature line shows: the shown failure route, or nothing for
 // a unit-success implicit default, which writes no return type. The failure
 // line still shows that route as `Err!`.

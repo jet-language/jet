@@ -36,37 +36,41 @@ kit_steps_machine_control: fn(text: String) -> Bool {
     false
 }
 
+// A `jet.report/v4` record: the CompilerDiagnostic members (fix_edits always
+// present, each edit's span naming its file), then the report extension.
 kit_steps_machine_report: fn(object: Dyn) -> String? {
-    loop key in ["moment", "severity", "code", "what", "why", "fix"] {
+    loop key in ["moment", "severity", "code", "message", "why", "fix"] {
         _: kit_steps_machine_string(object, key) ?? return Val("report record is missing string `{key}`")
     }
-    edits: object.get("fix_edits")
-    reason: object.get("no_fix_reason")
-    if kit_steps_machine_has(object, "fix_edits") && kit_steps_machine_has(object, "no_fix_reason") {
-        return Val("report record cannot contain both `fix_edits` and `no_fix_reason`")
+    severity: kit_steps_machine_string(object, "severity") ?? ""
+    if !kit_expect_named(["error", "lint"], severity) {
+        return Val("report severity `{severity}` is neither `error` nor `lint`")
     }
+    loop key in ["span", "origin"] {
+        if !kit_steps_machine_has(object, key) -> return Val("report record is missing `{key}`")
+    }
+    edits: object.get("fix_edits") ?? return Val("report record is missing `fix_edits`")
+    reason: object.get("no_fix_reason")
     if edits == {
-        .Val(value) -> {
-            if value == {
-                .Array(items) -> {
-                    loop item in items {
-                        edit: kit_steps_machine_object(item) ?? return Val("report edit is not an object")
-                        _: kit_steps_machine_string(edit, "file") ?? return Val("report edit is missing string `file`")
-                        span_value: edit.get("span") ?? return Val("report edit is missing `span`")
-                        span: kit_steps_machine_object(span_value) ?? return Val("report edit `span` is not an object")
-                        loop key in ["start", "end"] {
-                            if !kit_steps_machine_has(span, key) {
-                                return Val("report edit span is missing `{key}`")
-                            }
-                        }
-                        _: kit_steps_machine_string(edit, "new_text") ?? return Val("report edit is missing string `new_text`")
-                        _: kit_steps_machine_string(edit, "safety") ?? return Val("report edit is missing string `safety`")
+        .Array(items) -> {
+            if items.len() > 0 && kit_steps_machine_has(object, "no_fix_reason") {
+                return Val("report record cannot carry both `fix_edits` and `no_fix_reason`")
+            }
+            loop item in items {
+                edit: kit_steps_machine_object(item) ?? return Val("report edit is not an object")
+                span_value: edit.get("span") ?? return Val("report edit is missing `span`")
+                span: kit_steps_machine_object(span_value) ?? return Val("report edit `span` is not an object")
+                _: kit_steps_machine_string(span, "file") ?? return Val("report edit span is missing string `file`")
+                loop key in ["start", "end"] {
+                    if !kit_steps_machine_has(span, key) {
+                        return Val("report edit span is missing `{key}`")
                     }
                 }
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("report `fix_edits` is not an array")
+                _: kit_steps_machine_string(edit, "new_text") ?? return Val("report edit is missing string `new_text`")
+                _: kit_steps_machine_string(edit, "safety") ?? return Val("report edit is missing string `safety`")
             }
         }
-        .None -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("report `fix_edits` is not an array")
     }
     if reason == {
         .Val(value) -> {
@@ -104,8 +108,8 @@ kit_steps_machine_status: fn(object: Dyn) -> String? {
             loop item in items {
                 report: kit_steps_machine_object(item) ?? return Val("status report is not an object")
                 schema: kit_steps_machine_string(report, "schema") ?? return Val("status report is missing string `schema`")
-                if schema != "jet.report/v3" {
-                    return Val("status report uses `{schema}`; expected `jet.report/v3`")
+                if schema != "jet.report/v4" {
+                    return Val("status report uses `{schema}`; expected `jet.report/v4`")
                 }
                 failure: kit_steps_machine_report(report)
                 if failure != None -> return failure
@@ -120,7 +124,7 @@ kit_steps_machine_line: fn(text: String) -> String Err! {
     value: json.parse(text.trim().copy()) ?? return Err("machine JSON: {err}")
     object: kit_steps_machine_object(value) ?? return Err("machine record is not an object")
     schema: kit_steps_machine_string(object, "schema") ?? return Err("machine record is missing `schema`")
-    if schema == "jet.report/v3" {
+    if schema == "jet.report/v4" {
         failure: kit_steps_machine_report(object)
         if failure == {
             .Val(detail) -> return Err(detail)
@@ -137,7 +141,7 @@ kit_steps_machine_line: fn(text: String) -> String Err! {
         action: kit_steps_machine_string(object, "action") ?? ""
         return Ok(if action == "browser.relay" -> "browser-relay" else -> "status")
     }
-    Err("machine record uses `{schema}`; expected `jet.report/v3` or `jet.status/v1`")
+    Err("machine record uses `{schema}`; expected `jet.report/v4` or `jet.status/v1`")
 }
 
 kit_steps_machine_output: fn(text: String, expected: [String]) -> String? {

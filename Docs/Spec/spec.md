@@ -4096,7 +4096,7 @@ Recipe failures retain per-step logs and scratch in Hangar-managed storage.
 `jet explain <ref>` reports store identity, provider facts, dependency and
 closure edges, liveness roots, and rebuild checks. The causal forms
 `jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
-one view, and `jet explain <ref> --json` emits the stable `jet.report/v1`
+one view, and `jet explain <ref> --json` emits the stable `jet.report/v4`
 projection. `jet inspect provenance` reads the one lock-backed provenance
 record for each dependency and shows integrity, transparency, publisher, and
 build-attestation facts; present evidence is labeled `verified` or `recorded`
@@ -6673,7 +6673,7 @@ not compiled as an empty file). While a build is in flight or rejected,
 A rejected build's diagnostic carries `diagnostic_revision` (that candidate),
 and `accepted_revision` and `last_good_revision` equal the revision still
 served. Recovery publishes the candidate. With `--json`, every watch-cycle build
-emits one `jet.status/v1` record with action `dev.rebuild`, its `jet.report/v3`
+emits one `jet.status/v1` record with action `dev.rebuild`, its `jet.report/v4`
 diagnostics and the same revision fields.
 
 ## Canvas visual editor
@@ -6742,12 +6742,20 @@ with `schema_version: 1` and `api_version: 1`; its operations are `lex`,
 query `core.compiler.query` (see Compiler and package model APIs).
 Runtime calls to `core.compiler` are E0956.
 
-Diagnostics are value records with code, severity, message, why, fix, span,
-and origin. A diagnostic with a source span carries an origin naming the text
-it came from: `path` is the file's root-relative path, or none for the text the
-query was handed, and `source_digest` is the SHA-256 of the exact bytes
-checked. A diagnostic with no span carries no origin. The value records carry
-their own `schema_version`, 2 since `origin` was added. A `check` resolves the
+Diagnostics are value records with code, severity (`error` or `lint`),
+message, why, fix, span, origin and fix_edits (D-DIAG-ONESHAPE1). A span is
+`{file, start, end}`: `file` names the file the command read, or is "" for the
+text the query was handed. A diagnostic with a source span carries an origin
+naming the text it came from: `path` is the file's root-relative path, or none
+for the text the query was handed, and `source_digest` is the SHA-256 of the
+exact bytes checked. A diagnostic with no span carries no origin. `fix_edits`
+lists every repair the compiler knows, each `{span, new_text, safety}` with
+its safety grade (formatting, behavior-preserving, api-changing,
+target-changing or needs-review) and its own file in `span.file`. `jet
+inspect compiler lex|parse|check` prints these records through the one writer
+that also writes the first members of each `jet.report/v4` report. The value
+records carry
+their own `schema_version`, 3 since `fix_edits` was added. A `check` resolves the
 handed text's imports among the sources the calling compile holds under its
 root (`jet inspect compiler check <file>`: the sources `jet check <file>`
 holds); it never rereads them from disk. Semantic facts reuse the existing
@@ -6757,6 +6765,12 @@ envelope's 1. The API does not return
 `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
 internals, and modified syntax cannot be fed back into compilation
 (D-FRONTENDAPI1).
+
+A `check` with an error keeps its diagnostics and has no `semantic_index`.
+When the error stops the check before its program is checked (an import that
+does not resolve, for one), the result also lists no `functions` or
+`effects`: nothing was checked, so no fact is read from the syntax alone. Jet
+code and `jet inspect compiler check` read that one value.
 
 ## Command registry and typed inputs
 

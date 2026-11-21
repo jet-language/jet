@@ -20,7 +20,7 @@ exit: 0
 stderr: ~ " window_ms=3000 " # the window asked for, three seconds
 stderr: !~ "\nexited " # the check ran through all of it
 stderr: ~ "stacks unwound=" # how far the samples' stacks unwound, were cut or broke
-stderr: ~ " at Compiler/Jet" # a hot function by its declaration's file and line
+stderr: ~ " at Compiler/Jet" # a hot function by its declaration's file; the trace's rows below hold its line
 stderr: ~ "\ncpu by package\n" # the samples split by the package they worked for
 stderr: ~ "\n  Compiler/JetSema samples=" # the checking phase among them
 stderr: ~ "Trace: " # and the path of the trace it wrote
@@ -28,6 +28,8 @@ json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].v
 json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.exited_ms = null # and that the check outlived it
 json: file check.jettrace doc $.content.profile.window_wall_ns > 3000000000 # the window the samplers were open, past the three seconds asked for
 json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.stacks #>= 1 # the samples' folded stacks
+json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/Jet"][?line >= 1] #>= 1 # a hot function's declaration: its file in the compiler's packages and its line
+json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.functions[?file ^= "Compiler/"][?line <= 0] #= 0 # no function that names its file lacks its line
 step: jet perf view check.jettrace
 exit: 0
 stdout: ~ " window_ms=3000 " # the view shows the section's lines

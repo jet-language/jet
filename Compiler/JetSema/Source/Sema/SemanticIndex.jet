@@ -56,12 +56,11 @@ use jet_foundation.[
     derivation_payload_json,
     derivation_record,
     expr_span,
-    failure_contract_shown_type,
+    failure_contract_shown_name,
     failure_contract_source,
     sha256_hex,
     type_name,
     ModuleID,
-    module_none,
     module_text,
 ]
 
@@ -701,7 +700,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
                         TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference, registered_module.source_file)},
                         TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
                         TComptimeField{name: "return_type", value: sema_compiler_index_type_id_option(registration, target_row, output.return_type)},
-                        TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_shown_type(output.failure_contract)))},
+                        TComptimeField{name: "failure_contract", value: sema_compiler_index_string(failure_contract_shown_name(output.failure_contract))},
                         TComptimeField{name: "failure_source", value: sema_compiler_index_string(failure_contract_source(output.failure_contract))},
                         TComptimeField{name: "authority", value: sema_compiler_index_string("safe-jet")},
                         TComptimeField{name: "effects", value: sema_compiler_index_strings(effects)},
@@ -893,29 +892,14 @@ sema_compiler_index_fact_registry: fn(registration: SemaRegistrationGraph) -> TC
     TComptimeValue.List{values: values}
 }
 
-SemaCompilerIndexStructuralRecord: struct {
-    id: Int,
-    parent: Int?,
-    slot: String,
-    slot_is_list: Bool,
-    ordinal: Int,
-    class: String,
-    shape: String,
-    module_path: String,
-    module_identity: ModuleID,
-    span: Span,
-}
-
 SemaCompilerIndexWalkState: struct {
     nodes: [TComptimeValue],
-    structural: [SemaCompilerIndexStructuralRecord],
     arithmetic: [TComptimeValue],
     parents: [Int],
     // The next ordinal of each (parent, slot) pair, keyed by sema_compiler_index_ordinal_key.
     ordinals: [String:Int],
     slot: String,
     slot_is_list: Bool,
-    module_identity: ModuleID,
     // The source file of the module being walked.
     file: String,
 }
@@ -923,13 +907,11 @@ SemaCompilerIndexWalkState: struct {
 sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
     SemaCompilerIndexWalkState{
         nodes: [TComptimeValue]{},
-        structural: [SemaCompilerIndexStructuralRecord]{},
         arithmetic: [TComptimeValue]{},
         parents: [Int]{},
         ordinals: [String:Int]{},
         slot: "root",
         slot_is_list: true,
-        module_identity: module_none(),
         file: "",
     }
 }
@@ -1137,20 +1119,6 @@ sema_compiler_index_walk_node: fn(state: &SemaCompilerIndexWalkState, class: Str
     state.ordinals[key] = ordinal + 1
     id := state.nodes.len()
     slot_kind := if state.slot_is_list -> "list" else -> "scalar"
-    state.structural.push(
-        SemaCompilerIndexStructuralRecord{
-            id: id,
-            parent: parent,
-            slot: state.slot,
-            slot_is_list: state.slot_is_list,
-            ordinal: ordinal,
-            class: class,
-            shape: shape,
-            module_path: module_path,
-            module_identity: state.module_identity,
-            span: span,
-        },
-    )
     state.nodes.push(
         TComptimeValue.Struct{
             type_name: "CompilerStructuralNode",
@@ -1949,62 +1917,103 @@ sema_compiler_index_derivation_value: fn(record: DerivationRecord) -> TComptimeV
     }
 }
 
-sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, structural: [SemaCompilerIndexStructuralRecord], module_sources: [SemaCompilerModuleSource]) -> SemaCompilerIndexDerivationFacts Never! {
+// The symbol kind a top-level item of this shape declares, so a struct's
+// record never credits a symbol the compiler made at its name; None lets any
+// definition the item spans name it.
+sema_compiler_index_derivation_item_kind: fn(item: Item) -> SymbolKind? Never! {
+    if item == .Func(_) -> return Val(SymbolKind.Function)
+    if item == .Struct(_) || item == .Enum(_) -> return Val(SymbolKind.Type)
+    None
+}
+
+// Appends the record of `definition`, declared by the text at `span`, unless
+// a record already credits it; a text outside the source sets `missing`
+// when it is still "".
+sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, registered_module: SemaRegistrationModule, source: String, definition: Symbol, span: Span, records: &[DerivationRecord], credited: &[String:Bool], missing: &String) Never! {
+    definition_key := symbol_table_key(registration.symbols, definition.id)
+    if credited.get(definition_key) != None {
+        return
+    }
+    definition_source: sema_compiler_index_source_fragment(source, span) ?? {
+        if missing == "" {
+            missing = "`{definition_key}` at {span.start}..{span.end} lies outside the {source.count_bytes()}-byte source of `{module_text(registration.module_table, registered_module.module_identity)}`"
+        }
+        return
+    }
+    credited[definition_key] = true
+    kind := sema_compiler_index_definition_kind(definition, registration)
+    structural_key := "{kind}|{definition_key}"
+    stable_id := "def:{sha256_hex(structural_key).slice(0, 16)}"
+    signature := sema_compiler_index_definition_signature(definition, registered_module, registration)
+    signature_key := "{kind}|{signature}"
+    signature_id := "sig:{sha256_hex(signature_key).slice(0, 16)}"
+    normalized := sema_compiler_index_normalize_definition(definition_source)
+    content_id := "sha256:{sha256_hex(normalized)}"
+    record := derivation_record(
+        stable_id,
+        sema_compiler_identity(registration, definition_key),
+        "jet-sema",
+        DerivationMethod.StaticDerivation,
+        "checked-definition",
+        [String]{signature_id.copy(), content_id.copy()},
+        derivation_identity(content_id, signature_id, "", registered_module.module_path),
+    )
+    records.push(record)
+}
+
+// One record per written declaration, credited to the definition it declares
+// and read from that declaration's own text: each top-level item but an impl,
+// each impl, and each method of a nominal or an impl. A compiler-made impl
+// (the serde codecs; a derive's or a template's, whose span is its type's
+// name) or method has no text of its own: its owner's record covers it.
+sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerIndexDerivationFacts Never! {
     records := [DerivationRecord]{}
+    credited := [String:Bool]{}
     missing := ""
-    loop node in structural {
-        if node.parent != None || node.class != "item" -> next
-        module_index: sema_registration_module_index(registration, node.module_identity) ?? {
-            if missing == "" {
-                missing = "item at {node.span.start}..{node.span.end} of `{module_text(registration.module_table, node.module_identity)}` has no registered module"
-            }
-            next
-        }
+    loop module_index in 0..<registration.modules.len() {
         registered_module: registration.modules[module_index]
-        source: sema_compiler_index_module_source(module_sources, node.module_identity) ?? {
+        if registered_module.program.items.len() == 0 && registered_module.impls.len() == 0 -> next
+        source: sema_compiler_index_module_source(module_sources, registered_module.module_identity) ?? {
             if missing == "" {
-                missing = "module `{module_text(registration.module_table, node.module_identity)}` has no source"
+                missing = "module `{module_text(registration.module_table, registered_module.module_identity)}` has no source"
             }
             next
         }
-        definition_source: sema_compiler_index_source_fragment(source, node.span) ?? {
-            if missing == "" {
-                missing = "item at {node.span.start}..{node.span.end} lies outside the {source.count_bytes()}-byte source of `{module_text(registration.module_table, node.module_identity)}`"
-            }
-            next
-        }
-        symbol := Symbol?{None}
-        loop candidate in registered_module.symbols {
-            if !sema_compiler_index_derivation_definition_eligible(candidate) -> next
-            if candidate.span.start < node.span.start || candidate.span.end > node.span.end -> next
-            if {
-                symbol == None -> { symbol = Val(candidate) }
-                else -> {
-                    current: symbol ?? candidate
-                    if candidate.span.start < current.span.start -> symbol = Val(candidate)
+        loop item in registered_module.program.items {
+            if item == .Impl(_) -> next
+            span := sema_compiler_index_item_span(item)
+            item_kind := sema_compiler_index_derivation_item_kind(item)
+            symbol := Symbol?{None}
+            loop candidate in registered_module.symbols {
+                if !sema_compiler_index_derivation_definition_eligible(candidate) -> next
+                if item_kind == .Val(kind) && candidate.kind != kind -> next
+                if candidate.span.start < span.start || candidate.span.end > span.end -> next
+                if {
+                    symbol == None -> { symbol = Val(candidate) }
+                    else -> {
+                        current: symbol ?? candidate
+                        if candidate.span.start < current.span.start -> symbol = Val(candidate)
+                    }
                 }
             }
+            definition: symbol ?? next
+            sema_compiler_index_derivation_push(registration, registered_module, source, definition, span, records, credited, missing)
         }
-        definition: symbol ?? next
-        kind := sema_compiler_index_definition_kind(definition, registration)
-        definition_key := symbol_table_key(registration.symbols, definition.id)
-        structural_key := "{kind}|{definition_key}"
-        stable_id := "def:{sha256_hex(structural_key).slice(0, 16)}"
-        signature := sema_compiler_index_definition_signature(definition, registered_module, registration)
-        signature_key := "{kind}|{signature}"
-        signature_id := "sig:{sha256_hex(signature_key).slice(0, 16)}"
-        normalized := sema_compiler_index_normalize_definition(definition_source)
-        content_id := "sha256:{sha256_hex(normalized)}"
-        record := derivation_record(
-            stable_id,
-            sema_compiler_identity(registration, definition_key),
-            "jet-sema",
-            DerivationMethod.StaticDerivation,
-            "checked-definition",
-            [String]{signature_id.copy(), content_id.copy()},
-            derivation_identity(content_id, signature_id, "", registered_module.module_path),
-        )
-        records.push(record)
+        loop nominal in registered_module.nominals {
+            loop method in nominal.methods {
+                if method.declaration.compiler_generated -> next
+                sema_compiler_index_derivation_push(registration, registered_module, source, method.symbol, method.declaration.span, records, credited, missing)
+            }
+        }
+        loop implementation in registered_module.impls {
+            made := implementation.compiler_generated || (implementation.declaration.span.start == implementation.declaration.type_span.start && implementation.declaration.span.end == implementation.declaration.type_span.end)
+            if made -> next
+            sema_compiler_index_derivation_push(registration, registered_module, source, implementation.symbol, implementation.declaration.span, records, credited, missing)
+            loop method in implementation.methods {
+                if method.declaration.compiler_generated -> next
+                sema_compiler_index_derivation_push(registration, registered_module, source, method.symbol, method.declaration.span, records, credited, missing)
+            }
+        }
     }
     // Stable, as the insertion sort this replaces: equal (subject, claim) keep record order.
     records.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { (left.subject <=> right.subject).then(left.claim <=> right.claim) })
@@ -2218,11 +2227,10 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
     }
     walk := sema_compiler_index_walk_state()
     loop registered_module_index in 0..<registration.modules.len() {
-        walk.module_identity = registration.modules[registered_module_index].module_identity
         walk.file = registration.modules[registered_module_index].source_file
         sema_compiler_index_walk_items_slot(walk, "root", registration.modules[registered_module_index].program.items, registration.modules[registered_module_index].module_path)
     }
-    derivations := sema_compiler_index_derivations(registration, walk.structural, module_sources)
+    derivations := sema_compiler_index_derivations(registration, module_sources)
     missing := if !registration.complete -> "the registration graph is incomplete" else if !graph.complete -> "the checked graph is incomplete" else -> sema_compiler_index_module_sources_missing(registration, module_sources)
     loop registered_module_index in 0..<registration.modules.len() {
         found := false

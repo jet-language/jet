@@ -1,7 +1,8 @@
 # A fault (SIGSEGV, SIGBUS, SIGILL, SIGFPE) stops the program as a
 # breakpoint does, before its signal reaches the program: the session goes
 # on, at the function and line that faulted, with every thread stopped and
-# the stack whole, so `bt`, `locals`, `tasks` and `disas` read it. The next
+# the stack whole, so `bt`, `locals`, `tasks` and `disas` read it; the stop
+# names the address the fault touched and the faulting instruction. The next
 # run command delivers the signal: the runtime's own fault report runs and
 # ends the program, here the stack overflow stop E3012 with status 70.
 # `quit` at the fault ends the session as at any stop. The fixture must
@@ -13,6 +14,8 @@ step: jet debug prog.jet
 stdin: a_fault_stops_like_a_breakpoint_with_its_stack_readable.stdin
 exit: 0 # the program's own status is reported; the session ends cleanly
 stdout: ~ "(Jet) c\nProgram received SIGSEGV  prog.jet:2  in depth()\n" # the fault stops the session where it struck
+stdout: ~ "in depth()\n  fault address 0x" # naming the address the fault touched
+stdout: ~ " <depth+" # and the faulting instruction in depth
 stdout: ~ "(Jet) bt\n#0  depth()  at prog.jet:2\n#1  depth()  at prog.jet:4\n" # `bt` names the faulting function and line, then its callers
 stdout: ~ "(Jet) locals\nn: Int = " # `locals` reads the faulting frame
 stdout: ~ "(Jet) tasks\n" # `tasks` lists the stopped program's tasks

@@ -1,0 +1,3101 @@
+== Nothing but jet: the tools a probe can reach
+
+on the probes' PATH: lldb absent, gdb absent, perf absent, rr absent, go absent, pprof absent, otelcol absent
+on the host's PATH: lldb absent, gdb absent, perf absent, rr absent, go absent, pprof absent, otelcol absent
+peers given for comparison: lldb
+host: AMD Ryzen 9 7950X3D 16-Core Processor, 32 CPUs, perf_event_paranoid 2
+
+$ jet --version
+jet a0.0.46-dev
+Release status: Prerelease
+Release disposition: Current
+Release readiness: Not ready
+Compatibility policy: Future 1.0 (planned; not active)
+Supported editions: 2026 (newest: 2026)
+Registry protocol: v1
+(exit 0; wall 1 ms, cpu 0 ms, load 6.71 37.36 70.73)
+
+== D1, D4, D5, D6: Tools/Perf/DebugLatency, jet debug against lldb on one 120,004-line image
+
+$ jet run Main.jet -- --jet jet --functions 20000 --runs 5 --lldb lldb
+# image out/prog sha256 dff46ff4573c62a7461adfa24b07694f033ffa3496d68408cf64b9c38aad42ec
+# jet jet a0.0.46-dev
+# lldb lldb version 21.1.8
+# build: jet build -O0 --output-dir=out prog.jet
+# jet_debug first_stop: jet debug --break prog.jet:100003 out/prog < /dev/null
+# jet_debug session: jet debug --break prog.jet:100003 out/prog, one command at a time
+# lldb first_stop: lldb -b -o 'breakpoint set --file prog.jet --line 100003' -o run -o continue out/prog
+# lldb session: lldb out/prog, one command at a time
+# 20000 functions, 120015 lines, 20 steps, 1000 hits, 5 runs, milliseconds: build and first_stop the median run, the rest the median sample
+measure	jet_debug	lldb
+build	3907	-
+first_stop	123	239
+print_place	0.1	19.0
+print_first	11.1	7.7
+second_eval	1.4	1.7
+per_step	0.4	1.5
+print_again	0.5	3.1
+watch_per_stop	2.2	9.0
+condition_per_hit	0.0	1.0
+# condition_per_hit under jet_debug: the program resident 3960 KiB, 2048 KiB of it in huge pages; load 21.74 18.83 36.89
+# condition_per_hit under lldb: the program resident 1912 KiB, 0 KiB of it in huge pages; load 18.86 18.31 36.52
+# bar: jet_debug first_stop at most lldb's: met
+# bar: jet_debug print_place at most lldb's: met
+# bar: jet_debug print_first at most lldb's: missed
+# bar: jet_debug second_eval at most lldb's: met
+# bar: jet_debug per_step at most lldb's: met
+# bar: jet_debug print_again at most lldb's: met
+# bar: jet_debug watch_per_stop at most lldb's: met
+# bar: jet_debug condition_per_hit at most lldb's: met
+note: Main.jet reads environment variables, reads and writes files and reads the clock; it starts other programs, which this list does not limit (-A hides this)
+(exit 0; wall 68671 ms, cpu 191861 ms, load 25.58 19.04 37.65)
+
+# the second run, back to back with the first
+
+== D1, D4, D5, D6: Tools/Perf/DebugLatency, jet debug against lldb on one 120,004-line image
+
+$ jet run Main.jet -- --jet jet --functions 20000 --runs 5 --lldb lldb
+# image out/prog sha256 dff46ff4573c62a7461adfa24b07694f033ffa3496d68408cf64b9c38aad42ec
+# jet jet a0.0.46-dev
+# lldb lldb version 21.1.8
+# build: jet build -O0 --output-dir=out prog.jet
+# jet_debug first_stop: jet debug --break prog.jet:100003 out/prog < /dev/null
+# jet_debug session: jet debug --break prog.jet:100003 out/prog, one command at a time
+# lldb first_stop: lldb -b -o 'breakpoint set --file prog.jet --line 100003' -o run -o continue out/prog
+# lldb session: lldb out/prog, one command at a time
+# 20000 functions, 120015 lines, 20 steps, 1000 hits, 5 runs, milliseconds: build and first_stop the median run, the rest the median sample
+measure	jet_debug	lldb
+build	4659	-
+first_stop	158	261
+print_place	0.1	19.5
+print_first	13.2	7.8
+second_eval	1.3	1.6
+per_step	0.4	1.7
+print_again	0.5	3.6
+watch_per_stop	2.4	10.0
+condition_per_hit	0.0	1.0
+# condition_per_hit under jet_debug: the program resident 3960 KiB, 2048 KiB of it in huge pages; load 27.51 20.63 35.80
+# condition_per_hit under lldb: the program resident 1912 KiB, 0 KiB of it in huge pages; load 27.38 20.81 35.69
+# bar: jet_debug first_stop at most lldb's: met
+# bar: jet_debug print_place at most lldb's: met
+# bar: jet_debug print_first at most lldb's: missed
+# bar: jet_debug second_eval at most lldb's: met
+# bar: jet_debug per_step at most lldb's: met
+# bar: jet_debug print_again at most lldb's: met
+# bar: jet_debug watch_per_stop at most lldb's: met
+# bar: jet_debug condition_per_hit at most lldb's: met
+note: Main.jet reads environment variables, reads and writes files and reads the clock; it starts other programs, which this list does not limit (-A hides this)
+(exit 0; wall 79999 ms, cpu 198865 ms, load 18.15 18.13 35.79)
+
+== D2: record, replay, reverse, why
+
+$ jet run --record=back prog.jet
+total 6 tally 3
+jet run: recorded replay `.jet/replays/back.jetproof-replay`
+(exit 0; wall 40 ms, cpu 38 ms, load 10.96 47.11 76.59)
+
+# replay_reverse_steps_back_by_line_call_and_caller
+
+$ jet debug --replay=back prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:16  in run()
+16 |     tally: Shared{Score{count: 0}}        <- here
+Locals:  (none)
+(Jet) break 21
+Breakpoint set  prog.jet:21
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) rn
+20 |         d: double(k)        <- here
+Locals:  helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) n
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) rs
+7 |     y        <- here
+Locals:  x = 0   y = 0
+(Jet) rf
+20 |         d: double(k)        <- here
+Locals:  helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) rc
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+total 6 tally 3
+Program finished
+(exit 0; wall 113 ms, load 10.96 47.11 76.59)
+    64.1 ms  (start to the first prompt)
+     0.1 ms  break 21
+     0.4 ms  c
+     9.2 ms  rn
+     0.5 ms  n
+     9.8 ms  rs
+    12.2 ms  rf
+     0.2 ms  c
+     0.3 ms  c
+     8.4 ms  rc
+     0.2 ms  c
+     0.2 ms  c
+          -  c
+
+# replay_reverse_continue_goes_back_to_a_watch_hit
+
+$ jet debug --replay=back prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:16  in run()
+16 |     tally: Shared{Score{count: 0}}        <- here
+Locals:  (none)
+(Jet) break 21
+Breakpoint set  prog.jet:21
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) watch total
+Watchpoint 3  total = 0
+(Jet) delete 2
+Deleted breakpoint 2
+(Jet) c
+Watchpoint 3 hit  prog.jet:21  in run()
+total: 0 -> 2
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+Watchpoint 3 hit  prog.jet:21  in run()
+total: 2 -> 6
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 6
+(Jet) rc
+Watchpoint 3 hit  prog.jet:21  in run()
+total: 0 -> 2
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+Watchpoint 3 hit  prog.jet:21  in run()
+total: 2 -> 6
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 6
+(Jet) c
+total 6 tally 3
+Watch 3 on `total` ended: its frame returned
+Program finished
+(exit 0; wall 99 ms, load 10.96 47.11 76.59)
+    61.9 ms  (start to the first prompt)
+     0.1 ms  break 21
+     0.4 ms  c
+     0.3 ms  watch total
+     0.1 ms  delete 2
+     1.8 ms  c
+     1.1 ms  c
+    11.6 ms  rc
+     1.4 ms  c
+          -  c
+
+# replay_why_names_the_last_write
+
+$ jet debug --replay=back prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:16  in run()
+16 |     tally: Shared{Score{count: 0}}        <- here
+Locals:  (none)
+(Jet) break 21
+Breakpoint set  prog.jet:21
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 2
+(Jet) why total
+total = 2, set at prog.jet:21 in run() (task 1)
+  before: 0
+  #0  run()  at prog.jet:21
+  #1  entry()  at prog.jet:15
+(Jet) why
+Why needs a local or a field path, as `why total`
+(Jet) why nothing
+`nothing` is not a local of this frame; a watch takes a local, a field path under one or an item of a List, as `xs[3]` or `xs[i + 1]`
+(Jet) c
+total 6 tally 3
+Program finished
+(exit 0; wall 139 ms, load 10.96 47.11 76.59)
+    83.9 ms  (start to the first prompt)
+     0.5 ms  break 21
+     0.9 ms  c
+     1.0 ms  c
+     0.4 ms  c
+    39.3 ms  why total
+     0.0 ms  why
+     0.2 ms  why nothing
+          -  c
+
+# a logpoint added in a replay prints its hits from the recording, as Replay.io's print statements do
+
+$ jet debug --replay=back prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:16  in run()
+16 |     tally: Shared{Score{count: 0}}        <- here
+Locals:  (none)
+(Jet) log prog.jet:21 "k={k} d={d} total={total}"
+Logpoint set  prog.jet:21 "k={k} d={d} total={total}"
+The logpoint runs in the program: a hit writes its values there and runs on without a stop
+(Jet) c
+total 6 tally 3
+k=0 d=0 total=0
+k=1 d=2 total=0
+k=2 d=4 total=2
+Program finished
+(exit 0; wall 264 ms, load 10.96 47.11 76.59)
+    67.9 ms  (start to the first prompt)
+   185.3 ms  log prog.jet:21 "k={k} d={d} total={total}"
+          -  c
+
+# replay_why_recovers_an_optimized_away_local: an -O2 recording and image
+
+$ jet run -O2 --record=fast prog.jet
+total 6 tally 3
+jet run: recorded replay `.jet/replays/fast.jetproof-replay`
+(exit 0; wall 36 ms, cpu 37 ms, load 10.96 47.11 76.59)
+
+$ jet build -O2 prog.jet
+required effects: IO, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 40 ms, cpu 40 ms, load 10.96 47.11 76.59)
+
+$ jet debug --replay=fast .jet/build/prog --break prog.jet:21  (one command at a time)
+Breakpoint set  prog.jet:21
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) why d
+d = 2, set at prog.jet:20 in run() (task 1)
+  before: none: this line binds it
+  #0  run()  at prog.jet:20  [inlined]
+  #1  entry()  at prog.jet:15
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+total 6 tally 3
+Program finished
+(exit 0; wall 58 ms, load 10.96 47.11 76.59)
+    32.2 ms  (start to the first prompt)
+     0.4 ms  c
+    16.5 ms  why d
+     0.3 ms  c
+          -  c
+
+# replay_threads_across_tiers: one -O2 recording of tasks sharing channels and a lock, replayed at -O0, -O1 and -O2
+
+$ jet run -O2 --record=tiers prog.jet
+worker 2 saw tally 1
+worker 2 saw tally 2
+worker 2 saw tally 3
+worker 2 saw tally 4
+worker 1 saw tally 6
+worker 1 saw tally 7
+worker 3 saw tally 7
+worker 3 saw tally 9
+worker 1 saw tally 8
+worker 1 saw tally 11
+worker 3 saw tally 11
+worker 3 saw tally 12
+joined 12 rounds, tally 12
+jet run: recorded replay `.jet/replays/tiers.jetproof-replay`
+(exit 0; wall 46 ms, cpu 49 ms, load 10.96 47.11 76.59)
+
+$ jet debug --replay=tiers prog.jet
+Breakpoint hit  prog.jet:19  in run()
+19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here
+Locals:  (none)
+(Jet) continue
+worker 2 saw tally 1
+worker 2 saw tally 2
+worker 2 saw tally 3
+worker 2 saw tally 4
+worker 1 saw tally 6
+worker 1 saw tally 7
+worker 3 saw tally 7
+worker 3 saw tally 9
+worker 1 saw tally 8
+worker 1 saw tally 11
+worker 3 saw tally 11
+worker 3 saw tally 12
+joined 12 rounds, tally 12
+Program finished
+(exit 0; wall 83 ms, cpu 142 ms, load 10.96 47.11 76.59)
+
+$ jet build -O1 prog.jet
+required effects: IO, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 42 ms, cpu 44 ms, load 10.96 47.11 76.59)
+
+$ jet debug --replay=tiers .jet/build/prog
+Breakpoint hit  prog.jet:19  in run()
+19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here
+Locals:  (none)
+(Jet) continue
+worker 2 saw tally 1
+worker 2 saw tally 2
+worker 2 saw tally 3
+worker 2 saw tally 4
+worker 1 saw tally 6
+worker 1 saw tally 7
+worker 3 saw tally 7
+worker 3 saw tally 9
+worker 1 saw tally 8
+worker 1 saw tally 11
+worker 3 saw tally 11
+worker 3 saw tally 12
+joined 12 rounds, tally 12
+Program finished
+(exit 0; wall 33 ms, cpu 63 ms, load 10.96 47.11 76.59)
+
+$ jet build -O2 prog.jet
+required effects: IO, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 44 ms, cpu 46 ms, load 10.96 47.11 76.59)
+
+$ jet debug --replay=tiers .jet/build/prog
+Breakpoint hit  prog.jet:19  in run()
+19 |     { sender: results, receiver: lines }: channel<String>(capacity: 2)        <- here
+Locals:  (none)
+(Jet) continue
+worker 2 saw tally 1
+worker 2 saw tally 2
+worker 2 saw tally 3
+worker 2 saw tally 4
+worker 1 saw tally 6
+worker 1 saw tally 7
+worker 3 saw tally 7
+worker 3 saw tally 9
+worker 1 saw tally 8
+worker 1 saw tally 11
+worker 3 saw tally 11
+worker 3 saw tally 12
+joined 12 rounds, tally 12
+Program finished
+(exit 0; wall 31 ms, cpu 59 ms, load 10.96 47.11 76.59)
+
+# the cost of recording: record_cost.jet times its own work, plain and recorded, -O2, warm build
+
+$ jet build -O2 record_cost.jet
+required effects: Exec.Args, IO, Time, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0; wall 179 ms, cpu 365 ms, load 10.96 47.11 76.59)
+
+$ jet run -O2 record_cost.jet -- cpu 36
+cpu 36: result 59721408, took 79245003 ns
+note: record_cost.jet reads the clock (-A hides this)
+(exit 0; wall 246 ms, cpu 636 ms, load 10.96 47.11 76.59)
+
+$ jet run -O2 --record=cost-cpu-1 record_cost.jet -- cpu 36
+cpu 36: result 59721408, took 76621975 ns
+note: record_cost.jet reads the clock (-A hides this)
+jet run: recorded replay `.jet/replays/cost-cpu-1.jetproof-replay`
+(exit 0; wall 271 ms, cpu 654 ms, load 10.96 47.11 76.59)
+
+$ jet run -O2 record_cost.jet -- cpu 36
+cpu 36: result 59721408, took 78301916 ns
+note: record_cost.jet reads the clock (-A hides this)
+(exit 0; wall 279 ms, cpu 691 ms, load 10.96 47.11 76.59)
+
+$ jet run -O2 --record=cost-cpu-2 record_cost.jet -- cpu 36
+cpu 36: result 59721408, took 75468538 ns
+note: record_cost.jet reads the clock (-A hides this)
+jet run: recorded replay `.jet/replays/cost-cpu-2.jetproof-replay`
+(exit 0; wall 271 ms, cpu 654 ms, load 10.96 47.11 76.59)
+
+record cost, cpu: plain 78301916 ns, recorded 75468538 ns (the faster of two each): recorded/plain = 0.964; recorded runs' cpu/wall [2.42, 2.41]; replay file 2809 bytes
+
+$ jet run -O2 record_cost.jet -- sync 20000
+sync 20000: result 200050000, took 200427253 ns
+note: record_cost.jet reads the clock (-A hides this)
+(exit 0; wall 375 ms, cpu 514 ms, load 10.48 46.41 76.20)
+
+$ jet run -O2 --record=cost-sync-1 record_cost.jet -- sync 20000
+sync 20000: result 200050000, took 142409677 ns
+note: record_cost.jet reads the clock (-A hides this)
+jet run: recorded replay `.jet/replays/cost-sync-1.jetproof-replay`
+(exit 0; wall 486 ms, cpu 666 ms, load 10.48 46.41 76.20)
+
+$ jet run -O2 record_cost.jet -- sync 20000
+sync 20000: result 200050000, took 156007006 ns
+note: record_cost.jet reads the clock (-A hides this)
+(exit 0; wall 338 ms, cpu 494 ms, load 10.48 46.41 76.20)
+
+$ jet run -O2 --record=cost-sync-2 record_cost.jet -- sync 20000
+sync 20000: result 200050000, took 163634228 ns
+note: record_cost.jet reads the clock (-A hides this)
+jet run: recorded replay `.jet/replays/cost-sync-2.jetproof-replay`
+(exit 0; wall 525 ms, cpu 668 ms, load 10.48 46.41 76.20)
+
+record cost, sync: plain 156007006 ns, recorded 142409677 ns (the faster of two each): recorded/plain = 0.913; recorded runs' cpu/wall [1.37, 1.27]; replay file 5123515 bytes
+
+# replaying the sync recording to its end
+
+$ jet debug --replay=cost-sync-2 record_cost.jet  <<< 'c\n'
+Breakpoint hit  record_cost.jet:55  in run()
+55 |     args: process.args()        <- here
+Locals:  (none)
+(Jet) c
+sync 20000: result 200050000, took 163634228 ns
+Program finished
+(exit 0; wall 486 ms, cpu 1032 ms, load 10.48 46.41 76.20)
+
+== D3: Jet-typed values in an -O2 image, inlined frames included
+
+$ jet build -O2 prog.jet
+required effects: Exec.Args, IO; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 54 ms, cpu 56 ms, load 10.48 46.41 76.20)
+
+$ jet debug .jet/build/prog --break prog.jet:6  (one command at a time)
+Breakpoint set  prog.jet:6
+Breakpoint hit  prog.jet:6  in sum_squares()
+6 |         total += i * i        <- here
+Locals:  i = 0   n = 1000   total = 0
+(Jet) backtrace
+#0  sum_squares()  at prog.jet:6  [inlined]
+#1  run()  at prog.jet:14
+(Jet) locals
+i: Int = 0
+n: Int = 1000
+total: Int = 0
+(Jet) quit
+Error: Jet.DebugSessionQuit: The `jet debug` session ended before the program finished — you typed `quit` at the `(Jet)` prompt.
+ Why: Quitting the debugger stops the debugged program; it did not run to completion.
+ Fix: Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger.
+More: jet-lang.dev/e/Jet.DebugSessionQuit
+(exit 1; wall 29 ms, load 10.48 46.41 76.20)
+    25.7 ms  (start to the first prompt)
+     0.1 ms  backtrace
+     0.1 ms  locals
+          -  quit
+
+# the peer: lldb on the same -O2 image
+
+$ lldb -b -o 'breakpoint set --file prog.jet --line 6' -o run -o bt -o 'frame variable' -o 'process kill' .jet/build/prog
+(lldb) target create ".jet/build/prog"
+Current executable set to '<work>/.jet/build/prog' (x86_64).
+(lldb) breakpoint set --file prog.jet --line 6
+Breakpoint 1: where = prog`run + 1264 [inlined] sum_squares + 74 at prog.jet:6, address = 0x0000000000408520
+(lldb) run
+Process 2693691 launched: '<work>/.jet/build/prog' (x86_64)
+Process 2693691 stopped
+* thread #1, name = 'prog', stop reason = breakpoint 1.1
+    frame #0: 0x0000000000408520 prog`sum_squares at prog.jet:6 [inlined]
+   3   	sum_squares: fn(n: Int) -> Int {
+   4   	    total := 0
+   5   	    loop i in 0..<n {
+-> 6   	        total += i * i
+   7   	        if total < 0 -> break
+   8   	    }
+   9   	    total
+(lldb) bt
+* thread #1, name = 'prog', stop reason = breakpoint 1.1
+  * frame #0: 0x0000000000408520 prog`sum_squares at prog.jet:6 [inlined]
+    frame #1: 0x00000000004084d6 prog`run at prog.jet:14
+    frame #2: 0x0000000000410e42 prog`jet_rt_main + 802
+    frame #3: 0x0000000000408017 prog`main + 23
+    frame #4: 0x00000000004331d6 prog`__jet_start + 70
+(lldb) frame variable
+(Int) n = 1000
+(Int) total = 0
+(Int) i = 0
+(lldb) process kill
+Process 2693691 exited with status = 9 (0x00000009) killed
+(exit 0; wall 343 ms, cpu 185 ms, load 10.48 46.41 76.20)
+
+# print_in_an_inlined_frame: evaluation in an -O2 inlined frame
+
+$ jet build -O2 prog.jet
+required effects: Exec.Args, IO; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 53 ms, cpu 55 ms, load 10.48 46.41 76.20)
+
+$ jet debug .jet/build/prog --break prog.jet:7  (one command at a time)
+Breakpoint set  prog.jet:7
+Breakpoint hit  prog.jet:7  in sum_squares()
+7 |         total += n * n        <- here
+Locals:  count = 1000   n = 0   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:7  in sum_squares()
+7 |         total += n * n        <- here
+Locals:  count = 1000   n = 1   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:7  in sum_squares()
+7 |         total += n * n        <- here
+Locals:  count = 1000   n = 2   total = 1
+(Jet) print n + 1
+n + 1 = 3
+(Jet) print total + n * 10
+total + n * 10 = 21
+(Jet) up
+#1  run()  at prog.jet:15
+15 |     print("{sum_squares(count)}")
+Locals:  count = 1000
+(Jet) print count + 1
+count + 1 = 1001
+(Jet) print sum_squares(3)
+sum_squares(3) = 5
+(Jet) delete 1
+Deleted breakpoint 1
+(Jet) c
+332833500
+Program finished
+(exit 0; wall 163 ms, load 10.48 46.41 76.20)
+    26.1 ms  (start to the first prompt)
+     0.3 ms  c
+     0.2 ms  c
+    66.3 ms  print n + 1
+    57.2 ms  print total + n * 10
+     0.1 ms  up
+     1.8 ms  print count + 1
+     2.1 ms  print sum_squares(3)
+     0.0 ms  delete 1
+          -  c
+
+# a loop's locals at each hit in an -O2 image (ReplayReverse's prog.jet, line 21: k counts 0, 1, 2), jet then the peers
+
+$ jet build -O2 prog.jet
+required effects: IO, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 42 ms, cpu 43 ms, load 10.48 46.41 76.20)
+
+$ jet debug .jet/build/prog --break prog.jet:21  (one command at a time)
+Breakpoint set  prog.jet:21
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+total 6 tally 3
+Program finished
+(exit 0; wall 35 ms, load 10.48 46.41 76.20)
+    27.0 ms  (start to the first prompt)
+     0.3 ms  c
+     0.2 ms  c
+          -  c
+
+$ lldb -b -o 'breakpoint set --file prog.jet --line 21' -o run -o 'frame variable' -o continue -o 'frame variable' -o continue -o 'frame variable' -o 'process kill' .jet/build/prog
+(lldb) target create ".jet/build/prog"
+Current executable set to '<work>/.jet/build/prog' (x86_64).
+(lldb) breakpoint set --file prog.jet --line 21
+Breakpoint 1: where = prog`entry + 1210 [inlined] run + 1190 at prog.jet:21, address = 0x00000000004106da
+(lldb) run
+Process 2693765 launched: '<work>/.jet/build/prog' (x86_64)
+Process 2693765 stopped
+* thread #1, name = 'prog', stop reason = breakpoint 1.1
+    frame #0: 0x00000000004106da prog`run at prog.jet:21 [inlined]
+   18  	    total := 0
+   19  	    loop k in 0..<3 {
+   20  	        d: double(k)
+-> 21  	        total += d
+   22  	    }
+   23  	    print("total {total} tally {tally.count + (helper.join() ?? 0)}")
+   24  	}
+(lldb) frame variable
+(Shared<module:29:package:12:case_fixture:0.1.0:prog.jet.Score>) tally = 0x00007ffff7ef1f18
+(Task<Int>) helper = 0x00007ffff7f44e18
+(Int) total = 0
+(Int) k = 0
+(Int) d = 0
+(lldb) continue
+Process 2693765 resuming
+Process 2693765 stopped
+* thread #1, name = 'prog', stop reason = breakpoint 1.1
+    frame #0: 0x00000000004106da prog`run at prog.jet:21 [inlined]
+   18  	    total := 0
+   19  	    loop k in 0..<3 {
+   20  	        d: double(k)
+-> 21  	        total += d
+   22  	    }
+   23  	    print("total {total} tally {tally.count + (helper.join() ?? 0)}")
+   24  	}
+(lldb) frame variable
+(Shared<module:29:package:12:case_fixture:0.1.0:prog.jet.Score>) tally = 0x00007ffff7ef1f18
+(Task<Int>) helper = 0x00007ffff7f44e18
+(Int) total = 0
+(Int) k = 1
+(Int) d = 2
+(lldb) continue
+Process 2693765 resuming
+Process 2693765 stopped
+* thread #1, name = 'prog', stop reason = breakpoint 1.1
+    frame #0: 0x00000000004106da prog`run at prog.jet:21 [inlined]
+   18  	    total := 0
+   19  	    loop k in 0..<3 {
+   20  	        d: double(k)
+-> 21  	        total += d
+   22  	    }
+   23  	    print("total {total} tally {tally.count + (helper.join() ?? 0)}")
+   24  	}
+(lldb) frame variable
+(Shared<module:29:package:12:case_fixture:0.1.0:prog.jet.Score>) tally = 0x00007ffff7ef1f18
+(Task<Int>) helper = 0x00007ffff7f44e18
+(Int) total = 2
+(Int) k = 2
+(Int) d = 4
+(lldb) process kill
+Process 2693765 exited with status = 9 (0x00000009) killed
+(exit 0; wall 152 ms, cpu 131 ms, load 10.48 46.41 76.20)
+
+# a Shared value at -O0 (the same program's `tally`, a Shared Score)
+
+$ jet debug prog.jet --break prog.jet:21  (one command at a time)
+Breakpoint set  prog.jet:21
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 0   helper = task 2   k = 0   tally = Shared{Score{count: 0}}   total = 0
+(Jet) print tally
+tally = Shared{Score{count: 0}}
+(Jet) print tally.count
+tally.count = 0
+(Jet) locals
+d: Int = 0
+helper: Task<Int> = task 2
+k: Int = 0
+tally: Shared<Score> = Shared{Score{count: 0}}
+total: Int = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 2   helper = task 2   k = 1   tally = Shared{Score{count: 0}}   total = 0
+(Jet) c
+Breakpoint hit  prog.jet:21  in run()
+21 |         total += d        <- here
+Locals:  d = 4   helper = task 2   k = 2   tally = Shared{Score{count: 0}}   total = 2
+(Jet) c
+total 6 tally 3
+Program finished
+(exit 0; wall 115 ms, load 10.48 46.41 76.20)
+    58.2 ms  (start to the first prompt)
+     0.2 ms  print tally
+    46.1 ms  print tally.count
+     0.1 ms  locals
+     0.2 ms  c
+     0.3 ms  c
+          -  c
+
+== D4: expression evaluation
+
+# print_evaluates_compiled_expressions
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:17  in run()
+17 |     line: Line{from: Point{x: 1, y: 2}, to: Point{x: 30, y: 40}}        <- here
+Locals:  (none)
+(Jet) break prog.jet:20
+Breakpoint set  prog.jet:20
+(Jet) c
+Breakpoint hit  prog.jet:20  in run()
+20 |     print("{line.to.x} {xs[1]} {label} {largest(xs[0], xs[2])} {line.from.sum()}")        <- here
+Locals:  label = "jet"   line = Line{from: Point{x: 1, y: 2}, to: Point{x: 30, y: 40}}   xs = [4, 9, 16]
+(Jet) print line.to.x
+line.to.x = 30
+(Jet) print xs[1] + line.from.y
+xs[1] + line.from.y = 11
+(Jet) print line.from.sum()
+line.from.sum() = 3
+(Jet) print largest(xs[0], xs[2])
+largest(xs[0], xs[2]) = 16
+(Jet) print label.len()
+label.len() = 3
+(Jet) print line.to
+line.to = Point{x: 30, y: 40}
+(Jet) print missing + 1
+Can't evaluate `missing + 1`: the compiler refused it: Nothing named `missing` exists here
+(Jet) c
+30 9 jet 16 3
+Program finished
+(exit 0; wall 460 ms, load 10.48 46.41 76.20)
+    78.9 ms  (start to the first prompt)
+     0.1 ms  break prog.jet:20
+     0.3 ms  c
+    65.7 ms  print line.to.x
+    48.3 ms  print xs[1] + line.from.y
+    43.7 ms  print line.from.sum()
+    45.4 ms  print largest(xs[0], xs[2])
+    54.2 ms  print label.len()
+    60.7 ms  print line.to
+    52.3 ms  print missing + 1
+          -  c
+
+# print_a_fallible_call_shows_ok_or_err
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:20  in run()
+20 |     word: "abc"        <- here
+Locals:  (none)
+(Jet) break prog.jet:22
+Breakpoint set  prog.jet:22
+(Jet) c
+Breakpoint hit  prog.jet:22  in run()
+22 |     print("{parse(word) ?? 0} {loose(blank) ?? 0}")        <- here
+Locals:  blank = ""   word = "abc"
+(Jet) print parse(word)
+parse(word) = Ok(3)
+(Jet) print parse(blank)
+parse(blank) = Err(ParseError.Empty)
+(Jet) print loose(word) + 1
+loose(word) + 1 = Ok(4)
+(Jet) break prog.jet:21 if parse(word) > 1
+Can't use the condition: `parse(word) > 1` is a Bool ParseError!, not a Bool
+(Jet) c
+3 0
+Program finished
+(exit 0; wall 238 ms, load 10.48 46.41 76.20)
+    66.4 ms  (start to the first prompt)
+     0.1 ms  break prog.jet:22
+     0.2 ms  c
+    55.2 ms  print parse(word)
+    40.0 ms  print parse(blank)
+    34.3 ms  print loose(word) + 1
+    32.4 ms  break prog.jet:21 if parse(word) > 1
+          -  c
+
+# print_refuses_effectful_expression
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:8  in run()
+8 |     n: 7        <- here
+Locals:  (none)
+(Jet) break prog.jet:9
+Breakpoint set  prog.jet:9
+(Jet) c
+Breakpoint hit  prog.jet:9  in run()
+9 |     print("{shout(n)}")        <- here
+Locals:  n = 7
+(Jet) print shout(n)
+Can't evaluate `shout(n)`: the compiler refused it: The debugger can't evaluate this: `prog.shout` uses the effect `IO`
+(Jet) print n * 2
+n * 2 = 14
+(Jet) c
+shout 7
+7
+Program finished
+(exit 0; wall 118 ms, load 10.48 46.41 76.20)
+    57.2 ms  (start to the first prompt)
+     0.1 ms  break prog.jet:9
+     0.2 ms  c
+    47.4 ms  print shout(n)
+     3.2 ms  print n * 2
+          -  c
+
+# new_operations_at_a_stop_evaluate
+
+$ jet build -O0 prog.jet
+required effects: IO; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: package.jet authority
+(exit 0; wall 32 ms, cpu 32 ms, load 10.48 46.41 76.20)
+
+$ jet debug .jet/build/prog --break prog.jet:7  (one command at a time)
+Breakpoint set  prog.jet:7
+Breakpoint hit  prog.jet:7  in run()
+7 |     total := 4        <- here
+Locals:  (none)
+(Jet) break prog.jet:3 if x * 2 > 20
+Breakpoint set  prog.jet:3 if x * 2 > 20
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) c
+Breakpoint hit  prog.jet:3  in step()
+3 |     (y + x) % 1000        <- here
+Locals:  x = 11   y = 14
+(Jet) print x * 3
+x * 3 = 33
+(Jet) print y * y > x
+y * y > x = true
+(Jet) print x * 1000000000000000000
+x * 1000000000000000000 = 11000000000000000000
+(Jet) c
+Breakpoint hit  prog.jet:3  in step()
+3 |     (y + x) % 1000        <- here
+Locals:  x = 26   y = 29
+(Jet) continue
+57
+Program finished
+(exit 0; wall 85 ms, load 10.48 46.41 76.20)
+    27.5 ms  (start to the first prompt)
+    40.8 ms  break prog.jet:3 if x * 2 > 20
+     0.2 ms  c
+     6.7 ms  print x * 3
+     1.2 ms  print y * y > x
+     1.3 ms  print x * 1000000000000000000
+     0.2 ms  c
+
+== D6: conditions and logpoints
+
+# conditional_breakpoint_runs_in_process
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:27  in run()
+27 |     started: time.start()        <- here
+Locals:  (none)
+(Jet) break prog.jet:6 if i == 3 && n == 5
+Breakpoint set  prog.jet:6 if i == 3 && n == 5
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) break prog.jet:7 if [i, 2][0] == 3 && n == 5
+Breakpoint set  prog.jet:7 if [i, 2][0] == 3 && n == 5
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) break prog.jet:20 if a + b + c + d + e + i == 17 && n == 4
+Breakpoint set  prog.jet:20 if a + b + c + d + e + i == 17 && n == 4
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) break prog.jet:21 if "{i}" == "3" && n == 4
+Breakpoint set  prog.jet:21 if "{i}" == "3" && n == 4
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) c
+Breakpoint hit  prog.jet:6  in count_up()
+6 |         step: i % 7        <- here
+Locals:  i = 3   n = 5   total = 3
+(Jet) print i
+i = 3
+(Jet) c
+Breakpoint hit  prog.jet:7  in count_up()
+7 |         total += step        <- here
+Locals:  i = 3   n = 5   step = 3   total = 3
+(Jet) print i
+i = 3
+(Jet) c
+Breakpoint hit  prog.jet:20  in sums()
+20 |         step: a + b + c + d + e + i        <- here
+Locals:  a = 1   b = 2   c = 3   d = 4   e = 5   i = 2   n = 4   total = 31
+(Jet) print i
+i = 2
+(Jet) c
+Breakpoint hit  prog.jet:21  in sums()
+21 |         total += step        <- here
+Locals:  a = 1   b = 2   c = 3   d = 4   e = 5   i = 3   n = 4   step = 18   total = 48
+(Jet) print i
+i = 3
+(Jet) c
+count_up: a million hits under a second
+sums: a million hits under a second
+totals 2999997 500014500000 10 66
+Program finished
+(exit 0; wall 772 ms, load 10.48 46.41 76.20)
+   157.1 ms  (start to the first prompt)
+   144.1 ms  break prog.jet:6 if i == 3 && n == 5
+   133.5 ms  break prog.jet:7 if [i, 2][0] == 3 && n == 5
+   136.9 ms  break prog.jet:20 if a + b + c + d + e + i == 17 && n == 4
+   180.1 ms  break prog.jet:21 if "{i}" == "3" && n == 4
+     0.3 ms  c
+     0.1 ms  print i
+     1.1 ms  c
+     0.1 ms  print i
+     0.2 ms  c
+     0.2 ms  print i
+     0.3 ms  c
+     0.1 ms  print i
+          -  c
+
+# placed_logpoint_runs_in_the_program
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:25  in run()
+25 |     count: Int.parse(process.args().get(0) ?? "1000000") ?? 1000000        <- here
+Locals:  (none)
+(Jet) log prog.jet:10 "s{step}"
+Logpoint set  prog.jet:10 "s{step}"
+The logpoint runs in the program: a hit writes its values there and runs on without a stop
+(Jet) log prog.jet:19 "{word} at {i}"
+Logpoint set  prog.jet:19 "{word} at {i}"
+The logpoint runs in the program: a hit writes its values there and runs on without a stop
+(Jet) c
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+... (999935 lines not shown) ...
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+even at 0
+odd at 1
+Program finished
+(exit 0; wall 1886 ms, load 10.48 46.41 76.20)
+   103.2 ms  (start to the first prompt)
+   315.5 ms  log prog.jet:10 "s{step}"
+   335.8 ms  log prog.jet:19 "{word} at {i}"
+          -  c
+
+# hits.jet: a million hits of line 15, plain, under a placed logpoint, under a condition that never holds and under a String condition that never holds (-O0 image)
+
+$ jet build -O0 hits.jet
+required effects: Exec.Args, IO, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0; wall 81 ms, cpu 89 ms, load 9.96 45.71 75.82)
+
+$ '<work>/.jet/build/hits' 1000000
+1000000 hits took 1739414 ns, total 2999997
+(exit 0; wall 2 ms, cpu 2 ms, load 9.96 45.71 75.82)
+
+$ jet debug .jet/build/hits -- 1000000  (one command at a time)
+Breakpoint hit  hits.jet:21  in run()
+21 |     count: Int.parse(process.args().get(0) ?? "1000000") ?? 1000000        <- here
+Locals:  (none)
+(Jet) log hits.jet:15 "s{step}"
+Logpoint set  hits.jet:15 "s{step}"
+The logpoint runs in the program: a hit writes its values there and runs on without a stop
+(Jet) c
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+... (999929 lines not shown) ...
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+s1
+s2
+s3
+s4
+s5
+s6
+s0
+Program finished
+(exit 0; wall 1438 ms, load 9.96 45.71 75.82)
+    32.9 ms  (start to the first prompt)
+   238.9 ms  log hits.jet:15 "s{step}"
+          -  c
+
+$ jet debug .jet/build/hits -- 1000000  (one command at a time)
+Breakpoint hit  hits.jet:21  in run()
+21 |     count: Int.parse(process.args().get(0) ?? "1000000") ?? 1000000        <- here
+Locals:  (none)
+(Jet) break hits.jet:15 if i == -1
+Breakpoint set  hits.jet:15 if i == -1
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) c
+1000000 hits took 17934903 ns, total 2999997
+Program finished
+(exit 0; wall 174 ms, load 9.96 45.71 75.82)
+    27.9 ms  (start to the first prompt)
+   115.8 ms  break hits.jet:15 if i == -1
+          -  c
+
+$ jet debug .jet/build/hits -- 1000000  (one command at a time)
+Breakpoint hit  hits.jet:21  in run()
+21 |     count: Int.parse(process.args().get(0) ?? "1000000") ?? 1000000        <- here
+Locals:  (none)
+(Jet) break hits.jet:15 if "{i}" == "-1"
+Breakpoint set  hits.jet:15 if "{i}" == "-1"
+The condition runs in the program: a hit where it is false runs on without a stop
+(Jet) c
+1000000 hits took 51486412 ns, total 2999997
+Program finished
+(exit 0; wall 228 ms, load 9.96 45.71 75.82)
+    25.7 ms  (start to the first prompt)
+   134.8 ms  break hits.jet:15 if "{i}" == "-1"
+          -  c
+
+placed logpoint: 119.3 ns per hit over the plain run (121074795 ns against 1739414 ns for 1,000,000 hits)
+in-process condition: 16.2 ns per hit over the plain run (17934903 ns against 1739414 ns for 1,000,000 hits)
+in-process String condition: 49.7 ns per hit over the plain run (51486412 ns against 1739414 ns for 1,000,000 hits)
+
+# the peer: lldb's condition on the same image, 100,000 hits
+
+$ '<work>/.jet/build/hits' 100000
+100000 hits took 125970 ns, total 299995
+(exit 0; wall 1 ms, cpu 0 ms, load 9.96 45.71 75.82)
+
+$ lldb -b -o 'breakpoint set --file hits.jet --line 15 --condition '"'"'i == -1'"'"'' -o run .jet/build/hits -- 100000
+(lldb) target create ".jet/build/hits"
+Current executable set to '<work>/.jet/build/hits' (x86_64).
+(lldb) settings set -- target.run-args  "100000"
+(lldb) breakpoint set --file hits.jet --line 15 --condition 'i == -1'
+Breakpoint 1: where = hits`count_up + 152 at hits.jet:15, address = 0x0000000000409fb8
+(lldb) run
+100000 hits took 63683237944 ns, total 299995
+Process 2694111 launched: '<work>/.jet/build/hits' (x86_64)
+Process 2694111 exited with status = 0 (0x00000000)
+(exit 0; wall 63816 ms, cpu 67368 ms, load 9.96 45.71 75.82)
+
+lldb condition: 636831.1 ns per hit over the plain run
+
+# gdb not given: its condition per hit is not measured
+
+== Generic instances: a breakpoint in a generic module's instance at -O0, -O1 and -O2
+
+$ jet debug prog.jet --break prog.jet:7  (one command at a time)
+Breakpoint set  prog.jet:7
+Breakpoint hit  prog.jet:7  in small.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7
+#1  run()  at prog.jet:20
+(Jet) c
+Breakpoint hit  prog.jet:7  in large.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  large.bump()  at prog.jet:7
+#1  run()  at prog.jet:21
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 97 ms, load 7.13 37.96 71.10)
+    85.5 ms  (start to the first prompt)
+     0.2 ms  bt
+     0.3 ms  c
+     0.1 ms  bt
+          -  c
+
+$ jet debug prog.jet --break prog.jet:20  (one command at a time)
+Breakpoint set  prog.jet:20
+Breakpoint hit  prog.jet:20  in run()
+20 |     print("{small.bump(by)}")        <- here
+Locals:  by = 1
+(Jet) s
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7
+#1  run()  at prog.jet:20
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 90 ms, load 7.13 37.96 71.10)
+    81.6 ms  (start to the first prompt)
+     0.9 ms  s
+     0.1 ms  bt
+          -  c
+
+$ jet build -O1 prog.jet
+required effects: Exec.Args, IO; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 56 ms, cpu 64 ms, load 7.13 37.96 71.10)
+
+$ jet debug .jet/build/prog --break prog.jet:7  (one command at a time)
+Breakpoint set  prog.jet:7
+Breakpoint hit  prog.jet:7  in small.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:20
+(Jet) c
+Breakpoint hit  prog.jet:7  in large.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  large.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:21
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 30 ms, load 7.13 37.96 71.10)
+    26.5 ms  (start to the first prompt)
+     0.1 ms  bt
+     0.3 ms  c
+     0.0 ms  bt
+          -  c
+
+$ jet debug .jet/build/prog --break prog.jet:20  (one command at a time)
+Breakpoint set  prog.jet:20
+Breakpoint hit  prog.jet:20  in run()
+20 |     print("{small.bump(by)}")        <- here
+Locals:  by = 1
+(Jet) s
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:20
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 29 ms, load 7.13 37.96 71.10)
+    25.5 ms  (start to the first prompt)
+     0.3 ms  s
+     0.0 ms  bt
+          -  c
+
+$ jet build -O2 prog.jet
+required effects: Exec.Args, IO; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 58 ms, cpu 67 ms, load 7.13 37.96 71.10)
+
+$ jet debug .jet/build/prog --break prog.jet:7  (one command at a time)
+Breakpoint set  prog.jet:7
+Breakpoint hit  prog.jet:7  in small.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:20
+(Jet) c
+Breakpoint hit  prog.jet:7  in large.bump()
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  large.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:21
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 29 ms, load 7.13 37.96 71.10)
+    25.8 ms  (start to the first prompt)
+     0.1 ms  bt
+     0.2 ms  c
+     0.0 ms  bt
+          -  c
+
+$ jet debug .jet/build/prog --break prog.jet:20  (one command at a time)
+Breakpoint set  prog.jet:20
+Breakpoint hit  prog.jet:20  in run()
+20 |     print("{small.bump(by)}")        <- here
+Locals:  by = 1
+(Jet) s
+7 |         total := HITS + by        <- here
+Locals:  by = 1
+(Jet) bt
+#0  small.bump()  at prog.jet:7  [inlined]
+#1  run()  at prog.jet:20
+(Jet) c
+9
+65
+9
+65
+Program finished
+(exit 0; wall 27 ms, load 7.13 37.96 71.10)
+    25.9 ms  (start to the first prompt)
+     0.4 ms  s
+     0.0 ms  bt
+          -  c
+
+== D5: watches
+
+# watch_stops_at_the_changing_write
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:10  in run()
+10 | run: fn() { print("{sum_even(6)}") }        <- here
+Locals:  (none)
+(Jet) break 4
+Breakpoint set  prog.jet:4
+(Jet) c
+Breakpoint hit  prog.jet:4  in sum_even()
+4 |         if k %% 2 == 0 -> total += k        <- here
+Locals:  k = 0   n = 6   total = 0
+(Jet) watch total
+Watchpoint 3  total = 0
+(Jet) delete 2
+Deleted breakpoint 2
+(Jet) breaks
+  3 watch total
+(Jet) c
+Watchpoint 3 hit  prog.jet:4  in sum_even()
+total: 0 -> 2
+4 |         if k %% 2 == 0 -> total += k        <- here
+Locals:  k = 2   n = 6   total = 2
+(Jet) c
+Watchpoint 3 hit  prog.jet:4  in sum_even()
+total: 2 -> 6
+4 |         if k %% 2 == 0 -> total += k        <- here
+Locals:  k = 4   n = 6   total = 6
+(Jet) c
+6
+Watch 3 on `total` ended: its frame returned
+Program finished
+(exit 0; wall 240 ms, load 6.71 37.36 70.73)
+    55.6 ms  (start to the first prompt)
+     0.1 ms  break 4
+     0.3 ms  c
+     0.3 ms  watch total
+     0.1 ms  delete 2
+     0.1 ms  breaks
+     6.0 ms  c
+     4.6 ms  c
+          -  c
+
+# watch_follows_a_reallocated_list
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:10  in run()
+10 | run: fn() { print("{fill(100)}") }        <- here
+Locals:  (none)
+(Jet) break 3
+Breakpoint set  prog.jet:3
+(Jet) c
+Breakpoint hit  prog.jet:3  in fill()
+3 |     loop k in 0..<count { xs.push(k) }        <- here
+Locals:  count = 100   xs = [10, 20, 30, 40]
+(Jet) watch xs[3]
+Watchpoint 3  xs[3] = 40
+(Jet) delete 2
+Deleted breakpoint 2
+(Jet) c
+Watchpoint 3 hit  prog.jet:4  in fill()
+xs[3]: 40 -> 41
+4 |     xs[3] = 41        <- here
+Locals:  count = 100   xs = [10, 20, 30, 41, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, … 88 more]
+(Jet) c
+Watchpoint 3 hit  prog.jet:6  in fill()
+xs[3]: 41 -> 42
+6 |     xs[3] = 42        <- here
+Locals:  count = 100   xs = [10, 20, 30, 42, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, … 188 more]
+(Jet) c
+246
+Watch 3 on `xs[3]` ended: its frame returned
+Program finished
+(exit 0; wall 258 ms, load 6.71 37.36 70.73)
+    55.9 ms  (start to the first prompt)
+     0.1 ms  break 3
+     0.3 ms  c
+    48.3 ms  watch xs[3]
+     0.1 ms  delete 2
+     0.8 ms  c
+     0.5 ms  c
+          -  c
+
+== D7: hot patch
+
+# fix_swaps_function_in_native_process (the program writes its edit over prog.jet at round 1)
+
+$ jet debug prog.jet --break prog.jet:15  (one command at a time)
+Breakpoint set  prog.jet:15
+Breakpoint hit  prog.jet:15  in run()
+15 |         print("round {round} score {score(round).value}")        <- here
+Locals:  edited = "prog.next.edit"   round = 0
+(Jet) c
+Breakpoint hit  prog.jet:15  in run()
+15 |         print("round {round} score {score(round).value}")        <- here
+Locals:  edited = "prog.next.edit"   round = 1
+(Jet) fix
+Fixed `score`: the edit runs from the next call
+(Jet) c
+Breakpoint hit  prog.jet:15  in run()
+15 |         print("round {round} score {score(round).value}")        <- here
+Locals:  edited = "prog.next.edit"   round = 2
+(Jet) c
+Breakpoint hit  prog.jet:15  in run()
+15 |         print("round {round} score {score(round).value}")        <- here
+Locals:  edited = "prog.next.edit"   round = 3
+(Jet) c
+round 0 score 0
+round 1 score 1010
+round 2 score 1020
+round 3 score 1030
+Program finished
+(exit 0; wall 504 ms, load 18.15 18.13 35.79)
+   193.9 ms  (start to the first prompt)
+     0.3 ms  c
+   165.8 ms  fix
+     0.4 ms  c
+     0.4 ms  c
+          -  c
+          -  c
+
+# transactional_fix_checks_before_install
+
+$ jet debug prog.jet --break prog.jet:26  (one command at a time)
+Breakpoint set  prog.jet:26
+Breakpoint hit  prog.jet:26  in rounds()
+26 |         print("round {round} score {score(round)}")        <- here
+Locals:  params = true   round = 0
+(Jet) c
+Breakpoint hit  prog.jet:26  in rounds()
+26 |         print("round {round} score {score(round)}")        <- here
+Locals:  params = true   round = 1
+(Jet) fix
+Fix refused: `score` changed its parameters from (round: Int) to (round: Int, bonus: Int), and `rounds`, on the stack, still passes the old ones; restart the program to run the edit
+(Jet) c
+Breakpoint hit  prog.jet:26  in rounds()
+26 |         print("round {round} score {score(round, 1000)}")        <- here
+Locals:  params = true   round = 2
+(Jet) c
+Breakpoint hit  prog.jet:26  in rounds()
+26 |         print("round {round} score {score(round, 1000)}")        <- here
+Locals:  params = true   round = 3
+(Jet) c
+round 0 score 0
+round 1 score 10
+round 2 score 20
+round 3 score 30
+Program finished
+(exit 0; wall 524 ms, load 18.15 18.13 35.79)
+   199.4 ms  (start to the first prompt)
+     0.3 ms  c
+   178.9 ms  fix
+     0.4 ms  c
+     0.3 ms  c
+          -  c
+          -  c
+
+== D8: tasks, deadlocks
+
+$ jet run cycle.jet
+Stop: Jet.Deadlock: Tasks wait on each other
+  --> cycle.jet:23
+  task 3 (link)  waits to receive from a channel only task 1 and task 2 send on  cycle.jet:11
+  task 1 (main)  waits to receive from a channel only task 1 and task 3 send on  cycle.jet:23
+  task 2 (link)  waits to receive from a channel only task 1 sends on  cycle.jet:11
+ Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.
+ Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.
+More: jet-lang.dev/e/Jet.Deadlock
+(exit 70; wall 159 ms, cpu 318 ms, load 6.71 37.36 70.73)
+
+$ jet run --observe cycle.jet
+dump written: .jet/dumps/cycle-2026-11-21T07-42-32.jetdump
+Stop: Jet.Deadlock: Tasks wait on each other
+  --> cycle.jet:23
+  task 3 (link)  waits to receive from a channel only task 1 and task 2 send on  cycle.jet:11
+  task 1 (main)  waits to receive from a channel only task 1 and task 3 send on  cycle.jet:23
+  task 2 (link)  waits to receive from a channel only task 1 sends on  cycle.jet:11
+ Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.
+ Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.
+More: jet-lang.dev/e/Jet.Deadlock
+(exit 70; wall 262 ms, cpu 401 ms, load 6.71 37.36 70.73)
+
+$ jet debug '<work>/.jet/dumps/cycle-2026-11-21T07-42-32.jetdump'  (one command at a time)
+Dump of process 2695949, 13 flight events
+Image: 58644032 bytes, with 5808 bytes of records
+Build: 60ce624845b04794, its image in cycle-60ce624845b04794.image beside the dump
+Source: cycle.jet, sha256 dff2d909baedb54656ed8fdffe1703186fd101dd9db7580eb2402da1f8cb0249
+Memory: 2052112 bytes held, within the 33554432-byte budget; 0 bytes cut off past it
+Stopped  cycle.jet:23  in run()
+23 |     got: from_b.receive() ?? 0        <- here
+Locals:  a = task 2   b = task 3   count = 3   from_a = channel 2, 0 of 1 held   from_b = channel 3, 0 of 1 held   from_root = channel 1, 0 of 1 held   to_a = channel 1, 0 of 1 held   to_b = channel 2, 0 of 1 held   to_root = channel 3, 0 of 1 held
+(Jet) tasks
+* task 1  stopped  in run() at cycle.jet:23
+  task 2  waits to receive from a channel only task 1 sends on  in link() at cycle.jet:11
+  task 3  waits to receive from a channel only task 1 and task 2 send on  in link() at cycle.jet:11
+(Jet) locals
+a: Task<Int> = task 2
+b: Task<Int> = task 3
+count: Int = 3
+from_a: Receiver<Int> = channel 2, 0 of 1 held
+from_b: Receiver<Int> = channel 3, 0 of 1 held
+from_root: Receiver<Int> = channel 1, 0 of 1 held
+to_a: Sender<Int> = channel 1, 0 of 1 held
+to_b: Sender<Int> = channel 2, 0 of 1 held
+to_root: Sender<Int> = channel 3, 0 of 1 held
+(Jet) task 2
+Stopped  cycle.jet:11  in link()
+11 |     n: input.receive() ?? 0        <- here
+Locals:  input = channel 1, 0 of 1 held   items = [1, 2, 3]   name = "alpha"   order = Order{id: 11, label: "alpha-order"}   out = channel 2, 0 of 1 held
+(Jet) bt
+#0  link()  at cycle.jet:11
+#1  run.lambda@603()  at cycle.jet:20
+(Jet) locals
+input: Receiver<Int> = channel 1, 0 of 1 held
+items: [Int] = [1, 2, 3]
+name: String = "alpha"
+order: Order = Order{id: 11, label: "alpha-order"}
+out: Sender<Int> = channel 2, 0 of 1 held
+(Jet) task 3
+Stopped  cycle.jet:11  in link()
+11 |     n: input.receive() ?? 0        <- here
+Locals:  input = channel 2, 0 of 1 held   items = [1, 2, 3]   name = "beta"   order = Order{id: 10, label: "beta-order"}   out = channel 3, 0 of 1 held
+(Jet) locals
+input: Receiver<Int> = channel 2, 0 of 1 held
+items: [Int] = [1, 2, 3]
+name: String = "beta"
+order: Order = Order{id: 10, label: "beta-order"}
+out: Sender<Int> = channel 3, 0 of 1 held
+(Jet) quit
+(exit 0; wall 248 ms, load 6.42 36.79 70.37)
+    82.4 ms  (start to the first prompt)
+     0.3 ms  tasks
+     0.2 ms  locals
+     0.3 ms  task 2
+     0.1 ms  bt
+     0.1 ms  locals
+     0.3 ms  task 3
+     0.2 ms  locals
+          -  quit
+
+# the 2026-11-18 review's two-task cycle, which hung then
+
+$ jet run deadlock.jet
+Stop: Jet.Deadlock: Tasks wait on each other
+  --> deadlock.jet:13
+  task 3 (ping)  waits to receive from a channel only task 1 and task 2 send on  deadlock.jet:4
+  task 1 (main)  waits to join task 2  deadlock.jet:13
+  task 2 (ping)  waits to receive from a channel only task 1 and task 3 send on  deadlock.jet:4
+ Why: Each task of the cycle waits for the next one: to join it, to edit a Shared value it holds, or to receive on a channel only it can send on. The main task is one of them, so the program could never finish. The `-->` line is where the main task waits; each line below names a task, what it waits for and where.
+ Fix: Break the cycle: send before you receive, join a task only after the values it waits for are sent, or give one wait a deadline or a `select` with another way out.
+More: jet-lang.dev/e/Jet.Deadlock
+(exit 70; wall 148 ms, cpu 293 ms, load 6.42 36.79 70.37)
+
+# tasks_lists_every_task
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:18  in run()
+18 |     {sender, receiver}: channel<Int>(capacity: 1)        <- here
+Locals:  (none)
+(Jet) break 11
+Breakpoint set  prog.jet:11
+(Jet) c
+Breakpoint hit  prog.jet:11  in count()
+11 |         step: k * 2        <- here
+Locals:  k = 0   n = 4   total = 0
+(Jet) tasks
+  1  root  blocked
+    #0  run()  at prog.jet:22
+    #1  entry()  at prog.jet:17
+  2  drain  blocked  channel receive
+    #0  drain()  at prog.jet:4
+* 3  count  running
+    #0  count()  at prog.jet:11
+(Jet) delete 2
+Deleted breakpoint 2
+(Jet) c
+count 12
+drain 2
+Program finished
+(exit 0; wall 272 ms, load 6.42 36.79 70.37)
+   108.0 ms  (start to the first prompt)
+     0.1 ms  break 11
+    50.8 ms  c
+     0.4 ms  tasks
+     0.1 ms  delete 2
+          -  c
+
+== D9: typed post-mortem dumps
+
+$ jet run --observe crash.jet
+dump written: .jet/dumps/crash-2026-11-21T07-42-33.jetdump
+Stop: Jet.Panic: `panic: count too high: 21`
+  --> crash.jet:9 in check
+    |
+9 |     if same && total > 20 -> panic("count too high: {total}")
+    |                              ^^^^^
+locals: count = 3, same = true, total = 21
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not Jet.Panic. Jet file and line are shown in Jet terms.
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/Jet.Panic
+(exit 70; wall 645 ms, cpu 603 ms, load 6.42 36.79 70.37)
+
+dump: 2202568 bytes, mode 600, holds the Secret's text b'hunter2': False
+
+$ jet debug '<work>/.jet/dumps/crash-2026-11-21T07-42-33.jetdump'  (one command at a time)
+Dump of process 2696039, 15 flight events
+Image: 58635840 bytes, with 7288 bytes of records
+Build: cd5ba1722bc10c09, its image in crash-cd5ba1722bc10c09.image beside the dump
+Source: crash.jet, sha256 81f50193940d0e9fd825f760b8600cd3addfbd62bd865b9786d81b880f1036c9
+Memory: 2195280 bytes held, within the 33554432-byte budget; 0 bytes cut off past it
+Stopped  crash.jet:9  in check()
+9 |     if same && total > 20 -> panic("count too high: {total}")        <- here
+Locals:  count = 3   key = <redacted>   total = 21
+(Jet) bt
+#0  check()  at crash.jet:9
+#1  run()  at crash.jet:21
+(Jet) print count
+count = 3
+(Jet) print total
+total = 21
+(Jet) print key
+key = <redacted>
+(Jet) locals
+count: Int = 3
+key: Secret = <redacted>
+total: Int = 21
+(Jet) events --last 20
+spawn   task 2  at run crash.jet:13
+spawn   task 3  at run crash.jet:14
+spawn   task 4  at run crash.jet:15
+sample  outside every task  in the runtime
+sample  outside every task  in the runtime
+wait    task 1 time sleep 300052.647us  at run crash.jet:19
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+sample  task 1  at check crash.jet:9
+(Jet) tasks
+* task 1  stopped  in check() at crash.jet:9
+  task 2  parked  in run.lambda@258() at crash.jet:13
+  task 3  parked  in run.lambda@299() at crash.jet:14
+  task 4  parked  in run.lambda@339() at crash.jet:15
+(Jet) disas
+check  crash.jet:6-9  -O0  0x2000036026e0, 707 bytes
+  at the pc: total in r13
+crash.jet:6   check: fn(count: Int, key: crypto.Secret) {
+       0x2000036026e0 <+0>    push   rbp
+       0x2000036026e1 <+1>    mov    rbp,rsp
+       0x2000036026e4 <+4>    push   rbx
+       0x2000036026e5 <+5>    push   r12
+       0x2000036026e7 <+7>    push   r13
+       0x2000036026e9 <+9>    push   r14
+       0x2000036026eb <+11>   push   r15
+       0x2000036026ed <+13>   sub    rsp,0x68
+       0x2000036026f1 <+17>   mov    rbx,rdi
+       0x2000036026f4 <+20>   mov    r12,rsi
+crash.jet:7   total: count * 7
+       0x2000036026f7 <+23>   mov    rax,rbx
+       0x2000036026fa <+26>   mov    ecx,0x7
+       0x2000036026ff <+31>   mov    rdx,rax
+... (154 lines not shown) ...
+       0x20000360296b <+651>  jmp    0x200003602724 <+68>
+       0x200003602970 <+656>  mov    rdi,r13
+       0x200003602973 <+659>  mov    esi,0x14
+       0x200003602978 <+664>  call   0x200000809380 <jet_int_compare>
+       0x20000360297d <+669>  cmp    rax,0x0
+       0x200003602981 <+673>  rex setg al
+       0x200003602985 <+677>  movzx  rax,al
+       0x200003602989 <+681>  mov    r15,rax
+       0x20000360298c <+684>  jmp    0x200003602767 <+135>
+       0x200003602991 <+689>  mov    rdi,r15
+       0x200003602994 <+692>  mov    esi,0x0
+       0x200003602999 <+697>  call   0x2000008169a0 <jet_rt_string_drop>
+       0x20000360299e <+702>  jmp    0x2000036027d5 <+245>
+(Jet) continue
+A dump doesn't run: it is the program as it stopped. Commands: backtrace (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, tasks, task N, events [--last N], help (h), quit (q)
+(Jet) frame 1
+Stopped  crash.jet:21  in run()
+21 |     check(3, key)        <- here
+Locals:  first = <consumed>   key = <redacted>   second = <consumed>   third = <consumed>
+(Jet) quit
+(exit 0; wall 322 ms, load 6.42 36.79 70.37)
+    81.5 ms  (start to the first prompt)
+     0.1 ms  bt
+     0.2 ms  print count
+     0.1 ms  print total
+     0.2 ms  print key
+     0.1 ms  locals
+     0.1 ms  events --last 20
+     0.4 ms  tasks
+    14.5 ms  disas
+     0.1 ms  continue
+     0.3 ms  frame 1
+          -  quit
+
+# crash_dump_keeps_its_budget: a program holding 48 MB of lists
+
+$ jet run --observe big.jet
+dump written: .jet/dumps/big-2026-11-21T07-42-34.jetdump
+Stop: Jet.Panic: `panic: stopped with 3 chunks`
+  --> big.jet:5 in check
+    |
+5 |     if total == 3 -> panic("stopped with {total} chunks")
+    |                      ^^^^^
+locals: total = 3
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not Jet.Panic. Jet file and line are shown in Jet terms.
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/Jet.Panic
+(exit 70; wall 144 ms, cpu 144 ms, load 6.42 36.79 70.37)
+
+dump: 33556872 bytes
+
+$ jet debug '<work>/.jet/dumps/big-2026-11-21T07-42-34.jetdump'  (one command at a time)
+Dump of process 2696084, 6 flight events
+Image: 58631680 bytes, with 2688 bytes of records
+Build: 9021bb913f2fad79, its image in big-9021bb913f2fad79.image beside the dump
+Source: big.jet, sha256 e2b0fc6f7aa0c383932caacf74459af14bb5c9846cfc340165c13337c449a957
+Memory: 33554184 bytes held, within the 33554432-byte budget; 31096832 bytes cut off past it
+Stopped  big.jet:5  in check()
+5 |     if total == 3 -> panic("stopped with {total} chunks")        <- here
+Locals:  chunks = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, … 1999984 more], <cut off>, [4000000, 4000001, 4000002, 4000003, 4000004, 4000005, 4000006, 4000007, 4000008, 4000009, 4000010, 4000011, 4000012, 4000013, 4000014, 4000015, … 1999984 more]]   total = 3
+(Jet) print chunks
+chunks = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, … 1999984 more], <cut off>, [4000000, 4000001, 4000002, 4000003, 4000004, 4000005, 4000006, 4000007, 4000008, 4000009, 4000010, 4000011, 4000012, 4000013, 4000014, 4000015, … 1999984 more]]
+(Jet) quit
+(exit 0; wall 134 ms, load 6.42 36.79 70.37)
+    90.7 ms  (start to the first prompt)
+     0.2 ms  print chunks
+          -  quit
+
+== D10: visualizers
+
+# debug_view_renders_without_running_the_target
+
+$ jet debug prog.jet  (one command at a time)
+Breakpoint hit  prog.jet:29  in run()
+29 |     ring: Ring{slots: [Int]{5, 0, 3, 4}, start: 2, count: 3}        <- here
+Locals:  (none)
+(Jet) break 31
+Breakpoint set  prog.jet:31
+(Jet) c
+Breakpoint hit  prog.jet:31  in run()
+31 |     print("{ring.count} items, {noted.note}")        <- here
+Locals:  noted = Noted{note: "hello"}   ring = Ring{0: 3, 1: 4, 2: 5}
+(Jet) print ring
+ring = Ring{0: 3, 1: 4, 2: 5}
+(Jet) print noted
+noted = Noted{note: "hello"}
+(Jet) locals
+noted: Noted = Noted{note: "hello"}
+ring: Ring = Ring{0: 3, 1: 4, 2: 5}
+(Jet) c
+3 items, hello
+viewed.txt exists: false
+Program finished
+(exit 0; wall 371 ms, load 6.42 36.79 70.37)
+   189.5 ms  (start to the first prompt)
+     0.1 ms  break 31
+     7.3 ms  c
+     6.5 ms  print ring
+     6.7 ms  print noted
+     6.5 ms  locals
+          -  c
+
+# debug_view_package_ring_buffer
+
+$ jet debug app/main.jet  (one command at a time)
+Breakpoint hit  main.jet:4  in run()
+4 |     buffer: ring.Ring{slots: [Int]{5, 0, 3, 4}, start: 2, count: 3}        <- here
+Locals:  (none)
+(Jet) break 5
+Breakpoint set  main.jet:5
+(Jet) c
+Breakpoint hit  main.jet:5  in run()
+5 |     print("{buffer.count} items")        <- here
+Locals:  buffer = Ring{0: 3, 1: 4, 2: 5}
+(Jet) print buffer
+buffer = Ring{0: 3, 1: 4, 2: 5}
+(Jet) locals
+buffer: Ring = Ring{0: 3, 1: 4, 2: 5}
+(Jet) c
+3 items
+Program finished
+(exit 0; wall 173 ms, load 6.42 36.79 70.37)
+    58.0 ms  (start to the first prompt)
+     0.1 ms  break 5
+     2.4 ms  c
+     2.5 ms  print buffer
+     2.2 ms  locals
+          -  c
+
+== D11: surfaces: DAP launch, pause, restart, attach, reverse
+
+# pause 0 ms after configurationDone
+
+$ jet debug --dap '<work>/main.jet'  (DAP, one request at a time)
+    56.7 ms  initialize {"adapterID": "jet", "pathFormat": "path"} -> ok
+     0.1 ms  launch {"program": "<work>/main.jet", "stopOnEntry": false, "args": [], "env": {}} -> ok
+             event initialized {}
+     0.1 ms  configurationDone {} -> ok
+     2.5 ms  pause {} -> ok
+             event stopped {"reason": "pause", "threadId": 1, "allThreadsStopped": true}
+     0.1 ms  threads {} -> ok
+             body {"threads": [{"id": 1, "name": "root (task 1, running)"}]}
+     0.1 ms  stackTrace {"threadId": 1} -> ok
+             body {"stackFrames": [{"id": 65536, "name": "run", "source": {"name": "main.jet", "path": "<work>/main.jet"}, "line": 2, "column": 1, "instructionPointerReference": "0x485027"}], "totalFrames": 1}
+     0.6 ms  disconnect {} -> ok
+(adapter exit 0)
+
+# pause 100 ms after configurationDone
+
+$ jet debug --dap '<work>/main.jet'  (DAP, one request at a time)
+    55.5 ms  initialize {"adapterID": "jet", "pathFormat": "path"} -> ok
+     0.1 ms  launch {"program": "<work>/main.jet", "stopOnEntry": false, "args": [], "env": {}} -> ok
+             event initialized {}
+     0.0 ms  configurationDone {} -> ok
+     0.2 ms  pause {} -> ok
+             event stopped {"reason": "pause", "threadId": 1, "allThreadsStopped": true}
+     0.1 ms  threads {} -> ok
+             body {"threads": [{"id": 1, "name": "root (task 1, running)"}]}
+     0.1 ms  stackTrace {"threadId": 1} -> ok
+             body {"stackFrames": [{"id": 65536, "name": "run", "source": {"name": "main.jet", "path": "<work>/main.jet"}, "line": 3, "column": 1, "instructionPointerReference": "0x48504b"}], "totalFrames": 1}
+     1.5 ms  disconnect {} -> ok
+(adapter exit 0)
+
+$ jet debug --dap '<work>/main.jet'  (DAP, one request at a time)
+    56.0 ms  initialize {"adapterID": "jet", "pathFormat": "path"} -> ok
+     0.1 ms  launch {"program": "<work>/main.jet", "stopOnEntry": false, "args": []} -> ok
+             event initialized {}
+     0.1 ms  setBreakpoints {"source": {"path": "<work>/main.jet"}, "breakpoints": [{"line": 8}]} -> ok
+     3.5 ms  configurationDone {} -> ok
+             event stopped {"reason": "breakpoint", "threadId": 1, "allThreadsStopped": true, "hitBreakpointIds": [1]}
+     0.1 ms  stackTrace {"threadId": 1} -> ok
+             body {"stackFrames": [{"id": 65536, "name": "run", "source": {"name": "main.jet", "path": "<work>/main.jet"}, "line": 9, "column": 1, "instructionPointerReference": "0x4850a5"}], "totalFrames": 1}
+     0.0 ms  scopes {"frameId": 65536} -> ok
+             body {"scopes": [{"name": "Locals", "presentationHint": "locals", "variablesReference": 131073, "expensive": false}]}
+     3.5 ms  continue {"threadId": 1} -> ok
+             output: 6
+             event exited {"exitCode": 0}
+             event terminated {}
+     3.6 ms  restart {} -> ok
+             event stopped {"reason": "breakpoint", "threadId": 1, "allThreadsStopped": true, "hitBreakpointIds": [1]}
+     0.1 ms  stackTrace {"threadId": 1} -> ok
+             body {"stackFrames": [{"id": 196608, "name": "run", "source": {"name": "main.jet", "path": "<work>/main.jet"}, "line": 9, "column": 1, "instructionPointerReference": "0x4850a5"}], "totalFrames": 1}
+     0.0 ms  scopes {"frameId": 196608} -> ok
+             body {"scopes": [{"name": "Locals", "presentationHint": "locals", "variablesReference": 393217, "expensive": false}]}
+     0.1 ms  variables {"variablesReference": 393217} -> ok
+             body {"variables": [{"name": "total", "value": "6", "type": "Int", "variablesReference": 0}]}
+    20.8 ms  evaluate {"expression": "k", "context": "repl"} -> refused: the compiler refused it: Nothing named `k` exists here
+             body {}
+     1.0 ms  disconnect {} -> ok
+(adapter exit 0)
+
+# reverse over DAP, in a replay
+
+$ jet run --record=back prog.jet
+total 6 tally 3
+jet run: recorded replay `.jet/replays/back.jetproof-replay`
+(exit 0; wall 38 ms, cpu 39 ms, load 6.42 36.79 70.37)
+
+$ jet debug --dap --replay=back '<work>/prog.jet'  (DAP, one request at a time)
+    57.0 ms  initialize {"adapterID": "jet", "pathFormat": "path", "linesStartAt1": true, "columnsStartAt1": true} -> ok
+             body {"supportsConfigurationDoneRequest": true, "supportsConditionalBreakpoints": true, "supportsLogPoints": true, "supportsEvaluateForHovers": true, "supportsRestartRequest": true, "supportsDataBreakpoints": true, "supportsDisassembleRequest": true, "supportsStepBack": true}
+     0.0 ms  launch {"program": "<work>/prog.jet", "stopOnEntry": false, "args": []} -> ok
+             event initialized {}
+     0.0 ms  setBreakpoints {"source": {"path": "<work>/prog.jet"}, "breakpoints": [{"line": 21}]} -> ok
+     3.2 ms  configurationDone {} -> ok
+             event stopped {"reason": "breakpoint", "threadId": 1, "allThreadsStopped": true, "hitBreakpointIds": [1]}
+     0.3 ms  continue {"threadId": 1} -> ok
+             event stopped {"reason": "breakpoint", "threadId": 1, "allThreadsStopped": true, "hitBreakpointIds": [1]}
+     7.2 ms  reverseContinue {"threadId": 1} -> ok
+             event stopped {"reason": "breakpoint", "threadId": 1, "allThreadsStopped": true, "hitBreakpointIds": [1]}
+     0.1 ms  evaluate {"expression": "k", "context": "repl"} -> ok
+             body {"result": "0", "type": "Int", "variablesReference": 0}
+     8.6 ms  stepBack {"threadId": 1} -> ok
+             event stopped {"reason": "step", "threadId": 1, "allThreadsStopped": true}
+     0.1 ms  stackTrace {"threadId": 1} -> ok
+             body {"stackFrames": [{"id": 262144, "name": "run", "source": {"name": "prog.jet", "path": "<work>/prog.jet"}, "line": 20, "column": 1, "instructionPointerReference": "0x4851f0"}, {"id": 262145, "name": "entry", "source": {"name": "prog.jet", "path": "<work>/prog.jet"}, "line": 15, "column": 1, "instructionPointerReference": "0x485a92"}], "totalFrames": 2}
+     0.1 ms  setBreakpoints {"source": {"path": "<work>/prog.jet"}, "breakpoints": []} -> ok
+     0.8 ms  continue {"threadId": 1} -> ok
+             output: total 6 tally 3
+             event exited {"exitCode": 0}
+             event terminated {}
+     0.0 ms  disconnect {} -> ok
+(adapter exit 0)
+
+# attach to a running -O0 image (it allows any tracer, as the attach cases' authorizer does)
+
+$ jet build -O0 prog.jet
+required effects: none; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time; denied effects: none; authority: package.jet authority
+(exit 0; wall 34 ms, cpu 34 ms, load 6.42 36.79 70.37)
+
+$ jet debug --attach 2696242  (one command at a time)
+Attached to process 2696242  prog.jet:1  in tick()
+1 | tick: fn(n: Int) -> Int {        <- here
+Locals:  n = unavailable (not kept at this point)
+(Jet) break tick
+Breakpoint set  tick
+(Jet) c
+Breakpoint hit  prog.jet:2  in tick()
+2 |     bumped: n + 1        <- here
+Locals:  n = 445079247
+(Jet) bt
+#0  tick()  at prog.jet:2
+#1  run()  at prog.jet:8
+(Jet) 
+Detached from process 2696242
+(exit 0; wall 91 ms, load 6.42 36.79 70.37)
+     3.9 ms  (start to the first prompt)
+     0.1 ms  break tick
+     0.2 ms  c
+     0.1 ms  bt
+
+the target after the session: running
+
+== P1: sampling: four threads of fib for two seconds of CPU time, -O2
+
+$ jet perf run -O2 burn.jet --out burn.jettrace
+burned=true
+note: burn.jet reads environment variables (-A hides this)
+Trace: <work>/burn.jettrace
+(exit 0; wall 862 ms, cpu 2497 ms, load 6.42 36.79 70.37)
+
+$ jet perf view burn.jettrace  (its flame graph and per-line rows)
+flamegraph
+burn.jet#run wall ########################################
+burn.jet#fib profile:cpu samples=16238 cpu_us=2029750 share=99%
+  line 7 samples=10220 cpu_us=1277500 inclusive=16238
+  line 5 samples=5124 cpu_us=640500 inclusive=5124
+  line 6 samples=894 cpu_us=111750 inclusive=894
+burn.jet#run profile:wall samples=21 share=100%
+burn.jet#spent profile:cpu samples=1 cpu_us=125 share=0%
+  line 11 samples=1 cpu_us=125 inclusive=25
+burn.jet#burn profile:cpu samples=0 share=0%
+  line 16 samples=0 inclusive=16262
+burn.jet#run.lambda@599 profile:cpu samples=0 share=0%
+  line 22 samples=0 inclusive=4068
+burn.jet#run.lambda@623 profile:cpu samples=0 share=0%
+  line 23 samples=0 inclusive=4067
+burn.jet#run.lambda@647 profile:cpu samples=0 share=0%
+  line 24 samples=0 inclusive=4065
+burn.jet#run.lambda@671 profile:cpu samples=0 share=0%
+  line 25 samples=0 inclusive=4062
+timeline
+[16352969..526969181] burn.jet#run
+[116551486..416837798] burn.jet#run
+[116551486..416837798] burn.jet#run
+[116551486..416837798] burn.jet#run
+[116551486..416837798] burn.jet#run
+[16711883..526503253] task 1 in task join at burn.jet:26 for task 2 spawned at burn.jet:22, woken by task 2
+[526515726..526622670] task 1 in task join at burn.jet:26 for task 3 spawned at burn.jet:23, woken by task 3
+per-line
+  burn.jet:7 fib samples=10220 share=62% · cost: exact Int spill ×3 — semantic remainder (loop depth 0) · cost: stop poll ×2 — semantic remainder (loop depth 0)
+  burn.jet:5 fib samples=5124 share=31%
+  burn.jet:6 fib samples=894 share=5%
+  burn.jet:11 spent samples=1 share=0% · cost: outcome construction — optimizer-proven removed (loop depth 0)
+
+sampling: {"interval_us": 125, "pc": {"paranoid": 2, "period": 125000, "period_unit": "ns", "precise": false, "refused": [], "skid": "task_clock_interrupt", "source": "task_clock"}, "lenses": ["cpu"]}
+reason: one CPU-time sample per 125 microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; 28 of 16267 samples are outside burn.jet; the task clock took them, a perf event on each thread's CPU time in user mode, so time in the kernel takes none, and the kernel walked each sample's stack into its thread's ring, at most 127 callchain entries; outside Jet functions: unit_os_syscall_i64__asm 11, unit.alloc_frames_key 4, jet_rt_free 2, jet_int_owned_from_i64 1, jet_int_owned_to_i64 1, jet_rt_int_retire_zero 1, unit.int_compare_abs 1, unit.int_free_node 1; it kept 16267 of the 16309 samples that 2039 ms of CPU time on the threads' task clocks while sampled gives; 42 of their periods ended in kernel mode, where the task clock takes no sample; the wall row is the run's 21 observations of `run`, which do not separate the functions it calls
+overhead_status: measured
+overhead_ns: 35099862
+overhead_reason: the sampler took 35099 microseconds, 1.75% of the 2001971 microseconds of CPU time sampled: 6529 in its handlers and drains, each drain timer's signal delivered within them, 0 signals at the 1758 nanoseconds the kernel took to deliver and return from one as sampling started, and 28570 microseconds the kernel took to write the 16267 samples to the threads' rings, as timed when sampling started
+coverage: partial
+
+# precise_pc_names_its_source
+
+$ jet perf run main.jet -O2 --out spin.jettrace
+spun=982285
+Trace: <work>/spin.jettrace
+(exit 0; wall 714 ms, cpu 705 ms, load 6.42 36.79 70.37)
+
+pc: {"paranoid": 2, "period": 125000, "period_unit": "ns", "precise": false, "refused": [], "skid": "task_clock_interrupt", "source": "task_clock"}
+
+== P2: zones, frame marks, plots
+
+$ jet perf run -O2 main.jet --out zones.jettrace
+moved 1499 bodies over 5 frames
+note: main.jet writes logs (-A hides this)
+Trace: <work>/zones.jettrace
+(exit 0; wall 409 ms, cpu 442 ms, load 6.06 36.21 70.00)
+
+$ jet perf view zones.jettrace
+schema jet.trace v3
+trace c3f7dbee735c7e862a338707adab907132564dc1fe6fe1416ce8086ead9e8123
+command run
+frames jet
+Sample wall 252742683ns · main.jet#run
+profile method=sampling status=captured coverage=complete rows=5 clocks=cpu,wall overhead=measured window=exit run_wall=142881895ns run_cpu=133789000ns
+tasks count=1 children=0 rows=1 coverage=complete · main.jet#run
+native process_cpu=133789000ns observed_at=142881895ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=1 children=0 window=19324862..142881895ns · main.jet#run
+log spans count=1 window=19377953..142566424ns · main.jet#session
+instructions functions=1 kept=1 cut=0 code_bytes=5718: `--instructions` lists them
+zone physics count=5 samples=975 total=123180824ns longest=41116188ns · main.jet:14 975
+zone solve count=5 samples=975 total=123087746ns longest=41069139ns · main.jet:14 975
+zone broadphase count=1500 samples=0 total=10479ns longest=100ns
+frames count=5 mean=28747194ns longest=41116763ns
+plot moved count=5 last=499.0
+task phase session tasks=1 cpu_us=121875 samples=975
+threads count=2 claimed=2
+  thread 2696399 main stack=16777216 cpu_ns=176031571 off_cpu_ns=0 running at exit
+  thread 2696434 jet_rt_observe_writer stack=16777216 cpu_ns=149981 off_cpu_ns=123218744 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+syscalls calls=2 time_ns=2805
+  read count=2 time_ns=2805 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O2","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#settle profile:cpu samples=986 cpu_us=123250 share=100%
+  line 14 samples=986 cpu_us=123250 inclusive=986
+main.jet#run profile:wall samples=6 share=100%
+main.jet#entry profile:cpu samples=0 share=0%
+  line 28 samples=0 inclusive=986
+main.jet#run profile:cpu samples=0 share=0%
+  line 32 samples=0 inclusive=986
+main.jet#step profile:cpu samples=0 share=0%
+  line 25 samples=0 inclusive=986
+timeline
+[19324862..142881895] main.jet#run
+[27572476..27572476] main.jet#moved = 100.0
+[27572847..27572847] main.jet#frame
+[43881571..43881571] main.jet#moved = 200.0
+[43881692..43881692] main.jet#frame
+[68483909..68483909] main.jet#moved = 301.0
+[68483939..68483939] main.jet#frame
+[101444832..101444832] main.jet#moved = 399.0
+[19388752..27573299] main.jet#solve · 66 samples · main.jet:14
+[19379304..27573389] main.jet#physics · 66 samples · main.jet:14
+[27580934..43882249] main.jet#solve · 130 samples · main.jet:14
+[27573910..43882310] main.jet#physics · 130 samples · main.jet:14
+[43898470..68484302] main.jet#solve · 197 samples · main.jet:14
+[43882510..68484342] main.jet#physics · 197 samples · main.jet:14
+[68497778..101444691] main.jet#solve · 264 samples · main.jet:14
+[68484432..101444751] main.jet#physics · 264 samples · main.jet:14
+per-line
+  main.jet:14 settle samples=986 share=100% · cost: exact Int spill — semantic remainder (loop depth 0) · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+(exit 0; wall 100 ms, cpu 126 ms, load 6.06 36.21 70.00)
+
+# zones.jet: two million calls, plain, with a zone off (jet run) and on (jet perf run), -O2, warm build
+
+$ jet build -O2 zones.jet
+required effects: Exec.Args, IO, Time; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0; wall 111 ms, cpu 164 ms, load 6.06 36.21 70.00)
+
+$ jet run -O2 zones.jet -- plain
+plain 2000000 calls: acc 609, took 13145347 ns
+note: zones.jet reads the clock (-A hides this)
+(exit 0; wall 102 ms, cpu 152 ms, load 6.06 36.21 70.00)
+
+$ jet run -O2 zones.jet -- zoned
+zoned 2000000 calls: acc 609, took 17102296 ns
+note: zones.jet reads the clock (-A hides this)
+(exit 0; wall 111 ms, cpu 167 ms, load 6.06 36.21 70.00)
+
+$ jet perf run -O2 zones.jet --out plain.jettrace -- plain
+plain 2000000 calls: acc 609, took 13571810 ns
+note: zones.jet reads the clock (-A hides this)
+Trace: <work>/plain.jettrace
+(exit 0; wall 239 ms, cpu 271 ms, load 6.06 36.21 70.00)
+
+$ jet perf run -O2 zones.jet --out zoned.jettrace -- zoned
+zoned 2000000 calls: acc 609, took 76069712 ns
+note: zones.jet reads the clock (-A hides this)
+Trace: <work>/zoned.jettrace
+(exit 0; wall 605 ms, cpu 640 ms, load 6.06 36.21 70.00)
+
+$ jet run -O2 zones.jet -- plain
+plain 2000000 calls: acc 609, took 12422940 ns
+note: zones.jet reads the clock (-A hides this)
+(exit 0; wall 101 ms, cpu 149 ms, load 6.06 36.21 70.00)
+
+$ jet run -O2 zones.jet -- zoned
+zoned 2000000 calls: acc 609, took 16807084 ns
+note: zones.jet reads the clock (-A hides this)
+(exit 0; wall 106 ms, cpu 158 ms, load 6.06 36.21 70.00)
+
+$ jet perf run -O2 zones.jet --out plain.jettrace -- plain
+plain 2000000 calls: acc 609, took 13321783 ns
+note: zones.jet reads the clock (-A hides this)
+Trace: <work>/plain.jettrace
+(exit 0; wall 238 ms, cpu 286 ms, load 6.06 36.21 70.00)
+
+$ jet perf run -O2 zones.jet --out zoned.jettrace -- zoned
+zoned 2000000 calls: acc 609, took 72432442 ns
+note: zones.jet reads the clock (-A hides this)
+Trace: <work>/zoned.jettrace
+(exit 0; wall 645 ms, cpu 672 ms, load 6.06 36.21 70.00)
+
+per call (the faster of two runs): plain 6.21 ns, zone off 8.40 ns, plain sampled 6.66 ns, zone on 36.22 ns
+a zone off costs 2.19 ns; on, 29.56 ns over the sampled plain run
+
+$ jet perf view zoned.jettrace  (its zone rows)
+Sample wall 227008720ns · zones.jet#run
+tasks count=1 children=0 rows=1 coverage=complete · zones.jet#run
+native process_cpu=74803000ns observed_at=82869348ns target=x86_64-unknown-linux-gnu task=1 · zones.jet#run
+spans count=1 children=0 window=10013911..82869348ns · zones.jet#run
+zone tick count=465920 samples=28 total=3587296ns longest=63254ns · zones.jet:13 22 · zones.jet:14 6
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O2","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+zones.jet#run wall ########################################
+zones.jet#run profile:cpu samples=27 cpu_us=3375 share=54%
+zones.jet#zoned profile:cpu samples=17 cpu_us=2125 share=34%
+zones.jet#entry profile:cpu samples=6 cpu_us=750 share=12%
+zones.jet#run profile:wall samples=4 share=100%
+[10013911..82869348] zones.jet#run
+[10132837..10132887] zones.jet#tick
+[10138517..10138537] zones.jet#tick
+[10138587..10138607] zones.jet#tick
+[10138627..10138637] zones.jet#tick
+[10138657..10138667] zones.jet#tick
+[10138677..10138687] zones.jet#tick
+[10138707..10138707] zones.jet#tick
+  zones.jet:27 run samples=20 share=40% · cost: exact Int spill — semantic remainder (loop depth 1, repeats every loop turn)
+  zones.jet:14 zoned samples=15 share=30% · cost: exact Int spill ×2 — semantic remainder (loop depth 0)
+  zones.jet:14 entry samples=5 share=10% · cost: exact Int spill ×2 — semantic remainder (loop depth 0)
+  zones.jet:26 run samples=4 share=8%
+  zones.jet:25 run samples=3 share=6% · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  zones.jet:13 zoned samples=2 share=4%
+  zones.jet:13 entry samples=1 share=2%
+
+== P3, P9: waits and wakers, off-CPU time, I/O, a live process's zones
+
+# EveryWaitNamesItsWaker
+
+$ jet perf run main.jet --out t.jettrace
+total=5
+Trace: <work>/t.jettrace
+(exit 0; wall 606 ms, cpu 213 ms, load 6.06 36.21 70.00)
+
+$ jet perf view t.jettrace
+schema jet.trace v3
+trace d19fb7632dc34652be07acab083e1cebc8c24a9f70c5842ac8e5c3b76c6f9a09
+command run
+frames jet
+Sample wall 505295483ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=3 clocks=cpu,wall overhead=measured window=exit run_wall=410571457ns run_cpu=9010000ns
+tasks count=2 children=1 rows=2 coverage=complete · main.jet#run
+locks count=1 waiters=1 · main.jet#run
+native process_cpu=9010000ns observed_at=410571457ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=2 children=1 window=9507536..410571457ns · main.jet#run
+waits count=6 · longest 200017541ns: task 2 in time sleep at main.jet:29, woken by its timeout
+instructions functions=3 kept=3 cut=0 code_bytes=566: `--instructions` lists them
+task phase (none) tasks=2 cpu_us=125 samples=1
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  200017541ns waits=1 · run.lambda@182 main.jet:10 > hold main.jet:20 > locked main.jet:29 > time sleep
+  199976472ns waits=1 · run main.jet:12 > shared lock
+  100262308ns waits=1 · run main.jet:11 > channel receive
+  100099217ns waits=1 · run.lambda@182 main.jet:10 > hold main.jet:19 > time sleep
+  100062939ns waits=1 · run.lambda@182 main.jet:10 > hold main.jet:21 > time sleep
+  100038622ns waits=1 · run main.jet:13 > task join
+threads count=4 claimed=4
+  thread 2696904 main stack=16777216 cpu_ns=57535240 off_cpu_ns=343464008 running at exit
+  thread 2696915 jet_rt_observe_writer stack=16777216 cpu_ns=339166 off_cpu_ns=400475881 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+  thread 2696916 jet_rt_scheduler_worker stack=16777216 cpu_ns=256590 off_cpu_ns=400439270 running at exit · spawned at unit.scheduler_start_worker from main.jet:10 run
+  thread 2696917 jet_rt_scheduler_monitor stack=16777216 cpu_ns=110057 off_cpu_ns=300334316 running at exit · spawned at unit.scheduler_monitor_kick
+syscalls calls=30 time_ns=61548
+  open count=7 time_ns=27933 · at unit.cpu_read from main.jet:10 run
+  read count=12 time_ns=13127 · at unit.cpu_read from main.jet:10 run
+  stat count=1 time_ns=9529 · at unit.cpu_exists from main.jet:10 run
+  close count=6 time_ns=5830 · at unit.cpu_read from main.jet:10 run
+  read count=4 time_ns=5129 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#run profile:wall samples=17 share=100%
+main.jet#run profile:cpu samples=0 share=0%
+  line 10 samples=0 inclusive=1
+  line 12 samples=0 inclusive=1
+timeline
+[9507536..410571457] main.jet#run
+[109720300..309998337] main.jet#run
+[9857653..109956870] task 2 in time sleep at main.jet:19, woken by its timeout
+[9731633..109993941] task 1 in channel receive at main.jet:11 for channel 1, woken by task 2 at main.jet:28
+[109980686..309998227] task 2 in time sleep at main.jet:29, woken by its timeout
+[110048926..310025398] task 1 in shared lock at main.jet:12, woken by task 2 at main.jet:31
+[310008075..410071014] task 2 in time sleep at main.jet:21, woken by its timeout
+[310055205..410093827] task 1 in task join at main.jet:13 for task 2 spawned at main.jet:10, woken by task 2
+(exit 0; wall 90 ms, cpu 94 ms, load 6.06 36.21 70.00)
+
+# OffCPUTimeByStack
+
+$ jet perf run main.jet --out t.jettrace
+napped, paused 150ms
+Trace: <work>/t.jettrace
+(exit 0; wall 476 ms, cpu 223 ms, load 6.06 36.21 70.00)
+
+$ jet perf view t.jettrace
+schema jet.trace v3
+trace 6dd82ddc2675614cdf6f6b84bd9f723db1d0f682a16f442fce85a9de20b1d242
+command run
+frames jet
+Sample wall 377607648ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=3 clocks=cpu,wall overhead=measured window=exit run_wall=250711763ns run_cpu=4265000ns
+tasks count=1 children=0 rows=1 coverage=complete · main.jet#run
+native process_cpu=4265000ns observed_at=250711763ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=1 children=0 window=9917136..250711763ns · main.jet#run
+waits count=4 · longest 150069801ns: task 1 in time sleep at main.jet:10, woken by its timeout
+instructions functions=2 kept=2 cut=0 code_bytes=1273: `--instructions` lists them
+task phase (none) tasks=1 samples=0
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  150069801ns waits=1 · run main.jet:5 > pause main.jet:15 > nap main.jet:10 > time sleep
+  90172322ns waits=3 · run main.jet:4 > nap main.jet:10 > time sleep
+threads count=2 claimed=2
+  thread 2696924 main stack=16777216 cpu_ns=60742746 off_cpu_ns=179992588 running at exit
+  thread 2696935 jet_rt_observe_writer stack=16777216 cpu_ns=217867 off_cpu_ns=240343506 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+syscalls calls=2 time_ns=3958
+  read count=2 time_ns=3958 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#run profile:wall samples=11 share=100%
+main.jet#run profile:cpu samples=1 cpu_us=125 share=100%
+  line 4 samples=1 cpu_us=125 inclusive=1
+  line 6 samples=0 inclusive=1
+timeline
+[9917136..250711763] main.jet#run
+[10001287..40043248] task 1 in time sleep at main.jet:10, woken by its timeout
+[40061403..70127400] task 1 in time sleep at main.jet:10, woken by its timeout
+[70144192..100208556] task 1 in time sleep at main.jet:10, woken by its timeout
+[100225919..250295720] task 1 in time sleep at main.jet:10, woken by its timeout
+per-line
+  main.jet:4 run samples=1 share=100% · cost: outcome construction — optimizer-proven removed (loop depth 1) · cost: exact Int spill — optimizer-proven removed (loop depth 1) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+(exit 0; wall 50 ms, cpu 52 ms, load 6.06 36.21 70.00)
+
+# IOOnTimelineWithoutInstrumentation
+
+$ jet perf run main.jet --out t.jettrace
+11 4
+Trace: <work>/t.jettrace
+(exit 0; wall 289 ms, cpu 433 ms, load 6.06 36.21 70.00)
+
+$ jet perf view t.jettrace
+schema jet.trace v3
+trace 1bdae50396a5ab01699b8f09d6dab6b8ceee22cdf4fdded3d3b3b428774ee448
+command run
+frames jet
+Sample wall 202070002ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=2 clocks=cpu,wall overhead=not_measured window=exit run_wall=10921149ns run_cpu=14592000ns
+tasks count=1 children=0 rows=1 coverage=complete · main.jet#run
+io count=4 read_bytes=15 write_bytes=15 errors=0 · main.jet#write notes.txt
+native process_cpu=14592000ns observed_at=10921149ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans unavailable reason=task span requires multiple live observations · main.jet#run
+waits count=1 · longest 81014ns: task 1 in tcp connect at main.jet:15 on socket 127.0.0.1:58790 with peer 127.0.0.1:43039, woken by its peer
+instructions functions=1 kept=1 cut=0 code_bytes=255: `--instructions` lists them
+task phase (none) tasks=1 samples=0
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  81014ns waits=1 · run main.jet:15 > tcp connect
+threads count=3 claimed=3
+  thread 2696944 main stack=16777216 cpu_ns=68916521 off_cpu_ns=0 running at exit
+  thread 2696961 jet_rt_observe_writer stack=16777216 cpu_ns=97523 off_cpu_ns=480618 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+  thread 2696962 jet_rt_net_poller_worker stack=16777216 cpu_ns=86182 off_cpu_ns=332476 running at exit · spawned at unit.net_poller_start from main.jet:15 run
+syscalls calls=27 time_ns=131624
+  connect count=1 time_ns=66697 · at unit.net_socket_address_call from main.jet:15 run
+  close count=3 time_ns=25721 · at jet_fd_drop_raw from main.jet:19 run
+  socket count=1 time_ns=7504 · at jet_socket_create_raw from main.jet:13 run
+  bind count=1 time_ns=6763 · at unit.net_socket_address_call from main.jet:13 run
+  open count=1 time_ns=4860 · at unit.compiler_fs_write_open from main.jet:11 run
+  socket count=1 time_ns=3477 · at jet_socket_create_raw from main.jet:15 run
+  read count=3 time_ns=3196 · at unit.perf_precise_ended
+  write count=1 time_ns=2806 · at unit.compiler_fs_write_open from main.jet:11 run
+  read count=2 time_ns=2064 · at unit.compiler_fs_read_whole from main.jet:12 run
+  open count=1 time_ns=1463 · at unit.compiler_fs_read_whole from main.jet:12 run
+  syscall 51 count=1 time_ns=1182 · at unit.net_route_socket_address from main.jet:14 run
+  syscall 51 count=2 time_ns=1061 · at unit.perf_samples_sockaddr from main.jet:15 run
+  syscall 52 count=2 time_ns=941 · at unit.perf_samples_sockaddr from main.jet:15 run
+  fstat count=1 time_ns=922 · at unit.compiler_fs_read_whole from main.jet:12 run
+  close count=1 time_ns=672 · at unit.compiler_fs_write_open from main.jet:11 run
+  close count=1 time_ns=592 · at unit.compiler_fs_read_whole from main.jet:12 run
+  syscall 52 count=1 time_ns=441 · at unit.perf_samples_sockaddr from main.jet:17 run
+  syscall 51 count=1 time_ns=431 · at unit.perf_samples_sockaddr from main.jet:18 run
+  syscall 52 count=1 time_ns=420 · at unit.perf_samples_sockaddr from main.jet:18 run
+  syscall 51 count=1 time_ns=411 · at unit.perf_samples_sockaddr from main.jet:17 run
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#run profile:cpu samples=1 cpu_us=125 share=100%
+main.jet#run profile:wall samples=1 share=100%
+timeline
+[10390639..10471653] task 1 in tcp connect at main.jet:15 on socket 127.0.0.1:58790 with peer 127.0.0.1:43039, woken by its peer
+[10215044..10230233] task 1 wrote 11 bytes to file notes.txt at main.jet:11
+[10232708..10246374] task 1 read 11 bytes from file notes.txt at main.jet:12
+[10490569..10510106] task 1 wrote 4 bytes to peer 127.0.0.1:43039 at main.jet:17
+[10516288..10523742] task 1 read 4 bytes from peer 127.0.0.1:58790 at main.jet:18
+per-line
+  main.jet:10 run samples=1 share=100%
+(exit 0; wall 149 ms, cpu 277 ms, load 5.90 35.67 69.64)
+
+# attach_turns_zones_on: zones of a running program, half a second at a time
+
+$ jet run --observe live.jet  (in the background until 'READY')
+READY
+(ready)
+
+$ jet perf attach 2696977 --source live.jet --zones=500ms --out zones.jettrace
+Trace: <work>/zones.jettrace
+(exit 0; wall 877 ms, cpu 122 ms, load 5.90 35.67 69.64)
+
+$ jet perf view zones.jettrace
+schema jet.trace v3
+trace a38e668897015a8e8fca55450b759b6d25ecc680f7dc399f2359738c2fff10ad
+command attach
+frames jet
+Sample wall 2214ns · live.jet#run
+profile method=sampling status=captured coverage=partial rows=3 clocks=cpu,wall overhead=measured window=live run_wall=861299318ns run_cpu=51089076ns
+tasks count=1 children=0 · live.jet#run
+native process_cpu=0ns observed_at=0ns target=x86_64-unknown-linux-gnu task=1 · live.jet#run
+spans unavailable reason=task span requires multiple live observations · live.jet#run
+waits count=50 · longest 10079024ns: task 1 in time sleep at live.jet:28, woken by its timeout
+zone tick count=50 samples=130 total=16659268ns longest=524680ns · live.jet:13 130
+frames count=50 mean=10401106ns longest=10608474ns
+plot sum count=50 last=994.0
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  503023430ns waits=50 · run live.jet:28 > time sleep
+receipt perf {"build":null,"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":null}}}
+receipt window {"cpu_clock":"schedstat","cpu_resolution_ns":1,"exited_threads":0}
+flamegraph
+live.jet#run wall ########################################
+live.jet#tick profile:cpu samples=130 cpu_us=16250 share=100%
+  line 13 samples=130 cpu_us=16250 inclusive=130
+live.jet#run profile:wall samples=1 share=100%
+live.jet#run profile:cpu samples=0 share=0%
+  line 25 samples=0 inclusive=130
+timeline
+[0..10064777] task 1 in time sleep at live.jet:28, woken by its timeout
+[10579337..20640247] task 1 in time sleep at live.jet:28, woken by its timeout
+[21177461..31234483] task 1 in time sleep at live.jet:28, woken by its timeout
+[31479831..41535100] task 1 in time sleep at live.jet:28, woken by its timeout
+[41777702..51834695] task 1 in time sleep at live.jet:28, woken by its timeout
+[52200592..62254919] task 1 in time sleep at live.jet:28, woken by its timeout
+[62605568..72667199] task 1 in time sleep at live.jet:28, woken by its timeout
+[72903259..82966353] task 1 in time sleep at live.jet:28, woken by its timeout
+[10575640..10575640] live.jet#sum = 994.0
+[10576111..10576111] live.jet#frame
+[21173954..21173954] live.jet#sum = 0.0
+[21174405..21174405] live.jet#frame
+[31477456..31477456] live.jet#sum = 2.0
+[31477807..31477807] live.jet#frame
+[41775588..41775588] live.jet#sum = 0.0
+[41775939..41775939] live.jet#frame
+[20648592..21172961] live.jet#tick · 7 samples · live.jet:13
+[51841525..52198055] live.jet#tick · 6 samples · live.jet:13
+[82971018..83221746] live.jet#tick · 7 samples · live.jet:13
+[103730419..104105553] live.jet#tick · 7 samples · live.jet:13
+[134839802..135364482] live.jet#tick · 7 samples · live.jet:13
+[155973023..156254119] live.jet#tick · 7 samples · live.jet:13
+[176736840..177173332] live.jet#tick · 7 samples · live.jet:13
+[207911857..208327379] live.jet#tick · 6 samples · live.jet:13
+per-line
+  live.jet:13 tick samples=130 share=100% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+(exit 0; wall 160 ms, cpu 289 ms, load 5.90 35.67 69.64)
+
+== P4: typed heap snapshots, retention, diffs
+
+$ jet perf run -O2 --lens=alloc chat.jet --out o2.jettrace
+messages=200
+note: chat.jet reads environment variables (-A hides this)
+Trace: <work>/o2.jettrace
+(exit 0; wall 409 ms, cpu 423 ms, load 5.90 35.67 69.64)
+
+$ jet perf view o2.jettrace
+schema jet.trace v3
+trace 66570ff7290d6d9d8f5db88835cdcb0ec41f1bacf92887261d75661123d12d47
+command run
+frames jet
+Sample wall 327509081ns · chat.jet#run
+profile method=sampling status=captured coverage=complete rows=5 clocks=cpu,wall overhead=measured window=exit run_wall=1261073ns run_cpu=9953000ns
+tasks count=1 children=0 rows=1 coverage=complete · chat.jet#run
+native process_cpu=9953000ns observed_at=1261073ns target=x86_64-unknown-linux-gnu task=1 · chat.jet#run
+spans unavailable reason=task span requires multiple live observations · chat.jet#run
+task phase (none) tasks=1 samples=0
+threads count=2 claimed=2
+  thread 2697037 main stack=16777216 cpu_ns=33542912 off_cpu_ns=0 running at exit
+  thread 2697047 jet_rt_observe_writer stack=16777216 cpu_ns=56284 off_cpu_ns=492602 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"true","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O2","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":null,"interval_us":null,"lenses":["alloc"],"pc":null}}}
+flamegraph
+chat.jet#run wall ########################################
+chat.jet#run profile:wall samples=1 share=100%
+chat.jet#run profile:cpu samples=0 share=0%
+  line 22 samples=0 inclusive=0 allocations=216
+  line 28 samples=0 inclusive=0 allocations=2
+  line 18 samples=0 inclusive=0 allocations=1
+chat.jet#entry profile:cpu samples=0 share=0%
+  line 16 samples=0 inclusive=0 allocations=0
+heap
+allocated  220 allocations  18560 bytes: the alloc lens took 45 microseconds over 220 allocations, 206 nanoseconds each, 6.49% of the 700 microseconds of CPU time: each allocation waited for the checked heap's quarantine lock, linked its block on the live list and counted at its call sites, timed from before the wait to after the count
+  [Message]  chat.jet:22 run  16 allocations  14848 bytes
+  [Int]  chat.jet:22 run  200 allocations  3200 bytes
+  [Room]  chat.jet:18 run  1 allocations  224 bytes
+  chat.jet:28 run  2 allocations  208 bytes
+  elsewhere  1 allocations  80 bytes
+live at start  1 blocks  224 bytes
+  [Room]  chat.jet:18 run  1 blocks  224 bytes
+live at after-chat  205 blocks  11488 bytes
+  [Message]  chat.jet:22 run  4 blocks  8064 bytes
+  [Int]  chat.jet:22 run  200 blocks  3200 bytes
+  [Room]  chat.jet:18 run  1 blocks  224 bytes
+live at exit  205 blocks  11488 bytes
+  [Message]  chat.jet:22 run  4 blocks  8064 bytes
+  [Int]  chat.jet:22 run  200 blocks  3200 bytes
+  [Room]  chat.jet:18 run  1 blocks  224 bytes
+(exit 0; wall 59 ms, cpu 67 ms, load 5.90 35.67 69.64)
+
+$ jet perf compare o2.jettrace --heap start..after-chat
+Compare OK · schema jet.trace v3 · base 66570ff7290d6d9d8f5db88835cdcb0ec41f1bacf92887261d75661123d12d47 · head 66570ff7290d6d9d8f5db88835cdcb0ec41f1bacf92887261d75661123d12d47
+Captures: base o2.jettrace · head o2.jettrace
+Deltas: wall 327509081->327509081 ns · cpu 9953000->9953000 ns
+Heap start -> after-chat: blocks 1->205 · bytes 224->11488
+  [Message]  chat.jet:22 run  +4 blocks  +8064 bytes
+  [Int]  chat.jet:22 run  +200 blocks  +3200 bytes
+budgets: wall RelativeTo(trace-baseline) regression=0bp · base=327509081ns head=327509081ns
+(exit 0; wall 3 ms, cpu 3 ms, load 5.90 35.67 69.64)
+
+$ jet perf view o2.jettrace --retained-by '[Int]'
+retained [Int] at after-chat  200 blocks  3200 bytes
+  rooms[3].history[49].body  200 blocks  3200 bytes
+retained [Int] at exit  200 blocks  3200 bytes
+  no root reached (another thread's stack or a register holds them)  200 blocks  3200 bytes
+(exit 0; wall 2 ms, cpu 2 ms, load 5.90 35.67 69.64)
+
+# a heap snapshot of a running program
+
+$ jet run --observe --checked-alloc held.jet  (in the background until 'READY')
+READY
+(ready)
+
+$ jet perf attach 2697068 --lens=alloc --source held.jet --out attach.jettrace
+Heap snapshot: held the program's allocations and frees for 148 µs
+Trace: <work>/attach.jettrace
+(exit 0; wall 230 ms, cpu 79 ms, load 5.90 35.67 69.64)
+
+$ jet perf view attach.jettrace
+schema jet.trace v3
+trace 45c9074cdc4bbc8344de11bd28086d4219f6e39dd9836b8b1e2010bb258be40b
+command attach
+frames jet
+Sample wall 4338ns · held.jet#run
+profile method=sampling status=captured coverage=partial rows=2 clocks=cpu,wall overhead=not_measured window=live run_wall=225312558ns run_cpu=1830841ns
+tasks count=1 children=0 · held.jet#run
+native process_cpu=0ns observed_at=0ns target=x86_64-unknown-linux-gnu task=1 · held.jet#run
+spans unavailable reason=task span requires multiple live observations · held.jet#run
+waits count=9 · longest 10071420ns: task 1 in time sleep at held.jet:32, woken by its timeout
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  90550874ns waits=9 · run held.jet:32 > time sleep
+receipt perf {"build":null,"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":10000,"lenses":["cpu"],"pc":null}}}
+receipt window {"cpu_clock":"schedstat","cpu_resolution_ns":1,"exited_threads":0}
+flamegraph
+held.jet#run wall ########################################
+held.jet#run profile:cpu samples=1 cpu_us=10000 share=100%
+held.jet#run profile:wall samples=1 share=100%
+timeline
+[0..10057574] task 1 in time sleep at held.jet:32, woken by its timeout
+[10082120..20141257] task 1 in time sleep at held.jet:32, woken by its timeout
+[20162247..30222195] task 1 in time sleep at held.jet:32, woken by its timeout
+[30247694..40306910] task 1 in time sleep at held.jet:32, woken by its timeout
+[40328291..50385604] task 1 in time sleep at held.jet:32, woken by its timeout
+[50400242..60459348] task 1 in time sleep at held.jet:32, woken by its timeout
+[60472574..70535207] task 1 in time sleep at held.jet:32, woken by its timeout
+[70569993..80634520] task 1 in time sleep at held.jet:32, woken by its timeout
+per-line
+  held.jet:19 run samples=1 share=100%
+heap
+live at attach  209 blocks  11664 bytes
+  [Message]  held.jet:24 run  4 blocks  8064 bytes
+  [Int]  held.jet:24 run  200 blocks  3200 bytes
+  [Room]  held.jet:21 run  1 blocks  224 bytes
+  held.jet:32 run  4 blocks  176 bytes
+(exit 0; wall 139 ms, cpu 262 ms, load 5.90 35.67 69.64)
+
+== P5: hardware counters: top-down and memory per line
+
+$ jet perf run --lens=cpu,topdown td.jet --out td.jettrace
+guesses=16793600 hops=35183996698624 sums=27021597697114112
+Trace: <work>/td.jettrace
+(exit 0; wall 785 ms, cpu 769 ms, load 5.90 35.67 69.64)
+
+$ jet perf view td.jettrace
+schema jet.trace v3
+trace a540fc2edf73d555d8e98a9c266ddf85f7ea1837943a9085bd276399a3ee7db9
+command run
+frames jet
+Sample wall 681899833ns · td.jet#run
+profile method=sampling status=captured coverage=partial rows=14 clocks=cpu,wall overhead=measured window=exit run_wall=598136701ns run_cpu=570826000ns
+tasks count=1 children=0 rows=1 coverage=complete · td.jet#run
+native process_cpu=570826000ns observed_at=598136701ns target=x86_64-unknown-linux-gnu task=1 · td.jet#run
+spans count=1 children=0 window=19300725..598136701ns · td.jet#run
+instructions functions=9 kept=9 cut=0 code_bytes=7807: `--instructions` lists them
+task phase (none) tasks=1 cpu_us=483500 samples=3868
+Why hot functions are slow (AMD Zen 4, level 1)
+  function                         time     retiring     bad spec    front end     back end
+  sums                              39%          92%           0%           0%           2%
+  guesses                           31%          41%          32%          22%           6%
+  hops                              25%          27%           4%           0%          86%
+Why hot lines are slow (AMD Zen 4, level 1)
+  line                             time     retiring     bad spec    front end     back end
+  td.jet:42                         39%          92%           0%           0%           2%
+  td.jet:35                         21%          12%           0%           0%         100%
+  td.jet:20                         13%          46%          34%          21%           8%
+  td.jet:15                          6%          24%          34%          27%           5%
+  td.jet:22                          5%          46%          23%          19%           0%
+  td.jet:18                          5%          51%           0%          11%           4%
+  td.jet:30                          4%         100%          24%           0%           0%
+  td.jet:19                          3%          33%          78%          36%           8%
+  td.jet:34~                         0%          33%           0%           0%          33%
+  td.jet:33~                         0%           0%           0%           0%           0%
+Level 2 of those lines (AMD Zen 4)
+  line                            light        heavy   mispredict       clears   fe latency fe bandwidth       memory         core
+  td.jet:42                         92%           0%           0%           0%           0%           0%           1%           2%
+  td.jet:35                         12%           0%           0%           0%           0%           0%         100%           0%
+  td.jet:20                         46%           0%          34%           0%          11%          11%           5%           4%
+  td.jet:15                         24%           0%          34%           0%          15%          12%           3%           2%
+  td.jet:22                         46%           0%          23%           0%          12%           7%           0%           0%
+  td.jet:18                         51%           0%           0%           0%          11%           0%           3%           2%
+  td.jet:30                        100%           0%           0%          24%           0%           0%           0%           0%
+  td.jet:19                         33%           0%          78%           0%          13%          23%           8%           0%
+  td.jet:34~                        33%           0%           0%           0%           0%           0%          33%           0%
+  td.jet:33~                         0%           0%           0%           0%           0%           0%           0%           0%
+~ fewer than 20 samples of slots: low confidence
+threads count=2 claimed=2
+  thread 2697109 main stack=16777216 cpu_ns=628631570 off_cpu_ns=0 running at exit
+  thread 2697144 jet_rt_observe_writer stack=16777216 cpu_ns=300861 off_cpu_ns=578310307 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+syscalls calls=2 time_ns=2465
+  read count=2 time_ns=2465 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu","topdown"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+td.jet#run wall ########################################
+td.jet#sums profile:cpu samples=1481 cpu_us=185125 share=39%
+  line 42 samples=1481 cpu_us=185125 inclusive=1481
+td.jet#guesses profile:cpu samples=1138 cpu_us=142250 share=30%
+  line 20 samples=442 cpu_us=55250 inclusive=442
+  line 15 samples=197 cpu_us=24625 inclusive=197
+  line 22 samples=181 cpu_us=22625 inclusive=181
+td.jet#hops profile:cpu samples=1116 cpu_us=139500 share=29%
+  line 35 samples=847 cpu_us=105875 inclusive=847
+  line 30 samples=174 cpu_us=21750 inclusive=278
+  line 37 samples=56 cpu_us=7000 inclusive=56
+td.jet#run profile:wall samples=24 share=100%
+td.jet#run profile:cpu samples=0 share=0%
+  line 49 samples=0 inclusive=3839
+timeline
+[19300725..598136701] td.jet#run
+per-line
+  td.jet:42 sums samples=1481 share=39% · cost: exact Int spill ×3 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:35 hops samples=847 share=22% · cost: generic representation fallback — semantic remainder (loop depth 1, repeats every loop turn) · cost: exact Int spill — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:20 guesses samples=442 share=11% · cost: generic representation fallback ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: exact Int spill — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:15 guesses samples=197 share=5% · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:22 guesses samples=181 share=4% · cost: exact Int spill — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:30 hops samples=174 share=4% · cost: exact Int spill — semantic remainder (loop depth 0) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:18 guesses samples=167 share=4%
+  td.jet:19 guesses samples=144 share=3%
+  td.jet:37 hops samples=56 share=1% · last 41a1f375c667dcc8 samples=56 share=1%
+  td.jet:34 hops samples=33 share=0% · cost: exact Int spill ×3 — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:16 guesses samples=7 share=0% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn)
+  td.jet:33 hops samples=6 share=0% · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+(exit 0; wall 64 ms, cpu 64 ms, load 5.90 35.67 69.64)
+
+$ jet perf run --lens=cpu,memory walk.jet --out walk.jettrace
+lines=35184363700224 pages=35184363700224 hops=35183996698624
+Trace: <work>/walk.jettrace
+(exit 0; wall 629 ms, cpu 598 ms, load 5.90 35.67 69.64)
+
+$ jet perf view walk.jettrace
+schema jet.trace v3
+trace ec698d2c18170450bac816753e299b2c319f7895282c494dc91e978cbfecbe66
+command run
+frames jet
+Sample wall 480253469ns · walk.jet#run
+profile method=sampling status=captured coverage=partial rows=15 clocks=cpu,wall overhead=measured window=exit run_wall=363831079ns run_cpu=345626000ns
+tasks count=1 children=0 rows=1 coverage=complete · walk.jet#run
+native process_cpu=345626000ns observed_at=363831079ns target=x86_64-unknown-linux-gnu task=1 · walk.jet#run
+spans count=1 children=0 window=10930587..363831079ns · walk.jet#run
+instructions functions=30 kept=30 cut=0 code_bytes=23575: `--instructions` lists them
+counter l1d_misses captured period=10007
+counter llc_misses captured period=1009
+counter dtlb_misses captured period=1009
+counter page_faults captured period=1
+task phase (none) tasks=1 cpu_us=239500 samples=1916
+memory by line: l1d_misses left L1D, llc_misses were served from RAM, page_faults fell to the page cache or disk
+  walk.jet:44 run l1d_misses=4303010 llc_misses=3858416 dtlb_misses=1009 page_faults=0
+  walk.jet:39 run l1d_misses=7195033 llc_misses=863704 dtlb_misses=3027 page_faults=186
+  walk.jet:14 run l1d_misses=2051435 llc_misses=127134 dtlb_misses=4036 page_faults=1160
+  walk.jet:43 run l1d_misses=130091 llc_misses=84756 dtlb_misses=0 page_faults=0
+  walk.jet:42 run l1d_misses=10007 llc_misses=26234 dtlb_misses=0 page_faults=0
+  walk.jet:30 run l1d_misses=14390066 llc_misses=11099 dtlb_misses=0 page_faults=0
+  walk.jet:20 run l1d_misses=12168512 llc_misses=7063 dtlb_misses=0 page_faults=0
+  walk.jet:19 run l1d_misses=2401680 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:21 run l1d_misses=2251575 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:29 run l1d_misses=1961372 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:31 run l1d_misses=490343 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:27 run l1d_misses=20014 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:17 run l1d_misses=10007 llc_misses=0 dtlb_misses=0 page_faults=0
+  walk.jet:11 run l1d_misses=0 llc_misses=0 dtlb_misses=0 page_faults=3
+threads count=2 claimed=2
+  thread 2697214 main stack=16777216 cpu_ns=413475738 off_cpu_ns=0 running at exit
+  thread 2697249 jet_rt_observe_writer stack=16777216 cpu_ns=345367 off_cpu_ns=351950262 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+syscalls calls=2 time_ns=2374
+  read count=2 time_ns=2374 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu","memory"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+walk.jet#run wall ########################################
+walk.jet#run profile:cpu samples=1706 cpu_us=213250 share=100%
+  line 44 samples=877 cpu_us=109625 inclusive=877 l1d_misses=4303010 llc_misses=3858416 dtlb_misses=1009 page_faults=0
+  line 30 samples=275 cpu_us=34375 inclusive=275 l1d_misses=14390066 llc_misses=11099 dtlb_misses=0 page_faults=0
+  line 39 samples=210 cpu_us=26250 inclusive=328 l1d_misses=7195033 llc_misses=863704 dtlb_misses=3027 page_faults=186
+walk.jet#run profile:wall samples=15 share=100%
+timeline
+[10930587..363831079] walk.jet#run
+per-line
+  walk.jet:44 run samples=877 share=51% · cost: generic representation fallback — semantic remainder (loop depth 1, repeats every loop turn) · cost: exact Int spill — semantic remainder (loop depth 1, repeats every loop turn)
+  walk.jet:30 run samples=275 share=16% · cost: generic representation fallback — semantic remainder (loop depth 3, repeats every loop turn) · cost: exact Int spill — semantic remainder (loop depth 3, repeats every loop turn)
+  walk.jet:39 run samples=210 share=12% · cost: exact Int spill — semantic remainder (loop depth 0) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  walk.jet:20 run samples=186 share=10% · cost: generic representation fallback — semantic remainder (loop depth 3, repeats every loop turn) · cost: exact Int spill — semantic remainder (loop depth 3, repeats every loop turn)
+  walk.jet:14 run samples=41 share=2% · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  walk.jet:29 run samples=29 share=1% · cost: stop poll — semantic remainder (loop depth 3, repeats every loop turn)
+  walk.jet:43 run samples=26 share=1% · cost: exact Int spill ×3 — semantic remainder (loop depth 1, repeats every loop turn)
+  walk.jet:19 run samples=22 share=1% · cost: stop poll — semantic remainder (loop depth 3, repeats every loop turn)
+  walk.jet:21 run samples=20 share=1% · cost: exact Int spill — semantic remainder (loop depth 3, repeats every loop turn)
+  walk.jet:42 run samples=11 share=0% · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  walk.jet:31 run samples=9 share=0% · cost: exact Int spill — semantic remainder (loop depth 3, repeats every loop turn)
+(exit 0; wall 91 ms, cpu 91 ms, load 5.90 35.67 69.64)
+
+== P6: causal profiling, -O2 arm of causal_profile_predicts_speedup
+
+$ jet run -A -O2 main.jet -- measure before.txt
+measured
+(exit 0; wall 1195 ms, cpu 3418 ms, load 5.90 35.67 69.64)
+
+$ jet perf run -A -O2 main.jet --lens=causal --out causal.jettrace
+done
+Trace: <work>/causal.jettrace
+(exit 0; wall 5162 ms, cpu 14419 ms, load 5.66 35.13 69.28)
+
+$ jet run -A -O2 main.jet -- measure after.txt
+measured
+(exit 0; wall 1268 ms, cpu 3600 ms, load 5.45 34.60 68.93)
+
+before.txt: 189 190 192 1 2 4 7 5125 4200 1275981 1262446 0 1259419 7855 1004744 1036845 1025183 0 882311 7815 1005216 1270591 1257386 0 1257386 7715 704142
+after.txt: 179 189 190 2 4 7 5 5088 4382 1297262 1280580 0 1273836 8586 1014853 1095387 1082132 0 892971 8376 1011978 1285760 1272594 0 1272594 8235 710504
+
+$ jet run -A check.jet -- o2 causal.jettrace
+causal rounds o2 hand before.txt plain: wall 1275.9 span 1262.4 narrow at 0.0 for 1259.4 wide at 7.8 for 1004.7 (µs, medians)
+causal rounds o2 hand before.txt narrow-fast: wall 1036.8 span 1025.1 narrow at 0.0 for 882.3 wide at 7.8 for 1005.2 (µs, medians)
+causal rounds o2 hand before.txt wide-fast: wall 1270.5 span 1257.3 narrow at 0.0 for 1257.3 wide at 7.7 for 704.1 (µs, medians)
+causal rounds o2 hand after.txt plain: wall 1297.2 span 1280.5 narrow at 0.0 for 1273.8 wide at 8.5 for 1014.8 (µs, medians)
+causal rounds o2 hand after.txt narrow-fast: wall 1095.3 span 1082.1 narrow at 0.0 for 892.9 wide at 8.3 for 1011.9 (µs, medians)
+causal rounds o2 hand after.txt wide-fast: wall 1285.7 span 1272.5 narrow at 0.0 for 1272.5 wide at 8.2 for 710.5 (µs, medians)
+causal rounds o2 lens: tasks seen 11004, kept 11004 of at most 65536; rounds 2751, kept whole within one experiment 2592; experiments 155
+causal rounds o2 lens baseline: 1240 rounds span 1259.8 delay 0.0 virtual 1259.8 narrow at 0.0 for 1257.1 paused 0.0 work 1253.2 samples 1 wide at 8.1 for 1006.1 paused 0.0 work 1003.3 samples 1 cpus 4 (µs, medians)
+causal rounds o2 lens narrow line: 568 rounds span 1323.7 delay 300.4 virtual 1026.4 narrow at 0.0 for 1258.0 paused 0.0 work 1254.3 samples 1 wide at 7.5 for 1301.3 paused 300.0 work 1005.4 samples 1 cpus 4 (µs, medians)
+causal rounds o2 lens wide line: 784 rounds span 1680.8 delay 412.5 virtual 1260.8 narrow at 0.0 for 1679.9 paused 412.5 work 1257.1 samples 2 wide at 9.0 for 1034.6 paused 1.4 work 1005.8 samples 1 cpus 4 (µs, medians)
+causal case o2: clock, the lens flagged its gains: the profiled run's CPUs clocked 5153 to 4540 MHz and it could not fit how that slowed its tasks; fit refused, R² 0 and slope 0 thousandths; {"cells":[{"fitted":false,"gap_us":3,"residual_thousandths":13,"slowness_thousandths":1012,"tasks":1},{"fitted":false,"gap_us":5,"residual_thousandths":22,"slowness_thousandths":1021,"tasks":3},{"fitted":true,"gap_us":14,"residual_thousandths":-15,"slowness_thousandths":984,"tasks":503},{"fitted":true,"gap_us":20,"residual_thousandths":10,"slowness_thousandths":1009,"tasks":604},{"fitted":true,"gap_us":39,"residual_thousandths":16,"slowness_thousandths":1015,"tasks":245},{"fitted":true,"gap_us":102,"residual_thousandths":2,"slowness_thousandths":1001,"tasks":100},{"fitted":true,"gap_us":231,"residual_thousandths":-5,"slowness_thousandths":994,"tasks":475},{"fitted":true,"gap_us":289,"residual_thousandths":0,"slowness_thousandths":999,"tasks":3083},{"fitted":true,"gap_us":679,"residual_thousandths":19,"slowness_thousandths":1018,"tasks":194},{"fitted":false,"gap_us":1176,"residual_thousandths":50,"slowness_thousandths":1049,"tasks":10},{"fitted":false,"gap_us":2982,"residual_thousandths":20,"slowness_thousandths":1019,"tasks":4}],"r2_thousandths":0,"refused":"the fit of run time against idle gap explains 0.0% of the octaves' spread, under the 50.0% the lens warms its gains by","slope_thousandths":0}
+the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains
+causal rounds o2 hand before.txt plain: wall 1275.9 span 1262.4 narrow at 0.0 for 1259.4 wide at 7.8 for 1004.7 (µs, medians)
+causal rounds o2 hand before.txt narrow-fast: wall 1036.8 span 1025.1 narrow at 0.0 for 882.3 wide at 7.8 for 1005.2 (µs, medians)
+causal rounds o2 hand before.txt wide-fast: wall 1270.5 span 1257.3 narrow at 0.0 for 1257.3 wide at 7.7 for 704.1 (µs, medians)
+causal rounds o2 hand after.txt plain: wall 1297.2 span 1280.5 narrow at 0.0 for 1273.8 wide at 8.5 for 1014.8 (µs, medians)
+causal rounds o2 hand after.txt narrow-fast: wall 1095.3 span 1082.1 narrow at 0.0 for 892.9 wide at 8.3 for 1011.9 (µs, medians)
+causal rounds o2 hand after.txt wide-fast: wall 1285.7 span 1272.5 narrow at 0.0 for 1272.5 wide at 8.2 for 710.5 (µs, medians)
+causal rounds o2 lens: tasks seen 11004, kept 11004 of at most 65536; rounds 2751, kept whole within one experiment 2592; experiments 155
+causal rounds o2 lens baseline: 1240 rounds span 1259.8 delay 0.0 virtual 1259.8 narrow at 0.0 for 1257.1 paused 0.0 work 1253.2 samples 1 wide at 8.1 for 1006.1 paused 0.0 work 1003.3 samples 1 cpus 4 (µs, medians)
+causal rounds o2 lens narrow line: 568 rounds span 1323.7 delay 300.4 virtual 1026.4 narrow at 0.0 for 1258.0 paused 0.0 work 1254.3 samples 1 wide at 7.5 for 1301.3 paused 300.0 work 1005.4 samples 1 cpus 4 (µs, medians)
+causal rounds o2 lens wide line: 784 rounds span 1680.8 delay 412.5 virtual 1260.8 narrow at 0.0 for 1679.9 paused 412.5 work 1257.1 samples 2 wide at 9.0 for 1034.6 paused 1.4 work 1005.8 samples 1 cpus 4 (µs, medians)
+causal case o2: clock, the lens flagged its gains: the profiled run's CPUs clocked 5153 to 4540 MHz and it could not fit how that slowed its tasks; fit refused, R² 0 and slope 0 thousandths; {"cells":[{"fitted":false,"gap_us":3,"residual_thousandths":13,"slowness_thousandths":1012,"tasks":1},{"fitted":false,"gap_us":5,"residual_thousandths":22,"slowness_thousandths":1021,"tasks":3},{"fitted":true,"gap_us":14,"residual_thousandths":-15,"slowness_thousandths":984,"tasks":503},{"fitted":true,"gap_us":20,"residual_thousandths":10,"slowness_thousandths":1009,"tasks":604},{"fitted":true,"gap_us":39,"residual_thousandths":16,"slowness_thousandths":1015,"tasks":245},{"fitted":true,"gap_us":102,"residual_thousandths":2,"slowness_thousandths":1001,"tasks":100},{"fitted":true,"gap_us":231,"residual_thousandths":-5,"slowness_thousandths":994,"tasks":475},{"fitted":true,"gap_us":289,"residual_thousandths":0,"slowness_thousandths":999,"tasks":3083},{"fitted":true,"gap_us":679,"residual_thousandths":19,"slowness_thousandths":1018,"tasks":194},{"fitted":false,"gap_us":1176,"residual_thousandths":50,"slowness_thousandths":1049,"tasks":10},{"fitted":false,"gap_us":2982,"residual_thousandths":20,"slowness_thousandths":1019,"tasks":4}],"r2_thousandths":0,"refused":"the fit of run time against idle gap explains 0.0% of the octaves' spread, under the 50.0% the lens warms its gains by","slope_thousandths":0}
+(exit 0; wall 330 ms, cpu 663 ms, load 5.45 34.60 68.93)
+
+$ jet perf view causal.jettrace
+schema jet.trace v3
+trace 7040bb6149409e0772ed83dbdacb411c8482f30a8c3e7acf0f435f863f578e9d
+command run
+frames jet
+Sample wall 4239217174ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=14 clocks=cpu,wall overhead=measured window=exit run_wall=4004135383ns run_cpu=13030563000ns
+tasks count=11005 children=11004 rows=4096 coverage=complete · main.jet#run
+native process_cpu=13030563000ns observed_at=4004135383ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=138 children=137 window=1838213..4004135383ns · main.jet#run
+waits count=1207 · longest 2124398ns: task 1 in task join at main.jet:88, woken by task ?
+instructions functions=38 kept=38 cut=0 code_bytes=21842: `--instructions` lists them
+zone round count=2751 samples=320 total=3996836999ns longest=3420927ns · main.jet:86 168 · main.jet:89 77 · main.jet:88 58
+task phase round tasks=11005 cpu_us=12004250 samples=96034 · folded tasks=6909 cpu_us=5268750 samples=42150
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  1341384459ns waits=945 · entry main.jet:184 > run main.jet:243 > play_round main.jet:88 > task join
+  32719250ns waits=262 · entry main.jet:184 > run main.jet:243 > play_round main.jet:89 > task join
+threads count=9 claimed=9
+  thread 2697434 main stack=16777216 cpu_ns=102690193 off_cpu_ns=3899564016 running at exit
+  thread 2697472 jet_rt_observe_writer stack=16777216 cpu_ns=1871485 off_cpu_ns=4000261973 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+  thread 2697473 jet_rt_scheduler_worker stack=16777216 cpu_ns=3289202118 off_cpu_ns=712793257 running at exit · spawned at unit.scheduler_start_worker from main.jet:85 play_round
+  thread 2697474 jet_rt_scheduler_worker stack=16777216 cpu_ns=1245108932 off_cpu_ns=2756853360 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697475 jet_rt_scheduler_worker stack=16777216 cpu_ns=3245379659 off_cpu_ns=756526887 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697476 jet_rt_scheduler_worker stack=16777216 cpu_ns=3246358395 off_cpu_ns=755536579 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697477 jet_rt_scheduler_worker stack=16777216 cpu_ns=30155 off_cpu_ns=4001830243 running at exit · spawned at unit.scheduler_start_worker
+  thread 2697478 jet_rt_scheduler_worker stack=16777216 cpu_ns=1951027084 off_cpu_ns=2050742541 running at exit · spawned at unit.scheduler_start_worker
+  thread 2697479 jet_rt_scheduler_worker stack=16777216 cpu_ns=19877 off_cpu_ns=4001722877 running at exit · spawned at unit.scheduler_start_worker
+syscalls calls=26 time_ns=53824
+  open count=7 time_ns=26382 · at unit.cpu_read from main.jet:85 play_round
+  read count=12 time_ns=12625 · at unit.cpu_read from main.jet:85 play_round
+  stat count=1 time_ns=8917 · at unit.cpu_exists from main.jet:85 play_round
+  close count=6 time_ns=5900 · at unit.cpu_read from main.jet:85 play_round
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O2","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu","causal"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"timer_signal","source":"timer"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#wide profile:cpu samples=67384 cpu_us=8423000 share=70%
+  line 52 samples=67384 cpu_us=8423000 inclusive=67384
+main.jet#narrow profile:cpu samples=27858 cpu_us=3482250 share=29%
+  line 46 samples=27858 cpu_us=3482250 inclusive=27858
+main.jet#run profile:wall samples=159 share=100%
+main.jet#play_round.lambda@3733 profile:cpu samples=8 cpu_us=1000 share=0%
+  line 86 samples=8 cpu_us=1000 inclusive=67392
+main.jet#wide_run profile:cpu samples=0 share=0%
+  line 72 samples=0 inclusive=67384
+main.jet#narrow_run profile:cpu samples=0 share=0%
+  line 66 samples=0 inclusive=27858
+main.jet#play_round.lambda@3639 profile:cpu samples=0 share=0%
+  line 85 samples=0 inclusive=27858
+main.jet#entry profile:cpu samples=0 share=0%
+  line 184 samples=0 inclusive=373
+timeline
+[1838213..4004135383] main.jet#run
+[101980643..101980643] main.jet#run
+[101980643..101980643] main.jet#run
+[202104918..202104918] main.jet#run
+[202104918..202104918] main.jet#run
+[202104918..202104918] main.jet#run
+[202104918..202104918] main.jet#run
+[302197203..302197203] main.jet#run
+[110814400..112488529] main.jet#round · 11 samples · main.jet:85
+[124044912..125837226] main.jet#round · 1 sample · main.jet:88
+... (6 lines not shown) ...
+[2127073..3822884] task 1 in task join at main.jet:88, woken by task ?
+[3842953..5171775] task 1 in task join at main.jet:88 for task 139 spawned at main.jet:85, woken by task 139
+[5183146..6436154] task 1 in task join at main.jet:88, woken by task ?
+[6437787..6468495] task 1 in task join at main.jet:89, woken by task ?
+[6476050..7731732] task 1 in task join at main.jet:88, woken by task ?
+[7739126..9010048] task 1 in task join at main.jet:88, woken by task ?
+[9022001..10276571] task 1 in task join at main.jet:88 for task 143 spawned at main.jet:85, woken by task 143
+[10280909..10370059] task 1 in task join at main.jet:89 for task 145 spawned at main.jet:86, woken by task 145
+per-line
+  main.jet:52 wide samples=67384 share=70% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  main.jet:46 narrow samples=27858 share=29% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  main.jet:86 play_round.lambda@3733 samples=8 share=0% · cost: exact Int spill ×3 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+causal
+  flagged: gains may under-read: idle CPUs clocked down 11.8% (5153 MHz to 4540 MHz) between experiments, above the 10.0% the lens trusts, and it could not fit how much slower a task runs after its CPU idled (the fit of run time against idle gap explains 0.0% of the octaves' spread, under the 50.0% the lens warms its gains by): a task begun on a CPU that idled runs slower than its siblings until it clocks up, whichever line the experiment speeds up; run it longer, or with the CPUs held at one clock
+  `task`: if this line were 30% faster, each pass would come sooner by
+    main.jet:46 narrow  +17.1% (15.5% to 18.5%)
+    main.jet:52 wide  +1.1% (0.0% to 2.5%)
+  `round`: if this line were 30% faster, each pass would come sooner by
+    main.jet:46 narrow  +17.9% (16.3% to 19.2%)
+    main.jet:52 wide  -0.1% (-1.4% to 1.0%)
+(exit 0; wall 857 ms, cpu 995 ms, load 5.45 34.60 68.93)
+
+$ jet perf run -A -O2 main.jet --lens=causal --out short.jettrace -- 60
+done
+Trace: <work>/short.jettrace
+(exit 0; wall 443 ms, cpu 794 ms, load 5.45 34.60 68.93)
+
+$ jet perf view short.jettrace
+schema jet.trace v3
+trace 4ee731e4a296c050157ee9c4429f2b5e6164853d5ee42b8a377b1268f9ee256a
+command run
+frames jet
+Sample wall 329227866ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=10 clocks=cpu,wall overhead=measured window=exit run_wall=63301393ns run_cpu=217609000ns
+tasks count=173 children=172 rows=173 coverage=complete · main.jet#run
+native process_cpu=217609000ns observed_at=63301393ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=1 children=0 window=1872347..63301393ns · main.jet#run
+waits count=50 · longest 1846378ns: task 1 in task join at main.jet:88 for task 2 spawned at main.jet:85, woken by task 2
+instructions functions=5 kept=5 cut=0 code_bytes=5406: `--instructions` lists them
+zone round count=43 samples=5 total=61093808ns longest=2071860ns · main.jet:86 5
+task phase round tasks=173 cpu_us=198750 samples=1590
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  59841931ns waits=43 · entry main.jet:184 > run main.jet:243 > play_round main.jet:88 > task join
+  459876ns waits=7 · entry main.jet:184 > run main.jet:243 > play_round main.jet:89 > task join
+threads count=9 claimed=9
+  thread 2697753 main stack=16777216 cpu_ns=60024824 off_cpu_ns=1371019 running at exit
+  thread 2697825 jet_rt_observe_writer stack=16777216 cpu_ns=37240 off_cpu_ns=61237852 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+  thread 2697826 jet_rt_scheduler_worker stack=16777216 cpu_ns=51903765 off_cpu_ns=9216723 running at exit · spawned at unit.scheduler_start_worker from main.jet:85 play_round
+  thread 2697827 jet_rt_scheduler_worker stack=16777216 cpu_ns=53224503 off_cpu_ns=7866439 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697828 jet_rt_scheduler_worker stack=16777216 cpu_ns=45993096 off_cpu_ns=15057288 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697829 jet_rt_scheduler_worker stack=16777216 cpu_ns=48961336 off_cpu_ns=12075182 running at exit · spawned at unit.scheduler_start_worker from main.jet:86 play_round
+  thread 2697830 jet_rt_scheduler_worker stack=16777216 cpu_ns=37952 off_cpu_ns=60954482 running at exit · spawned at unit.scheduler_start_worker
+  thread 2697831 jet_rt_scheduler_worker stack=16777216 cpu_ns=44463 off_cpu_ns=60865794 running at exit · spawned at unit.scheduler_start_worker
+  thread 2697832 jet_rt_scheduler_worker stack=16777216 cpu_ns=29585 off_cpu_ns=60871575 running at exit · spawned at unit.scheduler_start_worker
+syscalls calls=26 time_ns=57599
+  open count=7 time_ns=28475 · at unit.cpu_read from main.jet:85 play_round
+  read count=12 time_ns=13736 · at unit.cpu_read from main.jet:85 play_round
+  stat count=1 time_ns=9428 · at unit.cpu_exists from main.jet:85 play_round
+  close count=6 time_ns=5960 · at unit.cpu_read from main.jet:85 play_round
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O2","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu","causal"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"timer_signal","source":"timer"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#wide profile:cpu samples=1113 cpu_us=139125 share=70%
+  line 52 samples=1113 cpu_us=139125 inclusive=1113
+main.jet#narrow profile:cpu samples=456 cpu_us=57000 share=29%
+  line 46 samples=456 cpu_us=57000 inclusive=456
+main.jet#run profile:wall samples=4 share=100%
+main.jet#play_round.lambda@3733 profile:cpu samples=0 share=0%
+  line 86 samples=0 inclusive=1113
+main.jet#wide_run profile:cpu samples=0 share=0%
+  line 72 samples=0 inclusive=1113
+main.jet#narrow_run profile:cpu samples=0 share=0%
+  line 66 samples=0 inclusive=456
+main.jet#play_round.lambda@3639 profile:cpu samples=0 share=0%
+  line 85 samples=0 inclusive=456
+main.jet#entry profile:cpu samples=0 share=0%
+  line 184 samples=0 inclusive=5
+timeline
+[1872347..63301393] main.jet#run
+[1961732..4033592] main.jet#round
+[4041427..5454096] main.jet#round
+[5454777..6802464] main.jet#round
+[6803546..8119093] main.jet#round
+[8119564..9416675] main.jet#round
+[9417096..10963547] main.jet#round
+[10964369..12378010] main.jet#round
+[33525468..34859188] main.jet#round · 5 samples · main.jet:86
+[2177418..4023796] task 1 in task join at main.jet:88 for task 2 spawned at main.jet:85, woken by task 2
+[4050828..5449132] task 1 in task join at main.jet:88 for task 6 spawned at main.jet:85, woken by task 6
+[5464562..6796730] task 1 in task join at main.jet:88 for task 10 spawned at main.jet:85, woken by task 10
+[6809003..8086758] task 1 in task join at main.jet:88 for task 14 spawned at main.jet:85, woken by task 14
+[8088942..8115573] task 1 in task join at main.jet:89 for task 16 spawned at main.jet:86, woken by task 16
+[8125352..9412143] task 1 in task join at main.jet:88 for task 18 spawned at main.jet:85, woken by task 18
+[9433745..10958269] task 1 in task join at main.jet:88 for task 22 spawned at main.jet:85, woken by task 22
+[10973238..12373576] task 1 in task join at main.jet:88 for task 26 spawned at main.jet:85, woken by task 26
+per-line
+  main.jet:52 wide samples=1113 share=70% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+  main.jet:46 narrow samples=456 share=29% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+causal
+  refused: the run kept 2 experiments of 25 ms, 2 of them baselines, and no line had 6 with an interval narrower than 30 points; run it for longer than 600 ms per line it spends time in
+(exit 0; wall 197 ms, cpu 337 ms, load 5.45 34.60 68.93)
+
+== P7: the compiler's cost facts beside measured samples
+
+$ jet perf run main.jet --out spin.jettrace
+spun=982285
+note: main.jet writes logs (-A hides this)
+Trace: <work>/spin.jettrace
+(exit 0; wall 911 ms, cpu 893 ms, load 5.45 34.60 68.93)
+
+$ jet perf view spin.jettrace
+schema jet.trace v3
+trace 5933ccc1cb20fc1712987907e3c06a7879f21d83c180b806409a26a215a756b6
+command run
+frames jet
+Sample wall 781544493ns · main.jet#run
+profile method=sampling status=captured coverage=partial rows=5 clocks=cpu,wall overhead=measured window=exit run_wall=641665349ns run_cpu=620140000ns
+tasks count=1 children=0 rows=1 coverage=complete · main.jet#run
+native process_cpu=620140000ns observed_at=641665349ns target=x86_64-unknown-linux-gnu task=1 · main.jet#run
+spans count=1 children=0 window=20561978..641665349ns · main.jet#run
+log spans count=1 window=20703097..641171989ns · main.jet#spin
+instructions functions=6 kept=6 cut=0 code_bytes=4770: `--instructions` lists them
+task phase spin tasks=1 cpu_us=618625 samples=4949
+threads count=2 claimed=2
+  thread 2697874 main stack=16777216 cpu_ns=708803024 off_cpu_ns=0 running at exit
+  thread 2697909 jet_rt_observe_writer stack=16777216 cpu_ns=535926 off_cpu_ns=620273776 running at exit · spawned at jet_rt_observe_runtime_start_from_env
+syscalls calls=2 time_ns=3336
+  read count=2 time_ns=3336 · at unit.perf_precise_ended
+receipt perf {"build":{"options":{"action_timeout":"30s","backtrace":"full","bounds":"fatal","checked_alloc":"false","dead_code":"remove","debug_info":"true","inline":"auto","libs":"","link":"default","link_args":"","min_os":"","optimize":"O0","os":"linux","output_dir":"","post_link":"","small":"false","write_generated":"off","zones":"keep"},"profile":null},"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":125,"lenses":["cpu"],"pc":{"paranoid":2,"period":125000,"period_unit":"ns","precise":false,"refused":[],"skid":"task_clock_interrupt","source":"task_clock"}}}}
+flamegraph
+main.jet#run wall ########################################
+main.jet#spin_hot_loop profile:cpu samples=4938 cpu_us=617250 share=100%
+  line 11 samples=4938 cpu_us=617250 inclusive=4938
+main.jet#run profile:wall samples=25 share=100%
+main.jet#run profile:cpu samples=0 share=0%
+  line 25 samples=0 inclusive=4939
+main.jet#spin profile:cpu samples=0 share=0%
+  line 17 samples=0 inclusive=4938
+  line 16 samples=0 inclusive=1
+timeline
+[20561978..641665349] main.jet#run
+[20703097..641171989] main.jet#spin
+per-line
+  main.jet:11 spin_hot_loop samples=4938 share=100% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn) · cost: stop poll — semantic remainder (loop depth 1, repeats every loop turn)
+(exit 0; wall 59 ms, cpu 59 ms, load 5.45 34.60 68.93)
+
+== P8: diffs with significance; exports
+
+$ jet perf run main.jet --out base/1.jettrace -- 50000000
+spun=922688
+note: main.jet writes logs (-A hides this)
+Trace: <work>/base/1.jettrace
+(exit 0; wall 341 ms, cpu 350 ms, load 5.45 34.60 68.93)
+
+$ jet perf run main.jet --out head/1.jettrace -- 100000000
+spun=863789
+note: main.jet writes logs (-A hides this)
+Trace: <work>/head/1.jettrace
+(exit 0; wall 525 ms, cpu 534 ms, load 5.74 34.17 68.61)
+
+$ jet perf compare base head
+Compare OK · schema jet.trace v3 · base 5 captures in base · head 5 captures in head
+Captures: base base/1.jettrace, base/2.jettrace, base/3.jettrace, base/4.jettrace, base/5.jettrace · head head/1.jettrace, head/2.jettrace, head/3.jettrace, head/4.jettrace, head/5.jettrace
+Deltas: wall 272913511->430070434 ns · cpu 158064800->307661200 ns
+Receipt deltas: syscalls.syscalls: [{"count":2,"name":"read","number":0,"stack":[{"file":null,"function":"unit.perf_precise_ended","line":0,"own":false},{"file":null,"function":"unit.perf_precise_ends","line":0,"own":false},{"file":null,"function":"unit.perf_samples_exit","line":0,"own":false},{"file":null,"function":"jet_rt_observe_exit","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"time_ns":2214}] -> [{"count":2,"name":"read","number":0,"stack":[{"file":null,"function":"unit.perf_precise_ended","line":0,"own":false},{"file":null,"function":"unit.perf_precise_ends","line":0,"own":false},{"file":null,"function":"unit.perf_samples_exit","line":0,"own":false},{"file":null,"function":"jet_rt_observe_exit","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"time_ns":2827}] · tasks.phases: [{"folded":0,"folded_samples":0,"name":"spin","samples":1207,"tasks":1}] -> [{"folded":0,"folded_samples":0,"name":"spin","samples":2408,"tasks":1}] · threads.threads: [{"cpu_ns":224555073,"name":"main","off_cpu_ns":0,"spawned_at":[],"stack_bytes":16777216,"state":"running","tid":2697927},{"cpu_ns":152206,"name":"jet_rt_observe_writer","off_cpu_ns":152929844,"spawned_at":[{"file":null,"function":"jet_rt_observe_runtime_start_from_env","line":0,"own":false},{"file":null,"function":"jet_rt_observe_start","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"stack_bytes":16777216,"state":"running","tid":2697964}] -> [{"cpu_ns":374107872,"name":"main","off_cpu_ns":0,"spawned_at":[],"stack_bytes":16777216,"state":"running","tid":2698166},{"cpu_ns":291886,"name":"jet_rt_observe_writer","off_cpu_ns":303047833,"spawned_at":[{"file":null,"function":"jet_rt_observe_runtime_start_from_env","line":0,"own":false},{"file":null,"function":"jet_rt_observe_start","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"stack_bytes":16777216,"state":"running","tid":2698201}]
+budgets: wall RelativeTo(trace-baseline) regression=5758bp · base=272913511ns head=430070434ns
+functions (CPU-time samples, base mean -> head mean):
+  main.jet spin_hot_loop 1215 -> 2427 samples (+99%) slower (p=0.008)
+  main.jet run 0 -> 0 samples (new) too few samples to judge
+lines (CPU-time samples, base mean -> head mean):
+  main.jet:11 spin_hot_loop 1215 -> 2427 samples (+99%) slower (p=0.008)
+  main.jet:23 run 0 -> 0 samples (new) too few samples to judge
+verdict: exact Mann-Whitney U over 5 captures against 5, each p adjusted for its table's judged rows (Benjamini-Hochberg); faster or slower below p=0.05; a row under 1% of both sides' samples is too few to judge
+(exit 0; wall 24 ms, cpu 23 ms, load 5.74 34.17 68.61)
+
+$ jet perf compare base/1.jettrace head/1.jettrace
+Compare OK · schema jet.trace v3 · base cd52111a6767c8bcd7c1dbcb718bcf7e1f513147123d60a2c7c7b05031400828 · head 6098eef7661eeb3d9c3458902af72337dd8aad4a677384811b4514a09cca68af
+Captures: base base/1.jettrace · head head/1.jettrace
+Deltas: wall 252882348->404095908 ns · cpu 160498000->312132000 ns
+Receipt deltas: syscalls.syscalls: [{"count":2,"name":"read","number":0,"stack":[{"file":null,"function":"unit.perf_precise_ended","line":0,"own":false},{"file":null,"function":"unit.perf_precise_ends","line":0,"own":false},{"file":null,"function":"unit.perf_samples_exit","line":0,"own":false},{"file":null,"function":"jet_rt_observe_exit","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"time_ns":2214}] -> [{"count":2,"name":"read","number":0,"stack":[{"file":null,"function":"unit.perf_precise_ended","line":0,"own":false},{"file":null,"function":"unit.perf_precise_ends","line":0,"own":false},{"file":null,"function":"unit.perf_samples_exit","line":0,"own":false},{"file":null,"function":"jet_rt_observe_exit","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"time_ns":2827}] · tasks.phases: [{"folded":0,"folded_samples":0,"name":"spin","samples":1207,"tasks":1}] -> [{"folded":0,"folded_samples":0,"name":"spin","samples":2408,"tasks":1}] · threads.threads: [{"cpu_ns":224555073,"name":"main","off_cpu_ns":0,"spawned_at":[],"stack_bytes":16777216,"state":"running","tid":2697927},{"cpu_ns":152206,"name":"jet_rt_observe_writer","off_cpu_ns":152929844,"spawned_at":[{"file":null,"function":"jet_rt_observe_runtime_start_from_env","line":0,"own":false},{"file":null,"function":"jet_rt_observe_start","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"stack_bytes":16777216,"state":"running","tid":2697964}] -> [{"cpu_ns":374107872,"name":"main","off_cpu_ns":0,"spawned_at":[],"stack_bytes":16777216,"state":"running","tid":2698166},{"cpu_ns":291886,"name":"jet_rt_observe_writer","off_cpu_ns":303047833,"spawned_at":[{"file":null,"function":"jet_rt_observe_runtime_start_from_env","line":0,"own":false},{"file":null,"function":"jet_rt_observe_start","line":0,"own":false},{"file":null,"function":"jet_rt_main","line":0,"own":false},{"file":null,"function":"main","line":0,"own":false}],"stack_bytes":16777216,"state":"running","tid":2698201}]
+budgets: wall RelativeTo(trace-baseline) regression=5979bp · base=252882348ns head=404095908ns
+functions (CPU-time samples, base mean -> head mean):
+  main.jet spin_hot_loop 1218 -> 2424 samples (+99%)
+lines (CPU-time samples, base mean -> head mean):
+  main.jet:11 spin_hot_loop 1218 -> 2424 samples (+99%)
+verdict: none (one capture each; capture each side at least 4 times)
+  capture each side into its own folder with `jet perf run <program> --out <folder>/<n>.jettrace`, then compare the two folders
+(exit 0; wall 9 ms, cpu 8 ms, load 5.74 34.17 68.61)
+
+$ jet perf export base/1.jettrace --pprof
+Profile: base/1.pb.gz
+(exit 0; wall 5 ms, cpu 4 ms, load 5.74 34.17 68.61)
+
+$ jet perf view base/1.pb.gz
+export pprof base/1.pb.gz
+comment jet perf cd52111a6767c8bcd7c1dbcb718bcf7e1f513147123d60a2c7c7b05031400828: one location per source line; inclusive samples, allocations and counter events are not carried
+flamegraph
+main.jet#spin_hot_loop profile:cpu samples=1218 cpu_us=152250 share=100%
+  line 11 samples=1218 cpu_us=152250
+main.jet#run profile:cpu samples=0 share=0%
+  line 25 samples=0
+main.jet#spin profile:cpu samples=0 share=0%
+  line 17 samples=0
+per-line
+  main.jet:11 spin_hot_loop samples=1218 share=100%
+(exit 0; wall 1 ms, cpu 1 ms, load 5.74 34.17 68.61)
+
+$ jet perf export base/1.jettrace --otel --out trace.otlp.json
+Export: trace.otlp.json
+(exit 0; wall 6 ms, cpu 3 ms, load 5.74 34.17 68.61)
+
+$ jet perf view trace.otlp.json
+export otlp trace.otlp.json
+spans count=2
+flamegraph
+main.jet#spin_hot_loop profile:cpu samples=1218 share=100%
+  line 11 samples=1218
+main.jet#run profile:cpu samples=0 share=0%
+  line 25 samples=0
+main.jet#spin profile:cpu samples=0 share=0%
+  line 17 samples=0
+timeline
+[9938447..163204297] main.jet#run
+[10018770..162927891] main.jet#spin
+per-line
+  main.jet:11 spin_hot_loop samples=1218 share=100%
+(exit 0; wall 1 ms, cpu 1 ms, load 5.74 34.17 68.61)
+
+== P10: attach to a running program: its flight ring and its live state
+
+$ jet run --observe live.jet  (in the background until 'READY')
+READY
+(ready)
+
+$ jet perf attach 2698387 --source live.jet --out ring.jettrace
+Trace: <work>/ring.jettrace
+(exit 0; wall 128 ms, cpu 127 ms, load 5.44 33.64 68.25)
+
+$ jet perf view ring.jettrace
+schema jet.trace v3
+trace c368dd65d5175e59f3827bd68807168647d64ffbc7dcb0a3c8b22eba3b47ce7e
+command attach
+frames jet
+Sample wall 641020550ns · live.jet#run
+profile method=sampling status=captured coverage=partial rows=2 clocks=cpu,wall overhead=not_measured window=live run_wall=123554289ns run_cpu=132109ns
+tasks count=2 children=1 · live.jet#run
+locks count=1 waiters=1 · live.jet#run
+native process_cpu=30000000ns observed_at=0ns target=x86_64-unknown-linux-gnu task=1 · live.jet#run
+spans unavailable reason=task span requires multiple live observations · live.jet#run
+waits count=3 · longest 500061739ns: task 1 in time sleep at live.jet:17, woken by its timeout
+off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first
+  500061739ns waits=1 · run live.jet:17 > time sleep
+  200068748ns waits=1 · run live.jet:14 > time sleep
+  200036537ns waits=1 · run.lambda@189 live.jet:10 > channel receive
+receipt perf {"build":null,"capture":{"allowlist":null,"sampling":{"allocations":"call-sites","clock":"cpu","interval_us":10000,"lenses":["cpu"],"pc":null}}}
+receipt window {"cpu_clock":"schedstat","cpu_resolution_ns":1,"exited_threads":0}
+flamegraph
+live.jet#run wall ########################################
+live.jet#run profile:cpu samples=1 cpu_us=10000 share=100%
+live.jet#run profile:wall samples=1 share=100%
+timeline
+[0..200068748] task 1 in time sleep at live.jet:14, woken by its timeout
+[79812..200116349] task 2 in channel receive at live.jet:10 for channel 1, woken by task 1 at live.jet:15
+[200108454..700170193] task 1 in time sleep at live.jet:17, woken by its timeout
+per-line
+  live.jet:6 run samples=1 share=100%
+(exit 0; wall 128 ms, cpu 242 ms, load 5.44 33.64 68.25)
+
+$ jet inspect live --attach 2698387 --once
+jet inspect live · pid 2698387
+protocol=jet.live.v2 session=jet-observe-2698387-1795246982049553682 source=live.jet build=runtime revision=runtime world=game
+
+Task Tree
+  Task 1     parent 0     blocked  wait=time sleep deadline=- canceled=false label=root open_spans=0 arena_allocations=0
+  Task 2     parent 1     blocked  wait=channel receive deadline=- canceled=false label=task@0 open_spans=0 arena_allocations=0
+
+Channels
+  Channel 1     depth 0/1 blocked send=0 recv=0 closed=false
+  Channel 2     depth 0/1 blocked send=0 recv=1 closed=false
+
+Effects: compute=0 waiting=2 channel=1 time=1 io=0
+Resources: workers=32 running=0 queued=0 canceled=0 arenas=0 arena_allocations=0 arena_bytes=0
+
+Values
+  (no live value decisions)
+
+Events
+  (no runtime event observations)
+(exit 0; wall 1 ms, cpu 1 ms, load 5.44 33.64 68.25)
+
+== Canvas: the Debug and Profile views, their first paint and panels, against RemedyBG
+
+# the browser: Chromium 152.0.7977.64, headless, 1440x900
+
+$ jetpack browser lock chromium --binary chromium --version 152.0.7977.64 --protocol bidi-2025.5 --driver chromedriver
+  jetpack  locked chromium 152.0.7977.64 -> chromium (sha256-f2bdb5101d9f834e00f344835e5ddfa6943210083024beb74213915e83222df9)
+(exit 0; wall 12 ms, cpu 9 ms, load 26.44 21.36 35.17)
+
+$ env NO_COLOR=1 JET_BIN=jet 'JET_PROJECT_ROOT=<work>' jet run --allow=Env,Exec,FS,IO,Net,Time '<repo>/Tools/CanvasTest/Run.jet' -- scenario --scenario debug_first_paint --source jet_debug_canvas_values_at_breakpoint.jet
+page: loaded and drawn in 295.9 ms
+debug: Start to the entry shown paused in 159.3 ms (Paused · line 7 · jet dev O0)
+debug: Continue to the stop painted in 56.8 ms (line 2 active in the source, 2 frames, x = 2)
+debug: a watch of x entered to its value painted in 195.1 ms
+debug panel: Source: in the window, 14 rows
+debug panel: Call Stack: in the window, 2 rows
+debug panel: Locals: in the window, 1 row
+debug panel: Watches: in the window, 1 row
+debug panel: Tasks: in the window, 3 rows
+debug panel: Debug Console: in the window, 3 rows
+profile: Profile entry to the timeline painted in 262.3 ms (1 ns shown · 1 samples · /tmp/jet_canvas_profile_2745286_1795247941696375612/canvas.jettrace)
+profile panel: Profile Timeline: in the window, a canvas 936x198
+profile panel: Hot Lines: in the window, 1 row
+profile panel: Selection: in the window, 0 rows
+PASS chromium debug_first_paint
+(exit 0; wall 3901 ms, cpu 6792 ms, load 26.44 21.36 35.17)
+
+RemedyBG's panels at a stop in the Debug view's window: 5 of 8
+not shown: Memory, Registers, Disassembly
+Continue to the stop painted: 56.8 ms, against RemedyBG's well under a second (not measured: RemedyBG runs on Windows alone)
+Verdict: does not hold: no Memory, Registers, Disassembly panel at the stop
+
+
+== D2, by hand: a taken recording name, `jet debug --record` and `jet run --record` (ReplayReverse's prog.jet)
+
+$ jet debug --record=dup prog.jet  <<< 'c\n'
+Breakpoint hit  prog.jet:16  in run()
+16 |     tally: Shared{Score{count: 0}}        <- here
+Locals:  (none)
+(Jet) c
+total 6 tally 3
+Program finished
+jet debug: recorded replay `.jet/replays/dup.jetproof-replay`
+
+$ jet debug --record=dup prog.jet  <<< 'c\n'
+Error: Jet.ReplayNameTaken: The recording name `dup` is taken, and nothing ran
+ Why: `.jet/replays/dup.jetproof-replay` already holds a recording, and `--record` never replaces one, so the program was refused before it ran
+ Fix: Choose another NAME, such as `--record=dup-2`, or remove `.jet/replays/dup.jetproof-replay` and record again
+More: jet-lang.dev/e/Jet.ReplayNameTaken
+
+$ jet run --record=dup2 prog.jet
+total 6 tally 3
+jet run: recorded replay `.jet/replays/dup2.jetproof-replay`
+
+$ jet run --record=dup2 prog.jet
+Error: Jet.ReplayNameTaken: The recording name `dup2` is taken, and nothing ran
+ Why: `.jet/replays/dup2.jetproof-replay` already holds a recording, and `--record` never replaces one, so the program was refused before it ran
+ Fix: Choose another NAME, such as `--record=dup2-2`, or remove `.jet/replays/dup2.jetproof-replay` and record again
+More: jet-lang.dev/e/Jet.ReplayNameTaken

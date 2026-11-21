@@ -3,8 +3,8 @@ fixture: LSPDiagnosticsFollowTheirOrigin.fixture
 env: NO_COLOR=1
 step: jet check --json main.jet
 exit: nonzero
-json: stdout doc $.reports[?what~="missing_helper"][0].file = "helper.jet"
-json: stdout doc $.reports[?what~="missing_local"][0].file = "main.jet"
+json: stdout doc $.reports[?message~="missing_helper"][0].span.file = "helper.jet"
+json: stdout doc $.reports[?message~="missing_local"][0].span.file = "main.jet"
 step: jet inspect compiler check main.jet
 exit: 0
 json: stdout doc $.compiler.value.diagnostics[?message~="missing_helper"][0].origin.path = "helper.jet"

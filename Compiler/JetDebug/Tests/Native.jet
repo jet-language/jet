@@ -1130,7 +1130,8 @@ NATIVE_TEST_OVERFLOW: "depth: fn(n: Int) -> Int {{\n    if n == 0 -> return 0\n 
     // The fault stops the program before its signal reaches it, in the
     // function that faulted, with the stack whole.
     faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
-    assert(faulted.text.contains("Program received SIGSEGV  prog.jet:1  in depth()"), faulted.text)
+    assert(faulted.text.contains("Program received SIGSEGV  prog.jet:1  in depth()\n  fault address 0x"), faulted.text)
+    assert(faulted.text.contains(" <depth+"), faulted.text)
     assert(!faulted.text.contains("Program stopped by"), faulted.text)
     shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
     assert(shown.text.starts_with("#0  depth()  at prog.jet:1\n#1  depth()  at prog.jet:3\n"), shown.text)
@@ -1163,12 +1164,49 @@ NATIVE_TEST_SIGNALED: "use sys: core.sys\n\ncrash: fn(n: Int) -> Int {{\n    #Un
     assert(first.text.contains("Breakpoint hit  prog.jet:11  in run()"), first.text)
     faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(faulted.text.contains("Program received SIGSEGV  "), faulted.text)
+    // A signal a process sent names no address: the stop names the pc.
+    assert(faulted.text.contains("\n  pc 0x") && !faulted.text.contains("fault address"), faulted.text)
     shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
     assert(shown.text.contains("crash()  at prog.jet:5\n"), shown.text)
     assert(shown.text.contains("run()  at prog.jet:11\n"), shown.text)
     ended: session.command("c", faulted.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(ended.text.contains("Fault [SIGSEGV]"), ended.text)
     assert(ended.text.contains("Program stopped by SIGSEGV"), ended.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A copy the runtime makes from an address the program never mapped
+// (mem.list_append from 0x40; a release build, so no checked access stops
+// it first) faults inside the runtime's copy routine.
+NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: Int) -> Int {{\n    held := [U8]{{}}\n    #Unsafe(\"the program copies from an address it never mapped, to fault\") {{\n        _ := mem.list_append(held, mem.from_addr<U8>(address), count)\n    }}\n    held.len()\n}}\n\nrun: fn() {{\n    print(\"before the fault\")\n    print(spill(64, 100000))\n}}\n"
+
+#Test("a_fault_inside_a_runtime_routine_shows_the_routines_the_instruction_and_the_address") {
+    scratch: native_test_files.temp_dir("jet-debug-runtime-fault") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_RUNTIME_FAULT, [String]{"--release", "--debug-info=true"})
+    lines: NATIVE_TEST_RUNTIME_FAULT.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 12}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint hit  prog.jet:12  in run()"), first.text)
+    // The stop stays on the user's line, names the routine it is in and
+    // the faulting pc, instruction and address.
+    faulted: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(faulted.text.contains("Program received SIGSEGV  prog.jet:6  in spill()\n  through jet_rt_mem_move\n  fault address 0x40  pc 0x"), faulted.text)
+    assert(faulted.text.contains(" <jet_rt_mem_move+"), faulted.text)
+    assert(faulted.text.contains("6 |         _ := mem.list_append(held, mem.from_addr<U8>(address), count)        <- here\n"), faulted.text)
+    // `bt` lists the routine's frame above the user's frames, numbered
+    // with them.
+    shown: session.command("bt", faulted.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+    assert(shown.text.starts_with("#0  jet_rt_mem_move  at 0x"), shown.text)
+    assert(shown.text.contains("\n#1  spill()  at prog.jet:6"), shown.text)
+    assert(shown.text.contains("  run()  at prog.jet:13"), shown.text)
+    // It is a frame `frame`, `up` and `down` select: below the stop's
+    // frame is the routine, at the instruction that faulted.
+    routine: session.command("down", faulted.stop, "prog.jet", lines) ?? panic("down: {err.detail}")
+    assert(routine.text.starts_with("#0  jet_rt_mem_move  at 0x"), routine.text)
+    assert(routine.text.contains(" <jet_rt_mem_move+"), routine.text)
+    back: session.command("frame 1", faulted.stop, "prog.jet", lines) ?? panic("frame 1: {err.detail}")
+    assert(back.text.starts_with("#1  spill()  at prog.jet:6\n"), back.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
