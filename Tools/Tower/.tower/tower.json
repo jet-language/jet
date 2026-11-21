@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112703,
+    "rev": 112704,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73784,11 +73784,11 @@
         {
           "n": 21,
           "text": "A compile-time child process dies with its parent: when a `jet check`, `jet build` or `jet run` is killed (SIGKILL included), its jet-comptime child stops too, instead of spinning on as an orphan (Perf/attach_samples_a_plain_jet_process has to kill it by hand). Proof: a case that kills a jet check busy in compile-time work and then finds no surviving child.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T16:09:34.557Z",
+          "evidence": "Holds on dev since 79a378b39e (Errors3202-comptime-child-outside-kill): the compile-time child holds the read end of a lifeline pipe set to SIGIO on close, since PR_SET_PDEATHSIG follows the spawning thread. Proof on batch compiler p385 (dev cd34962a1f): `jet test Compiler --profile cases --filter RuntimeStops/comptime_child_dies_with_its_parent` PASS 1/0. The case SIGKILLs jet check, build and run (exit 137) during compile-time work, asserts \"left: 0\" processes below, and asserts a compile-time child existed (\"below\" is not 0). Perf/attach_samples_a_plain_jet_process no longer kills the child by hand.",
+          "at": "2026-11-21T01:11:14.336Z",
           "proof": {
             "profile": "cases",
             "filter": "RuntimeStops/comptime_child_dies_with_its_parent"
@@ -73813,7 +73813,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T00:52:16.638Z",
+      "updated": "2026-11-21T01:11:14.336Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     }
@@ -133964,6 +133964,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:11:14.337Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#21"
+    },
     {
       "at": "2026-11-21T01:08:33.422Z",
       "by": "Main",
