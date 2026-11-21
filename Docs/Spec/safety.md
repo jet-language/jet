@@ -4850,21 +4850,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2058,
+      "line": 2064,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2417,
+      "line": 2423,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2480,
+      "line": 2486,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -12616,9 +12616,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1365:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1705:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1757:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2058:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2417:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2480:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2064:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2423:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2486:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 164:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
