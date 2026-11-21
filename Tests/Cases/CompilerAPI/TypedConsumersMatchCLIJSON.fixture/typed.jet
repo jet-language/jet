@@ -12,9 +12,9 @@ INDEX: #run { CHECKED.semantic_index() ?? panic("a clean check has an index") }
 DIGEST: #run INDEX.source_digest
 
 // The checked text's own facts, as typed code reads them.
-DEFINITIONS: #run (loop d in INDEX.definitions -> (if d.module == "core.compiler" && d.span.end > 0 -> "definition {d.name} {d.identity} {d.module} {d.span.start}-{d.span.end}\n" else -> "")).join("")
+DEFINITIONS: #run (loop d in INDEX.definitions -> (if d.module == "core_compiler" && d.span.end > 0 -> "definition {d.name} {d.identity} {d.module} {d.span.start}-{d.span.end}\n" else -> "")).join("")
 
-REFERENCES: #run (loop r in INDEX.references -> (if r.module == "core.compiler" -> "reference {r.name} {r.module} {r.span.start}-{r.span.end}\n" else -> "")).join("")
+REFERENCES: #run (loop r in INDEX.references -> (if r.module == "core_compiler" -> "reference {r.name} {r.module} {r.span.start}-{r.span.end}\n" else -> "")).join("")
 
 CALLS: #run (loop c in INDEX.calls -> "call {c.caller} {c.callee} {c.module} {c.span.start}-{c.span.end}\n").join("")
 

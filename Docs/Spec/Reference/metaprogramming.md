@@ -850,7 +850,10 @@ holds), `Struct`, `Enum`, `Distinct`, `Alias`, `Tag`, `UnitFamily`,
 `Trait`, `Impl`, `Constant`, `Field`, `Variant`, `Parameter`, `Local`,
 `Import`, `Foreign` or `Label`. The `path` is the declaration's dotted path
 (`run.Point.norm`), and the `scope` is the path of the declaration that holds
-it, or its module's name at module scope. The `path` of a function, method,
+it, or its module's name at module scope. Its `module` is that name too,
+the one its `identity` carries (`shapes` in `fn:shapes.area`), and every
+other record of the index (a reference, a call, a structural node) spells
+its module the same way. The `path` of a function, method,
 trait or constant is the `identity` of its record, and a type's is the
 `identity` of its TypeInfo's TypeId. A type's record is
 in `b.program.types()` and a function's in `functions()`. A method's
