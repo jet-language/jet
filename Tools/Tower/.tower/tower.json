@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112732,
+    "rev": 112735,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55434,11 +55434,11 @@
         {
           "n": 96,
           "text": "A breakpoint condition that builds, compares or drops a String (`\"{i}\" == \"3\"`) runs in the program: the runtime functions it calls (string builder, Int render, String eq and drop) are placed from the runtime pack with their allocations in the scratch arena, so a false hit runs on without a stop, and d6 prints \"The condition runs in the program\" for it with a million hits under a second.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T13:44:16.317Z",
+          "evidence": "p389 batch compiler (census build of 113aff2b14), a83f587325. Probe d6 (`jet Docs/Audits/BestInExistence20261119/Probes/Run.jet JET REPO d6`): `break prog.jet:21 if \"{i}\" == \"3\" && n == 4` prints \"The condition runs in the program: a hit where it is false runs on without a stop\", stops only at i = 3 (step = 18, total = 48), and prints \"sums: a million hits under a second\". The program finished in 701 ms wall at load 31.7/80.7/115.7. `jet test Compiler/JetIR/Tests/EvalPlace.jet`: 28 passed. Log: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/c96-d6.log.",
+          "at": "2026-11-21T03:50:38.096Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/conditional_breakpoint_runs_in_process"
@@ -55520,6 +55520,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T03:48:11.685Z"
+        },
+        {
+          "n": 103,
+          "text": "The Debug suite passes under suite load: Tests/Cases/Debug/canvas_debug_disconnect_is_not_live.case failed in a filtered `--filter Debug/` run on p389, during a census build, with \"panic: read\" at run.jet:26 (`stream.read_bytes(4096, deadline: 5s) ?? panic(\"read\")` in the canvas client); it passes in the full suites. That is a race or a load-dependent deadline in the canvas debug protocol, to be found and fixed, not a fluke. Proof: the case passes 20 filtered runs in a row during a heavy job, and the cause is named.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T03:50:39.101Z"
         }
       ],
       "refs": [],
@@ -55527,9 +55536,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T03:48:11.685Z",
+      "updated": "2026-11-21T03:50:39.101Z",
       "updatedBy": "Main",
-      "criteriaLastN": 102
+      "criteriaLastN": 103
     },
     {
       "id": "c0in2dft",
@@ -72420,11 +72429,11 @@
         {
           "n": 18,
           "text": "The jet perf refusal when the kernel offers no performance counters is tested without strace fault injection: the PerfRun cases reach the refusal through a supported test seam (for example a seccomp filter the case kit installs) and check the same message. Proof: jet test Compiler --profile cases --filter PerfRun/ with no strace.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T12:07:15.922Z"
+          "evidence": "p389 batch compiler (census build of 113aff2b14): `jet test Compiler --profile cases --filter PerfRun/` gives PASS 8, FAIL 0, ERROR 0, with no strace. The NoCounters fixture reaches a counterless kernel through a seccomp filter (8bef1a1921). Log: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/c18-perfrun.log.",
+          "at": "2026-11-21T03:48:46.986Z"
         },
         {
           "n": 19,
@@ -72488,8 +72497,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T03:47:07.524Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-21T03:48:46.986Z",
+      "updatedBy": "Main",
       "criteriaLastN": 22
     },
     {
@@ -130286,6 +130295,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T03:50:39.102Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "100 criteria, soft limit 6: Found while proving c98 (the Debug suite must pass)."
+    },
+    {
+      "at": "2026-11-21T03:50:39.101Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#103 The Debug suite passes under suite load: Tests/Cases/Debug/c"
+    },
+    {
+      "at": "2026-11-21T03:50:38.096Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#96"
+    },
+    {
+      "at": "2026-11-21T03:48:46.986Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#18"
+    },
     {
       "at": "2026-11-21T03:48:15.080Z",
       "by": "Main",
