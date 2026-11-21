@@ -261,6 +261,7 @@ task_spawn_refused: fn(state: I64, permit: I64, env: I64, release: I64) {
 task_run: fn(child: I64) {
     if !task_start(child) {
         task_drop(child)
+        scheduler_job_settled()
         return
     }
     control: sync_load(wrapping(child + I64{8}))
@@ -355,6 +356,9 @@ task_run: fn(child: I64) {
     sync_store(wrapping(base + I64{32}), saved_wait)
     sync_store(wrapping(base + I64{64}), saved_body)
     scheduler_completion_order(wrapping(child + I64{112}))
+    // Settled before done, so a join that returns leaves the quiesce only
+    // this run's carrier to wait out (Scheduler.jet jet_rt_scheduler_shutdown).
+    scheduler_job_settled()
     sync_store(wrapping(child + I64{24}), I64{1})
     // The joiner's wake is this task's, though its carrier's control is back.
     sync_park_wake_as(sync_load(wrapping(child + I64{104})), sync_load(wrapping(control + I64{56})))
@@ -419,6 +423,7 @@ task_run_stolen: fn(child: I64) {
     task_run(child)
     sync_thread_lock(root)
     sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+    _ := sync_add(wrapping(root + I64{280}), I64{-1})
     sync_thread_unlock(root)
 }
 

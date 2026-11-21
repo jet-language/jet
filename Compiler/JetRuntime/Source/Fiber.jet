@@ -298,6 +298,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
             next
         }
         sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+        _ := sync_add(wrapping(root + I64{280}), I64{-1})
         if (action == FIBER_DONE) {
             sync_store(wrapping(fiber_tcb + SCHEDULER_TCB_TURN), I64{0})
             head: fiber_pool_head(root, sync_load(wrapping(fiber + I64{200})))
