@@ -1,0 +1,36 @@
+# A release build whose output directory is inside its package
+# leaves the package runnable. The side debug file beside the image is a
+# hard link into the package's symbol store, not a symbolic link, so the
+# next `jet run` and `jet check` there walk the package's sources past it,
+# and `jet crash` still names the frames of that image's raw report from the
+# store. A second release build replaces the side file's name, never writing
+# through it into the store's file.
+fixture: ReleaseOutputDirInsideThePackage.fixture
+env: NO_COLOR=1
+step: jet build --release --output-dir=rel main.jet
+exit: 0
+file: rel/main.debug not-symlink # the side file's name beside the image is no symbolic link
+file: rel/main.debug is-file # but a file, the store's file by a second name
+file: .jet/symbols/.build-id is-dir # filed in the package's symbol store
+step: jet run main.jet
+exit: 0
+stdout: = "depth: 3\n" # the next run walks the package's sources past rel/main.debug
+step: jet check
+exit: 0
+step: {work}/rel/main overflow
+stdout: null
+stderr: file release.txt
+exit: any # the release image stops on the overflow; its report is the subject
+file: release.txt ~ "Stop: Jet.StackOverflow: Stack overflow in `??` at 0x" # the release image prints addresses
+file: release.txt ~ "(names and lines: jet crash)" # and its build id
+step: jet crash
+stdin: {work}/release.txt
+exit: 0
+stdout: ~ "Stop: Jet.StackOverflow: Stack overflow in `depth`" # jet crash names the function from the store
+stdout: ~ "--> main.jet:3 in depth" # and its line
+step: jet build --release --output-dir=rel main.jet
+exit: 0
+file: rel/main.debug not-symlink # the second build's side file is no symbolic link either
+step: jet run main.jet
+exit: 0
+stdout: = "depth: 3\n" # and the package still runs
