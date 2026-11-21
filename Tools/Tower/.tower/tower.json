@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112978,
+    "rev": 112982,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62057,8 +62057,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-21T18:18:18.988Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-21T20:24:59.666Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0gxq09x",
@@ -71937,7 +71937,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-21T19:41:33.279Z",
+      "updated": "2026-11-21T20:26:10.853Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -129576,8 +129576,10 @@
       "draftedBy": "Rivet",
       "reviewedBy": "Lens",
       "draft": false,
-      "status": "open",
-      "created": "2026-11-21T09:23:06.557Z"
+      "status": "ratified",
+      "created": "2026-11-21T09:23:06.557Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-21"
     },
     {
       "id": "D-DEBUG-PANELS1",
@@ -130340,7 +130342,7 @@
         {
           "key": "E",
           "name": "A destination word in the task's context",
-          "detail": "The caller writes the destination into a word of the current context record, where #Context's allocator lives, right before the call. The callee reads and clears it on entry. No signature changes.",
+          "detail": "The caller writes the destination into a word of the current context record, where #Context's allocator lives, right before the call. The callee reads and clears it on entry. No signature changes.\n\nWhy not the context: Jet's context is reached today through the thread's control block (one load of the current record's pointer), not passed as an argument. It holds settings that last across many calls (allocator, deadline, print). The destination changes at every call. In the context it needs a store before each call and a load and clear in the callee. It also needs a save around nested calls and task switches. Option A's register argument needs none of that.",
           "technical": "The probe kept the word in a module global written under #Unsafe. At O2 that cost 17 to 20 ns more per call on every form. It cost 16 to 19 at O0 and O1 and 31 to 31 on the web, and grew the builder by 395 bytes. A context word adds a thread-base load to the same store, load and clear; the probe does not show how much of the gap it keeps.\n\nThe word waits in memory from one call to the next. A missed write leaves the previous call's word, a real stack, which misplaces the result unchecked. The debugger's evaluator must save and restore the word.",
           "code": "// The caller writes the context's destination word, then calls;\n// trimmed reads and clears it on entry.\nwords := split(lines)    // word = stack\nkept.push(split(lines))  // word = heap"
         }
@@ -132106,6 +132108,19 @@
       "created": "2026-11-21T16:45:54.489Z",
       "answeredAt": "2026-11-21",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0i8pha9",
+      "cardId": "c0py34oh",
+      "decisionId": "D-PLACE-RETURN1",
+      "by": "owner",
+      "kind": "question",
+      "text": "shouldnt this be part of the context that is implicilty passed into all functions?",
+      "status": "answered",
+      "answer": "That is option E on this ballot. It was measured and loses on cost and safety.\n1. Jet's context is not passed to functions today. Code reaches it through the thread's control block, one load of the current record's pointer.\n2. The context holds settings that stay the same across many calls: the allocator, the deadline, print. The destination is different at every call, like an argument.\n3. Kept in the context, it needs a store before each call, a load and clear in the callee, and a save around nested calls and task switches. The probe (a global word, the same store, load and clear) cost 17 to 20 ns more per call at O2 and 395 bytes per builder. A's register argument measured no cost on x64.\n4. A word left in shared memory can be read by the wrong call if one write is missed. A register argument is set fresh at every call, and the verifier checks it.\nIf codegen later passes the context pointer as a hidden argument, the destination stays its own register; that change does not alter this ballot. I added this to option E's text so the ballot shows it.",
+      "created": "2026-11-21T20:24:57.677Z",
+      "answeredAt": "2026-11-21",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -132938,6 +132953,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T20:26:10.853Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0i8pha9",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T20:26:02.896Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PLACE-RETURN1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T20:24:59.666Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PLUGIN-ENGINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-21T20:24:57.677Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0i8pha9",
+      "note": ""
+    },
     {
       "at": "2026-11-21T19:41:33.279Z",
       "by": "Main",
