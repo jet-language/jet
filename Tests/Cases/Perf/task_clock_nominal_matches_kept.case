@@ -9,9 +9,13 @@
 # samples' own counts find: two consecutive samples of one thread two or
 # more periods apart, and the ends before a thread's first sample and after
 # its last. The session's reason says how many fell there, and they make up
-# the difference exactly. The samples file a run of the same program writes
-# is checked end by end: each took one sample or fell in kernel mode. Both
-# hold at every optimization level.
+# the difference exactly; it names apart the samples lost in the rings and
+# those the kernel dropped, which this run loses none of. The samples file
+# a run of the same program writes is checked end by end: each took one
+# sample or fell in kernel mode, the file holds every sample the rings
+# took, and the kernel dropped none. Both hold at every optimization
+# level. The check fails the same file read with one sample missing or one
+# written twice.
 requires: os-name:linux
 requires: probe grep -qx 2 /proc/sys/kernel/perf_event_paranoid # the task clock takes the samples at perf_event_paranoid 2
 fixture: TaskClockNominal.fixture
@@ -26,13 +30,23 @@ capture: tally = text cap:reason.split("it kept ", 1).split(" samples that ", 0)
 capture: kept = text cap:tally.split(" ", 0)
 capture: nominal = text cap:tally.split("of the ", 1)
 capture: kernel = text cap:reason.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
-json: cap:nominal doc $ = {cap:kept}+{cap:kernel} # the period ends are the samples kept and those that fell in kernel mode
+capture: lost = text cap:reason.split("; of their samples, ", 1).split(" were lost in the rings", 0)
+capture: dropped = text cap:reason.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+json: cap:lost doc $ = 0 # no sample was lost in the rings
+json: cap:dropped doc $ = 0 # nor dropped by the kernel
+json: cap:nominal doc $ = {cap:kept}+{cap:kernel} # so the period ends are the samples kept and those that fell in kernel mode
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin.samples JET_PERF_LENSES=cpu jet run --observe -O2 spin.jet
 exit: 0
 stdout: = "spun=5702887\n"
 step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -f period_ends.awk'
 exit: 0
 stdout: = "every period end took one sample or fell in kernel mode\n"
+step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -v lose=50 -f period_ends.awk'
+exit: 0
+stdout: ~ ", samples the rings took that the file lacks 1, " # a sample missing from the file fails the check
+step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -v copy=50 -f period_ends.awk'
+exit: 0
+stdout: ~ ", period ends that took two 1, " # and so does one written twice
 step: jet perf run -O1 spin.jet --out {work}/spin1.jettrace
 exit: 0
 stdout: = "spun=5702887\n"
@@ -41,6 +55,10 @@ capture: tally1 = text cap:reason1.split("it kept ", 1).split(" samples that ", 
 capture: kept1 = text cap:tally1.split(" ", 0)
 capture: nominal1 = text cap:tally1.split("of the ", 1)
 capture: kernel1 = text cap:reason1.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
+capture: lost1 = text cap:reason1.split("; of their samples, ", 1).split(" were lost in the rings", 0)
+capture: dropped1 = text cap:reason1.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+json: cap:lost1 doc $ = 0 # at -O1 too
+json: cap:dropped1 doc $ = 0 # at -O1 too
 json: cap:nominal1 doc $ = {cap:kept1}+{cap:kernel1} # at -O1 too
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin1.samples JET_PERF_LENSES=cpu jet run --observe -O1 spin.jet
 exit: 0
@@ -56,6 +74,10 @@ capture: tally0 = text cap:reason0.split("it kept ", 1).split(" samples that ", 
 capture: kept0 = text cap:tally0.split(" ", 0)
 capture: nominal0 = text cap:tally0.split("of the ", 1)
 capture: kernel0 = text cap:reason0.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
+capture: lost0 = text cap:reason0.split("; of their samples, ", 1).split(" were lost in the rings", 0)
+capture: dropped0 = text cap:reason0.split(", drained but not kept, and ", 1).split(" dropped by the kernel", 0)
+json: cap:lost0 doc $ = 0 # and at -O0
+json: cap:dropped0 doc $ = 0 # and at -O0
 json: cap:nominal0 doc $ = {cap:kept0}+{cap:kernel0} # and at -O0
 step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin0.samples JET_PERF_LENSES=cpu jet run --observe -O0 spin.jet
 exit: 0

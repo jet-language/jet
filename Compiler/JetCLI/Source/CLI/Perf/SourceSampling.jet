@@ -292,11 +292,10 @@ JetCLIPerfTimed: struct {
 // and drains ran, and the kernel's time to deliver one signal and return
 // from its handler, which the runtime timed as sampling started; then the
 // allocations the alloc lens counted and the time it spent on them (0 each
-// without it, or from a runtime whose record stops at the third); then the
-// samples the drains took from the kernel's rings, the kernel's time to
-// write them there as the runtime timed it when sampling started, and those
-// whose callchain the kernel cut (0 each under the timer, or from a runtime
-// whose record stops at the seventh).
+// without it); then the samples the drains took from the kernel's rings,
+// the kernel's time to write them there as the runtime timed it when
+// sampling started, those whose callchain the kernel cut and those the
+// kernel dropped, finding no room in a ring (0 each under the timer).
 JetCLIPerfCost: struct {
     cpu_ns: U64,
     handler_ns: U64,
@@ -306,6 +305,7 @@ JetCLIPerfCost: struct {
     ring_samples: U64,
     ring_ns: U64,
     cut: U64,
+    dropped: U64,
 }
 
 // The allocations the alloc lens counted at one line for one type
@@ -687,11 +687,22 @@ jet_cli_perf_sampler_reason: fn(used: JetCLIPerfSampler, total: U64, cpu_ns: U64
 // its thread's task clock completed while sampled, the CPU time it ran,
 // kernel mode's included, over its period; and, from its samples' counts
 // (JetCLIPerfSamples.counts), the period ends no sample took, which fell in
-// kernel mode, where the task clock takes none under exclude_kernel. Each
-// sample's count rounds to the period end that took it, since the kernel
-// forwards its timer by whole periods: an end before a sampler's first
-// sample, between two of its samples or after its last, to its end's, took
-// none. A sampler with no end record ends at its last sample.
+// kernel mode, where the task clock takes none under exclude_kernel. The
+// kernel forwards its timer from the end it last reached by whole periods,
+// so the counts of a sampler's consecutive samples lie a whole number of
+// periods apart, give or take the latency of its interrupt, and the ends
+// between them took none. A count is no fixed multiple of the period: each
+// time the thread is switched out and back in, the timer restarts with what
+// was left of its period, a few microseconds off the count, so a run that
+// is switched often drifts by more than half a period and two samples can
+// round to one multiple. A sampler's ends after its last sample, to its
+// end's, took none; one whose timer ran ahead of its count reached more
+// ends than its count gives, and those count too. A sampler with no end
+// record ends at its last sample. An end whose sample was lost took none
+// either, so of the ends no sample took, the samples lost in the rings
+// (those the drains took, JetCLIPerfCost.ring_samples, that the file
+// lacks) and those the kernel dropped, finding no room in a ring
+// (JetCLIPerfCost.dropped), are not kernel mode's.
 jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_sample: U64) -> String Never! {
     if sampled.sampler == .Val(used) && used.source == 3 && used.period > 0 && sampled.ends.len() > 0 {
         period: used.period
@@ -707,6 +718,9 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
         kernel := 0
         took := [Int:Bool]{}
         serial := 0
+        // The ends the sampler's timer reached to its latest sample, and
+        // that sample's count.
+        reached := 0
         last := 0
         index := 0
         loop index <= counts.len() {
@@ -714,24 +728,34 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
             owner: (word >> JET_CLI_PERF_ADDRESS_BITS) & 65535
             if owner != serial {
                 if serial != 0 {
-                    ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> last
-                    if ended > last -> kernel += ended - last
-                    if !sampled.ends.has_key(serial) -> nominal += last
+                    ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> 0
+                    if ended > reached -> kernel += ended - reached else {
+                        nominal += reached - ended
+                    }
                     took[serial] = true
                 }
                 serial = owner
+                reached = 0
                 last = 0
             }
             if index == counts.len() -> break
-            at: ((word & low) + period /% 2) /% period
-            if at > last + 1 -> kernel += at - last - 1
-            if at > last -> last = at
+            count: word & low
+            // A sample under half a period past the previous one took the
+            // same end, so it reaches none, and the samples kept then
+            // outnumber the ends they and kernel mode make up.
+            gap: (count - last + period /% 2) /% period
+            if gap > 0 -> kernel += gap - 1
+            reached += gap
+            last = count
             index += 1
         }
         loop (owner, end) in sampled.ends {
             if !took.has_key(owner) -> kernel += end /% period
         }
-        return "; it kept {sampled.total} of the {nominal} samples that {ns /% 1000000} ms of CPU time on the threads' task clocks while sampled gives; {kernel} of their periods ended in kernel mode, where the task clock takes no sample"
+        lost: if cost.ring_samples > sampled.total -> Int{cost.ring_samples - sampled.total} else -> 0
+        dropped: Int{cost.dropped}
+        kernel = if kernel > lost + dropped -> kernel - lost - dropped else -> 0
+        return "; it kept {sampled.total} of the {nominal} samples that {ns /% 1000000} ms of CPU time on the threads' task clocks while sampled gives; {kernel} of their periods ended in kernel mode, where the task clock takes no sample; of their samples, {lost} were lost in the rings, drained but not kept, and {dropped} dropped by the kernel, which found no room in a ring"
     }
     "; it kept {sampled.total} of the {cost.cpu_ns / per_sample} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives"
 }
@@ -1256,29 +1280,27 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             next
         }
         if kind == JET_CLI_PERF_CLOCK_KIND {
-            if record >= 4 && at + record * 8 <= words.len() {
-                // The records the program could not write, which a runtime
-                // whose record stops at the sixth word doesn't count.
-                lost: if record >= 7 -> checked(U64{link_debug_addr(words, at + 48)}) ?? U64{0} else -> U64{0}
+            // The exit's clock record (PerfSamples.jet perf_samples_exit).
+            if record >= 11 && at + record * 8 <= words.len() {
+                // The records the program could not write.
+                lost: checked(U64{link_debug_addr(words, at + 48)}) ?? U64{0}
                 if lost > sampled.records_lost -> sampled.records_lost = lost
                 if checked(U64{link_debug_addr(words, at + 8)}) == .Val(cpu) {
                     if checked(U64{link_debug_addr(words, at + 16)}) == .Val(handler) {
                         if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
                             // The alloc lens's count, which only the first
                             // exit writes.
-                            count := if record >= 6 -> checked(U64{link_debug_addr(words, at + 32)}) ?? U64{0} else -> U64{0}
-                            spent := if record >= 6 -> checked(U64{link_debug_addr(words, at + 40)}) ?? U64{0} else -> U64{0}
+                            count := checked(U64{link_debug_addr(words, at + 32)}) ?? U64{0}
+                            spent := checked(U64{link_debug_addr(words, at + 40)}) ?? U64{0}
                             if count == (U64{0}) && sampled.cost == .Val(earlier) {
                                 count = earlier.alloc_count
                                 spent = earlier.alloc_ns
                             }
-                            // The rings' tallies, which a runtime whose
-                            // record stops at the seventh word doesn't keep.
-                            rings: record >= 10
-                            ring_samples: if rings -> checked(U64{link_debug_addr(words, at + 56)}) ?? U64{0} else -> U64{0}
-                            ring_ns: if rings -> checked(U64{link_debug_addr(words, at + 64)}) ?? U64{0} else -> U64{0}
-                            cut: if rings -> checked(U64{link_debug_addr(words, at + 72)}) ?? U64{0} else -> U64{0}
-                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent, ring_samples: ring_samples, ring_ns: ring_ns, cut: cut})
+                            ring_samples: checked(U64{link_debug_addr(words, at + 56)}) ?? U64{0}
+                            ring_ns: checked(U64{link_debug_addr(words, at + 64)}) ?? U64{0}
+                            cut: checked(U64{link_debug_addr(words, at + 72)}) ?? U64{0}
+                            dropped: checked(U64{link_debug_addr(words, at + 80)}) ?? U64{0}
+                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent, ring_samples: ring_samples, ring_ns: ring_ns, cut: cut, dropped: dropped})
                         }
                     }
                 }
@@ -1544,7 +1566,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
     }
     if window == .Val(open) {
         sampled.interval_us = open.interval_us
-        sampled.cost = Val(JetCLIPerfCost{cpu_ns: open.cpu_ns, handler_ns: open.handler_ns, delivery_ns: open.delivery_ns, alloc_count: U64{0}, alloc_ns: U64{0}, ring_samples: U64{0}, ring_ns: U64{0}, cut: U64{0}})
+        sampled.cost = Val(JetCLIPerfCost{cpu_ns: open.cpu_ns, handler_ns: open.handler_ns, delivery_ns: open.delivery_ns, alloc_count: U64{0}, alloc_ns: U64{0}, ring_samples: U64{0}, ring_ns: U64{0}, cut: U64{0}, dropped: U64{0}})
         sampled.records_lost = open.lost
         // A window's samples are its CPU time's, not its samplers' whole runs.
         sampled.counts = [Int]{}
