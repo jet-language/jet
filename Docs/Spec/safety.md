@@ -237,9 +237,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1635,
+  "total": 1634,
   "counts": {
-    "Compiler": 796,
+    "Compiler": 795,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
@@ -11694,14 +11694,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 796 |
+| Compiler | 795 |
 | Core | 179 |
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 566 |
 | Tools | 28 |
-| **total** | **1635** |
+| **total** | **1634** |
 
 ### Regions
 
