@@ -1895,48 +1895,32 @@ IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 // (ir_x64_zone_regions), or in a stub, is a plain call: the region's own
 // site or skip passed it by with its arguments' computations. A close
 // whose open ran before the profiler turned zones on gets 0 and writes no
-// row (PerfSamples.jet jet_perf_zone_close). An open's 0 is written past
-// its site, and the call comes back past it: the open's result may hold
-// the name's register, which the call still reads. A `zones: strip` module
-// (IRModule.zones_stripped) keeps no zone site: an open is the Int 0 and a
-// close is nothing, while its frame marks and plots stay plain calls, which
-// record under a profiler as the setting promises.
+// row (PerfSamples.jet jet_perf_zone_close). An open's 0 is written before
+// its site, so the hot path holds no jump past it and its stub comes back
+// right past the site; the open's result therefore never shares a place
+// with an operand the call reads (X64Alloc.jet ir_x64_zone_open). A `zones:
+// strip` module (IRModule.zones_stripped) keeps no zone site: an open is the
+// Int 0 and a close is nothing, while its frame marks and plots stay plain
+// calls, which record under a profiler as the setting promises.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
     if e.sunk_site >= 0 && at <= e.sunk_end {
         ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         return
     }
+    if dst >= 0 {
+        x64_zero(e.code, X64_RAX)
+        ir_x64_store(e, m, f, al, dst, X64_RAX)
+    }
     if m.zones_stripped {
-        ir_x64_zone_zero(e, m, f, al, dst)
         return
     }
     if m.zone_table {
         ir_x64_zone_stub(e, at, at)
-        if dst >= 0 {
-            ir_x64_zone_zero(e, m, f, al, dst)
-            e.stubs[e.stubs.len() - 1].resume = e.code.bytes.len()
-        }
         return
     }
     skip: ir_x64_zones_skip(e)
     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
-    if dst < 0 {
-        ir_x64_patch(e, skip, e.code.bytes.len())
-        return
-    }
-    over: x64_jmp_rel32(e.code)
     ir_x64_patch(e, skip, e.code.bytes.len())
-    ir_x64_zone_zero(e, m, f, al, dst)
-    ir_x64_patch(e, over, e.code.bytes.len())
-}
-
-// The Int 0 into zone open `dst`'s place, if it has one.
-ir_x64_zone_zero: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, dst: Int) Never! {
-    if dst < 0 {
-        return
-    }
-    x64_zero(e.code, X64_RAX)
-    ir_x64_store(e, m, f, al, dst, X64_RAX)
 }
 
 // The site of a zone site or region, instructions `start` to `end`, in code
@@ -8129,9 +8113,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1)
     assert(compiled.errors.is_empty())
     code: compiled.function.code
-    // The open, the edge's close and the body's close. Each stub ends in a
-    // jump back past its site; the open's goes past the 0 the hot path
-    // writes as its result too (`xor eax, eax` first).
+    // The open, the edge's close and the body's close.
     assert_eq(compiled.function.zones.len(), 3)
     assert_eq(compiled.function.zone_ends.len(), 3)
     loop (nth, site) in compiled.function.zones {
@@ -8140,19 +8122,16 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         ends: compiled.function.zone_ends[nth]
         assert(ends > stub)
         byte: Int{code[ends - 1]}
-        back: if code[ends - 2] == 0xeb -> ends + (if byte >= 128 -> byte - 256 else -> byte) else -> ends + ir_x64_rel32_at(code, ends - 4)
-        assert(code[ends - 2] == 0xeb || code[ends - 5] == 0xe9, "zone site {nth}'s stub ends in a jump")
-        if nth == 0 {
-            assert(code[site + 5] == 0x31 && code[site + 6] == 0xc0, "the open's 0 follows its site")
-            assert(back > site + 6, "the open's stub comes back past its 0")
-        } else { assert_eq(back, site + 5) }
+        near: code[ends - 2] == 0xeb && ends + (if byte >= 128 -> byte - 256 else -> byte) == site + 5
+        far: code[ends - 5] == 0xe9 && ends + ir_x64_rel32_at(code, ends - 4) == site + 5
+        assert(near || far, "zone site {nth}'s stub ends in a jump back past it")
     }
 }
 
-// An open whose name dies at the open may get the name's register for its
-// result. The call still reads the name, so the open's 0 is written only
-// where the call does not run: past the listed site, whose stub comes back
-// past it, or past the inline skip, which the call's path jumps over.
+// An open whose name dies at the open: its 0, written before its site or
+// inline skip, goes to a place apart from the name's, which the call still
+// reads, and a listed site's stub comes back right past the site, as for an
+// open whose name lives on.
 #Test("A zone open's 0 does not overwrite the name its call reads") {
     loop listed in ([Bool]{false, true}) {
         m := ir_module_new()
@@ -8170,36 +8149,22 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         closed: ir_args(f, [Int]{closing, began})
         _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_perf_zone_close"), closed, 2, 3)
         _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 4)
+        al: ir_x64_allocate(m, f)
+        assert(al.regs[began] < 0 || al.regs[began] != al.regs[name], "the open's result keeps off the name's register")
+        assert(al.homes[began] == 0 || al.homes[began] != al.homes[name], "the open's result keeps off the name's home")
         m.functions.push(f)
         compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1)
         assert(compiled.errors.is_empty())
+        if !listed -> next
         code: compiled.function.code
-        tests := [Int]{}
-        opened := -1
-        loop reloc in compiled.function.relocs {
-            if reloc.target == .RuntimeData(symbol) && symbol == IR_X64_PERF_ZONES_SYMBOL {
-                tests.push(reloc.at)
-            }
-            if reloc.target == .Runtime(symbol) && symbol == "jet_perf_zone_open_named" {
-                opened = reloc.at
-            }
-        }
-        assert(opened >= 0)
-        if listed {
-            assert_eq(compiled.function.zones.len(), 2)
-            site: compiled.function.zones[0]
-            assert(code[site + 5] == 0x31 && code[site + 6] == 0xc0, "the open's 0 follows its site")
-            assert(opened > site + 5 + ir_x64_rel32_at(code, site + 1), "the open's call is in its stub")
-        } else {
-            // mov r11, [rip + zones]; test r11, r11; pop r11; je to the 0.
-            assert_eq(tests.len(), 2)
-            skip: tests[0] + 4 + 3 + 2
-            zero: ir_x64_test_jcc_target(code, skip)
-            assert(code[zero] == 0x31 && code[zero + 1] == 0xc0, "the skip lands on the open's 0")
-            assert(opened > skip && opened < zero, "the call sits between the skip and the 0")
-            near: code[zero - 2] == 0xeb && ir_x64_test_jcc_target(code, zero - 2) > zero + 1
-            far: code[zero - 5] == 0xe9 && ir_x64_test_jcc_target(code, zero - 5) > zero + 1
-            assert(near || far, "the call's path jumps over the 0")
+        assert_eq(compiled.function.zones.len(), 2)
+        loop (nth, site) in compiled.function.zones {
+            assert(code[site] == 0xa9)
+            ends: compiled.function.zone_ends[nth]
+            byte: Int{code[ends - 1]}
+            near: code[ends - 2] == 0xeb && ends + (if byte >= 128 -> byte - 256 else -> byte) == site + 5
+            far: code[ends - 5] == 0xe9 && ends + ir_x64_rel32_at(code, ends - 4) == site + 5
+            assert(near || far, "zone site {nth}'s stub ends in a jump back right past it")
         }
     }
 }
