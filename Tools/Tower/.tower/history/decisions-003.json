@@ -78150,6 +78150,195 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-20",
       "retiredAt": "2026-11-21T01:44:31.359Z"
+    },
+    {
+      "id": "D-LAYOUT-SHOW1",
+      "cardId": "c08idy63",
+      "group": "tooling",
+      "title": "Show how many bytes each type uses in this build",
+      "situation": "Every Jet value takes memory, and a list of a million values multiplies it, but Jet shows byte sizes only for types pinned to a C-compatible layout. So a programmer cannot discover that one rare, large enum case makes every list element heavy. You decide whether the tools show the sizes this build actually uses, while the language still promises nothing about them. We recommend showing them in the inspect command and editor hover, labeled as this build only.",
+      "gist": "Should Jet's tools show how many bytes each type uses in this build?",
+      "lesson": "A type's layout is how a value sits in memory: its size in bytes, where each field starts, and unused padding between fields. An enum stores a small tag naming its current case, plus room for its largest case. Jet chooses the layout of ordinary types itself and may improve it between versions or targets. A type marked with a C layout keeps a fixed, promised layout instead.",
+      "explainer": "Beginner path: run the inspect command on a file, or hover a type in the editor, and read one size line. Expert path: read field positions, padding holes, the enum tag and the largest case, then decide whether to move a rare large payload into a pool and keep a small id.\n\nShared work in every option: the compiler already computes these facts for the target it builds. The vote is only about who may see them, and whether programs may read them.",
+      "story": "Priya keeps a million input events in a list, and memory use is far higher than she expected. She suspects the rare Resize event, which carries a 4x4 matrix. Nothing in Jet will tell her how large one event is.",
+      "inWild": "// Rust; illustration, not executed here.\nenum Event { Click { x: i32, y: i32 }, Key(i32), Resize([f64; 16]) }\nprintln!(\"{}\", std::mem::size_of::<Event>()); // 136 on 64-bit x86",
+      "detail": "Current law and code. D-LAYOUT-FACTS1=B makes T.$layout the focused projection of reflection. Byte facts are computed for Jet-owned physical layouts and stay optional when physical layout is not guaranteed. The example Examples/features/comptime/layout_facts.jet prints null size and offset for a default-layout struct. Source/CmdInspect.rs on dev projects only layout kind and alignment in the shapes plane. Card #1690 made unguaranteed byte facts refuse honestly. #Layout(c) rejects growable fields with E1104.\n\nTool precedents, fetched 2026-10-05. rust-analyzer shows memory layout on hover by default, with size, alignment, offsets, padding and niche settings. Java has no size operator; the JOL tool prints field offsets, alignment gaps and space losses for the running VM. The pahole manual shows struct layouts from debug data and can reorganize members to remove holes.\n\nWarnings about advice, fetched 2026-10-05. Clippy's large_enum_variant warns above 200 bytes but documents that it cannot see how often each variant occurs. Clippy suggests an arena or ECS as an alternative to boxing, and says to always measure. Go's fieldalignment analyzer is left out of vet and gopls because its findings rarely indicate a significant problem. So the recommended report states facts and offers its note as information, never as a warning.\n\nWhy not a language value. Rust exposes size_of for types whose default layout is unspecified. Its unstable randomize-layout flag exists to find unsafe code that accidentally relies on that unspecified layout. Rust's unstable book states that randomization is not a safety oracle. No adoption or friction measurements were found; these are mechanism precedents, not user studies.\n\nSource witnesses. A 39-minute Rust memory-layout explainer teaches enum size as tag plus largest variant, padding, niches and boxing large variants. Jonathan Blow argues that visibility into what a program does is what makes systems bugs tractable. Jet card #3142 needs the same facts to measure flat enum layout and niches.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Show this build's sizes in the tools, labeled",
+          "detail": "The inspect command and editor hover print size, field positions, padding and the enum tag for the selected target. Every line says it describes this build and is not promised. T.$layout stays empty for ordinary types, so programs cannot depend on these numbers.",
+          "technical": "Add an observed-representation record to the shapes plane, its JSON and hover, separate from T.$layout. Fields: target triple, compiler identity, guarantee none, size, alignment, stride, field offsets and widths, padding holes, enum tag width, per-case payload sizes and niche use. \n\nCompute it from the canonical target layout engine for the selected target without building or running. Never feed it into reflection, comptime or code generation. When one case sets the size and exceeds the others by a stated ratio, add an informational note naming the pool-and-id rewrite and saying to measure first; it is never a warning.",
+          "code": "enum Event {\n    Click(x: I32, y: I32)\n    Key(code: I32)\n    Resize(m: [F64#16])\n}\n// $ jet inspect shapes events.jet   (illustrative output)\n// Event: 136 bytes, this build x86_64 Linux, not promised\n//   tag 1 byte; largest case Resize 128 bytes; others need 8"
+        },
+        {
+          "key": "B",
+          "name": "Make every size a language value",
+          "detail": "Event.$layout.size returns this target's number for every type, as in Rust, Go and Swift. Programs may branch on it at compile time. Code can then silently depend on sizes Jet later improves.",
+          "technical": "Fill size, alignment and offsets in T.$layout and reflection for default layouts with guarantee none. Comptime and derives can read them. Any later layout improvement becomes a visible change for code that read the numbers.",
+          "code": "enum Event {\n    Click(x: I32, y: I32)\n    Key(code: I32)\n    Resize(m: [F64#16])\n}\nprint(Event.$layout.size)  // 136 here; may differ elsewhere"
+        },
+        {
+          "key": "C",
+          "name": "Keep sizes for pinned layouts only",
+          "detail": "Today's rule stays. A programmer sees bytes only after marking a type with C layout. C layout rejects lists and text fields, so many ordinary types can never be inspected.",
+          "technical": "No change. T.$layout and the shapes plane keep refusing byte facts for default layouts; allocation profiles remain the only indirect evidence.",
+          "code": "enum Event {\n    Click(x: I32, y: I32)\n    Key(code: I32)\n    Resize(m: [F64#16])\n}\nprint(Event.$layout.size)  // empty: ordinary layout is not shown"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Every type answers size_of, and hover shows layout; illustration, not executed.",
+          "code": "std::mem::size_of::<Event>()"
+        },
+        {
+          "lang": "Java",
+          "note": "No language size operator; the JOL tool prints layout for the running VM only.",
+          "code": "ClassLayout.parseClass(Event.class).toPrintable()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Programmers see the real memory cost of their data, while Jet keeps the freedom to improve layouts without breaking code.",
+        "gains": [
+          "Learners see padding, tags and the largest enum case.",
+          "Experts find heavy types before profiling.",
+          "Jet keeps freedom to improve layouts."
+        ],
+        "losses": [
+          {
+            "loss": "People may treat shown numbers as promises.",
+            "mitigation": "Every line names the build and says not promised; the same report shows how to pin a C layout when bytes matter."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Programs could quietly depend on sizes Jet may change, the problem Rust built a randomizing flag to expose."
+          },
+          {
+            "key": "C",
+            "reason": "Most real types stay invisible, because C layout rejects lists and text fields."
+          }
+        ],
+        "tradeoff": "Visible costs in the tools, with no new promise in the language."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Validator dry run only; no compiler program was run. The 136-byte figures are illustrative for a tag plus a 128-byte payload at 8-byte alignment. After ratification, prove the shapes JSON against hand-derived fixtures for a struct with padding, a three-case enum and a niche case, then confirm T.$layout stays empty for default layouts.",
+      "surface": {
+        "gist": "Should Jet's tools show how many bytes each type uses in this build?",
+        "lesson": "Layout is how a value sits in memory: its size, where fields start, and unused padding. An enum stores a small tag plus room for its largest case. Jet picks ordinary layouts itself and may improve them; a C layout stays fixed.",
+        "trio": {
+          "current": {
+            "note": "Today an ordinary type shows no size anywhere.",
+            "code": "print(Event.$layout.size)  // empty\n// $ jet inspect shapes events.jet\n// shape Event (layout=default)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Every type answers size_of; illustration, not executed.",
+            "code": "std::mem::size_of::<Event>()  // 136 on 64-bit x86"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Show this build's sizes in the tools, labeled",
+            "gist": "Inspect and hover show bytes; programs still cannot read them.",
+            "gains": [
+              "See padding, tags and the largest case.",
+              "Layouts stay free to improve."
+            ],
+            "losses": [
+              "Numbers might be mistaken for promises."
+            ],
+            "proposed": {
+              "code": "// $ jet inspect shapes events.jet   (illustrative)\n// Event: 136 bytes, this build x86_64 Linux, not promised\n//   tag 1 byte; largest case Resize 128 bytes; others need 8"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Make every size a language value",
+            "gist": "Code can read any type's size, as in Rust or Go.",
+            "gains": [
+              "Programs can adapt to sizes."
+            ],
+            "losses": [
+              "Code may break when layouts improve."
+            ],
+            "proposed": {
+              "code": "print(Event.$layout.size)  // 136 here; may differ elsewhere"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep sizes for pinned layouts only",
+            "gist": "Only C-layout types show bytes, as today.",
+            "gains": [
+              "Nothing new to learn or maintain."
+            ],
+            "losses": [
+              "Most real types stay invisible."
+            ],
+            "proposed": {
+              "code": "print(Event.$layout.size)  // empty"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "You see the real memory cost of your data, and Jet stays free to improve layouts without breaking your code.",
+          "gains": [
+            "Learners and experts see real costs.",
+            "No new language promise."
+          ],
+          "losses": [
+            {
+              "loss": "Shown numbers might be read as promises.",
+              "mitigation": "Every line names the build and says not promised, and shows how to pin a layout."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Code could quietly depend on sizes Jet may change."
+            },
+            {
+              "key": "C",
+              "reason": "Lists and text block C layout, so most types stay hidden."
+            }
+          ],
+          "tradeoff": "Visible costs in tools, no new promise in the language."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Users may rely on unpromised numbers.",
+          "attempts": [
+            "Keep the numbers out of T.$layout, reflection and comptime so no program can read them.",
+            "Label every line with target, compiler identity and not promised, and print the pin path beside it."
+          ],
+          "result": "Reduced to a human misreading, mitigated by the label and pin path."
+        },
+        {
+          "loss": "Interpreter-only runs have no native size to report.",
+          "attempts": [
+            "Compute the record statically from the canonical target layout engine for the selected target, with no build or run.",
+            "Name the target in the record so the question of which execution path ran never arises."
+          ],
+          "result": "Removed: the report describes the selected target, independent of how the program last ran."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-05T21:09:23.964Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-10-05",
+      "retiredAt": "2026-11-21T04:13:22.566Z"
     }
   ]
 }

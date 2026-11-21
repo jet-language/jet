@@ -40957,6 +40957,125 @@
       "completedAt": "2026-11-18T01:48:11.878Z",
       "questions": [],
       "retiredAt": "2026-11-21T01:50:01.442Z"
+    },
+    {
+      "id": "c08idy63",
+      "num": 4633,
+      "title": "Show the compiled representation of every type in inspect and hover",
+      "body": "Today `T.$layout` and `jet inspect shapes` show bytes only for C and columnar layouts: Examples/features/comptime/layout_facts.jet prints null for default layout, the shapes plane projects kind and alignment only, and #Layout(c) rejects growable fields, so most real types never reveal their size. Learners and experts cannot see why an enum with one large case costs as much as that case, or what padding costs. Sources: Rust memory-layout explainer 7_o-YRxf_cc (padding 14:40-15:40, enum = tag + largest variant 22:00-24:40, niche 25:20-26:21, closure captures), voxel optimiser 40JzyaOYJeY (a 28-byte vertex made the world 24 MB). Also repair spec prose drift: the current spelling is `T.$layout` (syntax-decisions.md:35, D-COMPILER-NS1=A) but stale `@layout` text remains at syntax-decisions.md:2016, 2924, 2980, 3207 and reference/metaprogramming.md:188. Gate: D-LAYOUT-SHOW1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": "After D-LAYOUT-SHOW1: add an observed-representation record (target, compiler identity, 'not promised', size, alignment, stride, field offsets and widths, padding holes, enum tag width, per-case payload sizes, niche use, closure capture size) computed from the canonical target layout engine for the selected target; project it in the shapes plane, its JSON and editor hover; add the dominant-case note pointing at the Pool/Id rewrite. Never feed it into T.$layout, reflection or compile-time code.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "All six criteria met; the last, c3 (D-LAYOUT-SHOW1=B), on p292 (dev 18de3a687e)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main 2026-11-18: c1 stays open until the record implements the ratified outcome B; c3 is rewritten from A's 'size stays null' to B. The tools part (c2, c4, c5) holds at p290."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Root for C2/C5 (CardClose-1): Foundation Layout.jet handles only C-tagged enums and returns unknown otherwise, so inspect prints \"enum physical layout unspecified\" (Reflection.jet). The default enum representation exists only in JetIR. Under D-LAYOUT-SHOW1=B every size is a language value, so IR enum layout must be exported into Foundation TargetLayoutEngine. inspect shapes prints the codec ShapeType (Int category only) for a U8 field; the declared width is already in the layout fact. Empty-struct size 8 matches the native rule (Layout.jet: multiple of 8, at least 8)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-LAYOUT-SHOW1 is ratified and the record implements its outcome.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "D-LAYOUT-SHOW1=B ratified 2026-10-05: every size is a language value, and $layout.size returns this target's number for every type. c2, c4 and c5 carry the implementation.",
+          "at": "2026-11-15T04:25:12.261Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Arm target. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/LayoutFacts` and `jet test Compiler --profile cases --filter Inspect/shapes_match_hand_derived_layouts` (x86_64 Linux and --target board.virt_aarch64).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p290 batch compiler (dev 903da7aa3a; IfHole-6-1-4633-layout-shapes landed 5cbbdbb8a7): golden Metaprogramming/Reflection/LayoutFacts PASS on o0, o1 and o2; cases Inspect/shapes_match_hand_derived_layouts PASS (x86_64 Linux and board.virt_aarch64).",
+          "at": "2026-11-18T03:18:50.835Z"
+        },
+        {
+          "n": 3,
+          "text": "D-LAYOUT-SHOW1=B: T.$layout.size, alignment, stride and field offsets return this target's numbers for every default-layout type (struct, enum, optional, function value), with guarantee none, and reflection and derives read the same record as inspect and hover; compile-time code may branch on them. Proof: the Examples/Metaprogramming/Reflection/LayoutFacts golden prints a default-layout struct's and enum's size and offsets on o0, o1 and o2, matching jet inspect shapes for the same target, and a case shows a comptime branch on Event.$layout.size.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p292 batch compiler (dev 18de3a687e; IfHole-6-1-4633-c3-layout-values landed 18de3a687e): golden Metaprogramming/Reflection/LayoutFacts n=3 PASS (o0, o1, o2), cases Comptime/layout_size_selects_a_comptime_branch PASS, Inspect/shapes_match_hand_derived_layouts PASS, CoreLib/user_derive_layout_fact_matches_reflection_projection PASS, golden LowLevel/LayoutOptimized PASS; no new suite failure from it.",
+          "at": "2026-11-18T04:12:19.358Z"
+        },
+        {
+          "n": 4,
+          "text": "Every human line names target and compiler identity and says not promised; the dominant-case note appears only when one case sets the size and exceeds the next by a stated ratio.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p290 batch compiler (dev 903da7aa3a; IfHole-6-1-4633-layout-shapes landed 5cbbdbb8a7): cases Inspect/shapes_human_lines PASS and CLIPartsExpand/expand_layout_human_and_json_are_deterministic PASS; no new suite failure.",
+          "at": "2026-11-18T03:18:15.302Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Inspect/shapes_human_lines"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Hover shows a one-line summary from the same record; no second layout computation exists. Proof: `jet test Compiler --profile cases --filter LSP/lsp_hover_layout_summary`, and git grep finds one layout computation.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p290 (dev 903da7aa3a, layout landed 5cbbdbb8a7): cases LSP/lsp_hover_layout_summary PASS. On dev, git grep shows jet_driver_layout_summary used only by InspectShapes.jet and Navigation.jet, and jet_target_layout_native_enum_facts and _native_place each defined once, in JetFoundation/Source/Target/Layout.jet.",
+          "at": "2026-11-18T03:18:54.963Z"
+        },
+        {
+          "n": 6,
+          "text": "Spec prose uses `T.$layout` everywhere; no stale `@layout` text remains.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 18de3a687e: git grep @layout -- Docs/Spec finds one hit, syntax-decisions.md:8712, a decision record that lists `T.@layout` among the retired @ spellings; spec prose elsewhere uses T.$layout.",
+          "at": "2026-11-18T04:12:56.665Z"
+        }
+      ],
+      "refs": [
+        "D-LAYOUT-SHOW1",
+        "D-LAYOUT-FACTS1",
+        "D-CLI-ONE1",
+        "D-COMPILER-NS1",
+        "#2143",
+        "#3142"
+      ],
+      "tags": [
+        "layout",
+        "tooling",
+        "inspect",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c0bk3yid",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:54.070Z",
+      "updated": "2026-11-18T04:12:58.433Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-18T04:12:58.433Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T04:13:22.563Z"
     }
   ]
 }
