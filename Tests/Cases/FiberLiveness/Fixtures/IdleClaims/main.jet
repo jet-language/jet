@@ -1,0 +1,51 @@
+// Claims racing idle carriers as they go to sleep. Every round spawns one
+// to four tasks of a few microseconds each, so the carriers that ran the
+// last round are going idle just as the next round's submits claim them;
+// every other round a task spawns the round's tasks itself, so the claims
+// come from a carrier too. Each task sends its value, received before any
+// join: a join runs a task that never started on the joining thread, and so
+// would hide a lost wake. A claim lost between a carrier's last look for
+// work and its sleep leaves its task queued with every carrier asleep, and
+// the run hangs.
+ROUNDS: 20000
+
+sender: fn(tx: Sender<Int>, value: Int) -> Int {
+    total := value
+    loop step in 0..<200 -> total = (total * 31 + step) % 1000003
+    tx.send(value) ?? panic("send")
+    total
+}
+
+spawn_round: fn(tx: Sender<Int>, round: Int, width: Int) -> [Task<Int>] {
+    loop k in 0..<width -> task sender(tx, round + k)
+}
+
+// A task that spawns the round's tasks, receives their values and sends
+// their sum.
+spawner: fn(tx: Sender<Int>, round: Int, width: Int) -> Int {
+    { sender: inner, receiver: values }: channel<Int>(capacity: width)
+    started: spawn_round(inner, round, width)
+    sum := 0
+    loop _ in 0..<width -> sum += values.receive() ?? 0
+    tx.send(sum) ?? panic("send")
+    work := 0
+    loop handle in started -> work += handle.join() ?? 0
+    work
+}
+
+run: fn() {
+    received := 0
+    expected := 0
+    joined := 0
+    spawned := 0
+    loop round in 0..<ROUNDS {
+        width: 1 + round % 4
+        { sender: tx, receiver: rx }: channel<Int>(capacity: width)
+        started: if round % 2 == 0 -> spawn_round(tx, round, width) else -> [task spawner(tx, round, width)]
+        spawned += started.len()
+        loop _ in 0..<started.len() -> received += rx.receive() ?? 0
+        loop handle in started -> joined += if (handle.join() ?? -1) >= 0 -> 1 else -> 0
+        loop k in 0..<width -> expected += round + k
+    }
+    print("rounds {ROUNDS}, every value received {received == expected}, every task joined {joined == spawned}")
+}

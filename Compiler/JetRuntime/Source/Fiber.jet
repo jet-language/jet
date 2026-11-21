@@ -169,37 +169,32 @@ fiber_ready: fn(fiber: I64) {
     fiber_ready_push(root, fiber)
     taker: fiber_ready_taker(root)
     sync_thread_unlock(root)
-    fiber_ready_take(root, taker)
+    scheduler_take(root, taker)
 }
 
 // Who takes a fiber just queued on the ready FIFO, with the root lock held:
-// an idle carrier (-1), woken; else the first carrier (fiber_carrier_first);
-// else the monitor, which watches for blocked carriers
-// (scheduler_monitor_arm: 0 when it already watches).
+// an idle carrier, claimed (its record, which scheduler_kick_idle wakes),
+// unless a claimed one is on its way (0: it passes the work on,
+// Scheduler.jet scheduler_wake_work); else the first carrier
+// (fiber_carrier_first, -2); else the monitor, which watches for blocked
+// carriers (scheduler_monitor_arm: 1 or 2, and 0 when it already watches).
+// Scheduler.jet scheduler_take acts on it after the unlock.
 fiber_ready_taker: fn(root: I64) -> I64 {
-    if scheduler_wake_idle(root) -> return I64{-1}
+    woke: scheduler_wake_work(root)
+    if (woke > I64{0}) { return woke }
+    if (woke < I64{0}) { return I64{0} }
     first: fiber_carrier_first(root)
     if (first != I64{0}) -> first else -> scheduler_monitor_arm(root)
 }
 
-// The first carrier's start (-2, for fiber_ready_take) when none ever
-// started, else 0; the root lock is held. A fiber a plain thread ran
+// The first carrier's start (-2, for Scheduler.jet scheduler_take) when none
+// ever started, else 0; the root lock is held. A fiber a plain thread ran
 // (Task.jet task_run_joined) can park, and its timer wait for a carrier to
 // fire it, before any carrier exists.
 fiber_carrier_first: fn(root: I64) -> I64 {
     if (sync_load(wrapping(root + I64{152})) != I64{0}) { return I64{0} }
     sync_store(wrapping(root + I64{152}), I64{1})
     I64{-2}
-}
-
-// The half of fiber_ready_taker that runs after the root unlock. The first
-// carrier settles the pool size first, as a submit's would (scheduler_get).
-fiber_ready_take: fn(root: I64, taker: I64) {
-    if {
-        (taker == I64{-1}) -> scheduler_kick_idle(root)
-        (taker == I64{-2}) -> scheduler_start_worker(scheduler_get())
-        (taker != I64{0}) -> scheduler_monitor_kick(root, taker)
-    }
 }
 
 // The ready FIFO at root 168/176; callers hold the root lock.

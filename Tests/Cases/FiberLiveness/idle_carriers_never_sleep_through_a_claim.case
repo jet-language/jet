@@ -1,0 +1,27 @@
+# 20000 rounds of one to four short tasks, spawned by the main thread or by
+# a task on a carrier, each claiming an idle carrier just as the last
+# round's carriers go to sleep. A carrier goes on the idle list and clears
+# its wake word under the lock that found no work, so a claim always lands
+# before or after its last look; a lost one would leave a task queued with
+# every carrier asleep and hang the run. Every value arrives and every task
+# joins, on jet run and at O0 and O2.
+fixture: Fixtures/IdleClaims
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = "rounds 20000, every value received true, every task joined true\n"
+step: jet build -O0 main.jet
+exit: 0
+step o0: built
+limit: time=120
+exit: 0
+stdout: = "rounds 20000, every value received true, every task joined true\n"
+step: jet build --release main.jet
+exit: 0
+step o2: built
+limit: time=120
+exit: 0
+stdout: = "rounds 20000, every value received true, every task joined true\n"

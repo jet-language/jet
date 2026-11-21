@@ -88,6 +88,103 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
     child
 }
 
+// An idle carrier's thread (C supplies its address): the carrier of the
+// record at +0 sleeps on its own wake word until a claim stores 1, then
+// leaves the idle list of the root at +8 (Scheduler.jet
+// scheduler_carrier_idle). A wake that reached another word would not end
+// its sleep.
+#Export(c) jet_rt_scheduler_fixture_sleeper: fn(arguments: I64) -> I64 {
+    record: sync_load(arguments)
+    root: sync_load(arguments + I64{8})
+    word: record + SCHEDULER_CARRIER_WAKE
+    loop sync_load(word) == (I64{0}) -> _ := sync_futex_wait(word, I64{0}, I64{-1})
+    sync_thread_lock(root)
+    scheduler_idle_leave(root, record, I64{-1})
+    sync_thread_unlock(root)
+    I64{0}
+}
+
+// The idle list and its claims, on a root and carrier records of the test's
+// own, with no timing: the carrier that idled last is claimed first; a
+// claim stores 1 in the claimed carrier's own wake word and in no other, and
+// its wake ends that carrier's sleep alone; one claim for work is on its way
+// at a time; a claim that lands between a carrier's unlock and its futex
+// wait is not lost, as the wait then returns at once; and a carrier back
+// unclaimed takes itself off the list. `sleeper` is the address of
+// jet_rt_scheduler_fixture_sleeper.
+scheduler_test_idle_claims: fn(sleeper: I64) {
+    root: jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
+    thread_zero(root, SCHEDULER_ROOT_BYTES)
+    records: jet_rt_alloc(SCHEDULER_CARRIER_BYTES * I64{3}, I64{8})
+    thread_zero(records, SCHEDULER_CARRIER_BYTES * I64{3})
+    first: records
+    second: first + SCHEDULER_CARRIER_BYTES
+    third: second + SCHEDULER_CARRIER_BYTES
+    sync_store(first + SCHEDULER_CARRIER_WAKE, I64{1})
+    sync_thread_lock(root)
+    scheduler_test_require(scheduler_idle_enter(root, first) == I64{-1})
+    scheduler_test_require(scheduler_idle_enter(root, second) == I64{-1} && scheduler_idle_enter(root, third) == I64{-1})
+    scheduler_test_require(sync_load(root + I64{120}) == I64{3} && sync_load(root + I64{24}) == third && sync_load(first + SCHEDULER_CARRIER_WAKE) == I64{0})
+    // The three carriers unlocked and have not reached their futex waits
+    // yet when a submit claims one: the last to idle.
+    sync_thread_unlock(root)
+    sync_thread_lock(root)
+    claimed: scheduler_wake_work(root)
+    sync_thread_unlock(root)
+    scheduler_kick_idle(claimed)
+    scheduler_test_require(claimed == third && sync_load(third + SCHEDULER_CARRIER_WAKE) == I64{1})
+    scheduler_test_require(sync_load(second + SCHEDULER_CARRIER_WAKE) == I64{0} && sync_load(first + SCHEDULER_CARRIER_WAKE) == I64{0})
+    scheduler_test_require(sync_load(root + I64{160}) == I64{1} && sync_load(root + I64{24}) == second)
+    // The claimed carrier's wait, after the claim and its wake, returns at
+    // once (-EAGAIN), not at its 10 s deadline (-ETIMEDOUT).
+    scheduler_test_require(sync_futex_wait(third + SCHEDULER_CARRIER_WAKE, I64{0}, sync_deadline(I64{10000000000})) == I64{-11})
+    sync_thread_lock(root)
+    // Until the claimed carrier runs, work claims no other: it claims the
+    // next itself once it finds work still waiting.
+    scheduler_test_require(scheduler_wake_work(root) == I64{-1})
+    scheduler_idle_leave(root, third, I64{-1})
+    scheduler_test_require(sync_load(root + I64{160}) == I64{0} && sync_load(root + I64{120}) == I64{2} && sync_load(root + I64{24}) == second)
+    sync_thread_unlock(root)
+    // The other two sleep on threads of their own. A claim wakes the second,
+    // which leaves; the first, whose word no claim touched, stays listed.
+    arguments: jet_rt_alloc(I64{32}, I64{8})
+    sync_store(arguments, first)
+    sync_store(arguments + I64{8}, root)
+    sync_store(arguments + I64{16}, second)
+    sync_store(arguments + I64{24}, root)
+    first_thread: thread_spawn(sleeper, arguments)
+    second_thread: thread_spawn(sleeper, arguments + I64{16})
+    scheduler_test_require(first_thread > I64{0} && second_thread > I64{0})
+    sync_thread_lock(root)
+    claimed_second: scheduler_wake_work(root)
+    sync_thread_unlock(root)
+    scheduler_test_require(claimed_second == second)
+    scheduler_kick_idle(claimed_second)
+    scheduler_test_require(thread_join(second_thread, I64{0}) == I64{0})
+    sync_thread_lock(root)
+    scheduler_test_require(sync_load(first + SCHEDULER_CARRIER_WAKE) == I64{0} && sync_load(root + I64{24}) == first)
+    scheduler_test_require(sync_load(root + I64{120}) == I64{1} && sync_load(root + I64{160}) == I64{0})
+    claimed_first: scheduler_wake_work(root)
+    sync_thread_unlock(root)
+    scheduler_test_require(claimed_first == first)
+    scheduler_kick_idle(claimed_first)
+    scheduler_test_require(thread_join(first_thread, I64{0}) == I64{0})
+    scheduler_test_require(sync_load(root + I64{24}) == I64{0} && sync_load(root + I64{120}) == I64{0} && sync_load(root + I64{160}) == I64{0})
+    // A carrier back unclaimed (its deadline passed) takes itself off the
+    // middle of the list and leaves the claims as they were.
+    sync_thread_lock(root)
+    _ := scheduler_idle_enter(root, first)
+    _ := scheduler_idle_enter(root, second)
+    _ := scheduler_idle_enter(root, third)
+    scheduler_idle_leave(root, second, I64{-1})
+    scheduler_test_require(sync_load(root + I64{24}) == third && sync_load(third + SCHEDULER_CARRIER_NEXT) == first && sync_load(root + I64{120}) == I64{2})
+    scheduler_test_require(scheduler_wake_work(root) == third && scheduler_wake_work(root) == I64{-1} && sync_load(root + I64{24}) == first)
+    sync_thread_unlock(root)
+    jet_rt_free(arguments, I64{32}, I64{8})
+    jet_rt_free(records, SCHEDULER_CARRIER_BYTES * I64{3}, I64{8})
+    jet_rt_free(root, SCHEDULER_ROOT_BYTES, I64{8})
+}
+
 #Export(c) jet_rt_scheduler_fixture_run: fn(callbacks: I64) -> I64 {
     meta: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})
@@ -114,6 +211,7 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
     scheduler_test_require(sync_load(exit_log) == I64{0} && sync_load(exit_log + I64{8}) == I64{0})
     sync_store(exit_args + I64{24}, I64{3})
     _ := jet_rt_scheduler_fixture_exit_worker(exit_args)
+    scheduler_test_idle_claims(sync_load(callbacks + I64{48}))
     out: jet_rt_alloc(I64{32}, I64{8})
     root: scheduler_control_new()
     save: jet_rt_alloc(I64{32}, I64{8})
@@ -241,7 +339,7 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
     jet_rt_string_drop(minimum)
     // Real wheel timer wakes, cancellation synchronizes with freeing the slot.
     start: sync_now_ns()
-    timer: scheduler_timer_schedule(start + I64{10000000}, slot)
+    timer: scheduler_timer_schedule(start + I64{10000000}, slot, I64{0})
     sync_park(slot, I64{100000000})
     scheduler_timer_cancel(timer)
     scheduler_test_require(sync_now_ns() - start >= I64{9000000})
