@@ -381,7 +381,13 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         // A box of its structural enum, one payload per member
         // (ir_add_union_types).
         row: ir_type_def(p, ir_union_key(ty)) ?? return None
-        boxed: ir_intern_type(m, "enum:{p.types[row].key}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        // Spelled with its members in layout order whatever order the union
+        // that reached the row first was written in (`A | B` or `B | A`), so
+        // every part of a parallel build holds one type, and one DWARF name,
+        // for one row. The layout's own type is reordered in place.
+        layout := ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")
+        layout.ty = ir_union_layout_ordered(layout.ty.move())
+        boxed: ir_intern_type(m, "enum:{p.types[row].key}", layout)
         return Val(ir_mark_box(m, boxed))
     }
     if ir_string_view(ty) -> return ir_type_row(m, Type.String)
@@ -732,7 +738,14 @@ ir_handle_row_laid: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> In
     }
     atom: runtime_abi_atom(handle.runtime)
     clone: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
-    Val(ir_intern_type(m, "handle:{handle.runtime}", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_{atom}", clone)))
+    key: "handle:{handle.runtime}"
+    // Spelled by its runtime type's one table spelling whatever spelling
+    // reached the row first (a bare `FileReader` or its declaration's key),
+    // as a struct row is (ir_struct_row_laid), so every part of a parallel
+    // build holds one type, and one DWARF name, for one row. A plugin's
+    // interface argument goes too: every interface's plugin shares the row.
+    spelled: ir_runtime_handle_spelled(handle.jet_name) ?? handle
+    Val(ir_intern_type(m, key, ir_owned_layout(IRTypeKind.Pointer, Type.Named{name: spelled.jet_name.move()}, "jet_rt_handle_drop_{atom}", clone)))
 }
 
 // Whether a value of `ty` holds a compiler value host word (ir_host_value_name)
@@ -3328,6 +3341,18 @@ ir_union_layout_order: fn(members: [Type]) -> [Int] Never! {
         order.insert(at, index)
     }
     order
+}
+
+// Union `ty` with its members sorted in place into layout order (the stable
+// order by member identity ir_union_layout_order gives); any other type as
+// it is.
+ir_union_layout_ordered: fn(ty: &&Type) -> Type Never! {
+    if ty == .Union(members) {
+        ordered := members.move()
+        ordered.sort_by(fn(left: Type, right: Type) { type_carrier_identity_grouped(left) <=> type_carrier_identity_grouped(right) })
+        return Type.Union{members: ordered}
+    }
+    ty.move()
 }
 
 // Adds the structural enum of each union type a signature or a declaration

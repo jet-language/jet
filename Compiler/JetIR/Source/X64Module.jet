@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, NameTable, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_find, name_index, name_intern, name_table_sized, sha256_hex]
+    jet_foundation.[CompilerThreads, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -23,6 +23,7 @@ use {
         X64DebugTypeKind,
         X64DebugVariant,
         X64DebugVariable,
+        X64DwarfSymbols,
         X64ExecutableResult,
         X64FunctionDebug,
         X64FunctionID,
@@ -36,6 +37,8 @@ use {
         X64RuntimeExport,
         X64VariableRange,
         X64_FUNCTION_ALIGN,
+        dwarf_test_bytes,
+        x64_dwarf_sections,
         x64_object_functions_threads,
         x64_object_main,
         x64_object_main_debug,
@@ -1593,4 +1596,43 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
     assert(members.len() == 1 && members[0].name == "" && members[0].offset == IR_X64_SHARED_PAYLOAD, "the cell's one member is its payload word")
     value: if tables.debug_types[members[0].ty].kind == .Pointer(target) -> target else -> -1
     assert_eq(value, int_row)
+}
+
+// Two parts of a parallel build may reach one type row by different
+// spellings, in either order: a runtime handle by its bare name or by its
+// declaration's key, a union with its members in either order. Each row is
+// named by one spelling whichever reached it first, so the parts' rows
+// describe the same types and their `.debug_info` is the same bytes.
+#Test("a type row's debug name does not depend on which spelling reached it first") {
+    members: [Type]{Type.Int, Type.String}
+    defs := [TTypeDef]{ir_union_def(module_none(), ir_union_key(Type.Union{members: members}), members)}
+    p := ir_program_declared(defs, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    spellings: [[Type]]{
+        [Type]{Type.Named{name: "FileReader"}, Type.Named{name: "<corelib>/core.files.FileReader"}},
+        [Type]{Type.Union{members: [Type]{Type.Int, Type.String}}, Type.Union{members: [Type]{Type.String, Type.Int}}},
+    }
+    names := [[String]]{}
+    infos := [[U8]]{}
+    loop later in 0..<2 {
+        m := ir_module_new()
+        order: [Int]{1 - later, later}
+        loop pair in spellings {
+            loop at in order {
+                _: ir_value_type(m, p, pair[at]) ?? panic("{ir_type_name(pair[at])} has no row")
+            }
+        }
+        named: loop ty in m.types -> ir_type_name(ty.ty)
+        names.push(named)
+        tables := ir_x64_tables_start(m)
+        ir_x64_debug_types(m, tables)
+        program: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: compiler_take_rows<X64DebugType>(tables.debug_types)}, functions: [X64FunctionSource]{}}
+        symbols: X64DwarfSymbols{text: 1, abbrev: 2, line: 3, loclists: 4, addr: 5, rnglists: 6, functions: [Int]{}}
+        built: x64_dwarf_sections(program, [X64CompiledFunction]{}, [X64FunctionDebug]{}, [Int]{}, [Int]{}, 0, symbols, compiler_threads_single(), true)
+        infos.push(dwarf_test_bytes(built.info))
+    }
+    assert_eq(names[0], names[1])
+    assert(names[0].contains("<corelib>/core.files.FileReader"), "the handle is named by its declaration's key")
+    assert(names[0].contains("Int | String"), "the union is named with its members in layout order")
+    assert(infos[0].len() > 0, "the types are described")
+    assert_eq(infos[0], infos[1])
 }
