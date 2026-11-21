@@ -45,6 +45,7 @@ use {
         module_intern,
         module_table,
         name_mangle,
+        name_table_sized,
         symbol_key_text,
         symbol_table_key,
     ]
@@ -191,7 +192,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
     effect_inputs.reverse()
     prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls, graph.symbols)
     effect_symbols := graph.symbols.copy()
-    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, graph.module_table, [String:Bool]{}, compiler_threads_single(), false)
+    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, graph.module_table, name_table_sized(2), compiler_threads_single(), false)
     if republished.memory_declarations.len() != 2 {
         failures.push("in-place effect publication: manifest memory declarations duplicated")
     }

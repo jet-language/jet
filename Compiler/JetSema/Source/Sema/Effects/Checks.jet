@@ -65,9 +65,11 @@ use jet_foundation.[
     name_rows,
     name_rows_get_text,
     name_rows_set,
+    name_find,
     name_index,
     name_intern,
     name_table,
+    NameTable,
     SymbolID,
     NodeKind,
     Span,
@@ -1494,7 +1496,7 @@ sema_effect_context_reach: fn(nodes: [SemaEffectNode], root: Int, facts: &TEffec
 // name is prep code. The result holds, for each function the entries reach
 // that makes an input, the call path from an entry to it, entry first
 // (E0956).
-sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool], symbols: SymbolTable) -> [[Int]] Never! {
+sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: NameTable, symbols: SymbolTable) -> [[Int]] Never! {
     paths := [[Int]]{}
     any: loop node in nodes {
         if node.rare == .Val(rare) && rare.comptime_inputs.len() > 0 {
@@ -1508,7 +1510,7 @@ sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], modules: [SemaGraph
             if !fact.compile_time -> next
             callee: fact.callee ?? next
             key: sema_effect_run_key(symbols, callee) ?? next
-            comptime_callees[key] = true
+            _ := name_intern(comptime_callees, key)
         }
     }
     named := (loop _ in nodes -> false)
@@ -1524,7 +1526,9 @@ sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], modules: [SemaGraph
     parent := (loop _ in nodes -> -2)
     queue := [Int]{}
     loop (index, node) in nodes {
-        if named[index] || comptime_callees.has_key(node.key) || node.chain_name == "build" -> next
+        if named[index] || name_find(comptime_callees, node.key) != None || node.chain_name == "build" {
+            next
+        }
         parent[index] = -1
         queue.push(index)
     }
@@ -6355,7 +6359,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // selected machine when it has no heap ("" when it has one), and `entries`
 // are the keys of the functions the program starts at, from which nothing
 // may allocate (sema_effect_check_heap_free).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, eval_probes: SemaEvalProbes?{None}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: NameTable, threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, eval_probes: SemaEvalProbes?{None}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
