@@ -87,7 +87,7 @@ static void entry(void) {
     if (mode != 4) register_cleanup();
     static const unsigned char body[] = "body";
     Text text = { body, 4, 0, 0 };
-    jet_term_write_stdout_line(&text, 0); // Below the pipe's 8192-byte buffer.
+    jet_term_write_stdout_line(&text, 0); // Below the pipe's 65536-byte buffer.
     if (mode == 0) return;
     if (mode == 1) {
         static const unsigned char reason[] = "stdio-root-stop";

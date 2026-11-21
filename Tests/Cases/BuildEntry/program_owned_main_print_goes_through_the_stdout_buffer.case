@@ -1,8 +1,8 @@
 # A program that owns its main (JetIR EntryOwned.jet) prints through the same
-# 8192-byte stdout buffer as any other program: 3000 lines of a piped stdout
-# leave in about ten writes, not one write per line. `jet perf run` keeps the
+# 65536-byte stdout buffer as any other program: 3000 lines of a piped stdout
+# leave in two writes, not one write per line. `jet perf run` keeps the
 # owned main and counts every write in its trace's syscalls section;
-# writes.py sums them. The 3000 lines are 82890 bytes: ten full buffers,
+# writes.py sums them. The 3000 lines are 82890 bytes: one full buffer,
 # then the rest at the ending. Every ending drains the buffer first: a
 # return, process.exit, a stop with nothing to clean up and a stack
 # overflow's fault all keep every line, and stdout still drains before each
@@ -21,16 +21,16 @@ stdout: lines = 3000 # every line arrives
 stdout: ~ "line 2999 of the print loop\n" # the last one too
 step: python3 writes.py many.jettrace
 exit: 0
-json: stdout doc $ >= 10 # the trace counts the writes: at least the ten full buffers
-json: stdout doc $ <= 20 # one write per full buffer, not one per line
+json: stdout doc $ >= 1 # the trace counts the writes: at least the one full buffer
+json: stdout doc $ <= 2 # one write per 64 KiB, not one per line
 step exit: jet perf run exit.jet --out exit.jettrace
 exit: 3
 stdout: lines = 3000 # process.exit drains the buffer
 stdout: ~ "line 2999 of the print loop\n" # the last one too
 step: python3 writes.py exit.jettrace
 exit: 0
-json: stdout doc $ >= 10 # the trace counts the writes: at least the ten full buffers
-json: stdout doc $ <= 20 # buffered on this ending as well
+json: stdout doc $ >= 1 # the trace counts the writes: at least the one full buffer
+json: stdout doc $ <= 2 # buffered on this ending as well
 step: jet build stop.jet
 exit: 0
 step stop: {work}/.jet/build/stop

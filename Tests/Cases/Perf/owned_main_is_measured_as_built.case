@@ -1,5 +1,5 @@
 # `jet perf run` measures the program a plain build makes. This program owns
-# its main and prints 3000 lines into a pipe from one print line. Under
+# its main and prints 3072 lines into a pipe from one print line. Under
 # `jet perf run` it keeps that main: the print line's writes reach `main`
 # with no process root (jet_rt_main) between them. The view counts as many
 # writes there as the built program makes when it runs plainly. count.py
@@ -16,7 +16,7 @@ exit: 0
 stdout: ~ "Main: program-owned" # the plain build owns its main
 step: sh -c '{jet} perf run main.jet --out {work}/writes.jettrace | wc -l'
 exit: 0
-stdout: ~ "3000" # the program ran whole
+stdout: ~ "3072" # the program ran whole
 json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name in ["write","writev"]] #= 1 # every write is the print line's
 json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name in ["write","writev"]][0].stack[?function="run"][?line=7] #= 1 # at the print line
 json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name in ["write","writev"]][0].stack[?function="main"] #= 1 # called from the program's main
