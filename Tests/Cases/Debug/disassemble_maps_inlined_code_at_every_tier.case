@@ -5,12 +5,15 @@
 # `square` at -O0, `run` at -O1 and -O2. Each source line of that code
 # heads its own rows, the inlined callees' lines too. Inlined code follows
 # a line that names the inlined function and its call line, and `back in`
-# marks where it ends. The stop's row ends `<- here`. `disas NAME` lists a
-# function by name, an inlined one as its code in `run`, under the same
-# lines. A line with no code at a tier lists no rows, such as `total` on
-# line 11 at -O1 and -O2, whose value stays in a register. The fixture must
-# stay in jet fmt form: line 3 is square. No other debugger or
-# disassembler is on PATH.
+# marks where it ends. A call in another file than the listed function's
+# names that file: at -O2 Core's `args_from_argv` is inlined into `args`,
+# which calls it in Process.jet. The stop's row ends `<- here`. `disas NAME`
+# lists a function by name, an inlined one as its code in `run`, under the
+# same lines, headed by its own caller: `square` is called by
+# `sum_squares`, in `run`. A line with no code at a tier lists no rows,
+# such as `total` on line 11 at -O1 and -O2, whose value stays in a
+# register. The fixture must stay in jet fmt form: line 3 is square. No
+# other debugger or disassembler is on PATH.
 fixture: DisassembleMapsInlinedCodeAtEveryTier.fixture
 env: NO_COLOR=1
 step: jet build -O0 prog.jet
@@ -68,8 +71,7 @@ stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n  
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
-stdout: ~ "disas square\nsquare, inlined into run" # the innermost callee by name
-stdout: ~ "  prog.jet:3  -O1  0x" # its one line
+stdout: ~ "disas square\nsquare, inlined into sum_squares on line 8 in run  prog.jet:3  -O1  0x" # the innermost callee by name, under its own caller
 stdout: ~ "Program finished\n" # the session runs to its end
 step: jet build -O2 prog.jet
 exit: 0
@@ -87,6 +89,7 @@ stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n  
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # its loop
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n   b2  0x" # square inlined inside it, from the breakpoint's row
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
+stdout.filter(~ "  inlined args_from_argv, called on line ").filter(~ " of Process.jet"): lines >= 1 # Core's helper, called in Process.jet, not prog.jet
 stdout.filter(~ "   b2  0x").filter(~ "        <- here"): lines = 1 # the pc's row
 stdout: ~ "  back in run\n" # where the inlined code ends
 stdout: ~ "332833500\n" # the program's own output
@@ -100,6 +103,5 @@ stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n  
 stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
 stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
 stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
-stdout: ~ "disas square\nsquare, inlined into run" # the innermost callee by name
-stdout: ~ "  prog.jet:3  -O2  0x" # its one line
+stdout: ~ "disas square\nsquare, inlined into sum_squares on line 8 in run  prog.jet:3  -O2  0x" # the innermost callee by name, under its own caller
 stdout: ~ "Program finished\n" # the session runs to its end

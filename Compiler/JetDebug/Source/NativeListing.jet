@@ -90,9 +90,9 @@ native_disassemble: fn(session: &NativeSession, operand: String, file: String, l
         loop place in native_inlined_named(session.image, spec) {
             low: session.image.functions[place.function].inlined[place.run].low
             high: session.image.functions[place.function].inlined[place.run].high
-            call_line: session.image.functions[place.function].inlined[place.run].call_line
             index: x64_jetline_find(session.image.lines, low)
-            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, low, high, "{spec}, inlined into {session.image.functions[place.function].name} on line {call_line}", ask, file, lines)}"
+            heading: "{spec}, inlined into {native_listing_caller(session.image, session.image.functions[place.function], place.run)}"
+            text = "{text}{if text == "" -> "" else -> "\n"}{native_listing_block(session, symbols, index, low, high, heading, ask, file, lines)}"
         }
         if text != "" -> return Ok(text)
         loop symbol in symbols {
@@ -143,7 +143,7 @@ native_listing_replaced: fn(session: &NativeSession, low: Int) -> Bool Never! {
 // says; "" when `ask` keeps no row of it. Its heading names its lines, the
 // image's level, where it is and how big; a row starting a new line is
 // headed by the line and its source text; a run of inlined code is headed
-// by the function inlined and the line of its call.
+// by the function inlined and the line of its call (native_listing_call_line).
 native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], function: Int, low: Int, high: Int, name: String, ask: NativeListingAsk, file: String, lines: [String]) -> String Never! {
     marks := [Int:String]{}
     loop breakpoint in session.breakpoints {
@@ -223,7 +223,7 @@ native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], f
             }
             if inner != run && inner >= 0 {
                 callee: if session.image.abstracts.get(found.inlined[inner].origin) == .Val(abstract) -> "{abstract.name}" else -> "?"
-                text = "{text}  inlined {callee}, called on line {found.inlined[inner].call_line}\n"
+                text = "{text}  inlined {callee}, called on {native_listing_call_line(found, inner)}\n"
             }
             if inner != run && inner < 0 -> text = "{text}  back in {name}\n"
             run = inner
@@ -233,6 +233,25 @@ native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], f
         text = "{text}   {native_listing_pad(row.mark, 4)}{x64_hex(row.address)} {native_listing_pad("<+{row.offset}>", 8)}{encoded}{x64_listing_text(row, low, high)}{here}\n"
     }
     text
+}
+
+// Where run `run` of `function` is inlined: the function that calls it (the
+// run it is nested in, else `function`) and the call's line, then the
+// function holding its code when that is another:
+// `sum_squares on line 8 in run`.
+native_listing_caller: fn(image: NativeImage, function: NativeFunction, run: Int) -> String Never! {
+    parent: function.inlined[run].parent
+    if parent < 0 -> return "{function.name} on {native_listing_call_line(function, run)}"
+    caller: if image.abstracts.get(function.inlined[parent].origin) == .Val(abstract) -> "{abstract.name}" else -> "?"
+    "{caller} on {native_listing_call_line(function, run)} in {function.name}"
+}
+
+// The line of the call run `run` of `function` stands for, with its file
+// when that is not the function's own: `line 8`, `line 172 of Process.jet`.
+native_listing_call_line: fn(function: NativeFunction, run: Int) -> String Never! {
+    inlined: function.inlined[run]
+    other: inlined.call_path != "" && inlined.call_file >= 0 && function.file >= 0 && inlined.call_file != function.file
+    if other -> "line {inlined.call_line} of {native_listing_files.basename(inlined.call_path)}" else -> "line {inlined.call_line}"
 }
 
 // The symbols a listing names addresses by, in address order: each function

@@ -5,7 +5,7 @@ use {
     native_test_process: core.process
     native_test_files: core.files
     native_test_hex: core.encoding.hex
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_build_id, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_build_id, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses, native_listing_call_line, native_listing_caller]
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64TraceResume, X64_TRACE_RIP, X64_TRACE_RSP, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks, compiler_threads_single]
 }
@@ -1209,4 +1209,54 @@ NATIVE_TEST_RUNTIME_FAULT: "use mem: core.mem\n\nspill: fn(address: Int, count: 
     assert(back.text.starts_with("#1  spill()  at prog.jet:6\n"), back.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A run nested in another names that run's function as its caller, and the
+// function holding its code after it; a call in another file than that
+// function's names its file.
+#Test("an_inlined_run_names_its_own_caller_and_its_call_s_file") {
+    runs: [NativeInlined]{
+        NativeInlined{die: 10, origin: 1, low: 0x100, high: 0x180, call_line: 16, parent: -1, file: 1, call_file: 1, call_path: "prog.jet"},
+        NativeInlined{die: 20, origin: 2, low: 0x120, high: 0x140, call_line: 8, parent: 0, file: 1, call_file: 1, call_path: "prog.jet"},
+        NativeInlined{die: 30, origin: 3, low: 0x190, high: 0x1a0, call_line: 15, parent: -1, file: 2, call_file: 1, call_path: "prog.jet"},
+        NativeInlined{die: 40, origin: 4, low: 0x194, high: 0x19c, call_line: 172, parent: 2, file: 2, call_file: 2, call_path: "<corelib>/Core/Process/Process.jet"},
+    }
+    function: NativeFunction{low: 0x80, high: 0x200, name: "run", file: 1, variables: [NativeVariable]{}, inlined: runs}
+    abstracts := [Int:NativeAbstract]{}
+    abstracts[1] = NativeAbstract{name: "sum_squares", file: 1}
+    abstracts[2] = NativeAbstract{name: "square", file: 1}
+    abstracts[3] = NativeAbstract{name: "args", file: 2}
+    abstracts[4] = NativeAbstract{name: "args_from_argv", file: 2}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: abstracts, allocs: [Int:Int]{}}
+    assert_eq(native_listing_caller(image, function, 0), "run on line 16")
+    assert_eq(native_listing_caller(image, function, 1), "sum_squares on line 8 in run")
+    assert_eq(native_listing_caller(image, function, 3), "args on line 172 of Process.jet in run")
+    assert_eq(native_listing_call_line(function, 2), "line 15")
+    assert_eq(native_listing_call_line(function, 3), "line 172 of Process.jet")
+}
+
+// `square` (line 3) inlined into `sum_squares`, called on line 8, which is
+// inlined into `run`, called on line 16; at -O2 Core's `args_from_argv`
+// is inlined into `args`, which calls it in Process.jet.
+NATIVE_TEST_NESTED: "use process: core.process\n\nsquare: fn(i: Int) -> Int {{ i * i }}\n\nsum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n {{\n        sq: square(i)\n        total += sq\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
+
+#Test("disas_names_a_nested_inlined_run_s_caller_and_a_call_s_file") {
+    lines: NATIVE_TEST_NESTED.split("\n").to_list()
+    loop level in ([String]{"-O1", "-O2"}) {
+        scratch: native_test_files.temp_dir("jet-debug-nested") ?? panic("scratch: {err}")
+        root: scratch.path
+        session := native_test_session(root, NATIVE_TEST_NESTED, [String]{level})
+        stop: session.run_to([NativeBreak]{{file: "prog.jet", line: 3}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+        assert(stop.text.contains("Breakpoint hit  prog.jet:3  in square()"), "{level}: {stop.text}")
+        listed: session.command("disas", stop.stop, "prog.jet", lines) ?? panic("disas: {err.detail}")
+        assert(listed.text.contains("  inlined sum_squares, called on line 16\n"), "{level}: {listed.text}")
+        assert(listed.text.contains("  inlined square, called on line 8\n"), "{level}: {listed.text}")
+        if level == "-O2" {
+            assert(listed.text.contains("  inlined args_from_argv, called on line ") && listed.text.contains(" of Process.jet\n"), listed.text)
+        }
+        named: session.command("disas square", stop.stop, "prog.jet", lines) ?? panic("disas square: {err.detail}")
+        assert(named.text.starts_with("square, inlined into sum_squares on line 8 in run  prog.jet:3  {level}  0x"), "{level}: {named.text}")
+        session.close()
+        native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    }
 }
