@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112702,
+    "rev": 112703,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55102,6 +55102,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Sampler overhead finding (receipt_reports_measured_overhead, suite p383-p384). The case fails quiet and loaded alike: overhead_ns is 56-60 ms (2.8-3.0%) on burn.jet against the 2% budget (40 ms). The run_delay subtraction works: a run-queue wait 3x the run time leaves the receipt at its quiet value. Cause: 64c616649f moved sampling to the kernel ring with sample_type IP|TIME|CALLCHAIN|REGS_USER|STACK_USER (512-byte copy), and the kernel FP callchain write costs 2.7-3.2 us per sample at about 30 frames. Docs/Audits/2026-11-18-best-debugger-profiler.md:917 R2(d) \"0.75%\" comes from Probes/sampler-overhead.log (d3fbbe5cb4), measured on the earlier SIGPROF sampler, so it is stale for the current sampler: the switch raised overhead about 4x. Decision: the 2% budget stands and the bound does not rise. The cut is to drop CALLCHAIN and unwind FP+CFI inside one larger STACK_USER copy at drain time, marking deeper stacks truncated, with calibration from interleaved on/off pairs. Proof in a quiet window: jet run Tools/Perf/SamplerOverhead/Main.jet -- --jet jet --runs 9 --bar 200, which also re-measures R2(d) on the current sampler."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Decision (defect fix within scope; suite p383 row JetPerfTracePartsCaptureRun/perf_run_short_program_has_repeatable_source_attribution): a profile has one shape whether or not CPU samples land. (a) Samples in compiler-emitted shims such as the entry shim count as outside the source, like helpers, never as a source row. (b) The run wall observation row is kept beside any CPU sample rows instead of being swapped out. The case asserts the stable shape. Also under measurement: at 8 kHz on task-clock, a 0.5 ms program should collect about 4 samples but records 0 in nearly every run, so short programs may lose samples at arming or at the final drain."
         },
         {
@@ -56393,7 +56398,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T00:16:02.941Z",
+      "updated": "2026-11-21T01:08:33.422Z",
       "updatedBy": "Main",
       "criteriaLastN": 99
     },
@@ -59157,67 +59162,6 @@
       "updated": "2026-11-17T01:48:41.640Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
-    },
-    {
-      "id": "c0w8b7vb",
-      "num": 6872,
-      "title": "Map upsert in one hash lookup, with one spelling",
-      "body": "Destination: Map has one method that inserts or updates a value in one hash lookup (the counter idiom `counts[k] += 1` without a second lookup), chosen by ballot.\n\nWhy it matters: today Map.update takes an entries argument (a merge), so an upsert costs two lookups and every port writes it differently.\n\nSource: #5976 c63, c64, c66 (archived #1886).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e21",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "c1 decided (D-MAP-SLOT1=A); c2 met on p285 (1b22b95a71, 3821e2b8dc)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner. Proof: `timeout 120 node Tools/tower/tower.mjs decision list` shows the upsert ballot with its worked spellings.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by ratified law: D-MAP-SLOT1=A (ratified 2026-10-05, before this card) already chose the one-lookup spelling, a defaulted slot: counts[w, or: 0] += 1 and &groups[w, or: [String]{}].push(w), with insert-or-replace spelled add (D-ONCE-VERB1, D-API-STORE1). The ballot drafter (BallotRework-2, 2026-11-17) confirmed there is no open owner choice. A probe on gate-p277 (dev 112b577445) shows the spelling is not built: counts[w, or: 0] += 1 fails to parse with E0003. That build is c2.",
-          "at": "2026-11-17T21:54:29.759Z",
-          "closure": "decision"
-        },
-        {
-          "n": 2,
-          "text": "D-MAP-SLOT1=A is built: m[k, or: default] is a writable slot that does one hash lookup (compound assignment and &slot.method calls insert the default once), runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom (counts[w, or: 0] += 1), and core-library.md documents it; no second upsert spelling exists. Probe today: counts[w, or: 0] += 1 fails to parse with E0003 (gate-p277).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 1b22b95a71 (p282) and 3821e2b8dc (fallout, p285). On the p285 batch compiler cbd03bce07: `jet test Compiler --profile cases --filter CoreLib/map_upsert` passes 1/1 (map_upsert_slot_looks_up_once_and_starts_lazily), golden Collections/Map passes 15/15 (MapSlot on O0, O1 and O2), and the ui case compound_index_target passed on p282. m[k, or: d] is a writable slot with one hash lookup; setdefault is retired.",
-          "at": "2026-11-18T01:03:23.283Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "CoreLib/map_upsert"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "collections"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-18T01:03:36.563Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-18T01:03:36.563Z"
     },
     {
       "id": "c0blttm0",
@@ -134020,6 +133964,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:08:33.422Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T00:52:16.638Z",
       "by": "Main",
