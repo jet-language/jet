@@ -8,18 +8,18 @@ env: NO_COLOR=1
 step: jet check -p beta
 exit: 0
 stderr: ~ "beta/run.jet` has no problems" # only the picked member is checked
-stderr: !~ "alpha/run.jet"
-stderr: !~ "gamma/run.jet"
+stderr: !~ "alpha/run.jet" # alpha was not picked, so it is not checked
+stderr: !~ "gamma/run.jet" # nor gamma
 step: jet test -p gamma
 exit: 0
 stdout: ~ "gamma: pass" # only the picked member's tests run
-stdout: !~ "alpha: pass"
-stdout: !~ "beta: pass"
+stdout: !~ "alpha: pass" # alpha was not picked, so its tests do not run
+stdout: !~ "beta: pass" # nor beta's
 step: jet test -p alpha -p gamma
 exit: 0
 stdout: ~ "alpha: pass" # each picked member's tests run
-stdout: ~ "gamma: pass"
-stdout: !~ "beta: pass"
+stdout: ~ "gamma: pass" # gamma's run too
+stdout: !~ "beta: pass" # beta was not picked
 step: jet doc -p alpha
 exit: 0
 file: alpha/.jet/doc/index.html is-file # only the picked member is documented
@@ -28,8 +28,8 @@ file: gamma/.jet/doc absent
 step: jet build -p beta
 exit: 0
 file: beta/.jet/build/run is-file # only the picked member is built
-file: alpha/.jet/build absent
-file: gamma/.jet/build absent
+file: alpha/.jet/build/run absent # `jet test -p alpha` above leaves an empty .jet/build, but no program
+file: gamma/.jet/build/run absent
 step: jet test -p nope
 exit: 2
 stderr: ~ "No workspace member named `nope`" # a name no member has is refused
