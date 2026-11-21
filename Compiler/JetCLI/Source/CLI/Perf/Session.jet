@@ -465,9 +465,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     target: jet_cli_perf_session_target()
     // The attach's window on the program opens before its first read of it
     // and closes after its last (jet_cli_perf_attach_watch); the header's
-    // run window is that window, whatever the attach read in it. An outside
-    // sample's window is its samplers' own (`sampled`), the CPU in it that
-    // of the threads they sampled, which its samples stand for.
+    // run window is that window, whatever the attach read in it. A window
+    // whose samples the trace holds is its own instead (`sampled`): an
+    // outside sample's is its samplers', the CPU in it that of the threads
+    // they sampled; a zones window's is the program's, from its opening to
+    // its close, the CPU in it its process's. Either way the run window is
+    // the CPU its samples stand for.
     watch: jet_cli_perf_attach_watch(target_pid)
     sampled := JetCLIPerfAttachWindow?{None}
     read := [String]{"its live snapshot"}
@@ -531,6 +534,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         if zoned.move() == .Val(taken) {
             spans = Val(taken.spans)
             flight = taken.samples.move()
+            sampled = taken.held.move()
         }
         if flight != None {
             read.push("its records in the zones window")
@@ -754,10 +758,12 @@ jet_cli_perf_attach_window: fn(text: String) -> Int? Never! {
 
 // What an attach's zones window took (jet_cli_perf_attach_zones): the copy
 // of the program's spans file, and the records the program made in the
-// window, None when it opened none.
+// window, None when it opened none; with them the window as the run window
+// it held (jet_cli_perf_attach_zoned), None without them.
 JetCLIPerfZonesTaken: struct {
     spans: String,
     samples: JetCLIPerfSamples?,
+    held: JetCLIPerfAttachWindow?,
 }
 
 // How often an attach renews its zones request, in 25 ms waits: every
@@ -799,14 +805,14 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: St
     stem: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}")
     spans: "{stem}.spans"
     perf_files.copy("{ring}.spans", spans) ?? return Ok(None)
-    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
+    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
     records: "{stem}.window"
     if perf_files.copy("{ring}.window", records) == .Err(_) {
-        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
+        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
     }
     if perf_files.copy("{ring}.image", "{records}.image") == .Err(_) {
         perf_files.remove(records).drop("the attach reads the window it copied once")
-        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
+        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
     }
     words: jet_cli_perf_samples_records(records) ?? {
         perf_files.remove(records).drop("a refused window is not read")
@@ -814,7 +820,18 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: St
         perf_files.remove(spans).drop("a refused window's rows are not read")
         return Err(err)
     }
-    Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: jet_cli_perf_samples_read(records, words, source, [TraceCounter]{}, None, window: Val(window))}))
+    held: jet_cli_perf_attach_zoned(window.end_ns - window.start_ns, window.cpu_ns)
+    Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: jet_cli_perf_samples_read(records, words, source, [TraceCounter]{}, None, window: Val(window)), held: Val(held)}))
+}
+
+// A zones window of `wall_ns` on the program's monotonic clock, from its
+// opening to its close, in which its process's CPU-time clock counted
+// `cpu_ns` (JetRuntime PerfSamples.jet perf_flight_window_close), as the
+// run window an attach holds: that clock counts to the nanosecond, the
+// time of threads that exited in the window included.
+jet_cli_perf_attach_zoned: fn(wall_ns: Int, cpu_ns: U64) -> JetCLIPerfAttachWindow Never! {
+    wall: checked(U64{wall_ns}) ?? U64{0}
+    JetCLIPerfAttachWindow{window: JetCLIPerfRuntimeWindow{elapsed_ns: wall, cpu_ns: Val(cpu_ns), exit: false}, resolution_ns: Val(U64{1}), exited: 0, zoned: true}
 }
 
 // This user's private directory, where a flight-recorded program publishes
@@ -991,10 +1008,13 @@ JetCLIPerfAttachCPU: struct {
 // An attach's window on its program, closed (jet_cli_perf_attach_watched):
 // its wall time and the program's CPU in it; that CPU's resolution, None
 // where /proc showed no CPU at one end; and the threads that exited in it.
+// `zoned` says it is the program's own zones window
+// (jet_cli_perf_attach_zoned), its CPU by the process's CPU-time clock.
 JetCLIPerfAttachWindow: struct {
     window: JetCLIPerfRuntimeWindow,
     resolution_ns: U64?,
     exited: Int,
+    zoned: Bool,
 }
 
 // Open an attach's window on program `pid`, before the attach's first read
@@ -1044,7 +1064,7 @@ jet_cli_perf_attach_closed: fn(wall_ns: U64, before: JetCLIPerfAttachCPU?, after
             else -> {}
         }
     }
-    JetCLIPerfAttachWindow{window: JetCLIPerfRuntimeWindow{elapsed_ns: wall_ns, cpu_ns: cpu, exit: false}, resolution_ns: resolution, exited: exited}
+    JetCLIPerfAttachWindow{window: JetCLIPerfRuntimeWindow{elapsed_ns: wall_ns, cpu_ns: cpu, exit: false}, resolution_ns: resolution, exited: exited, zoned: false}
 }
 
 // Program `pid`'s CPU now: the sum of its live threads' schedstat run time
@@ -1078,9 +1098,10 @@ jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfAttachCPU
 
 // Record the attach's window on program `pid` in its trace: the profile's
 // run window, with why, and the `window` receipt section (type
-// `JetPerfAttachWindow`): its CPU's clock, `schedstat` or `ticks`, and
-// resolution, null where it has no CPU, and the threads that exited in it.
-// `read` is what the attach read of the program, in order.
+// `JetPerfAttachWindow`): its CPU's clock, `schedstat`, `ticks` or a zones
+// window's `process`, and resolution, null where it has no CPU, and the
+// threads that exited in it. `read` is what the attach read of the
+// program, in order.
 jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, closed: JetCLIPerfAttachWindow, read: [String]) Never! {
     jet_cli_perf_window(capture.profile, closed.window)
     clock := CanonicalJSON.Null
@@ -1088,14 +1109,21 @@ jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, close
     how := "/proc showed no CPU for it at one end"
     if closed.resolution_ns == .Val(step) {
         resolution = CanonicalJSON.Integer("{step}")
-        clock = CanonicalJSON.String(if step == (U64{1}) -> "schedstat" else -> "ticks")
+        clock = CanonicalJSON.String(
+            if {
+                closed.zoned -> "process"
+                step == (U64{1}) -> "schedstat"
+                else -> "ticks"
+            },
+        )
         how = if {
+            closed.zoned -> "the program's CPU is its process's CPU-time clock in it, to the nanosecond, the time of threads that exited in it included"
             step > (U64{1}) -> "the program's CPU is its process's utime and stime in it, in {step} ns ticks: this kernel keeps no schedstat"
             closed.exited > 0 -> "the program's CPU is its threads' schedstat run time in it, to the nanosecond, less that of the threads that exited in it ({closed.exited}), which /proc keeps only in the process's ticks"
             else -> "the program's CPU is its threads' schedstat run time in it, to the nanosecond"
         }
     }
-    capture.profile.window_reason = "the attach's window on process {pid}, from its first read of the program to its last ({read.join(", ")}): its wall time on jet's monotonic clock; {how}"
+    capture.profile.window_reason = if closed.zoned -> "the zones window process {pid} sampled in, from its opening to its close on its own monotonic clock ({read.join(", ")}): {how}" else -> "the attach's window on process {pid}, from its first read of the program to its last ({read.join(", ")}): its wall time on jet's monotonic clock; {how}"
     value: CanonicalJSON.Object(
         [CanonicalJSONField]{
             {key: "cpu_clock", value: clock},

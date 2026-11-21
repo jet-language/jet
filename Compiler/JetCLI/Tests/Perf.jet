@@ -41,6 +41,7 @@ use {
         jet_cli_canvas_profile_instructions,
         jet_cli_perf_attach_closed,
         jet_cli_perf_attach_keep_window,
+        jet_cli_perf_attach_zoned,
         jet_cli_perf_browser_decode,
         jet_cli_perf_causal_section,
         jet_cli_perf_causal_tasks_section,
@@ -287,6 +288,23 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     jet_cli_perf_attach_keep_window(coarse, 7, ticked, [String]{"its live snapshot"})
     coarse_trace: verify_jettrace(jet_cli_perf_capture_bytes(coarse, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
     assert((jet_cli_perf_profile_summary(coarse_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=30000000ns run_cpu_resolution=10ms"))
+}
+
+#Test("a zones attach's run window is the program's zones window, its wall and its process's CPU in it") {
+    zoned: jet_cli_perf_attach_zoned(512000000, U64{300000000})
+    assert_eq(zoned.window.elapsed_ns, U64{512000000})
+    assert_eq(zoned.window.cpu_ns, Val(U64{300000000}))
+    assert_eq(zoned.resolution_ns, Val(U64{1}))
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    capture := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(capture, 7, zoned, [String]{"its live snapshot", "its zones for 500 ms", "its records in the zones window"})
+    assert(capture.profile.window_reason.starts_with("the zones window process 7 sampled in, from its opening to its close"), capture.profile.window_reason)
+    assert(capture.profile.window_reason.contains("its process's CPU-time clock in it, to the nanosecond"), capture.profile.window_reason)
+    trace: verify_jettrace(jet_cli_perf_capture_bytes(capture, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    assert((jet_cli_perf_profile_summary(trace) ?? "").ends_with(" window=live run_wall=512000000ns run_cpu=300000000ns"))
 }
 
 #Test("perf observations of a run sit on its own clock, from its start") {
