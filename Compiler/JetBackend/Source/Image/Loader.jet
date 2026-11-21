@@ -37,6 +37,7 @@
 use {
     core.mem
     loader_files: core.files
+    loader_sys: core.sys
 }
 
 // The absolute path the program's `os.executable()` reports (a char*);
@@ -1287,9 +1288,8 @@ loader_record: fn(rows: &[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int,
 }
 
 // The data page's layout: a zeroed kernel sigaction (SIG_DFL, 32 bytes), a
-// stack_t with SS_DISABLE, a zeroed signal set, the thread name, this
-// process's auxiliary vector, and scratch for queries. Once the vector is
-// read, its room holds the program's prctl_mm_map (loader_mm_record).
+// stack_t with SS_DISABLE, a zeroed signal set, the thread name, scratch
+// for the signal queries, and the program's prctl_mm_map (loader_mm_record).
 LOADER_DATA_DEFAULT: 0
 
 LOADER_DATA_ALTSTACK: 64
@@ -1299,8 +1299,6 @@ LOADER_DATA_MASK: 96
 LOADER_DATA_NAME: 128
 
 LOADER_DATA_SCRATCH: 192
-
-LOADER_DATA_AUXV: 256
 
 LOADER_DATA_MM: 256
 
@@ -1312,7 +1310,7 @@ LOADER_DATA_MM: 256
 // at `map`. Code, data and brk stay as they are, from /proc/self/stat and
 // brk(0). Unprivileged needs only CONFIG_CHECKPOINT_RESTORE; where the call
 // is refused it changes nothing, and the executor goes on past it.
-#Unsafe("the map's 104 bytes lie in the caller's data page, in its auxiliary-vector room, read already; brk(0) only reports the current break")
+#Unsafe("the map's 104 bytes lie in the caller's data page, in its mm-map room; brk(0) only reports the current break")
 loader_mm_record: fn(rows: &[Int], map: Int, stack: Int, arg_start: Int, arg_end: Int, env_start: Int, env_end: Int) {
     stat: loader_files.read("/proc/self/stat") ?? return
     // The fields after the command name, which may hold spaces or ")".
@@ -1336,14 +1334,13 @@ loader_mm_record: fn(rows: &[Int], map: Int, stack: Int, arg_start: Int, arg_end
 }
 
 // The main stack's size: RLIMIT_STACK's soft limit, between 128 KiB and
-// 8 GiB (unlimited means 8 GiB); reserved, not committed.
-#Unsafe("prlimit64 writes one rlimit (two words) at `scratch`, which the caller owns")
-loader_stack_size: fn(scratch: Int) -> Int {
-    limit := 0
-    if os_syscall(OS_SYS_PRLIMIT64, 0, 3, 0, scratch, 0, 0) == 0 -> limit = os_load_word(scratch)
-    if limit <= 0 || limit > 0x200000000 -> return 0x200000000
-    if limit < 0x20000 -> return 0x20000
-    os_page_round(limit)
+// 8 GiB (unlimited or unread means 8 GiB); reserved, not committed.
+loader_stack_size: fn() -> Int {
+    limit: loader_sys.stack_limit() ?? return 0x200000000
+    soft: limit.soft ?? return 0x200000000
+    if soft <= 0 || soft > 0x200000000 -> return 0x200000000
+    if soft < 0x20000 -> return 0x20000
+    os_page_round(soft)
 }
 
 // The end of the user address space (47-bit; nothing maps above it unless
@@ -1507,10 +1504,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     loader_record(rows, OS_SYS_PRCTL, 15, data + LOADER_DATA_NAME, 0, 0, 0, 0, 0)
 
     // The main stack, with a guard page below it.
-    stack_size := 0
-    #Unsafe("the data page's scratch words are this plan's own") {
-        stack_size = loader_stack_size(data + LOADER_DATA_SCRATCH)
-    }
+    stack_size: loader_stack_size()
     stack := 0
     #Unsafe("a fresh anonymous reservation aliases nothing") {
         stack = os_map_with(0, stack_size + OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE_ANONYMOUS + OS_MAP_NORESERVE, -1, 0)
@@ -1566,27 +1560,11 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     loop address in env -> words.push(address)
     words.push(0)
     // This process's auxiliary vector, less what describes the image.
-    auxv := 0
-    #Unsafe("the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs") {
-        path: loader_c_string("/proc/self/auxv")
-        if path != 0 {
-            fd: os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, path, 0x80000, 0, 0, 0)
-            if fd >= 0 {
-                auxv = os_syscall(OS_SYS_READ, fd, data + LOADER_DATA_AUXV, OS_PAGE_SIZE - LOADER_DATA_AUXV, 0, 0, 0)
-                loader_close(fd)
-            }
-            _ := os_unmap(path, 16)
-        }
-    }
-    if auxv <= 0 -> return loader_plan_failed(plan, "couldn't read /proc/self/auxv")
+    auxv: loader_files.read_bytes("/proc/self/auxv") ?? return loader_plan_failed(plan, "couldn't read /proc/self/auxv: {err}")
     pair := 0
-    loop pair + 16 <= auxv {
-        kind := 0
-        value := 0
-        #Unsafe("the pair lies inside the bytes read into the data page") {
-            kind = os_load_word(data + LOADER_DATA_AUXV + pair)
-            value = os_load_word(data + LOADER_DATA_AUXV + pair + 8)
-        }
+    loop pair + 16 <= auxv.len() {
+        kind: x64_comptime_word(auxv, pair)
+        value: x64_comptime_word(auxv, pair + 8)
         pair += 16
         if kind == 0 -> break
         // AT_PHDR AT_PHENT AT_PHNUM AT_BASE AT_ENTRY AT_PLATFORM AT_BASE_PLATFORM AT_RANDOM AT_EXECFN

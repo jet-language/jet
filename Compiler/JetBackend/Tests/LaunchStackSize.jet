@@ -1,0 +1,16 @@
+// The main stack a launch reserves (Image/Loader.jet loader_plan): the
+// RLIMIT_STACK soft limit core.sys.stack_limit reads, page-rounded and kept
+// between 128 KiB and 8 GiB.
+use {
+    jet_backend.[loader_stack_size]
+    launch_sys: core.sys
+}
+
+#Test("the main stack's size is this process's stack limit, page-rounded, from 128 KiB to 8 GiB") {
+    size: loader_stack_size()
+    assert(size >= 0x20000 && size <= 0x200000000)
+    assert_eq(size % 4096, 0)
+    limit: launch_sys.stack_limit() ?? return
+    soft: limit.soft ?? return
+    if soft >= 0x20000 && soft <= 0x200000000 -> assert(size >= soft && size - soft < 4096)
+}
