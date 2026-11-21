@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112709,
+    "rev": 112710,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24366,8 +24366,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T01:33:26.797Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T01:37:39.436Z",
+      "updatedBy": "Errors3202",
       "workOrder": 19,
       "criteriaLastN": 35
     },
@@ -27249,82 +27249,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0p4qylf",
-      "num": 4171,
-      "title": "Co-editing one program from text and Canvas (EYG shared-tree lesson)",
-      "body": "Owner request: EYG sends the AST over the wire, which could let a text editor and a visual blueprint editor edit the same program at once; Mojo has no traditional AST and parses straight to MLIR. Take the best of both: a lighter compiler and blueprint-style editing.\n\nEYG's IR is a closed node list encoded as DAG-JSON with content-addressed references; text is one optional parser (commit 75f09475, `packages/gleam_ir/src/eyg/ir/tree.gleam:15-44`, `spec/README.md:44-92`). Mojo's parser emits the MLIR `lit` dialect (MojoCompilerWalkthrough.md:136-138). Jet parses text to an AST without lossless trivia (formatter re-emits canonical syntax), Canvas edits go through source transactions (D-CANVAS-RAD1=A), and no stable node identity crosses the LSP boundary.\n\nBallot D-PROGRAM-FORM1 decides the shared program form.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": "Owner decides D-PROGRAM-FORM1. If A wins: on a stale Canvas revision, resolve the edit's anchors in the newest revision, replay, format, re-check, publish atomically; report anchor conflicts. The self-hosted front-end shape (Mojo's no-AST lesson) stays an internal implementation choice.",
-      "checkSteps": null,
-      "probe": "jet run Examples/features/tooling/canvas_blueprint_demo.jet",
-      "visualMedia": [],
-      "blockedBy": [
-        "c0c209zc"
-      ],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: its one criterion, D-PROGRAM-FORM1 ratified, is met."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6618 (D-G5-3): one Canvas card. D-PROGRAM-FORM1=A still governs the replay design."
-        },
-        {
-          "at": "2026-10-29",
-          "by": "Main",
-          "text": "KitSpeed: C2 needs the Canvas transaction server (Compiler/JetDevserver, not yet built: jet check 1602 errors; jet dev --canvas E2104). Replay design kept in $JET_SCRATCH_ROOT/lanes/Main/land/KitSpeed-4171.msg."
-        },
-        {
-          "at": "2026-10-16",
-          "by": "Pip",
-          "text": "mine-for-jet V (2026-10-16): vlang/ui2 ships UI2 Studio, a Delphi/Lazarus-style WYSIWYG designer (palette, drag/resize, object tree and inspector, undo, live preview, main.v generation; ui2 README:522-534). It edits VML, a second markup language with its own expression evaluator compiled by $vml (README:125-232). Lesson for Canvas: match the designer workflow but edit Jet source directly, one language (I8)."
-        },
-        {
-          "at": "2026-10-02",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-PROGRAM-FORM1 ratified.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-PROGRAM-FORM1 ratified outcome A (Replay stale edits), ratifiedAt 2026-10-02 (card decisions[0])",
-          "at": "2026-10-29T12:18:30.464Z"
-        }
-      ],
-      "refs": [
-        "Docs/research/mine-for-jet-2026-10-01-systems-langs.md"
-      ],
-      "tags": [
-        "mine-2026-10-01",
-        "tooling",
-        "canvas",
-        "eyg",
-        "mojo",
-        "compiler",
-        "wayfinder:task"
-      ],
-      "parentId": "c0bk3yid",
-      "needsAcceptance": false,
-      "created": "2026-10-02T01:15:13.072Z",
-      "updated": "2026-11-18T01:37:19.675Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-18T01:37:19.674Z"
-    },
-    {
       "id": "c003mq4e",
       "num": 4174,
       "title": "C header import depth: read real headers with a full C front end",
@@ -29504,70 +29428,6 @@
       "updated": "2026-11-17T01:40:12.019Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
-    },
-    {
-      "id": "c0hh2g28",
-      "num": 4602,
-      "title": "One DataTree: owner rulings on duplicate keys, exact numbers, strict typed text and bytes",
-      "body": "Owner rulings 2026-10-05 (from Idiom-Runtime3's comparison $JET_STATE_ROOT/scratch/Idiom-Runtime3/DATATREE-DIFF.md of the ported runtime carrier vs the compiler built-in DataTree; I8: one DataTree, the built-in). (1) Duplicate object keys are a parse error; the explicit parse_allow_duplicates option keeps the later value. (2) Numbers keep their exact text: a Number variant holds the original lexeme (1.50 re-renders as 1.50; 1e400 and integers beyond Int are kept exactly); reading as Int/Float checks range at that point. (3) Decoding is strict: JSON \"42\" into an Int field is an error. (4) CBOR (and other binary) byte strings decode to a Bytes variant. Reconcile Docs/spec/reference/core-library.md (already lists number/typed text/bytes) with sema's built-in variants. Done when the built-in DataTree, every parser/encoder (JSON, TOML, YAML, CBOR, JSONL), decode/derive, both compilers, the runtime and docs follow these rules on every tier, with examples and goldens for each rule, in one greenfield cutover.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met in 6479b79c49."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded into #5976 as a criterion (CardTrim 2026-10-28)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T15/T23: folded here. Ruling (1) of this card already makes a duplicate object key a parse error; FutureAudit asks that the same rule cover every DataTree decoder, since parser differences on duplicate keys are a known exploit class."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Absorbed duplicate #4653 (json.dumps sorts object keys, contradicting the documented insertion order): json.dumps key sorting; log says absorbed by #4602 (cross-slice survivor, outside slice 4). Its repro and open criteria are carried here."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Ruling (1) applies to every DataTree decoder: JSON, YAML and TOML each report a duplicate key as a parse error naming the key and both positions, and the explicit allow-duplicates option keeps the later value; one test per format.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 6479b79c49 (dev, p283). JSON, YAML and TOML each report a repeated key as a parse error at the repeat, naming the key and where it first appears (\"duplicate key `k` (first at line L, column C)\"). toml.parse_allow_duplicates and yaml.parse_allow_duplicates join json.parse_allow_duplicates in keeping the later value. On the p283 batch compiler: `jet test Core/Encoding/{JSON,TOML,YAML}.jet` pass, with one duplicate-key test per format. The goldens pass: Encoding/ 99/99 (TOMLDuplicateKeys and YAMLDuplicateKeys included), Data/JSON/ 45/45, and the WebBuild dyn_exact_int_and_strict_json case 1/1.",
-          "at": "2026-11-18T00:08:50.202Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:task",
-        "audit-2026-10-28",
-        "future-2026-10-28",
-        "trimmed"
-      ],
-      "parentId": "c0iuv3zr",
-      "needsAcceptance": false,
-      "created": "2026-10-05T11:15:21.226Z",
-      "updated": "2026-11-18T01:37:08.258Z",
-      "updatedBy": "owner",
-      "completedAt": "2026-11-18T01:37:08.257Z"
     },
     {
       "id": "c0itvqcw",
@@ -32667,48 +32527,6 @@
       "criteriaLastN": 5
     },
     {
-      "id": "c0xgg9f1",
-      "num": 4940,
-      "title": "Restore jet db dev commands (DbOptions/DbRows) removed at self-host cutover: never compiled",
-      "body": "61e1fd228 added Compiler/JetCli Dev/DbOptions.jet, Dev/DbRows.jet and tests calling APIs that never existed (core rows_bounded, parse_allow_duplicates_with_limits, JetCLIOutputMode). The code never compiled, so the r12 self-host repair removed those files and their wiring (CliR12Fix, 2026-10-09 ~20:15) instead of inventing APIs. Restore from 61e1fd228 once bounded Core CSV/JSON APIs (CLI limits 32MiB/64 depth) and an output-mode type with quiet are designed and ratified. Owner decision: keep the feature (and design the Core APIs) or drop it.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #5973."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded into #5973 as a criterion (CardTrim 2026-10-28)."
-        }
-      ],
-      "criteria": [],
-      "refs": [],
-      "tags": [
-        "wayfinder:task",
-        "trimmed"
-      ],
-      "parentId": "c0fqk5ka",
-      "needsAcceptance": false,
-      "created": "2026-10-10T00:11:00.735Z",
-      "updated": "2026-11-18T01:37:36.122Z",
-      "updatedBy": "owner",
-      "completedAt": "2026-11-18T01:37:36.122Z"
-    },
-    {
       "id": "c066lqhv",
       "num": 4941,
       "title": "Jet Foundation IntegerKinds.jet has unratified I128/U128 rows (S42 closes the integer menu at <=64 bits)",
@@ -35004,87 +34822,6 @@
       "updated": "2026-11-17T01:41:06.168Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
-    },
-    {
-      "id": "c0awastn",
-      "num": 5086,
-      "title": "Jet-native raylib: a 1:1 raylib API written in idiomatic Jet that works out of the box",
-      "body": "Owner direction 2026-10-21: replace the dlopen-of-libraylib path with Jet-native raylib, API 1:1 with raylib, written in idiomatic Jet, working with no installed C library. Everything above the OS graphics boundary is Jet: windowing, input, rlgl, shapes, textures, text, models, audio mixing. Constraint to decide (owner): the GPU driver (libGL/libvulkan, libX11/Wayland) must be loaded from the user system at run time; the Jet runtime is fully static musl with no dynamic loader. Options: (a) graphical programs build as dynamically linked executables, (b) the runtime gains a minimal loader for driver libraries. Today the native tier implements raylib only on the no-library path (headless), from RouteRuntimeA2. Related: text shaping (HarfBuzz) is the same question - a Jet-native shaper (OpenType GSUB/GPOS) vs the fallback 1:1 glyph shaper.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e15",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Obsolete: owner ruling 2026-11-08, no reference to raylib."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner 2026-11-08: \"i do not want a module or subsystem called ray, if we need a separate module layer, it should just be called ui not ray\". Windows, frames, drawing surfaces and each window's input live in `ui` (Core/Ui, core.ui) with the D-GAME-PLATFORM1 shape (ui.open, win.frames(fps), frame.events(), frame.present, ui.headless); the Wayland client is ui's private Linux backend. No module, package or import alias is named `ray`; this supersedes the `ray` name in D-GAME-PLATFORM1, D-RAY-API1 and the 2026-11-01 package answer."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-RAYLIB-DRIVER-LOAD1 (draft for Main to file). The card text is background, not the decision."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built without any module, package or alias named `ray` (owner 2026-11-08): the raylib library keeps every raylib name and argument order on window and frame values from `ui` with typed colors, keys and buttons, written in Jet, and software-drawn programs stay single static files that speak the display and sound protocols directly.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
-          "at": "2026-11-08T19:53:47.003Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "A raylib example game runs headless (rendering to memory with the same calls) with a golden on O0, O1 and O2, and opens a window on a desktop with nothing installed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
-          "at": "2026-11-08T19:53:48.319Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "raylib",
-        "games",
-        "owner-direction",
-        "wayfinder:task"
-      ],
-      "parentId": "c0u5tm84",
-      "needsAcceptance": false,
-      "created": "2026-10-21T14:23:04.145Z",
-      "updated": "2026-11-18T01:37:27.366Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-18T01:37:27.366Z"
     },
     {
       "id": "c0ba141x",
@@ -42475,76 +42212,6 @@
       "criteriaLastN": 12
     },
     {
-      "id": "c0wesey9",
-      "num": 6388,
-      "title": "Build `reject(Diagnostic)` (D-MARKER-DIAG1=A): library compile-time checks raise their own error codes",
-      "body": "Found by #6385 on dev 59213de00f. D-MARKER-DIAG1=A ratified that a library error is a struct implementing Core's Diagnostic trait (what/why/fix as one-literal methods) and that `reject(err)` raises it while compiling, from a marker's expand or a helper. `reject` is not built: probes/zig/z05_reject.jet reports `E0102 Nothing named 'reject' exists here`. Today a comptime check can only `panic`, which gives E3010 with a message but no code, why, fix or `jet explain` page. This is Jet's version of Zig's @compileError, done better.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: c1-c3 live on #6039 c28-c30."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6039 (D-G6-1): reject(Diagnostic) is part of the marker API stream; its three criteria are carried as (was #6388 cN)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The D-MARKER-DIAG1 example (`#web.Route(\"orders\")` rejected with web.BadPath, and a TrailingSlash warning silenced by `#Allow`) builds and reports as ratified, with UI snapshots.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Folded into #6039 c28, which carries the same text and stays open there.",
-          "at": "2026-11-10T01:39:21.460Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 2,
-          "text": "`jet explain web.BadPath` prints the library's texts.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Folded into #6039 c29, which carries the same text and stays open there.",
-          "at": "2026-11-10T01:39:23.731Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 3,
-          "text": "`reject` outside compile-time evaluation is a registered error with a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Folded into #6039 c30, which carries the same text and stays open there.",
-          "at": "2026-11-10T01:39:26.027Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-30T20:21:07.004Z",
-      "updated": "2026-11-18T01:37:23.466Z",
-      "updatedBy": "owner",
-      "completedAt": "2026-11-18T01:37:23.466Z"
-    },
-    {
       "id": "c06lvend",
       "num": 6408,
       "title": "core.compute port: devices, streams, sparse tensors and transfer receipts need storage in the registered compute vocabulary",
@@ -42655,98 +42322,6 @@
       "updated": "2026-11-17T02:09:17.390Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
-    },
-    {
-      "id": "c0l09me0",
-      "num": 6421,
-      "title": "raylib leaves Core: Core/Game/Raylib.jet and UiRaylibMetadata.jet go to a first-party `raylib` package",
-      "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- Moves: Core/Game/Raylib.jet and Compiler/JetRuntime/Source/UiRaylibMetadata.jet to the\n  first-party battery Jetpack/Provider/Batteries/raylib/. It ships with Jet at its version\n  (D-JPK-RINGSHIP1=C), and `jet add raylib` writes the one dependency line.\n- Keeps the typed backend value of D-GAME-BACKEND1=A, so `game.run(scene, backend:)` still\n  takes it. GPU device providers stay with card 5964.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [
-        "D-GAME-PLATFORM1"
-      ],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Obsolete: owner ruling 2026-11-08, no reference to raylib."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c1: Examples/features/game/raylib_canvas -> Examples/Apps/Game/RaylibCanvas [new path does not exist yet: the criterion still has to create it]."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "Retargeted c1 (owner order 2026-11-02: an invalid criterion is retargeted to a valid one). Old text: `use raylib as rl` builds and runs Examples/features/game/raylib_canvas, raylib_shapes, raylib_indexed, raylib_sprites and battery, with the same golden checksums on o0/o1/o2. Why: the criterion spelled the retired `use raylib as rl` import form; the current form names the alias first (`use rl :: …`), as every game example spells it today."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`use rl: raylib` (the first-party package, replacing `use rl: core.game.raylib`) builds and runs Examples/features/game/raylib_canvas, raylib_shapes, raylib_indexed, raylib_sprites and battery, with the same golden checksums on o0/o1/o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
-          "at": "2026-11-08T19:53:49.650Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "Core/Game/Raylib.jet and its rows in Compiler/Prelude/Core.jet, CoreCalls.jet, CorePlatformSignatures.jet, CoreSurfaceInventory.jet and StructureRegistry.jet are gone, and the generated Core registries are regenerated.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
-          "at": "2026-11-08T19:53:50.950Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 3,
-          "text": "The package uses only mechanisms that any package can use (pillar 5): no Core-private power and no compiler row that names the package.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
-          "at": "2026-11-08T19:53:52.277Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-31T05:09:33.326Z",
-      "updated": "2026-11-18T01:37:31.142Z",
-      "updatedBy": "owner",
-      "completedAt": "2026-11-18T01:37:31.142Z"
     },
     {
       "id": "c00w7rum",
@@ -44981,151 +44556,6 @@
       "criteriaLastN": 12
     },
     {
-      "id": "c0fymc7l",
-      "num": 6516,
-      "title": "Packages declare diagnostics, lints and rewrite fixes as values (NEW-D-LINT-DECL1)",
-      "body": "The registry has 874 diagnostic rows; 80 carry a structured fix and 71 a lint name (DiagnosticRows.jet). Marker names are matched by hand in the parser (Compiler/JetParser/Source/Parser/Items.jet:1593) and in sema (Compiler/JetSema/Source/Sema/MarkerRules.jet:918), and re-declared as strings (Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:160). Packages cannot register codes.\n\nDone when: `impl T.Diagnostic` and `impl T.Lint` register package codes; `syntax.rewrite(pattern, template)` declares a structured fix that `jet fix` applies; the marker switches read the declared markers (D-MARKER-REFLECT1).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.11.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e18",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "All 8 criteria met (c9 at 8970803bb1)."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c9 landed 8970803bb1 (p273); the case UIFixes/jet_fix_inlines_deprecated_replacement is REFUSED (stream assertion at line 9), and the Markers.jet edit reordered the #Rename union (UI serde_rename_not_string). Returned to IfHole."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "D-DEPRECATE-INLINE1=A ratified. c9 SUB IfHole-6-1-6516-c9-deprecated-inline is queued for p273."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c9 needs a spelling no decision gives (how a #Deprecated function names its inlinable replacement). Ballot to post: D-DEPRECATE-INLINE1. Option A: #Deprecated field inline: Bool{false} beside since/use/removed_in; the function's own one-expression body is the replacement, jet fix substitutes each argument subtree for its parameter when the parameter is used once or the argument is a name or literal, inline excludes use, otherwise L2001 edit-by-hand as today (precedent Go 1.24 //go:fix inline). Option B: use: takes a call template string (use: \"scaled(a, 2)\"), rejected in spirit by NEW-D-LINT-DECL1 option C (string DSL). c9 waits on that ballot; c4, c8, c7, c5 proceed."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "2026-11-14 TowerKeeper-1: c3 (NEW-D-LINT-DECL1) split into #6516 c4-#6516 c7; #6202's package diagnostic, lint and deprecation items joined as #6516 c8, #6516 c7 and #6516 c9."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c2 progress: dev 635004f086 and c5f1fa287f (G6Meta-6516c2 and its fix) route Parser/Items.jet through the declared-marker hook table, with 0 `marker.name ==/!=` matches left there. c2 stays open: on dev ea1caf0d11, Compiler/JetSema/Source/Sema/MarkerRules.jet still has 13 `marker.name ==/!=` matches. The SUB said \"MarkerRules.jet already has none\", and that is wrong."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 2,
-          "text": "The parser and sema marker switches read the declared markers (D-MARKER-REFLECT1); the hand-written name matches at Parser/Items.jet and Sema/MarkerRules.jet are gone.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "635004f086 (the parser`s item parsing reads the marker hook table) and 8020c7a337 (sema`s marker rule checks read the hook table, not written marker names), both on dev. On dev 9623399213, Compiler/JetParser/Source/Parser/Items.jet reads parser_marker_hook 4 times and Compiler/JetSema/Source/Sema/MarkerRules.jet reads sema_marker_is_hook 17 times. The only name comparison left in MarkerRules.jet (:130) parses RuleSite variant names, not marker names. `jet test Compiler --profile cases --filter marker_declarations` on the gate-p55 jet (dev 9623399213): rc 0, 11/0, KF 0, including a_marker_under_a_prelude_name_reaches_no_prelude_hook.",
-          "at": "2026-11-14T06:21:31.317Z"
-        },
-        {
-          "n": 3,
-          "text": "NEW-D-LINT-DECL1=A is built (owner ratified 2026-11-11): Diagnostic stays the only finding carrier and gains `tier` and `structured_fix`, while `fix` stays literal help text. A package lint is a checked compile-event subscriber over resolved calls (the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library). syntax.rewrite takes resolved callable identities, keeps argument subtrees and refuses incompatible argument or return types. Importing a package never turns its lints on; a root enables the package's lint group once. Goldens and UI snapshots prove the NoPrintInLib lint, a structured fix applied by `jet fix`, the refused incompatible rewrite, and that a dependent's import stays silent.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6516 c4: split NEW-D-LINT-DECL1 into four one-sitting outcomes (#6516 L1-L4)",
-          "at": "2026-11-15T02:26:18.830Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 4,
-          "text": "Diagnostic, the only finding carrier, gains `tier` and `structured_fix`, while `fix` stays literal help text (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile ui --filter lint_structured_fix` and `jet fix` applies the structured fix in `jet test Compiler --profile cases --filter jet_fix_applies_structured_fix`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev f230c9163c: jet test Compiler --profile ui --filter lint_structured_fix PASS and --profile cases --filter jet_fix_applies_structured_fix PASS on the p248 batch compiler.",
-          "at": "2026-11-17T06:24:20.169Z"
-        },
-        {
-          "n": 5,
-          "text": "A package lint is a checked compile-event subscriber over resolved calls: the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile golden --filter Packages/NoPrintInLib` passes on o0, o1 and o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev d8563f35d5: jet test Compiler --profile golden --filter Packages/NoPrintInLib PASS 3/3 (o0, o1, o2) on the p248 batch compiler; the lint fires only on the resolved print symbol inside the opted-in library.",
-          "at": "2026-11-17T06:25:52.385Z"
-        },
-        {
-          "n": 6,
-          "text": "`syntax.rewrite` takes resolved callable identities, keeps argument subtrees, and refuses a rewrite whose argument or return types are incompatible (NEW-D-LINT-DECL1=A).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev dd0794101d: jet test Compiler --profile ui --filter rewrite_incompatible_refused PASS on the p248 batch compiler (syntax.rewrite over resolved callable identities refuses incompatible argument/return types).",
-          "at": "2026-11-17T06:24:17.866Z",
-          "proof": {
-            "profile": "ui",
-            "filter": "rewrite_incompatible_refused"
-          }
-        },
-        {
-          "n": 7,
-          "text": "Importing a package never turns its lints on; a root enables the package's lint group once, and a dependent's import stays silent (NEW-D-LINT-DECL1=A). A program with no attached lint hook emits no dispatch code (D-HOOK-ONE1). Proof: `jet test Compiler --profile cases --filter package_lint_import_silent`, which also checks the IR has no hook dispatch.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev eeb9a1cf9b: jet test Compiler --profile cases --filter package_lint_import_silent PASS on the p248 batch compiler, including the IR checks that neither program carries group code or hook dispatch.",
-          "at": "2026-11-17T06:24:25.147Z"
-        },
-        {
-          "n": 8,
-          "text": "A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter PackageMarkerOwnDiagnostic` and `jet test Compiler --profile cases --filter explain_package_diagnostic`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev dbf05f4ced (landed 335a07be11): in the p276 suite, cases UIFixes/jet_fix_inlines_deprecated_replacement passes. jet fix inlines the #Deprecated replacement body at the call.",
-          "at": "2026-11-17T21:06:00.906Z"
-        },
-        {
-          "n": 9,
-          "text": "A library author retires an API with `#Deprecated(…)` carrying a replacement body, and `jet fix` inlines it at every call so users migrate in one run.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 8970803bb1 (dev, D-DEPRECATE-INLINE1=A). On the p282 batch compiler bd564de961, the full cases suite passes Tests/Cases/UIFixes/jet_fix_inlines_deprecated_replacement.case: `jet fix` inlines a #Deprecated(inline: true) function body at every call, and the result matches the .fixed file.",
-          "at": "2026-11-18T00:03:44.592Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "jet_fix_inlines_deprecated_replacement"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "tooling",
-        "declarative"
-      ],
-      "parentId": "c085f598",
-      "needsAcceptance": false,
-      "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-18T01:33:44.227Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-18T01:33:44.227Z"
-    },
-    {
       "id": "c0uhfjtt",
       "num": 6517,
       "title": "`ffi.binder`: declared type maps, handles, error conventions and refusals derive a binder's expand loop",
@@ -45653,59 +45083,6 @@
       "updated": "2026-11-17T01:43:14.043Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
-    },
-    {
-      "id": "c0odfeu7",
-      "num": 6525,
-      "title": "`#Test` declares properties, fuzz targets and bench budgets",
-      "body": "Snapshot, golden and property testing are calls inside test bodies (Core/Testing/Testing.jet:102, 136, 517-532). `#Test` (Compiler/Prelude/Markers.jet:180) has no parameters for generation, fuzzing or budgets, and there is no bench marker.\n\nDone when: a `#Test` function with typed parameters is run as a property with derived generators and shrinking; `fuzz: true` on a `[U8]` parameter registers a fuzz target for D-TEST-MUTFUZZ1's engine; `bench: perf.budget(...)` is a D-WD14 gate.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.9.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met, proven on e4c7950dd0."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Frozen (D-G5-8): every part is covered by a ratified decision. Properties: #Test parameters, built under #6015 (done). Fuzzing: grade: generated (D-TEST-MUTFUZZ1=A, #6060). Benchmarks: the .measure member and jet test --measure (D-CLAIM-BENCH1=A; Examples/Tooling/Performance/Bench.jet). The fuzz: and bench: #Test parameters would be second spellings."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A `#Test` with typed parameters runs as a property with derived generators, shrinking and replay; fuzzing is `jet test --grade=generated` with a seeded budget that shrinks a planted bug; bench budgets are `.measure` claims judged by `jet test --measure`; each is proven by a test.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev e4c7950dd0, seed-b14 (Main ran each): jet test Compiler --profile cases --filter property_tests_generate_shrink_and_replay (PASS 1), --filter generated_grade_shrinks_a_planted_reverse_bug (PASS 1), --filter measure_budgets_judge_the_claim_record (PASS 1); FAIL 0 each.",
-          "at": "2026-11-13T07:12:22.456Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "testing",
-        "declarative"
-      ],
-      "parentId": "c085f598",
-      "needsAcceptance": false,
-      "created": "2026-11-01T01:15:08.007Z",
-      "updated": "2026-11-18T01:37:15.749Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-18T01:37:15.749Z"
     },
     {
       "id": "c0h8jjrp",
@@ -50616,56 +49993,6 @@
       "updated": "2026-11-17T01:44:32.974Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
-    },
-    {
-      "id": "c09a7oci",
-      "num": 6714,
-      "title": "Stale comments that still name the Rust or musl toolchain",
-      "body": "CFreeLead found comments that describe removed behavior: flake.nix:102-104, Tools/release/Admit.jet:758-759, Tools/agent/Chain.jet:41 and :1440, Tools/agent/JetEnv.jet:7, Tools/agent/Land.jet:969. Correct or cut each one to match the code.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "owner",
-          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met in f3785b5297."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Folded into #6693 as a criterion (BoardPlanner 2026-11-09): the comments go stale in the same cutover that removes the pack's C."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Each listed comment matches the current code or is removed",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in f3785b5297 (dev, p279). The listed comments were checked against dev 0921df52d9. flake.nix still said normal Jet compilation and the runtime build with Rust, and it now says Rust is only for extern rust bridges and opt-in FFI helpers. The others already match the code: JetEnv.jet --norust, Admit.jet \"without Rust\" rows, Chain.jet \"compiles no C and links no musl\", and the flake LIBRARY_PATH musl comment, which matches Compiler/JetCLI/Source/CLI/ForeignLink.jet find_folder. Land.jet:969 now holds unrelated code.",
-          "at": "2026-11-17T22:19:06.583Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T09:36:12.216Z",
-      "updated": "2026-11-18T01:37:11.834Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-18T01:37:11.834Z"
     },
     {
       "id": "c0qyk2os",
@@ -57854,205 +57181,6 @@
       "updated": "2026-11-17T01:48:13.175Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
-    },
-    {
-      "id": "c01gyy9b",
-      "num": 6857,
-      "title": "Language-review cutovers: arrow-first signatures, brace records, brace layout and one program entry form",
-      "body": "Destination: the owner's 2026-11-09/11 language-review rulings are the only spellings in the repository. Signatures put the arrow first (D-SIG-ARROW1), records use braces and paren tuples retire (D-RECORD-BRACE1), commas separate data members but not bodied methods (D-BRACE-LAYOUT1), and a program is either script style or one `run: fn` entry, never mixed (owner order 2026-11-11).\n\nWhy it matters: two spellings for one thing cost every reader and every tool; AGENTS.md Greenfield cutover requires one cutover per change with every in-repository caller migrated and no teaching of the retired form.\n\nEach cutover lands with its rewrite registered in `jet fix` (D-LANG-MIGRATE1, #6068) and its syntax row, syntax-decisions.md entry and regenerated grammars in the same change.\n\nSources: #6281 c127, c150, c180 and #6251 c12, c15 (split here 2026-11-14).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e18",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "All 14 criteria met."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c6 progress, cycle p261: dev 97ebe5bd89 (the generators write fmt form) and ce9989369e (MachineDoors under FmtCorpus's formatter-input rule). On batch compiler p261: FmtCorpus --check rc=0, and case FmtCorpus/fmt_corpus_is_in_jet_fmt_form 1/0. A direct `jet fmt --check Compiler` now reports only 5 files: Spellings.jet, PreludeMarkers.jet, PreludeFacts.jet, PreludeDerives.jet and PreludeUnits.jet. Formatting them would change their meaning: the formatter's meaning defects are #6898 c19. c6 waits on that criterion."
-        },
-        {
-          "at": "2026-11-17",
-          "by": "Main",
-          "text": "c6 progress: dev ac6cfc03f0 (cycle p259). jet fmt no longer loops on symlinked folders (the SystemsFileIndex fixture's loop -> . made `jet fmt --check Tests` hang), Diagnostics.jet and the hand-written sources are formatted, and Tools/Agent/FmtCorpus.jet --check passes on p259 (rc=0). A direct `jet fmt --check` over Core, Jetpack and Examples is clean on p259. Tools and Tests report only negative fixtures that do not parse. Compiler reports 101 files: 72 in Compiler/JetDevServer (formatted in SUB Main-6857-c6-devserver, cycle p260) and about 20 generated files whose generators do not write fmt form (FaultReport, Spellings, PreludeMarkers, EnvironmentNames x2, OwnedTraitRows, PreludeFacts, KeywordSpans, CompilerNeededText*, ExitCodes, HostEnums, HostErrors, ObserveMessages, ProcessGrants, TestMessages, TrapDefectMessages, TrapMessages, UnicodeNormalizeTables, UnicodeTables). Left for c6: each generator writes fmt form. PreludeFacts, HostErrors and Spellings also wait on the formatter meaning fixes in #6898 c19."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "Power loss 2026-11-16 14:37: unlanded #6857 work saved before worktrees were reset: GoalsA's c3/c4 stage-2 paren-tuple sweep (720 paths, base 18bc53b3e6) at $JET_SCRATCH_ROOT/lanes/Main/powerloss-1116/GoalsA-1-4-mc.patch; IfHole's c8 script-style WIP plus its landed bit-sigils (732 paths, base 17c073989d) at .../IfHole-6-1.patch. Owner order: 3 agents (2 G6, 1 G9); IfHole-6-1 now owns all of #6857."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "p219: bit sigils part a landed (594046a32a); BitSigils parser test, golden BitwiseNot/BitSigilsFollowTheirPrecedence, ui bit_complement_on_bool, bit_xor_update_in_condition, sigil_integer_not_retired and the bit_sigils1 migration case pass. c13 stays open: part b (the repository migration) was held from p220 because the migration writes compound bit updates into indexed slots (E0164 in Core/Crypto, TLS and X64Alloc); bit_not_wrong_type and the FmtLossless parser-validity manifest are with IfHole-6-1 in the same pass."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "c12 proof amended: the sigil meaning guard imports jet_lexer, so it is the nested guard package Tests/Guards/SigilMeaningTable (as ArrowSurface and DynSurface are), which the root guards filter does not reach. The census runs SigilMeaningTable, ArrowSurface and DynSurface through Land.jet GUARD_PACKAGES."
-        },
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "IfHole-6-1 owns this card. Order: c13 power half (infix ^ gets the generic parse error), then c10/c11, then the D-BIT-SIGILS1=A operator cutover (new tokens, sema, lowering on every tier, E0398 flipped, a jet fix rule, a sweep of 6,582 .bit_* calls in 688 files, one SUB per tree), then c12's meaning table and guard on the finished lexer. Then c8, c5/c6, c1/c2, c3/c4 and c7."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`jet fix` rewrites an error-first signature such as `fn(path: Path) IOError! -[FS.Write]>` to arrow-first `fn(path: Path) -[FS.Write]> IOError!` (unit result omitted after the arrow), registered as a D-LANG-MIGRATE1 rewrite in Compiler/Migrations (D-SIG-ARROW1=A).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter fix_sig_arrow_first PASS",
-          "at": "2026-11-16T17:11:07.255Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "fix_sig_arrow_first"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Every signature in Core, Compiler, Jetpack, Tools, Examples and tests is arrow-first (617 error-first signatures in Core on dev 72a8142651), and the parser no longer accepts the error-first order: it gets the generic parse error, with no teaching (D-SIG-ARROW1=A). Proof: `git grep -c -E '\\) [A-Z][A-Za-z]*! -\\[' -- '*.jet'` prints nothing and `jet test Compiler --profile ui --filter sig_error_first_not_jet`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p217 batch compiler (census build of dev ec9df40248): git grep -c -E '\\) [A-Z][A-Za-z]*! -\\[' ec9df40248 -- '*.jet' prints nothing; jet test Compiler --profile ui --filter sig_error_first_not_jet PASS; JetParser tests PASS. A wider check (any 'X! -[..]>') finds only deliberate parser tests and the refusal snapshot",
-          "at": "2026-11-16T17:11:08.517Z"
-        },
-        {
-          "n": 3,
-          "text": "Every record uses braces: `{x: 1}` is an unnamed struct, and a paren tuple is not Jet syntax (generic parse error, no teaching) (D-RECORD-BRACE1=A). Proof: `jet test Compiler --profile golden --filter Types/Records` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter paren_tuple_not_jet`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p227 batch compiler (dev eab1677096), commit eab1677096: jet test Compiler --profile golden --filter Types/Records PASS 3/3 (o0, o1, o2); jet test Compiler --profile ui --filter paren_tuple_not_jet PASS 1/1 (generic E0003). Still holds on p230 (dev 47086f2eb3): full golden 5020/5020.",
-          "at": "2026-11-16T22:20:40.709Z"
-        },
-        {
-          "n": 4,
-          "text": "Every in-repository paren tuple is migrated to a brace record in the same cutover, through a registered `jet fix` rewrite. Proof: `jet test Compiler --profile cases --filter fix_paren_tuple_to_record`, and the self-build plus `jet test Compiler --profile golden` pass with the parser refusing paren tuples.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p230 batch compiler (dev 47086f2eb3), commits eab1677096 (paren-tuple1 sweep of about 6000 sites) + 89a789c08c (fallout): jet test Compiler --profile cases --filter fix_paren_tuple_to_record PASS 1/1; the self-build (census build of 47086f2eb3, parser refusing paren tuples) succeeded and jet test Compiler --profile golden PASS 5020/5020, 0 FAIL.",
-          "at": "2026-11-16T22:20:41.854Z"
-        },
-        {
-          "n": 5,
-          "text": "Commas separate data members, and bodied method declarations (in struct, trait and impl bodies) take none: the parser and `jet fmt` follow it (D-BRACE-LAYOUT1=A). Proof: `jet test Compiler --profile cases --filter fmt_brace_layout` and `jet test Compiler --profile ui --filter brace_layout_`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p239 batch compiler (dev 58664a641a), commit 751b43cdd1: cases fmt_brace_layout PASS, cases brace_layout1 PASS, ui brace_layout_ PASS; FmtLossless and the JetParser tests PASS.",
-          "at": "2026-11-17T02:29:06.608Z"
-        },
-        {
-          "n": 6,
-          "text": "Every in-repository file follows D-BRACE-LAYOUT1. Proof: `jet fmt --check Core Compiler Jetpack Tools Examples tests` reports no brace-layout difference.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev 72f6b3bb9c (batch compiler p275): jet fmt --check Core Compiler Jetpack Tools Examples Tests reports no formatting or brace-layout difference. Its only output is 280 parse errors, every one in a deliberately invalid fixture or input (Tests/Cases/*fixture*, Tests/AgentWorkloads/inputs, Tools/Gauntlet/*/Fixtures), plus 2 BranchArmTable warnings. The exit code is 1 only because of those parse errors.",
-          "at": "2026-11-17T20:33:13.809Z"
-        },
-        {
-          "n": 7,
-          "text": "Each ruling built here, and D-MODULE-VAR1, D-CLI-EVAL1, D-COMPREHEND1 and D-LANG-MIGRATE1 on their cards, has its Compiler/JetFoundation/Data/Syntax row, its Docs/Spec/syntax-decisions.md entry and regenerated editor grammars in the same change. Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p235 batch compiler (dev 1c5b311279), commit 667edfcb7e: jet self devtools grammars leaves Tools/Editors unchanged (checked by DeclTypes-6-1); jet test Tests/Guards --filter grammar PASS, --filter syntax_reconciliation PASS, Tests/Guards/ArrowSurface PASS.",
-          "at": "2026-11-17T00:24:53.627Z"
-        },
-        {
-          "n": 8,
-          "text": "A program is either script style or one `run: fn` entry, never mixed, at any scope: a `run: fn` anywhere in the load graph, package or project (module, nested module, re-export, import rename such as `use { run: other.main }`, or generated code) refuses top-level executable statements anywhere in that scope, and the reverse. One registered diagnostic names both sites, replacing the partial E0620/E0621 checks, and every in-repository hit is migrated in the same batch. Proof: `jet test Compiler --profile ui --filter program_entry_mixed_` covers the same file, an imported module, another module of the package, a renamed import, a re-export and generated code.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p228 batch compiler (dev f720a24dc5), commits 98945a23a6 + f720a24dc5: jet test Compiler --profile ui --filter program_entry_mixed_ PASS 8/8 (same file, imported module, other package module, nested module, renamed import, re-export, generated code); cases loose_statements_are_rejected_even_with_explicit_run, script_shebang_runs_top_level_statements, imported_scripts_are_rejected_before_their_body_can_run and cli_beginner_onboarding PASS; full suite p228: 0 new failures.",
-          "at": "2026-11-16T21:35:48.918Z"
-        },
-        {
-          "n": 9,
-          "text": "syntax-decisions.md, core-library.md and the syntax registry state one yielding-loop and collection-head rule: D-COMPREHEND1=A on top of D-COMPREHENSION1, D-LOOPEVAL1 and D-ARROW-CONTROL1, with no contradiction left. Proof: `jet test Tests/Guards --filter syntax_registry` passes and `git grep -n 'D-COMPREHEND1' -- Docs/Spec` shows the rule in both docs. (was #3329 c9)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Tests/Guards PASS (syntax_registry included); git grep D-COMPREHEND1 -- Docs/Spec: syntax-decisions.md, core-library.md, spec.md",
-          "at": "2026-11-16T16:45:26.163Z"
-        },
-        {
-          "n": 10,
-          "text": "A typed collection head takes a loop and builds that collection through FromIterator: `Set<String>{loop …}` and `[String: Int]{loop … -> k: v}`; a bare loop literal stays a list (D-COMPREHEND1=A). Proof: `jet test Compiler --profile golden --filter Collections/TypedLoopHeads` passes on o0, o1 and o2. (was #3329 c22)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter Collections/TypedLoopHeads PASS o0/o1/o2 (3/3)",
-          "at": "2026-11-16T16:45:27.661Z"
-        },
-        {
-          "n": 11,
-          "text": "Items and a loop never mix in one collection literal: the mix is a registered error with what/why/fix (D-COMPREHEND1=A). Proof: `jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop`. (was #3329 c23)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop PASS",
-          "at": "2026-11-16T16:45:29.125Z"
-        },
-        {
-          "n": 12,
-          "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Guards/SigilMeaningTable` (a nested guard package, since it imports jet_lexer; the census runs it through GUARD_PACKAGES in Tools/Agent/Land.jet). (was #4022 c5)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Tests/Guards/SigilMeaningTable PASS; ArrowSurface and DynSurface guards PASS and joined GUARD_PACKAGES (IfHole-6-1-sigil-meaning-table, d1e7dd3c5b)",
-          "at": "2026-11-16T18:40:27.184Z"
-        },
-        {
-          "n": 13,
-          "text": "D-SIGIL-ALGEBRA1=B: infix `^` and `^=` for power are not Jet syntax and get no teaching diagnostic (owner order), and `x.pow(n)` generates the same code the operator did. Integer bit operations use `&`, `|`, `~` and `&~` (D-BIT-SIGILS1=A, 2026-10-31). Proof: `jet test Compiler --profile ui --filter caret_is_not_power` and `jet test Compiler --profile golden --filter Pow`. (was #4022 c8)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p225 batch compiler (dev 1b2c2d0a54): jet test Compiler --profile ui --filter caret_is_not_power PASS 2/2 (caret_is_not_power, caret_is_not_power_update); jet test Compiler --profile golden --filter Pow PASS (golden 5014 pass, 0 fail); bit sigils landed as dc42d69388 (p224, cases Migrations/bit_sigils1 and golden BitwiseNot, PowerAndExclusiveOr, Crypto, Basics/Compound pass), O2 line goldens 1b2c2d0a54.",
-          "at": "2026-11-16T20:28:43.567Z"
-        },
-        {
-          "n": 14,
-          "text": "Every nested guard package under Tests/Guards runs in the census through GUARD_PACKAGES in Tools/Agent/Land.jet and passes on dev, including ImplPlacement (87 impls outside their type's body on 7300cf5099) and CorpusAST (5 failures on 7300cf5099: EncodingEETF codable-structural site, examples_have_no_redundant_grouping_parentheses, the failure syntax detector and the failure surface). Proof: `jet test Tests/Guards/ImplPlacement` and `jet test Tests/Guards/CorpusAST` pass, and both names are in GUARD_PACKAGES.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p229 batch compiler (dev 8c9859caba), commit 5bccda1582: jet test Tests/Guards/ImplPlacement PASS and jet test Tests/Guards/CorpusAST PASS; both names are in GUARD_PACKAGES in Tools/Agent/Land.jet, and the p229, p230 and p231 censuses ran them clean.",
-          "at": "2026-11-16T22:53:13.431Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "syntax",
-        "cutover"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-18T01:33:49.782Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 14,
-      "completedAt": "2026-11-18T01:33:49.782Z"
     },
     {
       "id": "c0gbe4aj",
@@ -85515,206 +84643,6 @@
       "ratifiedAt": "2026-10-02"
     },
     {
-      "id": "D-PROGRAM-FORM1",
-      "cardId": "c0p4qylf",
-      "group": "tooling",
-      "title": "Co-editing one program from text and Canvas",
-      "gist": "When text and Canvas edit the same file at once, should both edits land, and how?",
-      "lesson": "Canvas is Jet's visual editor. Its edits are meaningful operations, such as \"rename greet to welcome\", each tagged with the file revision it saw. If the file changed meanwhile, Jet refuses the edit. EYG instead treats the syntax tree as the program and shares it over the wire, so many editors can work on it.",
-      "explainer": "",
-      "story": "Leo moves a call in Canvas while his teammate renames another function in a text editor. The teammate saves first, so Canvas refuses Leo's edit as stale and he redoes it. He wants both edits to land when they do not touch the same thing.",
-      "inWild": "// EYG: IR nodes encoded as DAG-JSON; text is one optional parser\n// Unison: definitions stored by hash; text is a projection\n// Google Docs and similar editors: operations are replayed against newer versions (operational transformation)",
-      "detail": "Existing law: D-CANVAS-RAD1=A sends every Canvas change through one source-transaction engine. Today that engine checks the file revision and refuses stale edits (Docs/spec/reference/canvas-protocol.md:93-121). A keeps the engine and changes only the stale case: resolve the edit's anchors (names, source ids, resolved references) in the newest revision, replay, format, re-check, and publish atomically. If anchors fail or the check fails, nothing is written, as today.\n\nB conflicts with the Canvas rule that transactions create no graph-side sidecar (canvas-protocol.md:157-158). Text editors keep standard LSP text edits under every option; Canvas keeps its HTTP transport.\n\nMojo's \"no AST\" lesson is a separate, internal question about the self-hosted front end. It needs no owner choice and is not on this ballot; the report records it. Content addressing: Jet already hashes build records, and D adds per-definition hashes, which co-editing does not need.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Replay stale edits",
-          "detail": "When a Canvas edit arrives with an old revision, the server tries to replay it on the current text. It resolves each anchor by name and reference, applies the same semantic operation, formats, and re-checks. Success publishes a new revision. Failure returns a conflict naming the anchor that no longer resolves or the diagnostic that the merged program fails.",
-          "technical": "Reuses the existing check-before-publish seam. Conflict rules: delete versus edit of the same anchor conflicts; edits to different declarations always replay; an edit whose result fails the front-end check is refused with diagnostics.",
-          "code": "{\"ok\": true, \"revision\": \"sha256-7c…\"}"
-        },
-        {
-          "key": "B",
-          "name": "Shared tree with node IDs",
-          "detail": "The server assigns stable IDs to nodes and stores them beside each file. Editors send tree operations by ID, merged by operational transformation.",
-          "technical": "Red-green tree with an ID map; plain text saves and checkouts force reassignment.",
-          "code": "{\"op\": \"move\", \"node\": \"call-91ab\", \"after\": \"stmt-22e0\", \"base\": 41}"
-        },
-        {
-          "key": "C",
-          "name": "Refuse stale edits",
-          "detail": "Keep the current protocol.",
-          "technical": "No change.",
-          "code": "{\"ok\": false, \"conflict\": \"stale revision\"}"
-        },
-        {
-          "key": "D",
-          "name": "Tree is the program",
-          "detail": "Store definitions as content-addressed trees in the store; text files become generated views and edit buffers.",
-          "technical": "New project storage, version-control adapter, and review tooling.",
-          "code": "welcome = #sha256:4f1c…"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "EYG",
-          "note": "Structural editor targets the IR; text-position mapping is a stated non-goal.",
-          "code": "packages/morph/src/morph/editable.gleam"
-        },
-        {
-          "lang": "Unison",
-          "note": "Definitions stored by hash; renames are metadata.",
-          "code": "ucm> rename.term greet welcome"
-        },
-        {
-          "lang": "Collaborative editors",
-          "note": "Replay concurrent operations against the newest version and surface true conflicts.",
-          "code": "transform(opA, opB) -> opA'"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A lets text and Canvas edits both land when they do not collide, using the semantic edits Canvas already sends.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B's stored IDs break on the very edits co-editing must survive, such as a plain save."
-          },
-          {
-            "key": "C",
-            "reason": "C makes the second of two simultaneous edits fail and be redone."
-          },
-          {
-            "key": "D",
-            "reason": "D breaks git, grep, and every text tool for identity Jet does not need here."
-          }
-        ],
-        "tradeoff": "Jet replays meaningful edits against the newest text instead of storing node identity."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: RliProgram. Skill: rli5. The beginner pass tested the complete ballot and showed Canvas edits are already semantic and revision-checked, so the current-state panel was rewritten.",
-        "adversarial": "Author model family: claude. Adversarial model family: claude-opus. Fresh agent: OpusAdversary. The adversarial review moved the recommendation to replaying stale edits and removed the compiler-stage question."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "When text and Canvas edit the same file at once, should both edits land, and how?",
-        "lesson": "Canvas is Jet's visual editor. Its edits are meaningful operations, such as \"rename greet to welcome\", each tagged with the file revision it saw. If the file changed meanwhile, Jet refuses the edit. EYG instead treats the syntax tree as the program and shares it over the wire, so many editors can work on it.",
-        "trio": {
-          "current": {
-            "note": "Edits are semantic and revision-checked; a stale edit is refused (Docs/spec/spec.md:3609-3613).",
-            "code": "// Canvas -> POST /__jet_canvas/transaction\n{\"schema\": \"jet.canvas.edit\", \"revision\": \"sha256-1a…\",\n \"edit\": {\"move_call\": {\"call\": \"greet(name)\", \"after\": \"print(x)\"}}}\n// Meanwhile a text editor saves greet.jet (a rename elsewhere).\n// Canvas: {\"ok\": false, \"conflict\": \"stale revision\"}\n// The user reloads and redoes the move by hand."
-          },
-          "wild": {
-            "lang": "EYG",
-            "note": "The program is a node tree encoded as DAG-JSON; text is one optional view (spec/README.md, commit 75f09475).",
-            "code": "{\"0\":\"l\",\"l\":\"greet\",\n \"v\":{\"0\":\"f\",\"l\":\"name\",\"b\":{\"0\":\"v\",\"l\":\"name\"}},\n \"t\":{\"0\":\"a\",\"f\":{\"0\":\"v\",\"l\":\"greet\"},\n      \"a\":{\"0\":\"s\",\"v\":\"Ada\"}}}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Replay stale edits",
-            "gist": "Re-apply a stale semantic edit to the new revision, then re-check.",
-            "gains": [
-              "Edits that touch different things both land.",
-              "No new storage and no new file format.",
-              "Works with every text editor today."
-            ],
-            "losses": [
-              "Two edits to the same node still conflict and need a choice."
-            ],
-            "proposed": {
-              "code": "// Same stale Canvas edit as today:\n{\"revision\": \"sha256-1a…\",\n \"edit\": {\"move_call\": {\"call\": \"greet(name)\", \"after\": \"print(x)\"}}}\n// Server: the anchors still resolve in the new revision,\n// so it replays the move, formats, re-checks, and writes.\n// -> {\"ok\": true, \"revision\": \"sha256-7c…\"}\n// If the teammate deleted print(x):\n// -> {\"ok\": false, \"conflict\": \"anchor print(x) no longer exists\"}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Shared tree with node IDs",
-            "gist": "Every node gets a stable ID; editors send tree operations by ID.",
-            "gains": [
-              "Edits survive even when names change.",
-              "Closest to EYG's shared-tree model."
-            ],
-            "losses": [
-              "Node IDs need a stored map that text-only edits break.",
-              "Amends Canvas's no-sidecar rule."
-            ],
-            "proposed": {
-              "code": "{\"op\": \"move\", \"node\": \"call-91ab\", \"after\": \"stmt-22e0\", \"base\": 41}\n// The server applies tree operations by ID.\n// A git checkout or plain text save reassigns IDs."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Refuse stale edits",
-            "gist": "Keep today's rule: one edit wins, the other is redone by hand.",
-            "gains": [
-              "Already built and documented.",
-              "Never guesses."
-            ],
-            "losses": [
-              "Two people cannot edit one file at once."
-            ],
-            "proposed": {
-              "code": "{\"revision\": \"sha256-1a…\", \"edit\": {...}}\n// File changed since sha256-1a… -> {\"ok\": false, \"conflict\": \"stale revision\"}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Tree is the program",
-            "gist": "EYG and Unison style: definitions stored as hashed trees; text is a view.",
-            "gains": [
-              "Renames and moves never conflict.",
-              "Each definition has a content hash."
-            ],
-            "losses": [
-              "Git diffs, grep, and text tools need Jet-aware adapters.",
-              "A new storage model for every project."
-            ],
-            "proposed": {
-              "code": "// Stored: welcome = #sha256:4f1c… (a tree)\n// Text files are generated views and edit buffers.\n// Callers point at the hash, so a rename changes no caller."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A lets text and Canvas edits both land when they do not collide, using the semantic edits Canvas already sends.",
-          "gains": [
-            "Co-editing with no new storage or file format."
-          ],
-          "losses": [
-            {
-              "loss": "Two edits to the same node still conflict and need a choice.",
-              "mitigation": "When two people change the same thing, only a person can say which change wins."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B's stored IDs break on the very edits co-editing must survive, such as a plain save."
-            },
-            {
-              "key": "C",
-              "reason": "C makes the second of two simultaneous edits fail and be redone."
-            },
-            {
-              "key": "D",
-              "reason": "D breaks git, grep, and every text tool for identity Jet does not need here."
-            }
-          ],
-          "tradeoff": "Jet replays meaningful edits against the newest text instead of storing node identity."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-02T02:18:19.103Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-02"
-    },
-    {
       "id": "D-PORTABLE1",
       "cardId": "c0aocd58",
       "group": "platform",
@@ -89424,193 +88352,6 @@
       "status": "ratified",
       "created": "2026-10-05T01:33:42.506Z",
       "outcome": "A",
-      "ratifiedAt": "2026-10-05"
-    },
-    {
-      "id": "D-DATATREE-RULES1",
-      "cardId": "c0hh2g28",
-      "group": "stdlib",
-      "title": "One DataTree contract for parsing and decoding",
-      "situation": "DataTree holds parsed data before a program reads it as particular types. Two implementations disagree on repeated keys, number spelling, text-to-number conversion and binary bytes, so the same input can change meaning or fail on a different path. The owner chose strict duplicate handling and typed decoding, exact number text and a byte case. This records those four choices for one public data tree.",
-      "gist": "Should one data tree reject duplicate keys, preserve number text, decode strictly and represent bytes?",
-      "lesson": "Parsing reads a document into a tree. Decoding then reads that tree as a type such as Int. A Number case keeps the original numeric spelling until decoding. A Bytes case keeps raw byte values. Strict decoding rejects quoted text where a number is required instead of converting it silently.",
-      "explainer": "Beginner path: ordinary JSON parsing rejects repeated keys, and quoted text stays text when decoding an Int. Expert path: explicitly use parse_allow_duplicates to retain the later value, decode Number into a checked numeric type, and preserve CBOR byte strings as Bytes. CBOR is a binary document format. Shared work: reconcile one public carrier, format adapters, error messages, tests and reference documentation. The four row choices are independent, not a blanket endorsement of either old implementation.",
-      "story": "Lee reads a configuration file and needs repeated settings, exact numbers and quoted text to have predictable meanings.",
-      "inWild": "// JavaScript comparison; not executed.\nJSON.parse('{\"x\":1,\"x\":2}').x // 2\nJSON.parse('1.50') // numeric value 1.5",
-      "detail": "Owner chat on 2026-10-05 selected these four rules for card #4602. Evidence: $JET_STATE_ROOT/scratch/Idiom-Runtime3/DATATREE-DIFF.md:11-16 covers duplicates, :18-28 numbers, :30-35 strict text and :37-41 bytes. Its :3 explicitly limits the evidence to code reading. Object insertion order is already shared behavior (:9); this ballot does not change it.\n\nOffered duplicate policies: reject repeated keys, keep both, or keep last by default. Offered number policies: preserve exact Number text or normalize numeric values. Offered decoding policies: reject quoted text as Int or convert it leniently. Offered byte policies: preserve CBOR byte strings as Bytes or return an error.\n\nA records the chosen combination. B illustrates the old runtime-like duplicate behavior. C illustrates the map/normalized alternative with lenient decoding as an offered choice. The diff does not establish lenient decoding as an observed built-in output; it describes that policy conditionally. No execution claim is made.\n\nThe reference already documents lexical numbers, typed text and bytes, but contradicts itself on CBOR bytes according to :37-41. This record resolves the requested public behaviors, not internal number tagging or runtime-only views. Preserve format-specific textual-cell contracts rather than inferring that CSV, environment or INI text must be decoded like quoted JSON.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Strict keys and types; exact numbers and bytes",
-          "detail": "Reject duplicate keys by default; an explicit permissive parser keeps the later value. Keep number spelling exactly, reject quoted text when decoding Int, and represent binary byte strings as Bytes. Beginners get errors for ambiguous data; experts opt in to duplicate replacement.",
-          "technical": "JSON input {\"x\":1,\"x\":2} is a parse error. parse_allow_duplicates keeps x:2 at the first x position. Do not retain both pairs in the ordinary object. Number stores the exact numeric text: 1.50 re-encodes as 1.50; 1e2 as 1e2. Values such as 1e400 and integers beyond Int survive parsing exactly; range errors occur when decoding into Int or Float.\n\nStrict typed decoding: JSON {\"n\":\"42\"} into a record with n: Int is an error, not n:42. Quoted JSON text must remain distinguishable for that contract; this ballot does not choose the internal representation used to do so. CBOR bytes 0x42 01 FF decode to Bytes([1,255]), not a representation error. Bytes re-encode as a CBOR byte string, not an ordinary numeric array. Reconcile the public carrier and adapters in one cutover without a duplicate runtime DataTree.\n\nThe strict rule concerns quoted JSON text being read as Int; do not silently remove existing textual-cell parsing for other formats. Error wording may identify the appropriate kind, but this record does not invent new exact messages.",
-          "code": "// Same four inputs after the chosen rules:\n// {\"x\":1,\"x\":2} -> error; explicit parser -> x:2\n// 1.50 -> Number(\"1.50\") -> JSON 1.50\n// {\"n\":\"42\"} as {n: Int} -> error\n// CBOR 42 01 FF -> Bytes([1,255])"
-        },
-        {
-          "key": "B",
-          "name": "Keep both keys; retain exact typed values",
-          "detail": "Keep duplicate key pairs, with lookup returning the first. Retain exact Number text, strict quoted-text decoding and Bytes as on the runtime side. Experts can inspect every repeated pair, but ordinary lookup and permissive replacement no longer agree.",
-          "technical": "For {\"x\":1,\"x\":2}, retain [x:1,x:2]; field(\"x\") returns 1 and rendering preserves both pairs. The runtime comparison also reports multiset equality for objects. Number(\"1.50\") preserves spelling; quoted JSON \"42\" into Int is rejected; CBOR 0x42 01 FF becomes Bytes([1,255]). These rows describe source evidence, not a current runtime test. Only duplicate handling differs from A in this comparison set.",
-          "code": "// Same four inputs under the runtime-like rows:\n// {\"x\":1,\"x\":2} -> both pairs; lookup x -> 1\n// 1.50 -> Number(\"1.50\") -> JSON 1.50\n// {\"n\":\"42\"} as {n: Int} -> error\n// CBOR 42 01 FF -> Bytes([1,255])"
-        },
-        {
-          "key": "C",
-          "name": "Keep last; normalize and convert leniently",
-          "detail": "Keep the last duplicate value by default, normalize numbers, permit quoted text to become Int, and reject binary byte strings. This is a forgiving text-input policy with fewer value kinds, but it loses spelling and cannot preserve binary bytes.",
-          "technical": "Offered alternative rows: {\"x\":1,\"x\":2} parses as x:2 without a special parser. Normalize 1.50 to 1.5 and 1e2 to 100.0; numbers beyond the numeric carrier's range may fail during parsing. Permit JSON {\"n\":\"42\"} to decode as n:42. Reject CBOR 0x42 01 FF because no Bytes case exists.\n\nThis combination is a comparison of offered policies, not an observed implementation bundle. The evidence reports normalized numbers and missing Bytes in the built-in. It reports duplicate rejection there, not ordinary keep-last. Its lenient JSON decode result is conditional on adopting the Text conversion rule. A rejects those alternative policies explicitly.",
-          "code": "// Same inputs under the offered lenient alternatives:\n// {\"x\":1,\"x\":2} -> x:2 by default\n// 1.50 -> numeric 1.5 -> JSON 1.5\n// {\"n\":\"42\"} as {n: Int} -> n:42\n// CBOR 42 01 FF -> error"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "JavaScript",
-          "note": "JSON.parse illustrates keep-last and normalized number values; not executed or proposed as Jet's contract.",
-          "code": "JSON.parse('{\"x\":1,\"x\":2}').x // 2\nJSON.parse('1.50') // 1.5"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Record the owner's choices: reject ambiguity, retain exact source numbers and preserve binary bytes.",
-        "gains": [
-          "No silent duplicate replacement.",
-          "Lossless number and byte representation."
-        ],
-        "losses": [
-          {
-            "loss": "Loose JSON inputs need an explicit choice or correction.",
-            "mitigation": "Use parse_allow_duplicates for replacement and fix quoted numeric fields before typed decoding."
-          },
-          {
-            "loss": "Pattern matches must account for Number and Bytes.",
-            "mitigation": "Update every carrier match and teach checked decoding beside the new cases."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Keeping both keys leaves ordinary lookup dependent on which repeated value it returns."
-          },
-          {
-            "key": "C",
-            "reason": "Silent replacement, number normalization and text conversion discard distinctions the owner chose to retain."
-          }
-        ],
-        "tradeoff": "Explicit handling and lossless values instead of silent cleanup."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": "Owner explicitly requested one ballot recording these four DataTree rules on 2026-10-05.",
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "Validate the payload without Tower writes; Main posts and records outcome A. Implementation acceptance: default duplicate rejection and explicit later-value retention at the original key position. Check exact re-encoding of 1.50, 1e2, 1e400 and beyond-Int integers, with checked numeric decode failures. Check quoted JSON 42-to-Int rejection and unaffected format-specific textual-cell decoding. Check CBOR byte-string decoding and re-encoding as Bytes on every execution path. Migrate carrier matches, adapters, diagnostics, examples and the contradictory reference text together.",
-      "surface": {
-        "gist": "Should the tree reject ambiguous input while keeping exact numbers and bytes?",
-        "lesson": "A data tree holds parsed values before typed decoding. Number keeps numeric spelling; Bytes keeps raw bytes. Strict decoding does not turn quoted text into Int.",
-        "trio": {
-          "current": {
-            "note": "The same repeated key can fail or remain twice.",
-            "code": "// {\"x\":1,\"x\":2}: error or two pairs"
-          },
-          "wild": {
-            "lang": "JavaScript",
-            "note": "Illustration of silent replacement; not executed.",
-            "code": "JSON.parse('{\"x\":1,\"x\":2}').x // 2"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Chosen strict, lossless rules",
-            "gist": "Reject duplicates; keep exact numbers and bytes; reject quoted text as Int.",
-            "gains": [
-              "Explicit ambiguity handling; exact values."
-            ],
-            "losses": [
-              "Loose input needs correction or an explicit parser."
-            ],
-            "proposed": {
-              "code": "// duplicate x -> error; explicit parser -> x:2\n// 1.50 -> exact 1.50; quoted 42 as Int -> error\n// CBOR 42 01 FF -> Bytes([1,255])"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep both repeated keys",
-            "gist": "Keep both pairs, with first-value lookup; retain exact numbers, strict decoding and bytes.",
-            "gains": [
-              "All repeated pairs remain inspectable."
-            ],
-            "losses": [
-              "Lookup chooses one of multiple values."
-            ],
-            "proposed": {
-              "code": "// duplicate x -> both; lookup -> x:1\n// 1.50 -> exact 1.50; quoted 42 as Int -> error\n// CBOR 42 01 FF -> Bytes([1,255])"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep last and convert",
-            "gist": "Replace duplicates, normalize numbers, convert text and reject bytes.",
-            "gains": [
-              "Forgiving text input."
-            ],
-            "losses": [
-              "Source distinctions and binary bytes are lost."
-            ],
-            "proposed": {
-              "code": "// duplicate x -> x:2 by default\n// 1.50 -> 1.5; quoted 42 as Int -> 42\n// CBOR 42 01 FF -> error"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "The owner chose explicit errors and lossless values instead of silent cleanup.",
-          "gains": [
-            "Predictable data meaning."
-          ],
-          "losses": [
-            {
-              "loss": "Loose input needs a deliberate choice.",
-              "mitigation": "Use parse_allow_duplicates for replacement; correct quoted numeric fields before decoding."
-            },
-            {
-              "loss": "More value cases to handle.",
-              "mitigation": "Update all matches and teach checked decoding beside Number and Bytes."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Ordinary lookup still picks among repeated values."
-            },
-            {
-              "key": "C",
-              "reason": "Silent conversion loses distinctions the owner wants."
-            }
-          ],
-          "tradeoff": "Explicit handling instead of silent cleanup."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Strict JSON decoding could be misread as removing CSV or environment numeric decoding.",
-          "attempts": [
-            "Scope the quoted-text witness to JSON and preserve format-specific textual-cell contracts."
-          ],
-          "result": "No unasked change to other formats is introduced."
-        },
-        {
-          "loss": "One comparison set could misrepresent the owner's independent row choices.",
-          "attempts": [
-            "List all row alternatives and distinguish offered combinations from source-observed behavior."
-          ],
-          "result": "Keep-both, keep-last, normalization, leniency and byte rejection are all recorded without fabricated execution."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-05T13:57:51.547Z",
-      "outcome": "A",
-      "comment": "Owner chose this option in chat on 2026-10-05; recorded as a ballot.",
       "ratifiedAt": "2026-10-05"
     },
     {
@@ -96126,161 +94867,6 @@
       "ratifiedAt": "2026-10-07"
     },
     {
-      "id": "D-DB-DEVCLI1",
-      "cardId": "c0xgg9f1",
-      "group": "product",
-      "title": "Restoring database developer commands",
-      "situation": "Database developer commands let people inspect and query data from the terminal, but their original implementation never compiled and was removed during the self-host repair. Restoring them needs CSV and JSON readers with real input limits, plus a quiet output mode for scripted use. Without those limits, inspecting a large file could use excessive memory instead of failing clearly. You choose to restore the feature through those APIs, defer it, or remove it permanently; we recommend designing the safe APIs and restoring it.",
-      "gist": "Should Jet restore its database developer commands with bounded input?",
-      "lesson": "These terminal commands depend on safe CSV and JSON input and a quiet output mode. Those APIs must be designed before restoration. A does that work and restores the feature, B keeps it planned but unavailable, and C removes it permanently. A does not authorize unbounded readers.",
-      "explainer": "The feature is not restored merely by retaining its files. Input size and nesting limits must be enforced before the commands become available. Quiet output is part of their usable scripting behavior.",
-      "story": "Bea inspects a table from the terminal. She needs a large or deeply nested input to fail at a known limit rather than fill memory or overwhelm her script's output.",
-      "inWild": "# SQLite ships a developer CLI for queries and importing CSV data.\n# https://www.sqlite.org/cli.html\nsqlite3 data.db 'SELECT * FROM items LIMIT 10;'\n# SQLite also exposes resource limits, including expression depth and length.\n# https://www.sqlite.org/limits.html\n# These precedents do not supply Jet's proposed CSV/JSON reader limits.",
-      "detail": "The source ballot links restoration to the ratified SQL safety plan. Its proposed CLI input defaults are 32 MiB and 64 nesting levels. The exact bounded-reader and quiet-mode APIs remain subject to design and ratification; the example below specifies behavior without inventing a current Core function.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Design safe APIs and restore commands",
-          "detail": "Design bounded CSV and JSON readers and a quiet output mode, then restore the commands using them. Enforce the agreed limits rather than reviving code that never compiled.",
-          "technical": "Bounded readers use size limits and JSON nesting limits. Proposed CLI defaults are 33,554,432 bytes and depth 64; the output-mode type includes quiet.",
-          "code": "# After API design and command restoration:\njet db --help\n# Database commands documented with bounded CSV/JSON input\n# and a quiet output mode; exact flags come from that design."
-        },
-        {
-          "key": "B",
-          "name": "Keep the feature planned for later",
-          "detail": "Retain the feature as future work but keep it outside this CLI release. Restore nothing until the dependencies are designed and ratified later.",
-          "technical": "No database developer commands are exposed in this release.",
-          "code": "# This release has no database developer commands.\n# Restoration remains planned."
-        },
-        {
-          "key": "C",
-          "name": "Drop the feature permanently",
-          "detail": "Remove the developer command implementation and its feature-specific tests. The CLI no longer promises this feature.",
-          "technical": "Delete the feature's command files and tests from the current tree, without deleting unrelated database APIs.",
-          "code": "# Database developer commands are removed from the product.\n# No restoration is promised."
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A retains a feature already named by the SQL safety plan and restores it only after the input limits are real.",
-        "gains": [
-          "Developers regain database commands with bounded input and usable scripted output."
-        ],
-        "losses": [
-          {
-            "loss": "Restoration waits for API design and ratification.",
-            "mitigation": "Complete bounded readers first, then restore commands against their approved limits rather than shipping unsafe interim input handling."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps the feature promised but leaves its return unspecified."
-          },
-          {
-            "key": "C",
-            "reason": "C permanently removes a feature already named by the safety plan."
-          }
-        ],
-        "tradeoff": "Do the safe-input API work before restoration rather than defer indefinitely or abandon the planned feature."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "After API ratification, exercise 32 MiB input limits and JSON depth 64, including refusal just beyond each limit. Verify quiet mode and restored developer commands compile and run against approved bounded readers.",
-      "surface": {
-        "gist": "Should Jet restore database developer commands with safe input limits?",
-        "lesson": "The old commands never compiled and were removed. They need bounded CSV and JSON reading and quiet output. A designs those APIs and restores the commands, B delays the feature, and C drops it. Restoration must not use unbounded interim readers.",
-        "trio": {
-          "current": {
-            "note": "The repaired CLI lacks these commands.",
-            "code": "# Database developer commands unavailable."
-          },
-          "wild": {
-            "lang": "SQLite CLI",
-            "note": "A real database tool offers terminal queries; source is in the long form.",
-            "code": "sqlite3 data.db 'SELECT * FROM items LIMIT 10;'"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Safe APIs, then restoration",
-            "gist": "Approve limits and quiet output before restoring commands.",
-            "gains": [
-              "Useful terminal commands with bounded input."
-            ],
-            "losses": [
-              "Commands wait for API design and approval."
-            ],
-            "proposed": {
-              "code": "# Restored after API design:\njet db --help\n# Documented input limits and quiet mode."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Restore later",
-            "gist": "Keep the feature planned but unavailable in this release.",
-            "gains": [
-              "No restoration dependency for this release."
-            ],
-            "losses": [
-              "Developers still lack the commands."
-            ],
-            "proposed": {
-              "code": "# No database developer commands this release."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Drop the feature",
-            "gist": "Remove the commands and feature-specific tests permanently.",
-            "gains": [
-              "No unfinished feature promise remains."
-            ],
-            "losses": [
-              "A planned database tool is lost."
-            ],
-            "proposed": {
-              "code": "# Database developer commands removed permanently."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps the planned feature and makes its safe-input prerequisites real before it returns.",
-          "gains": [
-            "Restored commands with enforced limits."
-          ],
-          "losses": [
-            {
-              "loss": "Restoration waits for API approval.",
-              "mitigation": "Finish bounded readers first and restore commands against their approved behavior."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B leaves restoration at an unspecified later time."
-            },
-            {
-              "key": "C",
-              "reason": "C abandons a feature already named by the safety plan."
-            }
-          ],
-          "tradeoff": "Design safe input first instead of restoring unsafe commands or abandoning the feature."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-10T01:07:17.529Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-10"
-    },
-    {
       "id": "D-INT128-1",
       "cardId": "c066lqhv",
       "group": "language",
@@ -100616,184 +99202,6 @@
       "created": "2026-10-23T01:40:48.180Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-01"
-    },
-    {
-      "id": "D-RAYLIB-DRIVER-LOAD1",
-      "cardId": "c0awastn",
-      "group": "platform",
-      "title": "Graphical Jet programs speak the display and sound protocols directly and stay static",
-      "situation": "Jet programs are single static files with no dynamic loader. Opening a window today seems to need C driver libraries that a static program cannot load, so games run only headless. But a desktop's display server and sound server are reached over local sockets, and the kernel exposes gamepads as plain files. This vote decides how `ray` reaches the screen, input and sound. We recommend speaking those protocols in Jet, keeping games static, and making GPU drivers a later opt-in.",
-      "gist": "Should graphical Jet programs talk to the display and sound servers directly and stay single static files?",
-      "lesson": "A window on Linux is a conversation over a local socket with the display server, X11 or Wayland. The program draws pixels into shared memory and tells the server to show them. Sound works the same way with the sound server. Only GPU acceleration needs the vendor's driver library.",
-      "explainer": "",
-      "story": "Sam builds his Jet game and copies one file to a friend's laptop. It opens a window, reads the gamepad and plays sound with nothing installed. Later he switches on GPU drawing, and that build uses the laptop's own graphics driver.",
-      "inWild": "// Rust x11rb: talks X11 over the socket with no C library\nlet (conn, screen) = x11rb::rust_connection::RustConnection::connect(None)?;\nlet win = conn.generate_id()?;\nconn.create_window(COPY_DEPTH_FROM_PARENT, win, root, 0, 0, 800, 450, 0, WindowClass::INPUT_OUTPUT, 0, &values)?;",
-      "detail": "Today. Jet executables are static musl programs, and musl's static dlopen does nothing. The raylib leaves take a no-library path (Compiler/JetRuntime/Source/RouteAGame.jet:1-7), so `window_should_close` is always true natively. The old draft of this ballot recommended dynamic executables for all graphical programs, at the cost of the single-file deploy.\n\nWhat A does for the screen. On Wayland, `ray` connects to the socket named by WAYLAND_DISPLAY and shares an RGBA buffer through a memfd. It opens the window with xdg-shell. On X11 it connects to the DISPLAY socket and presents with MIT-SHM, falling back to PutImage.\n\nWhen a Wayland compositor offers no server-side title bar, as GNOME's does not, `ray` uses its X11 path through XWayland. A later stage can draw its own title bar instead.\n\nInput. Keys and mouse arrive as display-server events. Key enums are physical key positions from the kernel key code, which both servers send. Typed-character input reads the XKB keymap the server hands over. Gamepads are read from /dev/input/event files, which logind grants to the seat user.\n\nSound. `ray` mixes in Jet and streams to the PulseAudio native socket. PipeWire serves that socket on current distros. With no sound server it writes to the kernel ALSA device through ioctl calls, as Android's tinyalsa does.\n\nThe operating-system doors. These need sockets with file-descriptor passing, memfd, mmap and ioctl. They sit in the Core platform module from card 5035 as audited calls, not as private runtime powers. Everything above them, including protocol encoding, is ordinary Jet.\n\nGPU, a later stage. Mesa and NVIDIA drivers are glibc shared libraries and cannot load into a static musl process. A program that opts into GPU drawing builds as a dynamic executable that loads libvulkan.so.1 through the system loader. A GPU driver is always an installed shared library, so that build loses nothing a static file could give.\n\nWhy not a loader inside the runtime. Loading glibc-built drivers into a musl process mixes two C libraries, two allocators and two thread-local layouts. The glibc linker warns that a static program calling dlopen needs the exact glibc it was built with. Musl ships no static dlopen at all.\n\nPeers. Rust's x11rb and wayland-client both have pure-Rust protocol backends. Go has jezek/xgb for X11 and jfreymuth/pulse for the PulseAudio protocol. Android ships tinyalsa for kernel sound. These show the protocols are stable and small enough to own.\n\nEdge cases. With no DISPLAY or WAYLAND_DISPLAY, `ray.init_window` returns a typed error that names both variables. `ray.headless_window` always works. Programs that never open a window link none of this code.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Speak the display and sound protocols in Jet; GPU is a later opt-in",
-          "detail": "Software-drawn games stay single static files and need nothing installed. GPU drawing, when it lands, builds dynamically against the installed driver.",
-          "technical": "Wayland and X11 clients, PulseAudio and ALSA streams, and evdev readers live in `ray` over audited Core socket, memfd, mmap and ioctl calls. A GPU build selects dynamic linking and loads libvulkan.so.1.",
-          "code": "use ray\n\nwin :: ray.init_window(800, 450, \"demo\")?   // no C library, still one static file\nloop frame in win.frames() -> frame.clear_background(.RayWhite)"
-        },
-        {
-          "key": "B",
-          "name": "Every graphical program builds as a dynamic executable",
-          "detail": "Graphical programs link the system's window, sound and driver libraries through the normal loader.",
-          "technical": "The build switches to dynamic linking whenever `ray` is used. libX11 or libwayland-client, libasound and libGL resolve at start.",
-          "code": "use ray   // build becomes dynamic; needs libX11, libasound, libGL\n\nwin :: ray.init_window(800, 450, \"demo\")?"
-        },
-        {
-          "key": "C",
-          "name": "A small driver loader inside the static runtime",
-          "detail": "The static runtime opens the C libraries itself through one loader with a fixed symbol list.",
-          "technical": "One audited loader maps ELF shared objects and resolves a fixed symbol table for the window, sound and GL libraries.",
-          "code": "use ray   // runtime loads libGL.so.1 itself\n\nwin :: ray.init_window(800, 450, \"demo\")?"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "jezek/xgb speaks X11 in pure Go, and jfreymuth/pulse speaks the PulseAudio protocol in pure Go. Source: pkg.go.dev.",
-          "code": "conn, _ := xgb.NewConn()\nc, _ := pulse.NewClient()"
-        },
-        {
-          "lang": "Rust",
-          "note": "wayland-client has a pure-Rust backend, so no libwayland is loaded. Source: docs.rs/wayland-backend.",
-          "code": "let conn = wayland_client::Connection::connect_to_env()?;"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Games keep Jet's one-file deploy and need nothing installed. GPU drawing still arrives, through the only route that works for real drivers.",
-        "gains": [
-          "Graphical games stay single static files.",
-          "No C library is needed to open a window or play sound.",
-          "GPU builds use the system's own driver loader."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B gives up the one-file deploy for every game, even games that draw no GPU pixels."
-          },
-          {
-            "key": "C",
-            "reason": "C mixes two C libraries in one process, which real drivers do not support."
-          }
-        ],
-        "tradeoff": "Jet maintains its own small display, input and sound protocol clients."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "No-library path: Compiler/JetRuntime/Source/RouteAGame.jet:1-7 at dev 94e290bb4a. Cards 5086 and 5035. Package home and names from D-RAYLIB-FONT-HOME1 and D-RAY-API1. Platform doors from D-GAME-PLATFORM1.",
-      "surface": {
-        "gist": "Should graphical Jet programs talk to the display and sound servers directly and stay single static files?",
-        "lesson": "A window on Linux is a conversation over a local socket with the display server. The program draws pixels into shared memory and asks the server to show them. Sound works the same way. Only GPU acceleration needs the vendor's driver library.",
-        "trio": {
-          "current": {
-            "note": "Today a native Jet program cannot reach a window, so the game loop ends at once.",
-            "code": "use core.game.raylib as rl\n\nwin :: rl.window_open(800, 450, \"demo\")\nrl.window_should_close(win)   // always true natively"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "x11rb talks to the X server over its socket with no C library at all.",
-            "code": "let (conn, screen) = RustConnection::connect(None)?;\nconn.create_window(depth, win, root, 0, 0, 800, 450, 0, class, 0, &values)?;"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Speak the display and sound protocols in Jet; GPU is a later opt-in",
-            "gist": "Games stay one static file; GPU builds use the installed driver.",
-            "gains": [
-              "Games run from one file with nothing installed.",
-              "No C library is loaded to open a window.",
-              "GPU builds use the system's own loader."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "use ray\n\nwin :: ray.init_window(800, 450, \"demo\")?   // still one static file\nloop frame in win.frames() -> frame.clear_background(.RayWhite)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Every graphical program builds as a dynamic executable",
-            "gist": "Link the system's window, sound and driver libraries normally.",
-            "gains": [
-              "Reuses the system libraries every desktop program uses."
-            ],
-            "losses": [
-              "Every game needs those libraries installed.",
-              "No game ships as one file."
-            ],
-            "proposed": {
-              "code": "use ray   // build turns dynamic; needs libX11, libasound, libGL\n\nwin :: ray.init_window(800, 450, \"demo\")?"
-            }
-          },
-          {
-            "key": "C",
-            "name": "A small driver loader inside the static runtime",
-            "gist": "The runtime opens the C libraries itself.",
-            "gains": [
-              "Games stay one file, in theory."
-            ],
-            "losses": [
-              "Real drivers expect a different C library.",
-              "A new loader must be trusted on every platform."
-            ],
-            "proposed": {
-              "code": "use ray   // runtime loads libGL.so.1 itself\n\nwin :: ray.init_window(800, 450, \"demo\")?"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Games keep the one-file deploy and need nothing installed. GPU drawing still arrives, through the only route that works with real drivers.",
-          "gains": [
-            "One-file games with nothing installed.",
-            "No C library to open a window or play sound.",
-            "GPU builds use the system's driver loader."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Every game loses the one-file deploy, even games with no GPU drawing."
-            },
-            {
-              "key": "C",
-              "reason": "Real drivers do not support loading into a static program."
-            }
-          ],
-          "tradeoff": "Jet maintains its own small display, input and sound protocol clients."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-23T01:40:51.666Z",
-      "designAway": [
-        {
-          "loss": "GPU-drawn games are not single static files.",
-          "attempts": [
-            "A loader inside the static runtime (option C): rejected, real drivers need the system C library."
-          ],
-          "result": "GPU drawing is opt-in. A GPU driver is always an installed shared library, so a static file could not carry it anyway."
-        },
-        {
-          "loss": "GNOME's Wayland session draws no title bars for clients.",
-          "attempts": [
-            "Require the libdecor library: rejected, it is a C library."
-          ],
-          "result": "`ray` uses XWayland there, which every GNOME session runs; a later stage can draw its own title bar."
-        }
-      ],
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
     },
     {
       "id": "D-SCRIPT-FAIL1",
@@ -111798,328 +110206,6 @@
       "ratifiedAt": "2026-10-31"
     },
     {
-      "id": "D-REJECT-AT1",
-      "cardId": "c0wesey9",
-      "group": "other",
-      "title": "One report channel for a library's compile-time checks",
-      "situation": "Libraries can check code while it compiles in two ratified ways. A hook returns plain warnings about a whole function. A marker check calls `reject` with a full library error, but only on the marker's line. A house rule like \"never keep an entity past a frame\" needs an error on the bad call, with a why and a fix. The owner decides whether both ways share one report type that can point inside the checked code. We recommend that, with an optional location.",
-      "gist": "Should a house rule's report be a real error that points at the bad line, through the same channel `reject` uses?",
-      "lesson": "Jet has two ratified ways for a library to report while compiling. A hook finding is a message-only warning at a whole declaration. `reject` raises a full library error, with what, why and fix, but only at the marker's line. Neither can say \"this call, here, is an error\". Whichever option wins, `reject` and hook findings still need to be built.",
-      "explainer": "",
-      "story": "Priya keeps a game engine with one house rule: never keep an entity past the end of a frame. Her check runs over the whole codebase while compiling and finds the bad call. The report is a plain warning on the function's first line, and a 200-line function hides the call.",
-      "inWild": "// Jai metaprogram check (Jonathan Blow, youtu.be/ZF1m1DsW3Rg 07:57-08:35)\ncompiler_report(\"Don't hold an Entity pointer across a frame; see wiki/frames\", loc = node.location);",
-      "detail": "Source: card #6377, Blow talk 07:57-08:35 (youtu.be/ZF1m1DsW3Rg), report Docs/research/blow-error-reporting-talk-2026-10-30.md. Related law: D-MARKER-DIAG1=A (#6039, library Diagnostic and `reject`). D-HOOK-STAGES1=A: hook findings are L1401 warnings, and deny gives E1293. D-JAI-EVENTS1=A: settled and finished stages also return findings. D-META-COMPILER1=A: its Error event observes diagnostics and does not raise them. Build card: #6388. Probe t11_reject.jet: `reject` is E0102 today on jet 03c64ad0c4.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One report type, placed anywhere in the checked code",
-          "detail": "A hook may return a finding built from a library error value, the same kind of value `reject` takes. That value brings its own code, severity, what, why and fix. Both calls take an optional `at:` naming a spot inside the code being checked, such as one call.\n\nWithout `at:`, nothing moves. A hook finding sits on its declaration, and a `reject` sits on the marker's line. With `at:`, that line becomes a note under the report.\n\nA message-only hook finding stays a warning, exactly as ratified. A team's policy can still turn any warning into an error. A dependency's hook that can raise errors says so in its grant request.",
-          "technical": "`compiler.finding` gains an overload `finding(err: impl Diagnostic, at: Span?)`, beside the ratified `finding(d, msg)`. `reject(err, at: Span?)` gains the same parameter. Severity comes from the Diagnostic's `severity` constant (D-MARKER-DIAG1=A), so an error-severity finding fails the build without a deny policy.\n\n`at:` accepts only a span taken from the invocation's own payload: the hook's declaration or the marked item. Any other span is a registered error. Each direct named call in the `compiler.declared` payload carries its span as `d.call_sites: [compiler.CallSite{name, span}]`; this ballot adds that list beside the ratified `d.calls` names.\n\nThis amends D-MARKER-DIAG1's sentence \"primary span is the marker's use site\" to add \"unless `at:` names a span inside the marked item\". The D-HOOK-STAGES1 grant text lists \"findings and errors\" when a hook module builds Diagnostic findings. Merge identity is the finding's package-qualified code plus span: the Diagnostic's `code`, or `lint_name` when its severity is .Lint; message-only findings keep their hook/lint identity. `#Allow` on the item that holds the span silences warnings, as today.",
-          "code": "// game/rules.jet: a hook module in the game package; FrameHold's code defaults to its path, game.FrameHold\nuse core.compiler\n\nstruct FrameHold {}\nimpl FrameHold.Diagnostic {\n    fn what(self) -> String { \"an entity is kept past the frame\" }\n    fn why(self) -> String { \"entities may be freed when the frame ends\" }\n    fn fix(self) -> String { \"store the entity id and look it up each frame\" }\n}\n\n#On(compiler.declared)\nfn frame_rule(d: compiler.Declaration) -> [compiler.Finding] {\n    d.call_sites\n        .filter(c -> c.name == \"engine.keep_entity\")\n        .map(c -> compiler.finding(FrameHold{}, at: c.span))\n}\n\n// $ jet check\n// Error [game.FrameHold]: an entity is kept past the frame\n//   --> app/update.jet:214:5\n//    = note: reported by hook game.frame_rule on update (app/update.jet:12)\n//  Why: entities may be freed when the frame ends\n//  Fix: store the entity id and look it up each frame"
-        },
-        {
-          "key": "B",
-          "name": "Keep the two ratified channels",
-          "detail": "Hook findings stay message-only warnings on a declaration. A team that wants an error adds the lint to its deny policy. `reject` stays the only library error, always on the marker's line.",
-          "technical": "No change to D-HOOK-STAGES1=A (L1401 findings, deny gives E1293) or D-MARKER-DIAG1=A (primary span is the marker's use site).",
-          "code": "// package.jet of every team that wants the rule enforced\npolicy: { lints: { deny: [\"frame_rule\"] } }\n\n// Error [E1293] (frame_rule): entity kept past the frame\n//   --> app/update.jet:12:1"
-        },
-        {
-          "key": "C",
-          "name": "Only `reject` gains a location",
-          "detail": "`reject` takes an optional `at:` naming a spot inside the marked item. Hook findings stay message-only warnings on a declaration.",
-          "technical": "Amends only D-MARKER-DIAG1=A, as in A. D-HOOK-STAGES1=A findings are unchanged.",
-          "code": "#game.FrameSafe\nfn update(world: World) {\n    // ... 200 lines ...\n    engine.keep_entity(world.player)   // the error points here\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "compiler_report takes a location, so metaprogram checks point at any node.",
-          "code": "compiler_report(msg, loc = node.location);"
-        },
-        {
-          "lang": "Rust proc macros",
-          "note": "A macro error carries a span chosen by the macro author.",
-          "code": "syn::Error::new(field.span(), \"fields must be public\")"
-        },
-        {
-          "lang": "ESLint",
-          "note": "A rule reports at any node, and the rule's metadata sets its severity.",
-          "code": "context.report({ node: call, messageId: \"frameHold\" });"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Blow's house rule needs an error that names the bad line and explains itself. One report type gives hooks and markers the same power, with no second mechanism.",
-        "gains": [
-          "House rules read like Jet's own errors.",
-          "One report type to learn, render and look up."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It leaves house rules as vague warnings on the wrong line, which is the exact problem in the story."
-          },
-          {
-            "key": "C",
-            "reason": "It fixes markers only, while the codebase-wide rule in Blow's example is a hook."
-          }
-        ],
-        "tradeoff": "None remains. A dependency's hook can raise errors only after a grant that says so, just as a dependency's marker can already `reject`."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": "Owner batch on card #6377 (mine the Blow error-reporting talk), routed by Main on 2026-10-30",
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should a house rule's report be a real error that points at the bad line, through the same channel `reject` uses?",
-        "lesson": "Jet has two ratified ways for a library to report while compiling. A hook finding is a message-only warning at a whole declaration. `reject` raises a full library error, with what, why and fix, but only at the marker's line. Neither can say \"this call, here, is an error\". Whichever option wins, `reject` and hook findings still need to be built.",
-        "trio": {
-          "current": {
-            "note": "Ratified today: a hook returns message-only warnings about a declaration. Only a team policy can turn them into errors.",
-            "code": "#On(compiler.declared)\nfn frame_rule(d: compiler.Declaration) -> [compiler.Finding] {\n    if d.calls.contains(\"engine.keep_entity\") {\n        return [compiler.finding(d, \"entity kept past the frame\")]\n    }\n    return []\n}\n// Warning [L1401] (frame_rule): entity kept past the frame\n//   --> app/update.jet:12:1      (the function, not the call)"
-          },
-          "wild": {
-            "lang": "Jai",
-            "note": "A metaprogram reports an error at any code node's location (Blow's stream, 07:57-08:35).",
-            "code": "compiler_report(\"Don't hold an Entity pointer across a frame\", loc = node.location);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One report type, placed anywhere in the checked code",
-            "gist": "Hooks and `reject` both report a library error value. An optional `at:` names any spot inside the code being checked.",
-            "gains": [
-              "A house rule can be a real error with a why and a fix.",
-              "The report points at the bad call, not the function."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "#On(compiler.declared)\nfn frame_rule(d: compiler.Declaration) -> [compiler.Finding] {\n    d.call_sites\n        .filter(c -> c.name == \"engine.keep_entity\")\n        .map(c -> compiler.finding(FrameHold{}, at: c.span))\n}\n// Error [game.FrameHold]: an entity is kept past the frame\n//   --> app/update.jet:214:5"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep the two ratified channels",
-            "gist": "Hook findings stay message-only warnings on a declaration. `reject` stays at the marker's line.",
-            "gains": [
-              "Nothing ratified changes."
-            ],
-            "losses": [
-              "A house rule is never an error unless each team adds a policy.",
-              "Reports point at the function, not the bad call."
-            ],
-            "proposed": {
-              "code": "Warning [L1401] (frame_rule): entity kept past the frame\n  --> app/update.jet:12:1"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Only `reject` gains a location",
-            "gist": "`reject` may point inside the marked item. Hook findings stay message-only warnings.",
-            "gains": [
-              "A marker check can point at the bad call."
-            ],
-            "losses": [
-              "Codebase-wide house rules stay warnings with no why or fix.",
-              "Two report shapes remain for one job."
-            ],
-            "proposed": {
-              "code": "#game.FrameSafe\nfn update(world: World) { ... }\n// Error [game.FrameHold]: an entity is kept past the frame\n//   --> app/update.jet:214:5"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Blow's house rule needs an error that names the bad line and explains itself. One report type gives hooks and markers the same power, with no second mechanism.",
-          "gains": [
-            "House rules read like Jet's own errors.",
-            "One report type to learn, render and look up."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "It leaves house rules as vague warnings on the wrong line, which is the exact problem in the story."
-            },
-            {
-              "key": "C",
-              "reason": "It fixes markers only, while the codebase-wide rule in Blow's example is a hook."
-            }
-          ],
-          "tradeoff": "None remains. A dependency's hook can raise errors only after a grant that says so, just as a dependency's marker can already `reject`."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T21:17:01.786Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
-      "id": "D-DIAG-LIBLINK1",
-      "cardId": "c0wesey9",
-      "group": "other",
-      "title": "Whether a library's error can carry its own help link",
-      "situation": "Every error Jet prints ends with a help line that links to a page about that error. Libraries can now define their own errors, such as a game engine refusing code that keeps an entity past a frame. Those errors have a what, a why and a fix, but no way to give a link, so they end without help. The owner decides what a library error shows on that line. We recommend an optional link on the error type, always printed beside the explain command.",
-      "gist": "Every Jet error ends with a help link. What should a library's own error show there?",
-      "lesson": "Jet's own errors end with a `More:` line linking to a page about that error code. Libraries can define their own errors with a what, a why and a fix, but they have no way to give a link. Whichever option wins, library errors still need to be built.",
-      "explainer": "",
-      "story": "Priya's engine refuses code that keeps an entity past a frame. The why and fix fit in two lines, but the reasoning needs a page with diagrams. Her team's wiki has that page, and she wants every report to point at it.",
-      "inWild": "// Blow's metaprogram check links to a web page (youtu.be/ZF1m1DsW3Rg 07:57-08:14)\n\"Hey, you're not supposed to do this in this code base ... here's the link to the web page\"",
-      "detail": "Source: card #6377, Blow talk 07:57-08:14 (youtu.be/ZF1m1DsW3Rg), report Docs/research/blow-error-reporting-talk-2026-10-30.md. Related law: D-DIAG-URL1=B (every diagnostic carries a link), D-MARKER-DIAG1=A (#6039, library Diagnostic trait), D-HOOK-STAGES1=A (hook findings are L1401). Build card: #6388. Probe t01_cascade.jet shows today's `More:` line on jet 03c64ad0c4.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Optional link, plus the explain command",
-          "detail": "The Diagnostic trait gains an optional constant `more`, an https address. The report prints `More: <more>` and then `(or: jet explain game.FrameHold)`. Without `more`, the report prints `More: jet explain game.FrameHold`.\n\nA third-party page can go dead later. The explain command reads the library's own texts from the installed package, so it still works offline and after the page is gone.\n\nToday a hook finding is message-only and keeps its L1401 code, which already links to Jet's page. If D-REJECT-AT1 adopts Diagnostic findings, they print that value's `more`.",
-          "technical": "Trait constant `more: String?` with default None, beside `code`, `severity` and `lint_name` (D-MARKER-DIAG1=A). The registry check refuses an address that is not https. Machine output carries `more` and `explain` as two fields, not prose (D-DIAG-URL1 review note).\n\nThis amends D-DIAG-URL1=B, which fixes the line as `More: jet-lang.dev/e/<CODE>`. For package codes, A prints `More: <more>  (or: jet explain <code>)`, or `More: jet explain <code>` when there is no link. Jet's own codes keep the ratified line.\n\n`jet explain <package code>` prints what, why and fix from the package's Diagnostic impl, which card #6388 already plans. Message-only hook findings (D-HOOK-STAGES1=A) keep the L1401 line. If D-REJECT-AT1 adopts Diagnostic findings, they print that value's `more` through this same path.",
-          "code": "impl FrameHold.Diagnostic {\n    more :: \"https://wiki.example.com/frames\"\n    fn what(self) -> String { \"`{self.name}` is kept past the frame\" }\n    fn why(self) -> String { \"entities may be freed when the frame ends\" }\n    fn fix(self) -> String { \"store the entity id and look it up each frame\" }\n}\n\n// Error [game.FrameHold]: `player` is kept past the frame\n//  Why: entities may be freed when the frame ends\n//  Fix: store the entity id and look it up each frame\n// More: https://wiki.example.com/frames  (or: jet explain game.FrameHold)"
-        },
-        {
-          "key": "B",
-          "name": "No link for library errors",
-          "detail": "Library errors print no `More:` line. Only Jet's own codes link. Hook findings keep only their L1401 link.",
-          "technical": "The Diagnostic trait stays as D-MARKER-DIAG1=A ratified it: what, why, fix, code, severity and lint name. The renderer omits the `More:` line when the code is not a Jet registry code.",
-          "code": "Error [game.FrameHold]: `player` is kept past the frame\n Why: entities may be freed when the frame ends\n Fix: store the entity id"
-        },
-        {
-          "key": "C",
-          "name": "One link pattern per package",
-          "detail": "The package file gains `error_docs`. Every error code of that package links to that address followed by the code.",
-          "technical": "Package field `error_docs: String?`, an https prefix. The renderer prints `More: <error_docs><code>`. Without the field, no `More:` line is printed.",
-          "code": "package { name: \"game\", error_docs: \"https://wiki.example.com/e/\" }\n// More: https://wiki.example.com/e/game.FrameHold"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust (clippy)",
-          "note": "Every lint ends with a link to its page.",
-          "code": "= help: for further information visit https://rust-lang.github.io/rust-clippy/..."
-        },
-        {
-          "lang": "ESLint",
-          "note": "Each rule's metadata can carry its own docs URL, shown by editors.",
-          "code": "meta: { docs: { url: \"https://example.com/rules/no-frame-hold\" } }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It matches the ratified rule that every error ends with a link. It lets a house rule point at the page that explains it.",
-        "gains": [
-          "Library errors read like Jet's own.",
-          "No library is forced to host pages."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It breaks the ratified rule that every error carries a link, and hides the explanation Blow's example relies on."
-          },
-          {
-            "key": "C",
-            "reason": "It forces one address layout on every package, even when the explanation already lives elsewhere."
-          }
-        ],
-        "tradeoff": "None remains. A library without a page, or with a page that later vanishes, still gets a working `jet explain` line."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": "Owner batch on card #6377 (mine the Blow error-reporting talk), routed by Main on 2026-10-30",
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Every Jet error ends with a help link. What should a library's own error show there?",
-        "lesson": "Jet's own errors end with a `More:` line linking to a page about that error code. Libraries can define their own errors with a what, a why and a fix, but they have no way to give a link. Whichever option wins, library errors still need to be built.",
-        "trio": {
-          "current": {
-            "note": "A Jet error ends with a link; a library error has nowhere to put one (the trait has what, why and fix only).",
-            "code": "Error [E0107]: Nothing named `missing_count` exists here\n Fix: Declare it first\nMore: jet-lang.dev/e/E0107"
-          },
-          "wild": {
-            "lang": "Rust (clippy)",
-            "note": "Each lint message ends with a link to its page.",
-            "code": "= help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#needless_return"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Optional link, plus the explain command",
-            "gist": "An error type may declare a link. The `More:` line shows it beside the `jet explain` command, which always works.",
-            "gains": [
-              "House rules can point at their own page.",
-              "Every error still ends with a working `More:` line."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "impl FrameHold.Diagnostic {\n    more :: \"https://wiki.example.com/frames\"\n    ...\n}\n// More: https://wiki.example.com/frames  (or: jet explain game.FrameHold)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "No link for library errors",
-            "gist": "Library errors print no `More:` line.",
-            "gains": [
-              "Nothing to build."
-            ],
-            "losses": [
-              "Library errors look different from Jet's own.",
-              "A house rule cannot point at its explanation."
-            ],
-            "proposed": {
-              "code": "Error [game.FrameHold]: `player` is kept past the frame\n Fix: store the entity id"
-            }
-          },
-          {
-            "key": "C",
-            "name": "One link pattern per package",
-            "gist": "A package declares one docs address; each of its errors links to that address plus its code.",
-            "gains": [
-              "One setting covers every error in the package."
-            ],
-            "losses": [
-              "Each error needs a page at one fixed address, even if one exists."
-            ],
-            "proposed": {
-              "code": "package { name: \"game\", error_docs: \"https://wiki.example.com/e/\" }\n// More: https://wiki.example.com/e/game.FrameHold"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "It matches the ratified rule that every error ends with a link. It lets a house rule point at the page that explains it.",
-          "gains": [
-            "Library errors read like Jet's own.",
-            "No library is forced to host pages."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "It breaks the ratified rule that every error carries a link, and hides the explanation Blow's example relies on."
-            },
-            {
-              "key": "C",
-              "reason": "It forces one address layout on every package, even when the explanation already lives elsewhere."
-            }
-          ],
-          "tradeoff": "None remains. A library without a page, or with a page that later vanishes, still gets a working `jet explain` line."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T21:17:03.526Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
       "id": "D-COMPUTE-TENSOR-STORE1",
       "cardId": "c06lvend",
       "group": "library",
@@ -112304,176 +110390,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-30T22:49:38.144Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
-      "id": "D-RAY-API1",
-      "cardId": "c0awastn",
-      "group": "core-library",
-      "title": "The native ray library keeps raylib's names but draws on explicit window and frame values",
-      "situation": "Jet is building `ray`, its own game library written in Jet, meant to feel like raylib and beat it. Raylib keeps one hidden global window, so drawing calls take no window and tests cannot run two windows or check pixels. Its colors and keys are plain integers, so a wrong key compiles. This vote fixes the public shape of `ray`: its names, how a program reaches the window and frame, and its types for colors and keys.",
-      "gist": "Should `ray` keep raylib's function names but call them on window and frame values, with typed colors and keys?",
-      "lesson": "Raylib programs open one window, then draw each frame between begin and end calls on hidden global state. A frame value makes that state visible: the loop hands you the frame, and drawing calls hang off it. A headless window draws the same pixels into memory, so a test can check them exactly.",
-      "explainer": "",
-      "story": "Mia ports a raylib tutorial. `DrawRectangle(10, 10, 50, 50, RED)` becomes `frame.draw_rectangle(10, 10, 50, 50, .Red)`. Her test opens a headless window, draws one frame, and checks the screenshot's checksum.",
-      "inWild": "// C raylib: hidden global window and plain integer keys\nInitWindow(800, 450, \"demo\");\nwhile (!WindowShouldClose()) {\n    BeginDrawing();\n    ClearBackground(RAYWHITE);\n    if (IsKeyDown(KEY_SPACE)) DrawRectangle(10, 10, 50, 50, RED);\n    EndDrawing();\n}",
-      "detail": "Today. core.game.raylib exposes 18 functions with raylib-style global drawing: `begin_drawing(window)`, then `draw_rectangle(...)` with no window. Keys and gamepad buttons are strings checked at run time (Core/Game/Raylib.jet:124-176). The library is headless on the native runtime.\n\nWhat A does. `ray.init_window(w, h, title)` returns a `Window`. `ray.headless_window(w, h)` returns the same type, drawing into memory. `loop frame in win.frames()` runs once per frame and presents when the body ends. The loop stops when the user closes the window.\n\nNames. Every raylib function keeps its name in snake_case and its argument order. Drawing calls hang off `frame`, window and input calls off `win`, and loaders off `ray`. So `DrawCircle(x, y, r, c)` is `frame.draw_circle(x, y, r, c)` and `IsKeyDown(KEY_A)` is `win.is_key_down(.A)`.\n\nTypes. `Color` is a struct with raylib's named colors as constants, so `.Red` and `Color{r: 1, g: 2, b: 3, a: 255}` both work. `Key`, `MouseButton` and `GamepadButton` are enums, so a misspelled key is a compile error. Raylib's `Vector2` and `Rectangle` are structs; integer and float overloads both exist.\n\nEffects. Drawing on a frame only writes memory, so it carries no effect and runs in any function or thread. Opening a window, presenting, reading input and playing sound carry `GPU`. Loading files adds `FS`.\n\nHeadless capture. `win.load_image_from_screen()` is raylib's own name and returns an `Image`. `image.checksum()` gives a stable hash of its RGBA bytes. The software rasterizer draws identical pixels on every tier and host, so goldens can assert it.\n\nMulti-window. Each `Window` owns its framebuffer, so two headless windows can render in one test, which raylib cannot do.\n\nPeers. Raylib's 70-plus language bindings mostly keep its names, often generated from raylib_api.json. Rust raylib-rs moved drawing onto a `RaylibDrawHandle` from `rl.begin_drawing(&thread)`, the same idea as the frame value. Pygame and LÖVE keep global state, a common complaint when testing.\n\nEdge cases. Drawing outside the framebuffer clips. A frame used after its loop iteration is a compile error, because `frame` is a loop-scoped borrow. `win.frames()` on a closed window yields nothing.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Raylib names on window and frame values, typed colors and keys",
-          "detail": "Keep every raylib name and argument order. Draw through the `frame` the loop gives you. Colors, keys and buttons are typed.\n\nA headless window renders to memory with the same calls.",
-          "technical": "`Window` owns its framebuffer and platform handle. `win.frames()` yields a loop-scoped `Frame` borrow and presents after each body. Drawing methods take `&Frame` and carry no effect.",
-          "code": "use ray\n\nwin :: ray.init_window(800, 450, \"demo\")?\nloop frame in win.frames() {\n    frame.clear_background(.RayWhite)\n    if win.is_key_down(.Space) -> frame.draw_rectangle(10, 10, 50, 50, .Red)\n}"
-        },
-        {
-          "key": "B",
-          "name": "Exact raylib globals",
-          "detail": "Copy raylib as it is: one hidden window, begin and end calls, and integer colors and keys.",
-          "technical": "A process-wide window and framebuffer in the library. Drawing calls reach them implicitly and carry `GPU`.",
-          "code": "use ray\n\nray.init_window(800, 450, \"demo\")\nloop !ray.window_should_close() {\n    ray.begin_drawing()\n    ray.draw_rectangle(10, 10, 50, 50, ray.RED)\n    ray.end_drawing()\n}"
-        },
-        {
-          "key": "C",
-          "name": "Short Jet names instead of raylib's",
-          "detail": "Use the frame value from A, but rename calls to short Jet names such as `rect`, `circle` and `text`.",
-          "technical": "Same types as A. Names follow Jet's own library style, not raylib's.",
-          "code": "use ray\n\nwin :: ray.open(800, 450, \"demo\")?\nloop frame in win.frames() {\n    frame.clear(.RayWhite)\n    frame.rect(10, 10, 50, 50, .Red)\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "raylib-rs draws through a handle returned by begin_drawing. Source: docs.rs/raylib.",
-          "code": "let mut d = rl.begin_drawing(&thread);\nd.clear_background(Color::WHITE);\nd.draw_rectangle(10, 10, 50, 50, Color::RED);"
-        },
-        {
-          "lang": "Python",
-          "note": "pyray keeps raylib's global names in snake_case. Source: pypi.org/project/raylib.",
-          "code": "begin_drawing()\ndraw_rectangle(10, 10, 50, 50, RED)\nend_drawing()"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Raylib's names keep every tutorial and cheatsheet usable. The frame value and typed keys remove hidden state and run-time typos. Headless windows make pixels testable.",
-        "gains": [
-          "Every raylib call maps to one Jet call by a simple rule.",
-          "Wrong keys and colors are compile errors.",
-          "Tests check exact pixels through a headless window."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Hidden global state blocks pixel tests, threads and second windows."
-          },
-          {
-            "key": "C",
-            "reason": "New names break the one-to-one map from raylib's documentation."
-          }
-        ],
-        "tradeoff": "Ported raylib code gains a `frame.` or `win.` receiver on each call."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Today's surface: Core/Game/Raylib.jet:38-109 at dev 94e290bb4a. Card 5086 asks for an API close to raylib's. Package name from D-RAYLIB-FONT-HOME1. Raylib names: raylib.h 5.5 and its parser/output/raylib_api.json.",
-      "surface": {
-        "gist": "Should `ray` keep raylib's function names but call them on window and frame values, with typed colors and keys?",
-        "lesson": "Raylib programs open one window, then draw each frame on hidden global state. A frame value makes that state visible: the loop hands you the frame, and drawing calls hang off it. A headless window draws the same pixels into memory, so a test can check them exactly.",
-        "trio": {
-          "current": {
-            "note": "Today's bridge copies raylib's globals, and keys are strings checked at run time.",
-            "code": "use core.game.raylib as rl\n\nwin :: rl.window_open(800, 450, \"demo\")\nrl.begin_drawing(win)\nif rl.key_down(\"Spcae\") -> rl.draw_rectangle(10, 10, 50, 50, red)   // typo runs\nrl.end_drawing()"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "raylib-rs keeps raylib's names but draws through a handle, the same idea as a frame value.",
-            "code": "let mut d = rl.begin_drawing(&thread);\nd.clear_background(Color::WHITE);\nd.draw_rectangle(10, 10, 50, 50, Color::RED);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Raylib names on window and frame values, typed colors and keys",
-            "gist": "Raylib's calls, reached through the frame the loop hands you.",
-            "gains": [
-              "Raylib tutorials map one call to one call.",
-              "Misspelled keys and colors fail at compile time.",
-              "Headless windows make exact pixel tests possible."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "use ray\n\nwin :: ray.init_window(800, 450, \"demo\")?\nloop frame in win.frames() {\n    frame.clear_background(.RayWhite)\n    if win.is_key_down(.Space) -> frame.draw_rectangle(10, 10, 50, 50, .Red)\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Exact raylib globals",
-            "gist": "Copy raylib's hidden window and begin and end calls.",
-            "gains": [
-              "Raylib C code ports with no added receiver."
-            ],
-            "losses": [
-              "Tests cannot open a second window or check pixels.",
-              "Drawing is not safe from worker threads."
-            ],
-            "proposed": {
-              "code": "use ray\n\nray.init_window(800, 450, \"demo\")\nloop !ray.window_should_close() {\n    ray.begin_drawing()\n    ray.draw_rectangle(10, 10, 50, 50, ray.RED)\n    ray.end_drawing()\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Short Jet names instead of raylib's",
-            "gist": "Frame values as in A, with shorter names.",
-            "gains": [
-              "Shorter lines."
-            ],
-            "losses": [
-              "Raylib documentation no longer maps name for name."
-            ],
-            "proposed": {
-              "code": "use ray\n\nwin :: ray.open(800, 450, \"demo\")?\nloop frame in win.frames() {\n    frame.clear(.RayWhite)\n    frame.rect(10, 10, 50, 50, .Red)\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Raylib's names keep its tutorials usable. The frame value and typed keys remove hidden state and run-time typos, and headless windows make pixels testable.",
-          "gains": [
-            "One raylib call becomes one Jet call.",
-            "Typos in keys and colors fail to compile.",
-            "Exact pixel tests on every machine."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Hidden global state blocks pixel tests, threads and second windows."
-            },
-            {
-              "key": "C",
-              "reason": "New names break the one-to-one map from raylib's documentation."
-            }
-          ],
-          "tradeoff": "Ported raylib code adds a `frame.` or `win.` receiver to each call."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Ported raylib code needs a receiver on each call.",
-          "attempts": [
-            "Global functions as in B: rejected, they bring back hidden state."
-          ],
-          "result": "The rule is mechanical: draw calls take `frame.`, window and input calls take `win.`. The docs list every raylib function beside its Jet call."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-31T01:21:47.454Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-31"
     },
@@ -117190,164 +115106,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-11-11T05:11:07.052Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-11"
-    },
-    {
-      "id": "NEW-D-LINT-DECL1",
-      "cardId": "c0fymc7l",
-      "group": "tooling",
-      "title": "Declare package lint findings and structured fixes without a second diagnostic mechanism",
-      "situation": "The research sketch uses a declaration spelling that Jet does not have. It also assigns a built-in numeric code to a package lint and gives no activation or safe-edit contract. A package needs a declared finding and an optional checked fix. We recommend keeping Diagnostic as the finding value and using checked compiler events for discovery. A dedicated registration trait remains a fair alternative, not another diagnostic carrier.",
-      "gist": "How should packages declare lint findings and structured fixes?",
-      "lesson": "Finding text and an edit are different values. Keep human help in fix; validate structured edits separately. Importing a package must not silently enable its policy.",
-      "explainer": "",
-      "story": "A library opts into NoPrintInLib. Every option finds the same resolved print call and offers the same deliberate logging edit.",
-      "inWild": "A dedicated registration trait can offer a compact authoring surface.",
-      "detail": "D-DECL-TYPES1 supplies Diagnostic with literal what/why/fix. D-API-COMPOSE1 favors one general operation and typed options, not sibling rewrite APIs. D-NO-WARNINGS1 distinguishes style rewrites, tidy errors and optional reports: do not invent warning severity or make style a new failing lint tier. Tidy findings fail check/build, not run/dev/test; reports use lint. \n\nFixes are opt-in and may change behavior only with explicit authorization. Printing to logging is not inherently behavior-preserving. Detect symbol aliases and shadowing, refuse unsafe argument duplication and incompatible logger calls, and reject stale or overlapping edits atomically. Recheck before writing. Proposed APIs are UNCHECKED; no package lint execution is claimed.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Diagnostic values; checked rewrites",
-          "gist": "Use one diagnostic carrier and checked compiler events.",
-          "detail": "Keep Diagnostic as the only finding carrier. Add tier and structured_fix; fix remains literal help text. A root build subscriber traverses checked calls and emits NoPrintInLib only for the resolved print symbol in the opted-in library. syntax.rewrite takes resolved callable identities and preserves argument subtrees. It requires compatible argument and return types. Dependents do not activate a lint merely by importing its package. Beginners enable the package lint group once; experts register a checked event subscriber.",
-          "code": "// [UNCHECKED: proposed checked-node and structured-fix APIs]\nNoPrintInLib: struct {\n    impl Diagnostic {\n        code: \"mypkg.NoPrintInLib\"\n        tier: .Tidy\n        what: fn(self) -> String { \"Library writes stdout\" }\n        why: fn(self) -> String { \"The caller owns stdout\" }\n        fix: fn(self) -> String { \"Use the package logger\" }\n        structured_fix: syntax.rewrite(callee: print, replacement: log.info)\n    }\n}\n// A checked-call subscriber emits this value for resolved print calls.\n// Input: print(value); fixed: log.info(value)."
-        },
-        {
-          "key": "B",
-          "name": "Lint trait; same diagnostic carrier",
-          "gist": "A dedicated Lint trait registers traversal, not another error type.",
-          "detail": "Lint is a registration trait whose find method consumes a checked call and returns an optional Diagnostic value. It does not replace Diagnostic, change command failure policy, or invent warning severity. Activate it explicitly for the same library as A. Use A’s checked rewrite value and the same finding texts. Its convenience is a one-place declaration; its cost is a second way to register checked-code traversal.",
-          "code": "// [UNCHECKED: proposed Lint registration trait]\nNoPrintRule: struct {\n    impl Lint {\n        find: fn(call: CheckedCall) -> NoPrintInLib? {\n            if call.callee == print && call.package.kind == .Library -> Val(NoPrintInLib{}) else -> None\n        }\n    }\n}\n// Uses A’s Diagnostic and structured rewrite, same explicit activation."
-        },
-        {
-          "key": "C",
-          "name": "Diagnostic values; string patterns",
-          "gist": "Use one carrier with parse-checked pattern and template strings.",
-          "detail": "Use A’s Diagnostic carrier and explicit subscriber activation, but structured_fix is syntax.rewrite(\"print($x)\", \"log.info($x)\"). These strings are a proposed pattern language, not Jet source. Parse both at declaration time; require every replacement hole to bind once in the pattern. Resolve names by symbol identity, preserve trivia and source spans, and reject rewrites that change evaluation order or cannot recheck. This is not automatic safe conversion from stdout to logging.",
-          "code": "// [UNCHECKED: proposed pattern DSL and APIs]\n// Same Diagnostic declaration and activation as A.\n// Only structured_fix differs:\n// structured_fix: syntax.rewrite(\"print($x)\", \"log.info($x)\")\n// Input: print(value); fixed: log.info(value)."
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Keep one Diagnostic value and reuse compiler-event registration. Make the structured fix a separately checked value, not a replacement for literal help text.",
-        "gains": [
-          "One reporting mechanism"
-        ],
-        "losses": [
-          {
-            "loss": "The checked-edit API is new.",
-            "mitigation": "Refuse stale, overlapping or untypeable edits before changing source."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A separate discovery trait is coherent, but duplicates compiler-event registration for this use."
-          },
-          {
-            "key": "C",
-            "reason": "Concise, but string holes duplicate checked-node matching and require a new binding and hygiene contract."
-          }
-        ],
-        "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked the cited decisions and exercised baseline syntax; separated proposals from observed behavior and repaired unfair alternatives."
-      },
-      "checkInstructions": "Proposal examples marked UNCHECKED are not implementation proof. Run the acceptance cases described in detail after implementation, on every applicable execution tier.",
-      "surface": {
-        "gist": "How should packages declare lint findings and structured fixes?",
-        "lesson": "Finding text and an edit are different values. Keep human help in fix; validate structured edits separately. Importing a package must not silently enable its policy.",
-        "trio": {
-          "current": {
-            "note": "The research sketch is not compiled and uses a nonexistent declaration spelling.",
-            "code": "// Research sketch is not executable evidence.\n// Rewrite declarations with name: value."
-          },
-          "wild": {
-            "lang": "Jet alternative",
-            "note": "A dedicated registration trait can offer a compact authoring surface.",
-            "code": "// [UNCHECKED: proposed Lint API]\n// find(call: CheckedCall) -> Diagnostic?"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Diagnostic values; checked rewrites",
-            "gist": "Use one diagnostic carrier and checked compiler events.",
-            "gains": [
-              "One reporting mechanism"
-            ],
-            "losses": [
-              "Needs checked-call reflection and edit APIs."
-            ],
-            "proposed": {
-              "code": "// [UNCHECKED: proposed checked-node and structured-fix APIs]\nNoPrintInLib: struct {\n    impl Diagnostic {\n        code: \"mypkg.NoPrintInLib\"\n        tier: .Tidy\n        what: fn(self) -> String { \"Library writes stdout\" }\n        why: fn(self) -> String { \"The caller owns stdout\" }\n        fix: fn(self) -> String { \"Use the package logger\" }\n        structured_fix: syntax.rewrite(callee: print, replacement: log.info)\n    }\n}\n// A checked-call subscriber emits this value for resolved print calls.\n// Input: print(value); fixed: log.info(value)."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Lint trait; same diagnostic carrier",
-            "gist": "A dedicated Lint trait registers traversal, not another error type.",
-            "gains": [
-              "One declaration contains discovery and reporting"
-            ],
-            "losses": [
-              "Adds a public registration trait."
-            ],
-            "proposed": {
-              "code": "// [UNCHECKED: proposed Lint registration trait]\nNoPrintRule: struct {\n    impl Lint {\n        find: fn(call: CheckedCall) -> NoPrintInLib? {\n            if call.callee == print && call.package.kind == .Library -> Val(NoPrintInLib{}) else -> None\n        }\n    }\n}\n// Uses A’s Diagnostic and structured rewrite, same explicit activation."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Diagnostic values; string patterns",
-            "gist": "Use one carrier with parse-checked pattern and template strings.",
-            "gains": [
-              "Concise patterns for package authors"
-            ],
-            "losses": [
-              "Adds a second pattern language and hygiene rules."
-            ],
-            "proposed": {
-              "code": "// [UNCHECKED: proposed pattern DSL and APIs]\n// Same Diagnostic declaration and activation as A.\n// Only structured_fix differs:\n// structured_fix: syntax.rewrite(\"print($x)\", \"log.info($x)\")\n// Input: print(value); fixed: log.info(value)."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Keep one Diagnostic value and reuse compiler-event registration. Make the structured fix a separately checked value, not a replacement for literal help text.",
-          "gains": [
-            "One reporting mechanism"
-          ],
-          "losses": [
-            {
-              "loss": "The checked-edit API is new.",
-              "mitigation": "Refuse stale, overlapping or untypeable edits before changing source."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A separate discovery trait is coherent, but duplicates compiler-event registration for this use."
-            },
-            {
-              "key": "C",
-              "reason": "Concise, but string holes duplicate checked-node matching and require a new binding and hygiene contract."
-            }
-          ],
-          "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-11T09:15:22.006Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-11"
     },
@@ -126259,187 +124017,6 @@
       "ratifiedAt": "2026-11-17"
     },
     {
-      "id": "D-DEPRECATE-INLINE1",
-      "cardId": "c0fymc7l",
-      "group": "tooling",
-      "title": "Use a deprecated wrapper's checked body as its replacement",
-      "situation": "Jet accepts a deprecation marker with replacement advice, but it does not accept an inline replacement flag. A small deprecated wrapper often already contains the replacement expression, so copying it into a string creates another source of truth. This vote chooses how tools offer a checked replacement at resolved calls. We recommend an opt-in body-based fix that preserves argument evaluation and refuses unsafe edits.",
-      "gist": "How should a deprecated wrapper offer a safe replacement?",
-      "lesson": "An editor fix is not compiler optimization. Replacing a call must preserve argument order, ownership, name binding and failure behavior.",
-      "explainer": "Beginner: opt in at a wrapper and request its offered fix. Expert: extend the approved checked-edit transport with body-substitution analysis; that analysis is new work, not existing optimizer inlining.",
-      "story": "Lena replaces an old scaling wrapper. Her argument logs a measurement, so the fix must not evaluate it twice or move it later.",
-      "inWild": "@Deprecated(\"Use scaled\", ReplaceWith(\"scaled(n, 2)\"))",
-      "detail": "Card #6516 c9 asks for body-derived migration. NEW-D-LINT-DECL1=A selects one Diagnostic and checked syntax.rewrite with resolved callable identities. It does not establish an implemented source inliner. Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet:287-290 declares since, use and removed_in. On gate-p261, probes2/deprecated.jet prints 8; probes2/deprecated-inline.jet rejects inline: true with E0930. Neither probe establishes deprecation diagnostic delivery.\n\nKotlin ReplaceWith supports argument substitution and explicit imports, including migrations different from the compatibility body. Go's documented //go:fix inline is the stronger body-based precedent. The Go article describes Go 1.26, not 1.24, and substantial handling of effects, captures and imports. It sometimes retains a literalized function call rather than emitting an unsafe substitution. Small wrapper syntax does not make the analysis small.\n\nAll proposed fixes must preserve language-level evaluation, errors, effects, ownership and cleanup, or refuse. Removing a wrapper necessarily changes source/debugger structure and can change stack traces; do not promise observational identity there. No automatic rewriting or runtime speedup is claimed.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Checked body-based replacement",
-          "detail": "Add inline: Bool{false} to Deprecated and derive requested fixes from checked wrapper bodies.",
-          "technical": "Keep use as literal human advice, optionally alongside inline. When inline is true, a one-expression body must exist and be available in dependency metadata. Preserve since and removed_in. Resolve the callable, receiver and instantiated types; feed checked edits to the approved rewrite transport. Body analysis and metadata retention are new implementation work, not capabilities proved by that transport.\n\nEvaluate receiver and all explicit/default arguments once, in the original order, including unused parameters. Preserve moves, borrows, destruction, error and effect behavior. Introduce hygienic temporaries only where a legal block preserves those rules. Definition-context names must remain accessible without leaking private helpers. Preserve attached comments and named-argument meaning; refuse ambiguous trivia relocation rather than discard comments.\n\nRecheck the whole affected expression. Refuse inaccessible names, escaping borrows, changed cleanup, recursive replacement cycles and unproved indirect callable identities. Unsupported bodies still use the same explicit checked rewrite API for complex migrations; no second edit engine. Stale or overlapping edits fail atomically. Editor preview must disclose removed wrapper frames; author opt-in accepts that debugging cost, not semantic changes.",
-          "code": "#Deprecated(since: \"1.0\", use: \"scaled\", inline: true)\nold_twice: fn(n: Int) -> Int { scaled(n, 2) }\n// Requested fix: old_twice(read_count())\n// becomes scaled(read_count(), 2)."
-        },
-        {
-          "key": "B",
-          "name": "Checked replacement template",
-          "detail": "Add an explicit replacement expression string while retaining use as human advice.",
-          "technical": "A new replace field, not a reinterpretation of existing use text, is parsed and resolved in declaration context. It supports migrations different from the wrapper body. Bind arguments with A's evaluation and ownership safeguards, then use the same checked edit transport. Kotlin demonstrates concise templates and explicit imports; Jet would still need import, hygiene and safe-substitution analysis. This alternative deliberately authorizes another expression-authoring surface under the existing checked rewrite mechanism.",
-          "code": "#Deprecated(since: \"1.0\", use: \"scaled\", replace: \"scaled(n, 2)\")\nold_twice: fn(n: Int) -> Int { scaled(n, 2) }"
-        },
-        {
-          "key": "C",
-          "name": "Advice plus explicit checked rewrites",
-          "detail": "Keep the marker unchanged and author machine fixes through the approved rewrite API.",
-          "technical": "This handles body-independent and complex migrations without a new marker field or substitution convention. It has the same safe edit transport as A and B. Simple wrappers need separate fix authoring, but that author can express more than a body-derived inliner. Keep one Diagnostic and one checked rewrite mechanism; never introduce another lint registration trait.",
-          "code": "#Deprecated(since: \"1.0\", use: \"scaled\")\nold_twice: fn(n: Int) -> Int { scaled(n, 2) }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Kotlin",
-          "note": "ReplaceWith supports expression templates and explicit imports, including body-independent migrations.",
-          "code": "ReplaceWith(\"scaled(n, 2)\")",
-          "source": "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-replace-with/"
-        },
-        {
-          "lang": "Go",
-          "note": "Go 1.26's source inliner handles effects and imports; preserving safety may retain a literalized call.",
-          "code": "//go:fix inline",
-          "source": "https://go.dev/blog/inliner"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "For simple wrappers, checked bodies avoid duplicate replacement expressions. Keep the existing rewrite API for migrations a body cannot express.",
-        "gains": [
-          "One source for simple replacements.",
-          "One checked edit transport."
-        ],
-        "losses": [
-          {
-            "loss": "Safe source inlining needs substantial analysis and may refuse edits.",
-            "mitigation": "Reuse checked syntax and transport; keep advice and explicit rewrite authoring for unsupported cases."
-          },
-          {
-            "loss": "Removing the wrapper changes debugging frames and source structure.",
-            "mitigation": "Require author opt-in and an editor preview; never present this as invisible runtime optimization."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "More expressive for body-independent replacements, but needs a second binding surface and the same safety analysis."
-          },
-          {
-            "key": "C",
-            "reason": "The strongest general migration route, but separately authors what simple wrapper bodies already state."
-          }
-        ],
-        "tradeoff": "Less authoring for wrappers, not a simpler safety problem."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Added Go's stronger precedent, separated new substitution analysis from approved edit transport, and preserved advice alongside opt-in. Named refusal/debugging costs and fixed the template option's incompatible reinterpretation of use."
-      },
-      "checkInstructions": "Reviewed marker acceptance and rejection on gate-p261; logs and inputs are in probes2. Proposed substitution remains unimplemented. Acceptance must cover reordered/unused arguments, defaults, receivers, generics, private names, moves, borrows, cleanup, comments, dependency metadata and atomic stale edits. Check debugger previews separately from language-level equivalence.",
-      "surface": {
-        "gist": "Should a deprecated wrapper's checked body supply its optional replacement fix?",
-        "lesson": "Safe substitution needs new analysis even with an existing edit engine. Removing wrapper frames also changes debugging.",
-        "trio": {
-          "current": {
-            "note": "The marker accepts advice; inline: true is rejected.",
-            "code": "#Deprecated(since: \"1.0\", use: \"twice\")\nold_twice: fn(n: Int) -> Int { n * 2 }"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "A source inliner handles effects and imports, not just text substitution.",
-            "code": "//go:fix inline"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Use the checked body",
-            "gist": "Offer requested body-based fixes through the checked edit engine.",
-            "gains": [
-              "No duplicate replacement expression."
-            ],
-            "losses": [
-              "New analysis; some edits must be refused."
-            ],
-            "proposed": {
-              "code": "#Deprecated(since: \"1.0\", use: \"scaled\", inline: true)\nold_twice: fn(n: Int) -> Int { scaled(n, 2) }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Checked template string",
-            "gist": "Add replacement text without changing human advice.",
-            "gains": [
-              "Replacement can differ from the body."
-            ],
-            "losses": [
-              "Another binding surface and the same safety work."
-            ],
-            "proposed": {
-              "code": "#Deprecated(since: \"1.0\", use: \"scaled\", replace: \"scaled(n, 2)\")"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Explicit checked rewrites",
-            "gist": "Keep advice unchanged and author fixes through the existing API.",
-            "gains": [
-              "Handles complex migrations."
-            ],
-            "losses": [
-              "Separate authoring for simple wrappers."
-            ],
-            "proposed": {
-              "code": "#Deprecated(since: \"1.0\", use: \"scaled\")"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Reuse wrapper bodies for simple migrations, without replacing the general rewrite API.",
-          "gains": [
-            "One edit mechanism."
-          ],
-          "losses": [
-            {
-              "loss": "Some fixes cannot be proved safe.",
-              "mitigation": "Keep advice and explain refusal; permit explicit checked rewrites."
-            },
-            {
-              "loss": "Wrapper debugging frames disappear.",
-              "mitigation": "Require author opt-in and preview the structural change."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "More expressive, but adds bindings and still needs safety analysis."
-            },
-            {
-              "key": "C",
-              "reason": "General, but repeats simple replacement information."
-            }
-          ],
-          "tradeoff": "Less duplicate authoring, not cost-free inlining."
-        }
-      },
-      "draftedBy": "Main",
-      "reviewedBy": "BallotReview2",
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-17T12:32:03.701Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-17"
-    },
-    {
       "id": "D-HOST-CALLBACK1",
       "cardId": "c0sdz4q0",
       "group": "language",
@@ -131663,6 +129240,182 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T00:37:49.149Z"
+    },
+    {
+      "id": "D-DIAG-ONESHAPE1",
+      "cardId": "c0dktg7a",
+      "group": "api",
+      "title": "One shape for a compiler error in every machine-readable output",
+      "situation": "When Jet finds a mistake in a program, it can describe it for tools in machine-readable form: a record with fields like code, message, location and the file it came from. Today three outputs write that record with separate code, and their fields have drifted apart. The same `x++` error carries a repair but no file from `jet inspect compiler parse`, and a made-up file name but no repair from `jet inspect compiler check`. `jet check --json` names the file but not which version of its text it read. A tool that combines these outputs, like an editor plugin or a build script, has to special-case each command and can't tell whether two reports describe the same text. We recommend one record written in one place, with repairs kept where they already live and graded for safety, so no tool loses information.",
+      "gist": "Should every machine-readable compiler error come from one record written in one place?",
+      "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it at compile time as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON, and `jet check --json` prints a fuller report. The editor protocol has a fixed shape of its own. The vote decides whether these outputs share one record and one origin.",
+      "explainer": "",
+      "story": "A build script runs `jet inspect compiler parse` and then `jet inspect compiler check` on the same file and merges the errors by location. The same `x++` error arrives once with a repair and no file, and once with a file name that doesn't exist and no repair, so the script reports it twice. It also can't match either one to the `jet check --json` report, which names the file but not the text it read.",
+      "inWild": "// rustc --error-format=json: one record for every JSON consumer\n// https://doc.rust-lang.org/rustc/json.html\n{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One record, written once",
+          "detail": "The typed CompilerDiagnostic (version 2) is the one record. `jet inspect compiler lex`, `parse` and `check` all print it through one writer. A query over handed text names no file: its span `file` is empty and `origin.path` is null. The internal label `core.compiler.jet` is no longer printed.\n\n`jet check --json` reports gain an `origin` member: the same path and digest record, taken from the same origin rows. A report with no source has a null origin. Every existing report member stays. The editor protocol keeps its fixed shape and files each diagnostic under the URI of that same origin.\n\nBeginner path: read `code`, `message` and `span` from any output; they mean the same everywhere. Expert path: match reports across commands by `origin.source_digest`, and take repairs from `fix_edits`.",
+          "technical": "Today the compiler-API JSON mirror has two writers. `jet_cli_compiler_checked_value` (Compiler/JetCLI/Source/CLI/InspectCompiler.jet:54) prints the typed value for a checked result. The hand-written `jet_cli_compiler_diagnostics` (Compiler/JetCLI/Source/CLI/Inspect.jet:1065) prints lex, parse and a check that fails before checking. They differ in `span.file` and the extra `edit`.\n\nA deletes the hand writer and its origin copy (Inspect.jet:1086-1095). Every inspect path prints `jet_eval_compiler_services_diagnostic_values` (Compiler/JetEval/Source/CompilerServices.jet:303) through the value writer. The check query span file follows CompilerServices.jet:234-236, empty for handed text, instead of JET_DRIVER_COMPILER_SOURCE_FILE (Compiler/JetDriver/Source/Driver/ComptimeCompiler.jet:63).\n\n`jet_cli_report_json_with` (Compiler/JetCLI/Source/CLI/Report.jet:401) adds `origin` from the same SemaDiagnosticOrigin rows (Compiler/JetSema/Source/Sema/Diagnostics.jet:895-993). The member is optional and additive, so the report stays `jet.report/v3`. The record inside it is versioned by JET_COMPILER_SERVICES_SCHEMA_VERSION 2 (CompilerServices.jet:186), unchanged. Package-model schemas are untouched.\n\nProof cases assert one field set across inspect lex, parse and check, the typed value, the `jet check --json` origin and LSP routing.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",\"severity\":\"error\",\"message\":\"`++` is not a Jet operator\",\n \"why\":\"Jet updates a number in place with an assignment operator\",\"fix\":\"Write `+= 1`\",\n \"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"}}\n\n// jet check --json main.jet\n{\"schema\":\"jet.report/v3\",\"code\":\"E0003\",...,\"file\":\"main.jet\",\"line\":3,\"col\":6,\n \"span\":{\"start\":28,\"end\":30},\n \"fix_edits\":[{\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}],...,\n \"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"}}\n"
+        },
+        {
+          "key": "B",
+          "name": "The typed value grows an edit",
+          "detail": "Everything in A, and CompilerDiagnostic gains `edit: CompilerTextEdit?` (`span`, `new_text`), so the one writer keeps printing an `edit` in inspect output and Jet code can read the repair at compile time. Beginner path: as A. Expert path: read a repair from `edit` in Jet code or inspect output, or from `fix_edits` in the check report.",
+          "technical": "Adds a public record member and a new public type (CoreRecordRows, the sema field table and the compile-time value), and moves JET_COMPILER_SERVICES_SCHEMA_VERSION to 3 for every typed consumer. `edit` carries no safety grade and only the primary repair, while `fix_edits` carries every repair with its grade.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",...,\n \"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"},\n \"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}}\n"
+        },
+        {
+          "key": "C",
+          "name": "Keep separate writers",
+          "detail": "Each output keeps its own writer. Inspect lex and parse, and a check that fails before checking, print the hand-written shape: a span without `file`, plus `edit`. A checked result prints the typed value, with the internal label as its file and no repair. `jet check --json` names the file but not the text it read. Beginner path: learn which command prints which fields. Expert path: merge outputs with per-command rules.",
+          "technical": "Leaves Inspect.jet:1065-1095 beside InspectCompiler.jet:54, and Report.jet:401 without the origin record.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet\n\"span\":{\"start\":28,\"end\":30},\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}\n// jet check --json main.jet\n\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30}\n"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (rustc)",
+          "note": "--error-format=json prints one Diagnostic record type for every consumer; spans carry file_name and byte offsets. https://doc.rust-lang.org/rustc/json.html",
+          "code": "{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "tsc and tsserver both start from one ts.Diagnostic record (file, start, length, code, messageText); the editor protocol converts it at the edge. https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API",
+          "code": "const d: ts.Diagnostic = program.getSemanticDiagnostics()[0];\nconsole.log(d.file?.fileName, d.start, d.length, d.code);"
+        },
+        {
+          "lang": "Go (go/analysis)",
+          "note": "An analyzer reports one Diagnostic record; gopls turns it into the editor protocol's shape at the edge. https://pkg.go.dev/golang.org/x/tools/go/analysis#Diagnostic",
+          "code": "pass.Report(analysis.Diagnostic{Pos: pos, End: end, Message: msg})"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One writer can't drift from itself, and the origin record already ratified for Jet code (D-BIG-DIAGORIGIN1) becomes the one origin every output names. Repairs stay in the one place that grades them for safety.",
+        "gains": [
+          "A field added to the record appears in every output at once."
+        ],
+        "losses": [
+          {
+            "loss": "Inspect lex and parse output lose their own `edit` field.",
+            "mitigation": "`jet check --json` already reports the same repair in `fix_edits`, graded for safety. The inspect field was an ungraded copy."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the copy by adding a second, ungraded repair channel to the public record and moves every Jet caller to version 3."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves one error with two shapes and a check report that can't name the text it read."
+          }
+        ],
+        "tradeoff": "Scripts read repairs from `fix_edits` instead of inspect `edit`. In return, every output shares one record."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should every machine-readable compiler error come from one record written in one place?",
+        "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it at compile time as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON, and `jet check --json` prints a fuller report. The editor protocol has a fixed shape of its own. The vote decides whether these outputs share one record and one origin.",
+        "trio": {
+          "current": {
+            "note": "Observed with the current batch compiler: one error, two inspect shapes, and a check report with no digest.",
+            "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet: a repair, no file\n\"span\":{\"start\":28,\"end\":30},...,\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet: an internal file name, no repair\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}\n// jet check --json main.jet: the file, but no digest of its text\n\"file\":\"main.jet\",\"line\":3,\"col\":6,\"fix_edits\":[{\"file\":\"main.jet\",...,\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]"
+          },
+          "wild": {
+            "lang": "Rust (rustc --error-format=json)",
+            "note": "rustc writes one Diagnostic record for every JSON consumer; each span carries its own file_name. Source: https://doc.rust-lang.org/rustc/json.html",
+            "code": "{\"message\":\"...\",\"level\":\"error\",\n \"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One record, written once",
+            "gist": "Every inspect output prints the typed value through one writer, and `jet check --json` adds the same origin record.",
+            "gains": [
+              "One error has one shape in every inspect command.",
+              "A check report names the exact text it read, by digest.",
+              "No new public type and no version bump for Jet code."
+            ],
+            "losses": [
+              "Inspect lex and parse output lose their own `edit` field."
+            ],
+            "proposed": {
+              "code": "// jet inspect compiler parse main.jet, and check alike\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"}\n// jet check --json main.jet: every member as today, plus\n\"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3...\"}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The typed value grows an edit",
+            "gist": "As A, and CompilerDiagnostic gains an `edit` field, so inspect keeps it.",
+            "gains": [
+              "Inspect output keeps its `edit` field.",
+              "Jet code can read a repair at compile time."
+            ],
+            "losses": [
+              "A second repair channel beside `fix_edits`, with no safety grade.",
+              "A new public field and type, and version 3 for all Jet code."
+            ],
+            "proposed": {
+              "code": "// jet inspect compiler parse main.jet, and check alike\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"},\n\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep separate writers",
+            "gist": "Each output keeps its own code and its own fields.",
+            "gains": [
+              "No output changes."
+            ],
+            "losses": [
+              "One error keeps two shapes, chosen by the command.",
+              "A check report still can't say which text it read."
+            ],
+            "proposed": {
+              "code": "// unchanged from today\n\"span\":{\"start\":28,\"end\":30},\"edit\":{...}                // parse\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}  // check"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One writer can't drift from itself, and the origin record already ratified for Jet code (D-BIG-DIAGORIGIN1) becomes the one origin every output names. Repairs stay in the one place that grades them for safety.",
+          "gains": [
+            "A field added to the record appears in every output at once."
+          ],
+          "losses": [
+            {
+              "loss": "Inspect lex and parse output lose their own `edit` field.",
+              "mitigation": "`jet check --json` already reports the same repair in `fix_edits`, graded for safety. The inspect field was an ungraded copy."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps the copy by adding a second, ungraded repair channel to the public record and moves every Jet caller to version 3."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves one error with two shapes and a check report that can't name the text it read."
+            }
+          ],
+          "tradeoff": "Scripts read repairs from `fix_edits` instead of inspect `edit`. In return, every output shares one record."
+        }
+      },
+      "draftedBy": "Errors3202",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-21T01:37:39.436Z"
     }
   ],
   "questions": [
@@ -132474,19 +130227,6 @@
       "answer": "Yes. The revised ballot makes it one mechanism instead of three. States and their allowed moves are written once, as lines like Draft -> Confirmed, Cancelled, and the same lines serve as an enum's cases (states that exist at run time) or a struct's state { } section (compile-time typestate). Methods, parameters and results name states from that list with the single #State(...) marker, and the compiler checks every move and call and draws the diagram from that one declaration. The separate transitions section from the first version is gone, and D-STATE-PARAM1 is merged in.",
       "created": "2026-10-30T18:07:07.818Z",
       "answeredAt": "2026-10-30",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q08843xa",
-      "cardId": "c0l09me0",
-      "decisionId": null,
-      "by": "Main",
-      "kind": "question",
-      "text": "Naming clash between two A outcomes: D-RAY-API1=A shows `use ray`, while D-RAYLIB-FONT-HOME1=A says `jet add raylib` (package `raylib`). Main proposes: the package is `raylib` (jet add raylib), and examples import it as `use raylib as ray`, so both texts hold. Say if you want the package itself named `ray` instead.",
-      "status": "answered",
-      "answer": "Owner (chat 2026-11-01 ~07:50 EST): the package is raylib, imported as ray (use ray :: raylib under the #6542 import syntax).",
-      "created": "2026-10-31T05:10:07.382Z",
-      "answeredAt": "2026-11-01",
       "answeredBy": "Main"
     },
     {
@@ -133942,6 +131682,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:37:39.436Z",
+      "by": "Errors3202",
+      "action": "decision.add",
+      "ref": "D-DIAG-ONESHAPE1",
+      "note": "One shape for a compiler error in every machine-readable output (draft)"
+    },
     {
       "at": "2026-11-21T01:33:26.797Z",
       "by": "Main",

@@ -39512,6 +39512,912 @@
       "completedAt": "2026-11-18T01:27:14.507Z",
       "questions": [],
       "retiredAt": "2026-11-21T01:30:19.124Z"
+    },
+    {
+      "id": "c0p4qylf",
+      "num": 4171,
+      "title": "Co-editing one program from text and Canvas (EYG shared-tree lesson)",
+      "body": "Owner request: EYG sends the AST over the wire, which could let a text editor and a visual blueprint editor edit the same program at once; Mojo has no traditional AST and parses straight to MLIR. Take the best of both: a lighter compiler and blueprint-style editing.\n\nEYG's IR is a closed node list encoded as DAG-JSON with content-addressed references; text is one optional parser (commit 75f09475, `packages/gleam_ir/src/eyg/ir/tree.gleam:15-44`, `spec/README.md:44-92`). Mojo's parser emits the MLIR `lit` dialect (MojoCompilerWalkthrough.md:136-138). Jet parses text to an AST without lossless trivia (formatter re-emits canonical syntax), Canvas edits go through source transactions (D-CANVAS-RAD1=A), and no stable node identity crosses the LSP boundary.\n\nBallot D-PROGRAM-FORM1 decides the shared program form.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Owner decides D-PROGRAM-FORM1. If A wins: on a stale Canvas revision, resolve the edit's anchors in the newest revision, replay, format, re-check, publish atomically; report anchor conflicts. The self-hosted front-end shape (Mojo's no-AST lesson) stays an internal implementation choice.",
+      "checkSteps": null,
+      "probe": "jet run Examples/features/tooling/canvas_blueprint_demo.jet",
+      "visualMedia": [],
+      "blockedBy": [
+        "c0c209zc"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: its one criterion, D-PROGRAM-FORM1 ratified, is met."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6618 (D-G5-3): one Canvas card. D-PROGRAM-FORM1=A still governs the replay design."
+        },
+        {
+          "at": "2026-10-29",
+          "by": "Main",
+          "text": "KitSpeed: C2 needs the Canvas transaction server (Compiler/JetDevserver, not yet built: jet check 1602 errors; jet dev --canvas E2104). Replay design kept in $JET_SCRATCH_ROOT/lanes/Main/land/KitSpeed-4171.msg."
+        },
+        {
+          "at": "2026-10-16",
+          "by": "Pip",
+          "text": "mine-for-jet V (2026-10-16): vlang/ui2 ships UI2 Studio, a Delphi/Lazarus-style WYSIWYG designer (palette, drag/resize, object tree and inspector, undo, live preview, main.v generation; ui2 README:522-534). It edits VML, a second markup language with its own expression evaluator compiled by $vml (README:125-232). Lesson for Canvas: match the designer workflow but edit Jet source directly, one language (I8)."
+        },
+        {
+          "at": "2026-10-02",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PROGRAM-FORM1 ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-PROGRAM-FORM1 ratified outcome A (Replay stale edits), ratifiedAt 2026-10-02 (card decisions[0])",
+          "at": "2026-10-29T12:18:30.464Z"
+        }
+      ],
+      "refs": [
+        "Docs/research/mine-for-jet-2026-10-01-systems-langs.md"
+      ],
+      "tags": [
+        "mine-2026-10-01",
+        "tooling",
+        "canvas",
+        "eyg",
+        "mojo",
+        "compiler",
+        "wayfinder:task"
+      ],
+      "parentId": "c0bk3yid",
+      "needsAcceptance": false,
+      "created": "2026-10-02T01:15:13.072Z",
+      "updated": "2026-11-18T01:37:19.675Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-18T01:37:19.674Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.641Z"
+    },
+    {
+      "id": "c0hh2g28",
+      "num": 4602,
+      "title": "One DataTree: owner rulings on duplicate keys, exact numbers, strict typed text and bytes",
+      "body": "Owner rulings 2026-10-05 (from Idiom-Runtime3's comparison $JET_STATE_ROOT/scratch/Idiom-Runtime3/DATATREE-DIFF.md of the ported runtime carrier vs the compiler built-in DataTree; I8: one DataTree, the built-in). (1) Duplicate object keys are a parse error; the explicit parse_allow_duplicates option keeps the later value. (2) Numbers keep their exact text: a Number variant holds the original lexeme (1.50 re-renders as 1.50; 1e400 and integers beyond Int are kept exactly); reading as Int/Float checks range at that point. (3) Decoding is strict: JSON \"42\" into an Int field is an error. (4) CBOR (and other binary) byte strings decode to a Bytes variant. Reconcile Docs/spec/reference/core-library.md (already lists number/typed text/bytes) with sema's built-in variants. Done when the built-in DataTree, every parser/encoder (JSON, TOML, YAML, CBOR, JSONL), decode/derive, both compilers, the runtime and docs follow these rules on every tier, with examples and goldens for each rule, in one greenfield cutover.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met in 6479b79c49."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #5976 as a criterion (CardTrim 2026-10-28)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T15/T23: folded here. Ruling (1) of this card already makes a duplicate object key a parse error; FutureAudit asks that the same rule cover every DataTree decoder, since parser differences on duplicate keys are a known exploit class."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Absorbed duplicate #4653 (json.dumps sorts object keys, contradicting the documented insertion order): json.dumps key sorting; log says absorbed by #4602 (cross-slice survivor, outside slice 4). Its repro and open criteria are carried here."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ruling (1) applies to every DataTree decoder: JSON, YAML and TOML each report a duplicate key as a parse error naming the key and both positions, and the explicit allow-duplicates option keeps the later value; one test per format.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 6479b79c49 (dev, p283). JSON, YAML and TOML each report a repeated key as a parse error at the repeat, naming the key and where it first appears (\"duplicate key `k` (first at line L, column C)\"). toml.parse_allow_duplicates and yaml.parse_allow_duplicates join json.parse_allow_duplicates in keeping the later value. On the p283 batch compiler: `jet test Core/Encoding/{JSON,TOML,YAML}.jet` pass, with one duplicate-key test per format. The goldens pass: Encoding/ 99/99 (TOMLDuplicateKeys and YAMLDuplicateKeys included), Data/JSON/ 45/45, and the WebBuild dyn_exact_int_and_strict_json case 1/1.",
+          "at": "2026-11-18T00:08:50.202Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "audit-2026-10-28",
+        "future-2026-10-28",
+        "trimmed"
+      ],
+      "parentId": "c0iuv3zr",
+      "needsAcceptance": false,
+      "created": "2026-10-05T11:15:21.226Z",
+      "updated": "2026-11-18T01:37:08.258Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:08.257Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0xgg9f1",
+      "num": 4940,
+      "title": "Restore jet db dev commands (DbOptions/DbRows) removed at self-host cutover: never compiled",
+      "body": "61e1fd228 added Compiler/JetCli Dev/DbOptions.jet, Dev/DbRows.jet and tests calling APIs that never existed (core rows_bounded, parse_allow_duplicates_with_limits, JetCLIOutputMode). The code never compiled, so the r12 self-host repair removed those files and their wiring (CliR12Fix, 2026-10-09 ~20:15) instead of inventing APIs. Restore from 61e1fd228 once bounded Core CSV/JSON APIs (CLI limits 32MiB/64 depth) and an output-mode type with quiet are designed and ratified. Owner decision: keep the feature (and design the Core APIs) or drop it.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: folded into #5973."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded into #5973 as a criterion (CardTrim 2026-10-28)."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "wayfinder:task",
+        "trimmed"
+      ],
+      "parentId": "c0fqk5ka",
+      "needsAcceptance": false,
+      "created": "2026-10-10T00:11:00.735Z",
+      "updated": "2026-11-18T01:37:36.122Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:36.122Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0awastn",
+      "num": 5086,
+      "title": "Jet-native raylib: a 1:1 raylib API written in idiomatic Jet that works out of the box",
+      "body": "Owner direction 2026-10-21: replace the dlopen-of-libraylib path with Jet-native raylib, API 1:1 with raylib, written in idiomatic Jet, working with no installed C library. Everything above the OS graphics boundary is Jet: windowing, input, rlgl, shapes, textures, text, models, audio mixing. Constraint to decide (owner): the GPU driver (libGL/libvulkan, libX11/Wayland) must be loaded from the user system at run time; the Jet runtime is fully static musl with no dynamic loader. Options: (a) graphical programs build as dynamically linked executables, (b) the runtime gains a minimal loader for driver libraries. Today the native tier implements raylib only on the no-library path (headless), from RouteRuntimeA2. Related: text shaping (HarfBuzz) is the same question - a Jet-native shaper (OpenType GSUB/GPOS) vs the fallback 1:1 glyph shaper.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Obsolete: owner ruling 2026-11-08, no reference to raylib."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner 2026-11-08: \"i do not want a module or subsystem called ray, if we need a separate module layer, it should just be called ui not ray\". Windows, frames, drawing surfaces and each window's input live in `ui` (Core/Ui, core.ui) with the D-GAME-PLATFORM1 shape (ui.open, win.frames(fps), frame.events(), frame.present, ui.headless); the Wayland client is ui's private Linux backend. No module, package or import alias is named `ray`; this supersedes the `ray` name in D-GAME-PLATFORM1, D-RAY-API1 and the 2026-11-01 package answer."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-RAYLIB-DRIVER-LOAD1 (draft for Main to file). The card text is background, not the decision."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built without any module, package or alias named `ray` (owner 2026-11-08): the raylib library keeps every raylib name and argument order on window and frame values from `ui` with typed colors, keys and buttons, written in Jet, and software-drawn programs stay single static files that speak the display and sound protocols directly.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
+          "at": "2026-11-08T19:53:47.003Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "A raylib example game runs headless (rendering to memory with the same calls) with a golden on O0, O1 and O2, and opens a window on a desktop with nothing installed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
+          "at": "2026-11-08T19:53:48.319Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "raylib",
+        "games",
+        "owner-direction",
+        "wayfinder:task"
+      ],
+      "parentId": "c0u5tm84",
+      "needsAcceptance": false,
+      "created": "2026-10-21T14:23:04.145Z",
+      "updated": "2026-11-18T01:37:27.366Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-18T01:37:27.366Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0wesey9",
+      "num": 6388,
+      "title": "Build `reject(Diagnostic)` (D-MARKER-DIAG1=A): library compile-time checks raise their own error codes",
+      "body": "Found by #6385 on dev 59213de00f. D-MARKER-DIAG1=A ratified that a library error is a struct implementing Core's Diagnostic trait (what/why/fix as one-literal methods) and that `reject(err)` raises it while compiling, from a marker's expand or a helper. `reject` is not built: probes/zig/z05_reject.jet reports `E0102 Nothing named 'reject' exists here`. Today a comptime check can only `panic`, which gives E3010 with a message but no code, why, fix or `jet explain` page. This is Jet's version of Zig's @compileError, done better.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Duplicate: c1-c3 live on #6039 c28-c30."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6039 (D-G6-1): reject(Diagnostic) is part of the marker API stream; its three criteria are carried as (was #6388 cN)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The D-MARKER-DIAG1 example (`#web.Route(\"orders\")` rejected with web.BadPath, and a TrailingSlash warning silenced by `#Allow`) builds and reports as ratified, with UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Folded into #6039 c28, which carries the same text and stays open there.",
+          "at": "2026-11-10T01:39:21.460Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 2,
+          "text": "`jet explain web.BadPath` prints the library's texts.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Folded into #6039 c29, which carries the same text and stays open there.",
+          "at": "2026-11-10T01:39:23.731Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "`reject` outside compile-time evaluation is a registered error with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Folded into #6039 c30, which carries the same text and stays open there.",
+          "at": "2026-11-10T01:39:26.027Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T20:21:07.004Z",
+      "updated": "2026-11-18T01:37:23.466Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:23.466Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0l09me0",
+      "num": 6421,
+      "title": "raylib leaves Core: Core/Game/Raylib.jet and UiRaylibMetadata.jet go to a first-party `raylib` package",
+      "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- Moves: Core/Game/Raylib.jet and Compiler/JetRuntime/Source/UiRaylibMetadata.jet to the\n  first-party battery Jetpack/Provider/Batteries/raylib/. It ships with Jet at its version\n  (D-JPK-RINGSHIP1=C), and `jet add raylib` writes the one dependency line.\n- Keeps the typed backend value of D-GAME-BACKEND1=A, so `game.run(scene, backend:)` still\n  takes it. GPU device providers stay with card 5964.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "D-GAME-PLATFORM1"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Obsolete: owner ruling 2026-11-08, no reference to raylib."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Superseded by the owner's 2026-11-08 order (no raylib; ui and app). #6701 owns the cutover; nothing on this card is left to build."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c1: Examples/features/game/raylib_canvas -> Examples/Apps/Game/RaylibCanvas [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "Retargeted c1 (owner order 2026-11-02: an invalid criterion is retargeted to a valid one). Old text: `use raylib as rl` builds and runs Examples/features/game/raylib_canvas, raylib_shapes, raylib_indexed, raylib_sprites and battery, with the same golden checksums on o0/o1/o2. Why: the criterion spelled the retired `use raylib as rl` import form; the current form names the alias first (`use rl :: …`), as every game example spells it today."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`use rl: raylib` (the first-party package, replacing `use rl: core.game.raylib`) builds and runs Examples/features/game/raylib_canvas, raylib_shapes, raylib_indexed, raylib_sprites and battery, with the same golden checksums on o0/o1/o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
+          "at": "2026-11-08T19:53:49.650Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "Core/Game/Raylib.jet and its rows in Compiler/Prelude/Core.jet, CoreCalls.jet, CorePlatformSignatures.jet, CoreSurfaceInventory.jet and StructureRegistry.jet are gone, and the generated Core registries are regenerated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
+          "at": "2026-11-08T19:53:50.950Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "The package uses only mechanisms that any package can use (pillar 5): no Core-private power and no compiler row that names the package.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. Superseded by #6701.",
+          "at": "2026-11-08T19:53:52.277Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T05:09:33.326Z",
+      "updated": "2026-11-18T01:37:31.142Z",
+      "updatedBy": "owner",
+      "completedAt": "2026-11-18T01:37:31.142Z",
+      "questions": [
+        {
+          "id": "q08843xa",
+          "cardId": "c0l09me0",
+          "decisionId": null,
+          "by": "Main",
+          "kind": "question",
+          "text": "Naming clash between two A outcomes: D-RAY-API1=A shows `use ray`, while D-RAYLIB-FONT-HOME1=A says `jet add raylib` (package `raylib`). Main proposes: the package is `raylib` (jet add raylib), and examples import it as `use raylib as ray`, so both texts hold. Say if you want the package itself named `ray` instead.",
+          "status": "answered",
+          "answer": "Owner (chat 2026-11-01 ~07:50 EST): the package is raylib, imported as ray (use ray :: raylib under the #6542 import syntax).",
+          "created": "2026-10-31T05:10:07.382Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0fymc7l",
+      "num": 6516,
+      "title": "Packages declare diagnostics, lints and rewrite fixes as values (NEW-D-LINT-DECL1)",
+      "body": "The registry has 874 diagnostic rows; 80 carry a structured fix and 71 a lint name (DiagnosticRows.jet). Marker names are matched by hand in the parser (Compiler/JetParser/Source/Parser/Items.jet:1593) and in sema (Compiler/JetSema/Source/Sema/MarkerRules.jet:918), and re-declared as strings (Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:160). Packages cannot register codes.\n\nDone when: `impl T.Diagnostic` and `impl T.Lint` register package codes; `syntax.rewrite(pattern, template)` declares a structured fix that `jet fix` applies; the marker switches read the declared markers (D-MARKER-REFLECT1).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.11.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "All 8 criteria met (c9 at 8970803bb1)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c9 landed 8970803bb1 (p273); the case UIFixes/jet_fix_inlines_deprecated_replacement is REFUSED (stream assertion at line 9), and the Markers.jet edit reordered the #Rename union (UI serde_rename_not_string). Returned to IfHole."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "D-DEPRECATE-INLINE1=A ratified. c9 SUB IfHole-6-1-6516-c9-deprecated-inline is queued for p273."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c9 needs a spelling no decision gives (how a #Deprecated function names its inlinable replacement). Ballot to post: D-DEPRECATE-INLINE1. Option A: #Deprecated field inline: Bool{false} beside since/use/removed_in; the function's own one-expression body is the replacement, jet fix substitutes each argument subtree for its parameter when the parameter is used once or the argument is a name or literal, inline excludes use, otherwise L2001 edit-by-hand as today (precedent Go 1.24 //go:fix inline). Option B: use: takes a call template string (use: \"scaled(a, 2)\"), rejected in spirit by NEW-D-LINT-DECL1 option C (string DSL). c9 waits on that ballot; c4, c8, c7, c5 proceed."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c3 (NEW-D-LINT-DECL1) split into #6516 c4-#6516 c7; #6202's package diagnostic, lint and deprecation items joined as #6516 c8, #6516 c7 and #6516 c9."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c2 progress: dev 635004f086 and c5f1fa287f (G6Meta-6516c2 and its fix) route Parser/Items.jet through the declared-marker hook table, with 0 `marker.name ==/!=` matches left there. c2 stays open: on dev ea1caf0d11, Compiler/JetSema/Source/Sema/MarkerRules.jet still has 13 `marker.name ==/!=` matches. The SUB said \"MarkerRules.jet already has none\", and that is wrong."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "The parser and sema marker switches read the declared markers (D-MARKER-REFLECT1); the hand-written name matches at Parser/Items.jet and Sema/MarkerRules.jet are gone.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "635004f086 (the parser`s item parsing reads the marker hook table) and 8020c7a337 (sema`s marker rule checks read the hook table, not written marker names), both on dev. On dev 9623399213, Compiler/JetParser/Source/Parser/Items.jet reads parser_marker_hook 4 times and Compiler/JetSema/Source/Sema/MarkerRules.jet reads sema_marker_is_hook 17 times. The only name comparison left in MarkerRules.jet (:130) parses RuleSite variant names, not marker names. `jet test Compiler --profile cases --filter marker_declarations` on the gate-p55 jet (dev 9623399213): rc 0, 11/0, KF 0, including a_marker_under_a_prelude_name_reaches_no_prelude_hook.",
+          "at": "2026-11-14T06:21:31.317Z"
+        },
+        {
+          "n": 3,
+          "text": "NEW-D-LINT-DECL1=A is built (owner ratified 2026-11-11): Diagnostic stays the only finding carrier and gains `tier` and `structured_fix`, while `fix` stays literal help text. A package lint is a checked compile-event subscriber over resolved calls (the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library). syntax.rewrite takes resolved callable identities, keeps argument subtrees and refuses incompatible argument or return types. Importing a package never turns its lints on; a root enables the package's lint group once. Goldens and UI snapshots prove the NoPrintInLib lint, a structured fix applied by `jet fix`, the refused incompatible rewrite, and that a dependent's import stays silent.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6516 c4: split NEW-D-LINT-DECL1 into four one-sitting outcomes (#6516 L1-L4)",
+          "at": "2026-11-15T02:26:18.830Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "Diagnostic, the only finding carrier, gains `tier` and `structured_fix`, while `fix` stays literal help text (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile ui --filter lint_structured_fix` and `jet fix` applies the structured fix in `jet test Compiler --profile cases --filter jet_fix_applies_structured_fix`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev f230c9163c: jet test Compiler --profile ui --filter lint_structured_fix PASS and --profile cases --filter jet_fix_applies_structured_fix PASS on the p248 batch compiler.",
+          "at": "2026-11-17T06:24:20.169Z"
+        },
+        {
+          "n": 5,
+          "text": "A package lint is a checked compile-event subscriber over resolved calls: the NoPrintInLib example fires only on the resolved print symbol inside the opted-in library (NEW-D-LINT-DECL1=A). Proof: `jet test Compiler --profile golden --filter Packages/NoPrintInLib` passes on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d8563f35d5: jet test Compiler --profile golden --filter Packages/NoPrintInLib PASS 3/3 (o0, o1, o2) on the p248 batch compiler; the lint fires only on the resolved print symbol inside the opted-in library.",
+          "at": "2026-11-17T06:25:52.385Z"
+        },
+        {
+          "n": 6,
+          "text": "`syntax.rewrite` takes resolved callable identities, keeps argument subtrees, and refuses a rewrite whose argument or return types are incompatible (NEW-D-LINT-DECL1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev dd0794101d: jet test Compiler --profile ui --filter rewrite_incompatible_refused PASS on the p248 batch compiler (syntax.rewrite over resolved callable identities refuses incompatible argument/return types).",
+          "at": "2026-11-17T06:24:17.866Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "rewrite_incompatible_refused"
+          }
+        },
+        {
+          "n": 7,
+          "text": "Importing a package never turns its lints on; a root enables the package's lint group once, and a dependent's import stays silent (NEW-D-LINT-DECL1=A). A program with no attached lint hook emits no dispatch code (D-HOOK-ONE1). Proof: `jet test Compiler --profile cases --filter package_lint_import_silent`, which also checks the IR has no hook dispatch.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev eeb9a1cf9b: jet test Compiler --profile cases --filter package_lint_import_silent PASS on the p248 batch compiler, including the IR checks that neither program carries group code or hook dispatch.",
+          "at": "2026-11-17T06:24:25.147Z"
+        },
+        {
+          "n": 8,
+          "text": "A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter PackageMarkerOwnDiagnostic` and `jet test Compiler --profile cases --filter explain_package_diagnostic`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev dbf05f4ced (landed 335a07be11): in the p276 suite, cases UIFixes/jet_fix_inlines_deprecated_replacement passes. jet fix inlines the #Deprecated replacement body at the call.",
+          "at": "2026-11-17T21:06:00.906Z"
+        },
+        {
+          "n": 9,
+          "text": "A library author retires an API with `#Deprecated(…)` carrying a replacement body, and `jet fix` inlines it at every call so users migrate in one run.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 8970803bb1 (dev, D-DEPRECATE-INLINE1=A). On the p282 batch compiler bd564de961, the full cases suite passes Tests/Cases/UIFixes/jet_fix_inlines_deprecated_replacement.case: `jet fix` inlines a #Deprecated(inline: true) function body at every call, and the result matches the .fixed file.",
+          "at": "2026-11-18T00:03:44.592Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "jet_fix_inlines_deprecated_replacement"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "declarative"
+      ],
+      "parentId": "c085f598",
+      "needsAcceptance": false,
+      "created": "2026-11-01T01:14:41.377Z",
+      "updated": "2026-11-18T01:33:44.227Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-18T01:33:44.227Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c0odfeu7",
+      "num": 6525,
+      "title": "`#Test` declares properties, fuzz targets and bench budgets",
+      "body": "Snapshot, golden and property testing are calls inside test bodies (Core/Testing/Testing.jet:102, 136, 517-532). `#Test` (Compiler/Prelude/Markers.jet:180) has no parameters for generation, fuzzing or budgets, and there is no bench marker.\n\nDone when: a `#Test` function with typed parameters is run as a property with derived generators and shrinking; `fuzz: true` on a `[U8]` parameter registers a fuzz target for D-TEST-MUTFUZZ1's engine; `bench: perf.budget(...)` is a D-WD14 gate.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.9.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met, proven on e4c7950dd0."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Frozen (D-G5-8): every part is covered by a ratified decision. Properties: #Test parameters, built under #6015 (done). Fuzzing: grade: generated (D-TEST-MUTFUZZ1=A, #6060). Benchmarks: the .measure member and jet test --measure (D-CLAIM-BENCH1=A; Examples/Tooling/Performance/Bench.jet). The fuzz: and bench: #Test parameters would be second spellings."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A `#Test` with typed parameters runs as a property with derived generators, shrinking and replay; fuzzing is `jet test --grade=generated` with a seeded budget that shrinks a planted bug; bench budgets are `.measure` claims judged by `jet test --measure`; each is proven by a test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e4c7950dd0, seed-b14 (Main ran each): jet test Compiler --profile cases --filter property_tests_generate_shrink_and_replay (PASS 1), --filter generated_grade_shrinks_a_planted_reverse_bug (PASS 1), --filter measure_budgets_judge_the_claim_record (PASS 1); FAIL 0 each.",
+          "at": "2026-11-13T07:12:22.456Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "testing",
+        "declarative"
+      ],
+      "parentId": "c085f598",
+      "needsAcceptance": false,
+      "created": "2026-11-01T01:15:08.007Z",
+      "updated": "2026-11-18T01:37:15.749Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-18T01:37:15.749Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c09a7oci",
+      "num": 6714,
+      "title": "Stale comments that still name the Rust or musl toolchain",
+      "body": "CFreeLead found comments that describe removed behavior: flake.nix:102-104, Tools/release/Admit.jet:758-759, Tools/agent/Chain.jet:41 and :1440, Tools/agent/JetEnv.jet:7, Tools/agent/Land.jet:969. Correct or cut each one to match the code.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "owner",
+          "text": "Closed by Main on the owner's instruction (2026-11-18: close frozen cards whose work is done, obsolete or duplicate). Done: c1 met in f3785b5297."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Folded into #6693 as a criterion (BoardPlanner 2026-11-09): the comments go stale in the same cutover that removes the pack's C."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each listed comment matches the current code or is removed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in f3785b5297 (dev, p279). The listed comments were checked against dev 0921df52d9. flake.nix still said normal Jet compilation and the runtime build with Rust, and it now says Rust is only for extern rust bridges and opt-in FFI helpers. The others already match the code: JetEnv.jet --norust, Admit.jet \"without Rust\" rows, Chain.jet \"compiles no C and links no musl\", and the flake LIBRARY_PATH musl comment, which matches Compiler/JetCLI/Source/CLI/ForeignLink.jet find_folder. Land.jet:969 now holds unrelated code.",
+          "at": "2026-11-17T22:19:06.583Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T09:36:12.216Z",
+      "updated": "2026-11-18T01:37:11.834Z",
+      "updatedBy": "owner",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-18T01:37:11.834Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
+    },
+    {
+      "id": "c01gyy9b",
+      "num": 6857,
+      "title": "Language-review cutovers: arrow-first signatures, brace records, brace layout and one program entry form",
+      "body": "Destination: the owner's 2026-11-09/11 language-review rulings are the only spellings in the repository. Signatures put the arrow first (D-SIG-ARROW1), records use braces and paren tuples retire (D-RECORD-BRACE1), commas separate data members but not bodied methods (D-BRACE-LAYOUT1), and a program is either script style or one `run: fn` entry, never mixed (owner order 2026-11-11).\n\nWhy it matters: two spellings for one thing cost every reader and every tool; AGENTS.md Greenfield cutover requires one cutover per change with every in-repository caller migrated and no teaching of the retired form.\n\nEach cutover lands with its rewrite registered in `jet fix` (D-LANG-MIGRATE1, #6068) and its syntax row, syntax-decisions.md entry and regenerated grammars in the same change.\n\nSources: #6281 c127, c150, c180 and #6251 c12, c15 (split here 2026-11-14).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e18",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "All 14 criteria met."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c6 progress, cycle p261: dev 97ebe5bd89 (the generators write fmt form) and ce9989369e (MachineDoors under FmtCorpus's formatter-input rule). On batch compiler p261: FmtCorpus --check rc=0, and case FmtCorpus/fmt_corpus_is_in_jet_fmt_form 1/0. A direct `jet fmt --check Compiler` now reports only 5 files: Spellings.jet, PreludeMarkers.jet, PreludeFacts.jet, PreludeDerives.jet and PreludeUnits.jet. Formatting them would change their meaning: the formatter's meaning defects are #6898 c19. c6 waits on that criterion."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c6 progress: dev ac6cfc03f0 (cycle p259). jet fmt no longer loops on symlinked folders (the SystemsFileIndex fixture's loop -> . made `jet fmt --check Tests` hang), Diagnostics.jet and the hand-written sources are formatted, and Tools/Agent/FmtCorpus.jet --check passes on p259 (rc=0). A direct `jet fmt --check` over Core, Jetpack and Examples is clean on p259. Tools and Tests report only negative fixtures that do not parse. Compiler reports 101 files: 72 in Compiler/JetDevServer (formatted in SUB Main-6857-c6-devserver, cycle p260) and about 20 generated files whose generators do not write fmt form (FaultReport, Spellings, PreludeMarkers, EnvironmentNames x2, OwnedTraitRows, PreludeFacts, KeywordSpans, CompilerNeededText*, ExitCodes, HostEnums, HostErrors, ObserveMessages, ProcessGrants, TestMessages, TrapDefectMessages, TrapMessages, UnicodeNormalizeTables, UnicodeTables). Left for c6: each generator writes fmt form. PreludeFacts, HostErrors and Spellings also wait on the formatter meaning fixes in #6898 c19."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Power loss 2026-11-16 14:37: unlanded #6857 work saved before worktrees were reset: GoalsA's c3/c4 stage-2 paren-tuple sweep (720 paths, base 18bc53b3e6) at $JET_SCRATCH_ROOT/lanes/Main/powerloss-1116/GoalsA-1-4-mc.patch; IfHole's c8 script-style WIP plus its landed bit-sigils (732 paths, base 17c073989d) at .../IfHole-6-1.patch. Owner order: 3 agents (2 G6, 1 G9); IfHole-6-1 now owns all of #6857."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p219: bit sigils part a landed (594046a32a); BitSigils parser test, golden BitwiseNot/BitSigilsFollowTheirPrecedence, ui bit_complement_on_bool, bit_xor_update_in_condition, sigil_integer_not_retired and the bit_sigils1 migration case pass. c13 stays open: part b (the repository migration) was held from p220 because the migration writes compound bit updates into indexed slots (E0164 in Core/Crypto, TLS and X64Alloc); bit_not_wrong_type and the FmtLossless parser-validity manifest are with IfHole-6-1 in the same pass."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c12 proof amended: the sigil meaning guard imports jet_lexer, so it is the nested guard package Tests/Guards/SigilMeaningTable (as ArrowSurface and DynSurface are), which the root guards filter does not reach. The census runs SigilMeaningTable, ArrowSurface and DynSurface through Land.jet GUARD_PACKAGES."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "IfHole-6-1 owns this card. Order: c13 power half (infix ^ gets the generic parse error), then c10/c11, then the D-BIT-SIGILS1=A operator cutover (new tokens, sema, lowering on every tier, E0398 flipped, a jet fix rule, a sweep of 6,582 .bit_* calls in 688 files, one SUB per tree), then c12's meaning table and guard on the finished lexer. Then c8, c5/c6, c1/c2, c3/c4 and c7."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet fix` rewrites an error-first signature such as `fn(path: Path) IOError! -[FS.Write]>` to arrow-first `fn(path: Path) -[FS.Write]> IOError!` (unit result omitted after the arrow), registered as a D-LANG-MIGRATE1 rewrite in Compiler/Migrations (D-SIG-ARROW1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter fix_sig_arrow_first PASS",
+          "at": "2026-11-16T17:11:07.255Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "fix_sig_arrow_first"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Every signature in Core, Compiler, Jetpack, Tools, Examples and tests is arrow-first (617 error-first signatures in Core on dev 72a8142651), and the parser no longer accepts the error-first order: it gets the generic parse error, with no teaching (D-SIG-ARROW1=A). Proof: `git grep -c -E '\\) [A-Z][A-Za-z]*! -\\[' -- '*.jet'` prints nothing and `jet test Compiler --profile ui --filter sig_error_first_not_jet`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): git grep -c -E '\\) [A-Z][A-Za-z]*! -\\[' ec9df40248 -- '*.jet' prints nothing; jet test Compiler --profile ui --filter sig_error_first_not_jet PASS; JetParser tests PASS. A wider check (any 'X! -[..]>') finds only deliberate parser tests and the refusal snapshot",
+          "at": "2026-11-16T17:11:08.517Z"
+        },
+        {
+          "n": 3,
+          "text": "Every record uses braces: `{x: 1}` is an unnamed struct, and a paren tuple is not Jet syntax (generic parse error, no teaching) (D-RECORD-BRACE1=A). Proof: `jet test Compiler --profile golden --filter Types/Records` passes on o0, o1 and o2, and `jet test Compiler --profile ui --filter paren_tuple_not_jet`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p227 batch compiler (dev eab1677096), commit eab1677096: jet test Compiler --profile golden --filter Types/Records PASS 3/3 (o0, o1, o2); jet test Compiler --profile ui --filter paren_tuple_not_jet PASS 1/1 (generic E0003). Still holds on p230 (dev 47086f2eb3): full golden 5020/5020.",
+          "at": "2026-11-16T22:20:40.709Z"
+        },
+        {
+          "n": 4,
+          "text": "Every in-repository paren tuple is migrated to a brace record in the same cutover, through a registered `jet fix` rewrite. Proof: `jet test Compiler --profile cases --filter fix_paren_tuple_to_record`, and the self-build plus `jet test Compiler --profile golden` pass with the parser refusing paren tuples.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p230 batch compiler (dev 47086f2eb3), commits eab1677096 (paren-tuple1 sweep of about 6000 sites) + 89a789c08c (fallout): jet test Compiler --profile cases --filter fix_paren_tuple_to_record PASS 1/1; the self-build (census build of 47086f2eb3, parser refusing paren tuples) succeeded and jet test Compiler --profile golden PASS 5020/5020, 0 FAIL.",
+          "at": "2026-11-16T22:20:41.854Z"
+        },
+        {
+          "n": 5,
+          "text": "Commas separate data members, and bodied method declarations (in struct, trait and impl bodies) take none: the parser and `jet fmt` follow it (D-BRACE-LAYOUT1=A). Proof: `jet test Compiler --profile cases --filter fmt_brace_layout` and `jet test Compiler --profile ui --filter brace_layout_`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p239 batch compiler (dev 58664a641a), commit 751b43cdd1: cases fmt_brace_layout PASS, cases brace_layout1 PASS, ui brace_layout_ PASS; FmtLossless and the JetParser tests PASS.",
+          "at": "2026-11-17T02:29:06.608Z"
+        },
+        {
+          "n": 6,
+          "text": "Every in-repository file follows D-BRACE-LAYOUT1. Proof: `jet fmt --check Core Compiler Jetpack Tools Examples tests` reports no brace-layout difference.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 72f6b3bb9c (batch compiler p275): jet fmt --check Core Compiler Jetpack Tools Examples Tests reports no formatting or brace-layout difference. Its only output is 280 parse errors, every one in a deliberately invalid fixture or input (Tests/Cases/*fixture*, Tests/AgentWorkloads/inputs, Tools/Gauntlet/*/Fixtures), plus 2 BranchArmTable warnings. The exit code is 1 only because of those parse errors.",
+          "at": "2026-11-17T20:33:13.809Z"
+        },
+        {
+          "n": 7,
+          "text": "Each ruling built here, and D-MODULE-VAR1, D-CLI-EVAL1, D-COMPREHEND1 and D-LANG-MIGRATE1 on their cards, has its Compiler/JetFoundation/Data/Syntax row, its Docs/Spec/syntax-decisions.md entry and regenerated editor grammars in the same change. Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p235 batch compiler (dev 1c5b311279), commit 667edfcb7e: jet self devtools grammars leaves Tools/Editors unchanged (checked by DeclTypes-6-1); jet test Tests/Guards --filter grammar PASS, --filter syntax_reconciliation PASS, Tests/Guards/ArrowSurface PASS.",
+          "at": "2026-11-17T00:24:53.627Z"
+        },
+        {
+          "n": 8,
+          "text": "A program is either script style or one `run: fn` entry, never mixed, at any scope: a `run: fn` anywhere in the load graph, package or project (module, nested module, re-export, import rename such as `use { run: other.main }`, or generated code) refuses top-level executable statements anywhere in that scope, and the reverse. One registered diagnostic names both sites, replacing the partial E0620/E0621 checks, and every in-repository hit is migrated in the same batch. Proof: `jet test Compiler --profile ui --filter program_entry_mixed_` covers the same file, an imported module, another module of the package, a renamed import, a re-export and generated code.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p228 batch compiler (dev f720a24dc5), commits 98945a23a6 + f720a24dc5: jet test Compiler --profile ui --filter program_entry_mixed_ PASS 8/8 (same file, imported module, other package module, nested module, renamed import, re-export, generated code); cases loose_statements_are_rejected_even_with_explicit_run, script_shebang_runs_top_level_statements, imported_scripts_are_rejected_before_their_body_can_run and cli_beginner_onboarding PASS; full suite p228: 0 new failures.",
+          "at": "2026-11-16T21:35:48.918Z"
+        },
+        {
+          "n": 9,
+          "text": "syntax-decisions.md, core-library.md and the syntax registry state one yielding-loop and collection-head rule: D-COMPREHEND1=A on top of D-COMPREHENSION1, D-LOOPEVAL1 and D-ARROW-CONTROL1, with no contradiction left. Proof: `jet test Tests/Guards --filter syntax_registry` passes and `git grep -n 'D-COMPREHEND1' -- Docs/Spec` shows the rule in both docs. (was #3329 c9)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Tests/Guards PASS (syntax_registry included); git grep D-COMPREHEND1 -- Docs/Spec: syntax-decisions.md, core-library.md, spec.md",
+          "at": "2026-11-16T16:45:26.163Z"
+        },
+        {
+          "n": 10,
+          "text": "A typed collection head takes a loop and builds that collection through FromIterator: `Set<String>{loop …}` and `[String: Int]{loop … -> k: v}`; a bare loop literal stays a list (D-COMPREHEND1=A). Proof: `jet test Compiler --profile golden --filter Collections/TypedLoopHeads` passes on o0, o1 and o2. (was #3329 c22)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile golden --filter Collections/TypedLoopHeads PASS o0/o1/o2 (3/3)",
+          "at": "2026-11-16T16:45:27.661Z"
+        },
+        {
+          "n": 11,
+          "text": "Items and a loop never mix in one collection literal: the mix is a registered error with what/why/fix (D-COMPREHEND1=A). Proof: `jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop`. (was #3329 c23)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p216 batch compiler (census build of dev efb3da4f6c): jet test Compiler --profile ui --filter collection_literal_mixes_items_and_loop PASS",
+          "at": "2026-11-16T16:45:29.125Z"
+        },
+        {
+          "n": 12,
+          "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Guards/SigilMeaningTable` (a nested guard package, since it imports jet_lexer; the census runs it through GUARD_PACKAGES in Tools/Agent/Land.jet). (was #4022 c5)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Tests/Guards/SigilMeaningTable PASS; ArrowSurface and DynSurface guards PASS and joined GUARD_PACKAGES (IfHole-6-1-sigil-meaning-table, d1e7dd3c5b)",
+          "at": "2026-11-16T18:40:27.184Z"
+        },
+        {
+          "n": 13,
+          "text": "D-SIGIL-ALGEBRA1=B: infix `^` and `^=` for power are not Jet syntax and get no teaching diagnostic (owner order), and `x.pow(n)` generates the same code the operator did. Integer bit operations use `&`, `|`, `~` and `&~` (D-BIT-SIGILS1=A, 2026-10-31). Proof: `jet test Compiler --profile ui --filter caret_is_not_power` and `jet test Compiler --profile golden --filter Pow`. (was #4022 c8)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p225 batch compiler (dev 1b2c2d0a54): jet test Compiler --profile ui --filter caret_is_not_power PASS 2/2 (caret_is_not_power, caret_is_not_power_update); jet test Compiler --profile golden --filter Pow PASS (golden 5014 pass, 0 fail); bit sigils landed as dc42d69388 (p224, cases Migrations/bit_sigils1 and golden BitwiseNot, PowerAndExclusiveOr, Crypto, Basics/Compound pass), O2 line goldens 1b2c2d0a54.",
+          "at": "2026-11-16T20:28:43.567Z"
+        },
+        {
+          "n": 14,
+          "text": "Every nested guard package under Tests/Guards runs in the census through GUARD_PACKAGES in Tools/Agent/Land.jet and passes on dev, including ImplPlacement (87 impls outside their type's body on 7300cf5099) and CorpusAST (5 failures on 7300cf5099: EncodingEETF codable-structural site, examples_have_no_redundant_grouping_parentheses, the failure syntax detector and the failure surface). Proof: `jet test Tests/Guards/ImplPlacement` and `jet test Tests/Guards/CorpusAST` pass, and both names are in GUARD_PACKAGES.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p229 batch compiler (dev 8c9859caba), commit 5bccda1582: jet test Tests/Guards/ImplPlacement PASS and jet test Tests/Guards/CorpusAST PASS; both names are in GUARD_PACKAGES in Tools/Agent/Land.jet, and the p229, p230 and p231 censuses ran them clean.",
+          "at": "2026-11-16T22:53:13.431Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "cutover"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:29:41.039Z",
+      "updated": "2026-11-18T01:33:49.782Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-18T01:33:49.782Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T01:37:39.643Z"
     }
   ]
 }
