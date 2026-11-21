@@ -6766,6 +6766,12 @@ envelope's 1. The API does not return
 internals, and modified syntax cannot be fed back into compilation
 (D-FRONTENDAPI1).
 
+A `check` with an error keeps its diagnostics and has no `semantic_index`.
+When the error stops the check before its program is checked (an import that
+does not resolve, for one), the result also lists no `functions` or
+`effects`: nothing was checked, so no fact is read from the syntax alone. Jet
+code and `jet inspect compiler check` read that one value.
+
 ## Command registry and typed inputs
 
 The command registry is the one source for dispatch, help, manual pages,

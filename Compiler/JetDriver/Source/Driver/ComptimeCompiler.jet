@@ -32,30 +32,28 @@ use {
         TComptimeField,
         TComptimeReport,
         TComptimeValue,
-        Type,
         diagnostic_from_registry,
         schema_fact_digest,
         schema_fact_rows,
     ]
     jet_eval.[
-        JET_COMPILER_SERVICES_SCHEMA_VERSION,
         JetCompilerServicesSourceInput,
         JetCompilerServicesSourcePreparation,
         JetEvalBuildReply,
         JetEvalCompilerQueryHost,
         JetEvalConfig,
         jet_eval_compiler_services_diagnostic_values,
+        jet_eval_compiler_services_failed_check,
         jet_eval_compiler_services_source_map,
         jet_eval_compiler_services_source_map_value,
         jet_eval_compiler_services_int,
         jet_eval_compiler_services_lex,
         jet_eval_compiler_services_option_span,
         jet_eval_compiler_services_parse,
-        jet_eval_compiler_services_span,
         jet_eval_compiler_services_string,
     ]
     jet_pkg_model.[AuthorityError, AuthorityResolver]
-    jet_sema.[SemaDiagnosticOrigin, sema_comptime_reflection_written_signature, sema_comptime_reflection_doc_source, sema_comptime_reflection_documentation, sema_diagnostic_loaded_origins]
+    jet_sema.[SemaDiagnosticOrigin, sema_diagnostic_loaded_origins]
 }
 
 JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
@@ -382,49 +380,6 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
     if result.product == {
         .CheckedCompilerValue(checked) -> JetEvalBuildReply.Value{value: TComptimeValue.Present{value: checked.value}}
         .RetainedCheckedProjection(_) -> JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` returned a retained projection", "a compile-time check query asks for its compiler value", "report this compiler bug")}
-        .Failed -> {
-            functions := [TComptimeValue]{}
-            module_text: sema_comptime_reflection_doc_source(text, "")
-            loop item in parsed.parsed.program.items {
-                if item == .Func(function) && function.name != "build" {
-                    functions.push(
-                        TComptimeValue.Struct{
-                            type_name: "FunctionInfo",
-                            fields: [TComptimeField]{
-                                TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
-                                TComptimeField{name: "module", value: jet_eval_compiler_services_string("core.compiler")},
-                                TComptimeField{name: "identity", value: jet_eval_compiler_services_string("core.compiler.{function.name}")},
-                                TComptimeField{name: "package", value: jet_eval_compiler_services_string("")},
-                                TComptimeField{name: "signature", value: sema_comptime_reflection_written_signature(function, "")},
-                                TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, "")},
-                                TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
-                                TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: []}},
-                                TComptimeField{name: "facts", value: TComptimeValue.List{values: []}},
-                                TComptimeField{name: "markers", value: TComptimeValue.List{values: []}},
-                                // The failed check registered no module, so no source places the function.
-                                TComptimeField{name: "location", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceLocation"}}}},
-                                TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(module_text, Val(function.name_span))}},
-                            },
-                        },
-                    )
-                }
-            }
-            JetEvalBuildReply.Value{
-                value: TComptimeValue.Present{
-                    value: TComptimeValue.Struct{
-                        type_name: "CompilerChecked",
-                        fields: [TComptimeField]{
-                            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
-                            TComptimeField{name: "source", value: jet_eval_compiler_services_string(text)},
-                            TComptimeField{name: "syntax", value: parsed.value},
-                            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(result.diagnostics, sema_diagnostic_loaded_origins(result.diagnostics, result.sources, JET_DRIVER_COMPILER_SOURCE_FILE, text, None))},
-                            TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
-                            TComptimeField{name: "effects", value: TComptimeValue.List{values: []}},
-                            TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},
-                        },
-                    },
-                },
-            }
-        }
+        .Failed -> JetEvalBuildReply.Value{value: TComptimeValue.Present{value: jet_eval_compiler_services_failed_check(text, parsed.value, result.diagnostics, sema_diagnostic_loaded_origins(result.diagnostics, result.sources, JET_DRIVER_COMPILER_SOURCE_FILE, text, None))}}
     }
 }

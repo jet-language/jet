@@ -1,4 +1,4 @@
-# Typed code reading `compiler.check` and the CLI's `jet inspect compiler check` see one result: each index fact typed.jet prints from main.jet is the same value in the CLI JSON, and a text with a semantic error keeps its diagnostics and has no index on both sides.
+# Typed code reading `compiler.check` and the CLI's `jet inspect compiler check` see one result: each index fact typed.jet prints from main.jet is the same value in the CLI JSON, and a text with a semantic error keeps its diagnostics and has no index on both sides. A text whose import does not resolve is stopped before anything is checked, so both sides list no function and no effect rather than facts read from its syntax.
 # Covers the members typed code can read: source_digest, definitions, references, calls and effects. The typed index record does not carry state_graphs, fact_registry or derivations, so those are not compared here.
 fixture: TypedConsumersMatchCLIJSON.fixture
 env: NO_COLOR=1
@@ -13,6 +13,7 @@ stdout: ~ "call fn:core_compiler.run fn:core_compiler.helper core.compiler 63-69
 stdout: ~ "effect fn:core_compiler.helper direct= callees= inferred= maximal=false provenance=" # helper has no effect
 stdout: ~ "effect fn:core_compiler.run direct=IO callees=fn:core_compiler.helper inferred=IO maximal=false provenance=IO:fn:core_compiler.run@57-62" # run's IO comes from its own print
 stdout: ~ "broken E0107 index absent" # broken.jet keeps its diagnostic and has no index
+stdout: ~ "unresolved E0603 functions=0 effects=0 index absent" # the stopped check claims no checked fact
 step: jet inspect compiler check main.jet
 exit: 0
 json: stdout doc $.compiler.value.semantic_index.source_digest = "9f360578ca264b727a79652f62db9bbb31f14499e2d867f6cf6f08243d14e001"
@@ -53,3 +54,9 @@ step: jet inspect compiler check broken.jet
 exit: 0
 json: stdout doc $.compiler.value.diagnostics[*].code = ["E0107"] # the semantic error stays a diagnostic
 json: stdout doc $.compiler.value.semantic_index = null # and the index is absent, as typed.jet saw
+step: jet inspect compiler check unresolved.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[*].code = ["E0603"] # the same diagnostic typed.jet printed
+json: stdout doc $.compiler.value.functions = [] # as typed.jet saw: no function
+json: stdout doc $.compiler.value.effects = [] # and no effect
+json: stdout doc $.compiler.value.semantic_index = null

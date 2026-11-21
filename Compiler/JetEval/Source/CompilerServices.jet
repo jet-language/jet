@@ -933,6 +933,25 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
 }
 
+// A check that stopped before it had a checked graph (a load or resolution
+// failure): its text, syntax and diagnostics, and no checked facts. Nothing
+// was checked, so it lists no function or effect and has no semantic index;
+// a fact read from the syntax alone would claim what no check established.
+jet_eval_compiler_services_failed_check: fn(source: String, syntax: TComptimeValue, diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
+    TComptimeValue.Struct{
+        type_name: "CompilerChecked",
+        fields: [TComptimeField]{
+            TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
+            TComptimeField{name: "syntax", value: syntax},
+            TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics, origins)},
+            TComptimeField{name: "functions", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "effects", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},
+        },
+    }
+}
+
 // The build context's whole-program view, or the first producer fact it lacks.
 JetCompilerServicesProgramInfo: enum {
     Ready(value: TComptimeValue),
