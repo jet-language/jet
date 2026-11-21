@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112761,
+    "rev": 112775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25787,6 +25787,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c19, row BuildEntry/program_owned_main: root cause found. Its `plain` image never allocates, so its main thread has no TCB and GS stays 0 (Thread.jet jet_rt_thread_init). Its stop runs trap_simple_report -> trap_task_site_begin -> jet_rt_stop_domain -> scheduler_control_current, which loads thread_base() + 16: SIGSEGV at 0x10 instead of the Jet.ArithmeticOrBoundsFailure report (p391 streams). The site capture came with the stop-site work of 2026-11-20 (d0ec689cc8, ac7e8574ce). Fix submitted as SUB Main-3594-c19-plain-stop: stop domain 2 exists only once a body has entered and installed the publication rail, so trap_task_site_begin asks scheduler_body_ever_entered (a global load) first. No TCB read and no syscall; the hot callers of jet_rt_stop_domain are unchanged. The other three c19 rows (the two process-tree timeouts and fork_under_load) remain open."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "2026-11-15 TowerKeeper-1: c1 retargeted to Examples/Systems/Process; c6 proof is now a case, not a scratch script; c14 debris stripped."
@@ -26033,7 +26038,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-21T03:48:13.611Z",
+      "updated": "2026-11-21T04:58:56.436Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -54097,6 +54102,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c105: ballot D-PERF-OVERHEAD-BOUND1 (drafted by Lens, reviewed by Main) is posted to the owner. Option A bounds the runtime's share at 1% and reports the kernel's share as an estimate from timed samples, which may read low (1.85 us/sample charged vs 2.3 us probed). A fixed 4 kHz default was weighed and excluded by c68's 8 kHz parity. The overhead row stays failing until the ballot is ratified and built; no bar was relaxed."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c104 not met: in p392's proof run and units profile, JetDebug an_optimized_stop_never_shows_a_scattered_list_as_empty fails at -O2 ('Can't evaluate items: this session has no compiler'). OptScalar --filter scattered passes. Root: Native.jet evaluate skipped an <Unavailable> local and fell through to compiling the name, which a session with no evaluator (the unit test, a dump) refuses. Fix filed as SUB Main-6841-c104-print-unavailable (print refuses an unavailable local at once: 'local items has no readable value at this stop'); passes at -O1 and -O2 on the p392 compiler in a scratch tree. c104 is met when p393's proof run passes it."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c104: root confirmed by JET_OPT_DISABLE=scalar. With scalar replacement off, the same -O2 stop shows items = [0, 3, 6, 9, 12]. When the storage is lent, OptScalar keeps it for the loan, but its bytes hold the fields only around each loan, while the address slot still located the variable. Fix submitted as Main-6841-c104-scattered-list: IRFunction.scattered marks those address slots, ir_x64_variables gives their variables no location (shown unavailable), and every slot-renumbering pass carries the list. A JetIR unit test fails without the marking. The JetDebug test from the criterion (-O1 and -O2; accepts the true list or unavailable, refuses []) fails on the p391 jet and runs on the next batch compiler. Showing the true value from the field slots (DW_OP_piece) is possible later work, not needed for c104."
         },
         {
@@ -55448,11 +55463,11 @@
         {
           "n": 102,
           "text": "A fault report names the routine it faulted in: Tests/Cases/Debug/a_fault_names_its_routine_and_task_and_leaves_a_dump.case has errored in every suite since it was added (p382 to p389). `jet run --release --debug-info=true` prints \"Backtrace:\\n  ??\\n  run.lambda@448 at main.jet:7\", an unknown first frame where the faulting routine belongs. Proof: the case passes in the suite.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T03:48:11.685Z"
+          "evidence": "Proof run on the p392 batch compiler (dev f768b6597e, carrying IfHole-6-1-c102-runtime-symbols 56c706c9f6): the full cases suite (suite-p392, collect-all) lists `PASS Tests/Cases/Debug/a_fault_names_its_routine_and_task_and_leaves_a_dump.case`. It ERRORed (child terminated by signal, first frame `??`) in every suite from p382 to p391.",
+          "at": "2026-11-21T05:17:12.971Z"
         },
         {
           "n": 103,
@@ -55471,6 +55486,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T04:13:22.165Z"
+        },
+        {
+          "n": 105,
+          "text": "Regression of c67: `Perf/receipt_reports_measured_overhead` fails again under suite load. In p387-p391, overhead_ns reached 43-66 ms against the case's 40 ms bar (p391: 50262488). Quiet, it is 34.9 ms (1.74%). Lens's root: at 8 kHz with whole kernel callchains, the kernel's ring write is about 1.85 us a sample (30.1 of 34.9 ms), and under load the kernel's own perf-interrupt time climbs. The runtime's handlers and drains are 4.8 ms. No ratified decision sets the 2% bar, so the fix is either engineering that cuts the kernel's per-sample cost while keeping c44 whole stacks and c68 8 kHz, or the D-PERF-OVERHEAD-BOUND1 ballot (Lens drafting); never a looser bar without a ruling. Proof: the case passes in 3 consecutive full suites (suite-pNNN cases.out), under whatever bound is ratified.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T04:53:14.472Z"
         }
       ],
       "refs": [],
@@ -55478,9 +55502,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T04:43:50.083Z",
+      "updated": "2026-11-21T05:25:14.526Z",
       "updatedBy": "Main",
-      "criteriaLastN": 104
+      "criteriaLastN": 105
     },
     {
       "id": "c0in2dft",
@@ -62514,70 +62538,6 @@
       "criteriaLastN": 14
     },
     {
-      "id": "c0rl2anf",
-      "num": 6900,
-      "title": "Guides: a design guide, architecture rows for every Core namespace, embedded systems, and API maturity",
-      "body": "Destination: Docs/spec/guides/design.md teaches a method for hard problems, SOLID translated for Jet and the escape-hatch ladder, linking every cited decision; Docs/spec/architecture.md classifies every Core namespace; and the docs cover embedded systems and API maturity.\n\nWhy it matters: these are the pages a programmer reads before writing a large Jet program.\n\nSource: Map card #5982 c1, c2, c15 (from #4728, #4800, #155).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e20",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "All criteria met on dev 18de3a687e."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Docs/Spec/Guides/design.md exists with a method for hard problems, SOLID translated for Jet and the escape-hatch ladder, and links every decision it cites. Proof: `git ls-files Docs/Spec/Guides/design.md` and each D- id in it resolves in `tower decision show`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 18de3a687e (guides landed c9ccdef68b): git ls-files lists Docs/Spec/Guides/design.md; its six decision ids (D-ACCEL-LIB1, D-AUTH-DEFAULT1, D-EFF3, D-EFFTREE1, D-PLUGIN1, D-UNSAFE2) each report ratified in tower decision show.",
-          "at": "2026-11-18T05:20:59.524Z"
-        },
-        {
-          "n": 2,
-          "text": "Docs/Spec/architecture.md has a classification row for every Core namespace (60 were missing). Proof: a guard compares the namespaces under Core/ with the architecture rows (`jet test Tests/Guards --filter architecture_rows`).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "gate-p292 (dev 18de3a687e; guides landed c9ccdef68b): jet test Tests/Guards --filter architecture_rows: \"architecture classifies every Core module: pass\", 1 passed, 0 failed.",
-          "at": "2026-11-18T05:21:11.832Z"
-        },
-        {
-          "n": 3,
-          "text": "The docs have a page for embedded systems (targets, no-OS machines, boards) and one for API maturity tags, each linked from the guide index. Proof: `git ls-files Docs/Spec/Guides | grep -i -E 'embedded|maturity'` names both.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 18de3a687e (guides landed c9ccdef68b): git ls-files Docs/Spec/Guides lists embedded.md and maturity-tags.md.",
-          "at": "2026-11-18T05:21:01.428Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "docs"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T03:52:56.157Z",
-      "updated": "2026-11-18T05:21:13.381Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-18T05:21:13.381Z"
-    },
-    {
       "id": "c0s1vode",
       "num": 6901,
       "title": "LSP references and rename follow checked identity across files, versions and Unicode",
@@ -66040,7 +66000,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c14 not met at dev f768b6597e. The golden Examples/Modules/Packages/SandboxMathKit/run.jet passes in suite-p392, but git ls-files '*.wasm' -- Examples prints two tracked files: Examples/Modules/Packages/SandboxMathKit/mathkit.wasm (25911 bytes, the prebuilt guest c14 says must not ship) and Examples/Modules/Packages/PluginFailure/malformed_guest.wasm (41 bytes, a deliberately malformed input, which the proof also forbids as written). Both date from 2c3e68a70b (11-06). Remaining: build mathkit.wasm from SandboxSource in the example's own build; make the malformed input inside the PluginFailure example rather than commit it."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -66237,7 +66203,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:52.537Z",
-      "updated": "2026-11-17T01:50:22.042Z",
+      "updated": "2026-11-21T05:29:22.670Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -72176,6 +72142,16 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "D-PERF-TARGET1 redrafted by Lens and updated on the board (rec A: jet perf attach also starts a command after --, with counts and syscalls lenses). Main checked the redraft against f768b6597e: attach dispatch Command.jet:60, x64_sampler_open, E2102/E2124 registered and E2127 free, the 64-process cap at Outside.jet:29, and 153 call lines in 30 runtime files bypassing host_call. Following children for a launched command's whole life is stated as new work with its costs, not as existing. Not posted: the board records Main as drafter, so a review by another agent is still owed before posting. c1, c2, c5, c11 and c14-c17 wait on it."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "D-PERF-TARGET1 (drafted, unreviewed) fails Main's check on dev f768b6597e and must be redrafted before any review or posting. (1) It never names `jet perf attach` (Perf/Command.jet:60, Session.jet:358, the outside sampler in Outside.jet), which already profiles a running built program or the jet CLI. No option weighs attach launching a command itself. (2) It omits `jet perf test`. (3) `jet perf run` already writes `syscalls` and `instructions` receipt sections (jet_cli_perf_syscalls_section), so the \"new lenses\" framing and the host-call claim are stale. (4) E2124 is AttachTargetNotObserved, so the no-counters and ptrace-refused edge cases need a fitting code. (5) Tools/Perf/StdoutBuffer/run.sh is a strace user the draft does not count. Redraft queued to Lens."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c5 part 1 (jet debug on the compiler), p390 batch compiler (census build of a8df17dfb5), transcript at $JET_SCRATCH_ROOT/lanes/Main/dbg6995/sema-print.txt: `jet debug JET -- check hello.jet`, then `break sema_function_result`, `continue`, `print function_key` stops at CheckProgram.jet:759 in sema_function_result() and prints function_key = \"function:module:14:source-root:0::hello.jet.greet\"; a second continue prints \"...hello.jet.run\". `next` steps to line 760 with complete = true. Part 2, a `jet perf run` of `jet build Compiler`, is queued for the quiet window (it is a heavy job). Gap found: --break FILE:LINE stops at the wrong function (new criterion)."
         },
         {
@@ -72250,11 +72226,11 @@
         {
           "n": 4,
           "text": "A compiler crash (exit 101) or a runtime fault in a batch suite run is triaged with jet debug: the landing cycle keeps a --record replay or the fault report for each new exit-101 row, and the triage note shows the jet debug commands that found the cause. Proof: one such triage on a real row, its commands and output on the card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T00:56:46.227Z"
+          "evidence": "Triage of a real suite row, BuildEntry/program_owned_main_stops_as_the_process_root_does (ERROR \"child terminated by signal\" in every suite since p371; #3594 c19). The cycle kept its fault report: suite-p391/cases.out streams block \"Fault [SIGSEGV]: invalid memory access at address 0x10 / Backtrace: jet_rt_stop_domain / unit.trap_simple_report / run at plain.jet:7\". Triage with the p392 batch compiler (f768b6597e) on the fixture plain.jet: `jet build plain.jet` then `./.jet/build/plain` exits 139 with the same report. `jet debug .jet/build/plain`, with commands `continue`, `backtrace`, `disassemble jet_rt_stop_domain`: \"Program received SIGSEGV plain.jet:7 in run()\"; the disassembly shows `+4 mov rax,QWORD PTR gs:0x0`, `+16 mov r8,QWORD PTR [r8+0x10]`. The GS self-pointer read succeeds and returns 0, because GS names the detached zero word of a thread with no TCB; the load at 0+0x10 faults. Cause: trap_simple_report -> trap_task_site_begin -> jet_rt_stop_domain -> scheduler_control_current reads the control of a main thread that never allocated. Fix: SUB Main-3594-c19-plain-stop (trap_task_site_begin asks scheduler_body_ever_entered first). Session output kept at $JET_SCRATCH_ROOT/lanes/Main/triage6995/debug1.out. The triage found a jet debug gap, recorded as a new criterion here.",
+          "at": "2026-11-21T05:18:11.028Z"
         },
         {
           "n": 5,
@@ -72464,6 +72440,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T04:44:59.118Z"
+        },
+        {
+          "n": 26,
+          "text": "At a fault inside a runtime routine, jet debug shows at least what the crash report shows. Today, on the program_owned_main `plain` image (p392), the crash report backtrace lists jet_rt_stop_domain and unit.trap_simple_report above run at plain.jet:7, but `backtrace` at the SIGSEGV stop lists only `#0 run() at plain.jet:7` and `frame 1` is refused. Neither the stop nor any command names the faulting instruction, the address it read or the registers. The user line stays the stop line; the runtime frames are listed under it, and the stop names the faulting pc, instruction and address. Proof: a JetDebug unit test or Debug case on that image whose backtrace lists jet_rt_stop_domain and whose stop text names address 0x10.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T05:18:11.896Z"
         }
       ],
       "refs": [],
@@ -72471,9 +72456,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T04:44:59.118Z",
+      "updated": "2026-11-21T05:29:01.054Z",
       "updatedBy": "Main",
-      "criteriaLastN": 25
+      "criteriaLastN": 26
     },
     {
       "id": "c0c3gh6u",
@@ -126729,201 +126714,213 @@
       "cardId": "c00ni11n",
       "group": "tooling",
       "title": "How jet perf measures any command or built program, not only a .jet file",
-      "situation": "Jet's profiler, `jet perf`, can only measure a program it compiles and runs itself from a .jet file. It cannot measure a program that is already built, or a jet command such as `jet build Compiler`. So two jobs still need outside Linux tools. One is counting how much work a run does, which `perf stat` does today for the compile-speed gate. The other is listing the calls a run makes into the operating system, such as opening files or starting threads, which `strace` does today in seven test cases. The team rule says Jet code is measured with Jet tools, so both outside tools must go. You are asked how a user names such a target and asks for counts or a call list. We recommend one more way to name the target on the existing `jet perf run`, with counts and calls as two more lenses.",
-      "gist": "How should `jet perf` name a built program or a jet command as its target, and ask for work counts or a list of system calls?",
-      "lesson": "A profiler watches a program run. Today `jet perf run` watches only a program it builds from a .jet file. Two jobs need more. One is counting the work a run does: instructions, the steps the processor finishes, and cycles, its clock ticks. The other is listing the system calls a run makes, which are its requests to the operating system. Both must work on any built program or jet command, with every thread and child process it starts. This vote picks how the user writes that.",
-      "explainer": "Beginner path. A beginner who wants to know how much work a program does writes `jet perf run hash.jet --lens=counts` and reads two numbers in `jet perf view`. To see which files it opens, they write `--lens=syscalls` instead. A built program or a jet command goes after `--exec`, as in `jet perf run --lens=counts --exec jet build Compiler`. If they forget `--exec` and name a program that is not a .jet file, the error names `--exec`.\n\nExpert path. A script or test case records `jet perf run --lens=counts,syscalls --out run.jettrace --exec ./jet run main.jet`. It reads `jet perf view run.jettrace --json`, which holds the counts per process and every call with its arguments. The compile-speed gate drops `perf stat` this way. A test case filters the view's call lines as it filtered strace's lines.",
-      "story": "Sam works on the compiler and wants to know whether a change made `jet build Compiler` do more work. Today the speed gate runs Linux `perf stat`, which Jet's rules forbid for Jet code, and `jet perf run` only takes a .jet file. Under option A, Sam writes `jet perf run --lens=counts --exec jet build Compiler`. The view prints the instructions and cycles of the whole build, with every thread and helper process in the total.\n\nLater a test fails because `jet run` opened its own file twice. Sam runs `jet perf run --lens=syscalls --exec jet run main.jet`. The view lists both opens, each with its path and the line of Jet code that made it.",
-      "inWild": "Linux `perf stat ./prog args` counts events for any command, its threads and its children; `perf stat -e instructions:u,cycles:u` counts user-mode work only. `perf trace ./prog` lists system calls like strace, from the same front door. `strace -f ./prog` follows children and decodes each call's arguments, such as the path of an `openat` and the flags of a `clone`.\n\nThe tools that profile one language follow its runner. Go's `go test -cpuprofile` covers only Go programs. Rust's cargo has no built-in counter and relies on `perf stat`. Valgrind's tools take a whole command, as in `valgrind --tool=callgrind ./prog args`. Instruments on macOS opens any app and records system calls in its System Trace template.\n\nSources follow, one per line.\nperf stat: man7.org/linux/man-pages/man1/perf-stat.1.html\nperf trace: man7.org/linux/man-pages/man1/perf-trace.1.html\nstrace: man7.org/linux/man-pages/man1/strace.1.html\nvalgrind: valgrind.org/docs/manual/manual-core.html",
+      "situation": "Jet's profiler has two engines. `jet perf run` and `jet perf test` build a Jet program and watch it from inside, 8,000 samples a second with tasks and waits. `jet perf attach <pid>` watches any running process from outside, for one second, 1,000 samples a second. No form starts a built program or a jet command and counts its work or lists its system calls, its requests to the operating system. So the repo still runs Linux `perf`, GNU `time -v` and `strace` in 19 places. You are asked how a user names that job. We recommend that `jet perf attach` also start a command given after `--`, with two new lenses, `counts` and `syscalls`.",
+      "gist": "How should `jet perf` count the work of, and list the system calls of, a built program or a jet command?",
+      "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process from outside, for one second. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
+      "explainer": "Beginner path. To see how much work a built program does, write `jet perf attach --lens=counts -- .jet/build/hash data.bin`. The view prints `counts instructions:u=... cycles:u=... cpu_ns=... peak_rss_bytes=... processes=1`. To see which files it opens, write `--lens=syscalls` instead. To profile a Jet program's own code, `jet perf run hash.jet` stays the tool, as today.\n\nExpert path. A gate writes `jet perf attach --lens=counts,syscalls --out run.jettrace -- jet build Compiler` and reads `jet perf view run.jettrace --json`. The counts are per process and summed, and every call has its pid, arguments and result. `jet perf compare` compares two such traces' counts.",
+      "story": "Sam wants to know whether a change made `jet build Compiler` do more work. Today the speed gate runs Linux `perf stat`, which the dogfood rule forbids for Jet code. Under option A, Sam writes `jet perf attach --lens=counts -- jet build Compiler`. The view prints the instructions and cycles of the whole build, every helper process included.\n\nLater a test fails because `jet run` opened its own file twice. Sam writes `jet perf attach --lens=syscalls -- jet run main.jet`, and the view lists both opens with their paths.",
+      "inWild": "$ perf stat -e instructions:u,cycles:u -- jet build Compiler\n$ strace -f -e trace=openat -o run.trace jet run main.jet\n$ /usr/bin/time -v jet build Compiler",
       "detail": "The code was read on dev 2e2ac929c1. The command `jet perf run` is the function `jet_cli_perf_session` in the file Compiler/JetCLI/Source/CLI/Perf/Session.jet. It always spawns `jet run --observe` with the user's words. The words after `--` go to the program. So no spelling today names a built program or a jet command, and `--` cannot be reused for that.\n\nThe lenses are `cpu`, `memory`, `alloc`, `topdown` and `causal` (`jet_cli_perf_session_lenses`). The runtime opens the memory and top-down counters with perf_event_open on the program's starting thread only (Compiler/JetRuntime/Source/PerfSamples.jet). The runtime also counts the calls that pass through `host_call` in HostProcess.jet, by number and Jet stack, without arguments. Thread starts, the allocator's munmap, the open of /proc/self/exe and the sockets go around it through raw syscalls. Children and the loader are never seen.\n\nTwo kinds of users wait on this. Tools/Perf/CompileThroughput/Throughput.jet runs each compile under `perf stat -x , -e instructions:u,cycles:u` to count its work. Seven cases run strace. CLICompilerSpeed checks the clone and openat calls of `{jet} run`, twice. ControlAndData checks the munmap calls of a built program at exit. Report checks the network calls of `{jet} build`. TaskgroupStack checks the clone calls of a built program. JetpackJetOS runs it twice, and Tools/Perf/CoreStrace once.\n\nThe engine is the same under every option. Counts use perf_event_open with `inherit` set, so every thread and child adds into the total, user mode only. Calls use ptrace on the target, which follows fork, vfork, clone and exec, and decodes open paths, clone flags, munmap ranges and the socket calls. JetDebug's Native.jet already drives ptrace for `jet debug`. A Jet program also gets the Jet line that made each call, from its debug info.\n\nEdge cases, the same under every option. With no counters (a virtual machine without them, or perf_event_paranoid above 2), the run is refused before it starts with E2124. The message names the kernel's errno and the paranoid level, and the fix names the sysctl. Where ptrace is refused (Yama ptrace_scope 3, a seccomp sandbox, or a target already under `jet debug`), `syscalls` is refused the same way.\n\nA setuid program runs without its privilege under ptrace, as under strace, and the view says so. The command's exit code is passed through. A child still running when the command ends is listed by pid and detached; its counts so far are kept. Each call row keeps at most 4096 bytes of decoded arguments. Past 65536 calls the rest are counted per name.",
       "options": [
         {
           "key": "A",
-          "name": "`--exec` on jet perf run, with counts and syscalls as lenses",
-          "detail": "`jet perf run` keeps its .jet form and gains `--exec`. Every word after `--exec` is the command, run as the shell would, so any perf flag comes before it. Two new lenses join `cpu`, `memory`, `alloc`, `topdown` and `causal`. `counts` records instructions and cycles in user mode, summed over every thread and child. `syscalls` records every call with its arguments. Both land in the one trace file that `jet perf view`, `compare` and `export` already read.\n\nFor a .jet file the counts and calls are the program's alone, never the compile's, as for the other lenses. For `--exec` they are the whole command's. The `syscalls` lens refuses `cpu` beside it, because stopping at every call skews CPU time.",
-          "technical": "Session.jet parses `--exec` as the end of perf flags and spawns the remaining words directly, without `jet run --observe`. The lens list gains `counts` and `syscalls`. Two receipt sections are added: `counts` (instructions, cycles, per process and in total, and survivors) and `syscalls` rows gain `args` and `pid`. `jet perf view` prints `counts instructions:u=… cycles:u=… processes=… threads=…` and one line per call, `pid name(args) = result · at file:line`. `jet perf compare` compares the counts.",
-          "code": "# a .jet file: the program alone, not its compile\n$ jet perf run hash.jet --lens=counts\n$ jet perf run hash.jet --lens=syscalls\n# a built program with its arguments\n$ jet perf run --lens=counts --exec .jet/build/hash data.bin\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n# a jet command\n$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec jet build Compiler\n$ jet perf view .jet/perf/<stamp>.jettrace\ncounts instructions:u=81204417733 cycles:u=29511803012 processes=3 threads=14"
+          "name": "`jet perf attach` can start the command",
+          "detail": "Attach is the outside engine. Today it takes a running pid. It also takes a command after `--`, which it starts and watches for its whole life. Two lenses join it: `counts`, the user-mode instructions and cycles, CPU time and peak memory of each process and in total, and `syscalls`, every system call with its process, arguments and result. The default stays `cpu`, the outside sampler.\n\nFollowing children is new work. Today jet_cli_perf_outside_family (Outside.jet:503) reads each thread's /proc `children` once, when sampling starts, at most 64 processes. A process started later is never sampled. `jet build` and `jet test` start their compile and link children later, so the command form must follow them as they start. The pid form keeps today's read: children started after the attach are missed, and this ballot leaves that.\n\nThe command's exit code is passed through. The pid form is unchanged, and `--for=` (D-PERF-ATTACH-WINDOW1) stays the pid form's window.\n\n`jet perf test` is unchanged. It profiles the tests' own code from inside. `jet perf attach --lens=counts -- jet test x.jet` measures the whole command: compile, test binary and helpers. Those are two jobs, so nothing is spelled twice.\n\nThe compiler compiling Compiler, the job of #6995 c2, c5 and c11, stays on `jet perf run Compiler/JetCLI/run.jet -- build Compiler`. That runs the compiler from source under the inside engine, with phases and tasks. Attach of `jet build Compiler` is the quick look at an installed jet, for the whole run. It samples 1,000 times a second with frame-pointer stacks. It names functions from the image's symbols and declaration lines. Compile-time code counts as `unnamed`, and phases come from the package split.",
+          "technical": "Session.jet jet_cli_perf_attach: words after `--` are the command. It is spawned stopped, the engines open on its pid before it runs, then it runs.\n\nNew child following, with its costs. `cpu` today opens per-thread task-clock events (x64_sampler_open) on the threads of the family read at open. The command form opens one sampling event per CPU with `inherit` on the stopped command instead. Inherited sampling events cannot keep today's per-thread ring, so samples arrive through one ring per CPU, tagged by pid and tid.\n\n`counts` opens instructions:u and cycles:u with `inherit` before exec, so threads and children add in, read per process at its exit. Counting needs no ring, so that inherit is cheap. CPU time and peak memory come from each reap's rusage. `syscalls` ptraces the command with fork, vfork, clone and exec following. Each fork then stops for the tracer, and each call stops twice [INFERENCE: the slowdown is unmeasured].\n\nThe pid form refuses `counts` and `syscalls` with E2102 (Jet.UnknownFlag), whose fix is the `--` form: a count or call list missing the start would mislead. The command form refuses `--for=`, `--source` and `--zones=` the same way.\n\nReceipt delta. The `syscalls` section (JetPerfSyscalls) exists: `jet perf run` counts each host call by number and Jet stack (HostProcess.jet host_call). Its rows have no arguments, no pid and no result. Children and the compile are never seen. Runtime calls that bypass host_call are missed too. The command form fills the same section, adding `pid` to each row and a `calls` list: pid, tid, name, decoded arguments, result.\n\nThe bypass count. `git grep -c -E '^\\s*[^/ ].*os_syscall_i64\\(' f768b6597e -- Compiler/JetRuntime/Source` with HostProcess.jet and PerfSamples.jet excluded prints 153 lines in 30 files. It counts call lines only. Comment lines are excluded, and so are host_call itself and the perf hook. The definition is in Compiler/JetBackend/Source/OS/Linux.jet:393, outside that path. The plain `git grep -c os_syscall_i64` there prints 180 lines in 33 files, comments included.\n\nThe `instructions` section (JetPerfInstructions) also exists. It keeps the sampled machine code, not run totals, so it is unchanged. One new section, `counts` (JetPerfCounts), holds the totals: `instructions_u`, `cycles_u`, `cpu_ns`, `peak_rss_bytes`, per process and summed.\n\nRefusals. No new diagnostic code is needed. A kernel without counters makes `counts` `unavailable` with the errno and perf_event_paranoid, as the memory and topdown lenses already report (observability.md, Instructions and lenses). A refused ptrace makes `syscalls` `unavailable` with the errno and the Yama ptrace_scope. The command still runs. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone. A refusal instead would need a new code, E2127 being free, with its registry row, UI snapshot and diagnostics.md entry.",
+          "code": "$ jet perf attach --lens=counts -- jet build Compiler\ncounts instructions:u=81204417733 cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000 processes=3 threads=14\n$ jet perf attach --lens=syscalls -- jet run main.jet\nsyscalls calls=412 processes=2\n  4251 openat(AT_FDCWD, \"main.jet\", O_RDONLY|O_CLOEXEC) = 3\n$ jet perf test hash_test.jet        # unchanged: the tests' code\n$ jet perf run Compiler/JetCLI/run.jet -- build Compiler   # c2: inside"
         },
         {
           "key": "B",
-          "name": "Two new subcommands, `jet perf stat` and `jet perf trace`",
-          "detail": "Like Linux `perf stat` and `strace`, each takes a whole command and prints its result on stderr when the command ends. `jet perf stat` prints the counts and `jet perf trace` prints one line per call. A .jet file is built first, and then only the program is measured. `--out` also writes a trace file. `jet perf trace --calls=openat,clone3` keeps only the calls named.",
-          "technical": "Two verbs join the perf family in the command registry. Each spawns its command under the shared engine and prints a text report; with `--out` it writes a trace with the same receipt sections as A. A .jet file argument runs `jet build` and then the built program.",
-          "code": "# a .jet file: built first, then the program alone\n$ jet perf stat hash.jet\n$ jet perf trace hash.jet\n# a built program with its arguments\n$ jet perf stat .jet/build/hash data.bin\n$ jet perf trace .jet/build/hash data.bin\n# a jet command\n$ jet perf stat jet build Compiler\n$ jet perf trace --calls=openat jet build Compiler\ninstructions:u 81204417733\ncycles:u       29511803012"
+          "name": "`jet perf run --exec`",
+          "detail": "`jet perf run` keeps its .jet form and gains `--exec`. Every word after it is the command. The engine, lenses, receipt and refusals are option A's: the outside sampler, `counts` and `syscalls`. That includes A's new work of following children the command starts later, with its costs. `jet perf attach` stays for running pids, missing children started after it attaches, as today.\n\n`jet perf test` refuses `--exec`; `jet perf run --exec jet test x.jet` measures the whole command. For the compiler compiling Compiler, `jet perf run Compiler/JetCLI/run.jet -- build Compiler` stays the inside route. `jet perf run --exec jet build Compiler` is the outside one, with option A's detail and costs.",
+          "technical": "Session.jet jet_cli_perf_session ends its flags at `--exec` and spawns the rest without `jet run --observe`, under the engines of option A. One verb then writes traces from two engines, 8,000 samples a second inside and 1,000 outside. The receipt's `capture.sampling` names which. Outside sampling is reachable from both run and attach.",
+          "code": "$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n$ jet perf attach 4242 --for=20s"
         },
         {
           "key": "C",
-          "name": "jet perf run takes any command, and always records counts",
-          "detail": "`jet perf run` reads its first plain word. A .jet file or a folder runs under `jet run` as today. Anything else is a command found as the shell finds it. Counts are recorded in every trace, with no flag. Calls need `--lens=syscalls`. Perf flags go before the command's words.",
-          "technical": "Session.jet decides the target by the first word that is not a perf flag. A `.jet` file or a directory runs under `jet run`. Any other word is resolved on PATH or as a path. The `counts` section is in every trace's receipt. The `syscalls` lens is as in A.",
-          "code": "# a .jet file: counts are always in the trace\n$ jet perf run hash.jet\n$ jet perf run --lens=syscalls hash.jet\n# a built program with its arguments\n$ jet perf run .jet/build/hash data.bin\n$ jet perf run --lens=syscalls .jet/build/hash data.bin\n# a jet command\n$ jet perf run jet build Compiler\n$ jet perf run --lens=syscalls jet build Compiler"
+          "name": "New verbs `stat` and `trace`",
+          "detail": "Like Linux `perf stat` and `strace`, `jet perf stat <command>` prints the counts and `jet perf trace <command>` the calls when the command ends. `--out` also writes a trace. The engine, receipt and refusals are option A's, including its new work of following children the command starts later, with its costs.\n\nThe perf family then has six verbs that run something: run, test, attach, stat, trace and view. `jet perf stat jet test x.jet` and `jet perf test x.jet` both measure a test run, from outside and from inside. The compiler-compiling-Compiler route is as in A.",
+          "technical": "Two verbs join the perf family in the command registry. Each spawns its command under option A's engines and prints a text report on stderr. The `cpu` outside profile of a launched command has no verb of its own in this option, so `jet perf attach` would still need a launch form for it.",
+          "code": "$ jet perf stat jet build Compiler\n$ jet perf trace --calls=openat jet run main.jet"
         }
       ],
       "comparisons": [
         {
           "lang": "Linux perf",
-          "note": "One front door for any command: `stat` counts, `trace` lists calls, and `record` samples. Children and threads count unless `--no-inherit` is given.",
-          "code": "$ perf stat -e instructions:u,cycles:u ./prog args\n$ perf trace -e openat ./prog args"
+          "note": "`perf stat` and `perf trace` take a command; `-p` takes a running pid. https://man7.org/linux/man-pages/man1/perf-stat.1.html",
+          "code": "$ perf stat -e instructions:u ./prog\n$ perf stat -p 4242"
         },
         {
           "lang": "strace",
-          "note": "Takes a whole command. `-f` follows children and threads, and `-e trace=` keeps chosen calls.",
-          "code": "$ strace -f -e trace=clone,clone3 ./prog args"
+          "note": "One tool takes a command or `-p` a pid, `-f` following children. https://man7.org/linux/man-pages/man1/strace.1.html",
+          "code": "$ strace -f -e trace=openat ./prog\n$ strace -p 4242"
         },
         {
-          "lang": "Valgrind",
-          "note": "Every tool takes the whole command after its own flags.",
-          "code": "$ valgrind --tool=callgrind ./prog args"
+          "lang": "Superluminal",
+          "note": "One capture dialog either launches a program or attaches to a running one. https://superluminal.eu/docs/documentation.html",
+          "code": "Run > Launch Process... | Attach to Process..."
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "One more way to name the target keeps one profiler command and one trace file, which view, compare and export already read. Counts and calls become two more lenses, the way the memory and top-down counters already are. The command after `--exec` is never mistaken for a .jet file or a folder, and today's `jet perf run` lines keep their meaning.",
+        "why": "Attach is already the outside engine. Starting the command itself, and newly following the children it starts, gives it the whole run with no new verb.",
         "gains": [
-          "One command and one trace file for every target and every lens.",
-          "Today's `jet perf run hash.jet -- args` keeps its meaning.",
-          "`jet perf compare` compares counts of two builds with no new tool.",
-          "Test cases and the speed gate read one JSON view."
+          "One engine per verb, so a trace's detail is clear from its verb.",
+          "No new verb and no change to run or test.",
+          "Retires every perf stat, time and strace use in the repo except comparisons."
         ],
         "losses": [
           {
-            "loss": "Users who know `perf stat` and `strace` look for those names first.",
-            "mitigation": "`jet perf stat` and `jet perf trace` stay unknown words whose error prints the matching `jet perf run --lens=… --exec` line, and the help lists both lenses."
+            "loss": "Users of `perf stat` and `strace` may not look under attach.",
+            "mitigation": "`jet perf stat` and `jet perf trace` are refused with the attach line to paste."
           },
           {
-            "loss": "Forgetting `--exec` before a built program is an easy slip.",
-            "mitigation": "A first word that is an executable file and not a .jet file is refused with the same line rewritten with `--exec`, so the fix is one paste."
+            "loss": "Following children started later is new engine work with costs.",
+            "mitigation": "Counts follow children cheaply; ptrace follows forks only when `syscalls` is asked."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Two more verbs and a second, text-only result format beside the trace file. Counts printed on stderr cannot be compared with `jet perf compare`, so the speed gate would parse text."
+            "reason": "B puts two engines of different detail under one verb, and outside sampling under two verbs."
           },
           {
             "key": "C",
-            "reason": "Guessing the target from its first word is ambiguous when a folder and a program share a name, as `jet` does in a checkout. Always counting would also refuse every run on a machine without counters."
+            "reason": "C adds two verbs, and `jet perf stat jet test` overlaps `jet perf test`."
           }
         ],
-        "tradeoff": "A asks for one extra word, `--exec`, in exchange for no guessing and one trace file for every target."
+        "tradeoff": "Attach's name stretches to a process it starts, in exchange for one engine per verb."
       },
       "hybrid": null,
       "ballotMode": "short",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": null,
-      "checkInstructions": "Tools/Perf/CompileThroughput runs its compiles under `jet perf run --lens=counts --exec`. Its counts match `perf stat -e instructions:u,cycles:u` within 1% on one revision.\n\nThe strace users run `jet perf run --lens=syscalls --exec` and check the same facts from `jet perf view`. They are the cases CLICompilerSpeed (two), ControlAndData, Report, TaskgroupStack and JetpackJetOS (two), and Tools/Perf/CoreStrace.\n\nFurther cases cover the E2124 refusal with no counters and with ptrace refused. Others cover the exit code passed through, a child left running, and the hint for `jet perf stat`.",
+      "checkInstructions": "Census: git grep on f768b6597e, Docs and Tower excluded. Every option retires the same rows, since all three share one engine.\n\nRetired by `counts`, each matching its old figure within 1% on one revision. Tools/Perf/CompileThroughput/Throughput.jet runs perf stat and GNU time -v. Tools/Gauntlet/Harness/run.mjs runs perf stat cycles:u over the process tree, named in standings.mjs and measurement-manifest.json. Tools/Perf/AsmParity runs perf stat in AsmParity.mjs and run.jet. Tools/Release/Admit.jet runs perf stat in the speed gate.\n\nAlso retired by `counts`: Tools/Perf/Selfhost/Run.mjs runs /usr/bin/time. Tools/Perf/HelloCompile/Bench.py, Tools/Perf/JetcProfile/Startup/run.jet and Tools/Perf/UnicodeLiteral/Run.jet run time -v.\n\nRetired by `syscalls`, each checking the same facts from `jet perf view --json`. The strace cases are CLICompilerSpeed (two), ControlAndData, Report, TaskgroupStack and JetpackJetOS (two). Tools/Perf/CoreStrace/run.jet takes its strace -c table from the section's per-name totals. Tools/Perf/StdoutBuffer/run.sh counts write and writev.\n\nPartly: Tools/Perf/Scaling (Profile.mjs, Gate/Source/Profile.jet) uses perf record and perf script for timed samples by phase. Outside samples carry no time today (X64Samples: thread, depth, frames). So it moves to the inside route, `jet perf run Compiler/JetCLI/run.jet`.\n\nNot this ballot. Jetpack/CLI/Source/Jobs/AccessTrace.jet runs strace for the cached-job access proof. It is product code that would call the ptrace engine as a library, so it needs its own card row. Tools/Perf/ReadInto (Memory.jet, memory.mjs) runs gdb at exit, #6995 c15.\n\nKept as named comparisons under #6995 c1's allowlist. Tools/Perf/DebugLatency compares with lldb. Tests/Cases/ToolInterop reads Jet output in lldb (four cases) and perf record and report (one). Tools/Perf/Scriptbench runs hyperfine, a peer timing harness. The dev shell (flake.nix) keeps perf and lldb only for those.\n\nFurther cases: counters unavailable (the PerfRun NoCounters seccomp seam), ptrace refused, the exit code passed through, a child left running, and the refused `jet perf stat` hint.",
       "surface": {
-        "gist": "How should `jet perf` measure a built program or a jet command, not only a .jet file?",
-        "lesson": "`jet perf run` profiles only a program it builds from a .jet file. Two jobs need more: counting the work a run does, and listing its requests to the operating system, called system calls. Both must cover any built program or jet command, with its threads and child processes.",
+        "gist": "How should `jet perf` count the work of, and list the system calls of, a built program or a jet command?",
+        "lesson": "`jet perf run` and `jet perf test` watch a Jet program from inside. `jet perf attach` watches a running process from outside, for one second. Neither starts a built program or a jet command and counts its work or lists its system calls. Those jobs still use Linux `perf stat`, GNU `time` and `strace`.",
         "trio": {
           "current": {
-            "note": "Today a built program or a jet command needs outside Linux tools.",
-            "code": "$ jet perf run .jet/build/hash data.bin\nerror: not a .jet file\n$ perf stat -e instructions:u jet build Compiler\n$ strace -f -e trace=openat jet run main.jet"
+            "note": "Today a built program or a jet command is measured with outside tools.",
+            "code": "$ jet perf run .jet/build/hash data.bin   # words go to `jet run`\n$ jet perf attach 4242                     # a running pid, 1 s\n$ perf stat -e instructions:u,cycles:u jet build Compiler\n$ strace -f -e trace=openat jet run main.jet"
           },
           "wild": {
             "lang": "Linux perf",
-            "note": "One command takes any program, with its threads and children.",
-            "code": "$ perf stat -e instructions:u,cycles:u ./prog args\n$ perf trace -e openat ./prog args"
+            "note": "One verb per job: `perf stat` counts, `perf trace` lists calls, and `-p` attaches to a pid.",
+            "code": "$ perf stat -e instructions:u,cycles:u ./prog args\n$ perf trace -e openat ./prog args\n$ perf stat -p 4242"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "`--exec` plus two lenses",
-            "gist": "`--exec` names any command; `--lens=counts` and `--lens=syscalls` choose what is recorded.",
+            "name": "`jet perf attach` can start the command",
+            "gist": "Attach watches from outside: a running pid, or a command it starts after `--`.",
             "gains": [
-              "One command and one trace file for everything",
-              "Today's commands keep their meaning",
-              "Counts compare with the existing compare command"
+              "Each verb keeps one engine: run and test inside, attach outside.",
+              "No new verb; `jet perf test` is unchanged.",
+              "Counts and calls can cover the whole command, children included."
             ],
             "losses": [
-              "One extra word, `--exec`, before the command"
+              "Users of `perf stat` may not look under attach first.",
+              "Following children started later is new work, with its own costs."
             ],
             "proposed": {
-              "code": "$ jet perf run hash.jet --lens=counts\n$ jet perf run hash.jet --lens=syscalls\n$ jet perf run --lens=counts --exec .jet/build/hash data.bin\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin\n$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec jet build Compiler"
+              "code": "$ jet perf attach --lens=counts -- jet build Compiler\n$ jet perf attach --lens=syscalls -- .jet/build/hash data.bin\n$ jet perf attach -- jet check big.jet      # CPU, from outside\n$ jet perf attach 4242 --for=20s            # unchanged pid form"
             }
           },
           {
             "key": "B",
-            "name": "Two new subcommands",
-            "gist": "`jet perf stat` counts and `jet perf trace` lists calls, like the Linux tools.",
+            "name": "`jet perf run --exec`",
+            "gist": "Run takes `--exec` and a command, watched from outside.",
             "gains": [
-              "Familiar to users of Linux perf and strace",
-              "Short to type"
+              "One verb starts every target.",
+              "No new verb."
             ],
             "losses": [
-              "Two more commands and a second text format",
-              "Counts cannot use the existing compare command"
+              "Run gets two engines with different detail.",
+              "Run and attach both sample from outside.",
+              "Following later children is A's new work and costs."
             ],
             "proposed": {
-              "code": "$ jet perf stat hash.jet\n$ jet perf trace hash.jet\n$ jet perf stat .jet/build/hash data.bin\n$ jet perf trace .jet/build/hash data.bin\n$ jet perf stat jet build Compiler\n$ jet perf trace jet build Compiler"
+              "code": "$ jet perf run --lens=counts --exec jet build Compiler\n$ jet perf run --lens=syscalls --exec .jet/build/hash data.bin"
             }
           },
           {
             "key": "C",
-            "name": "Any command, counts always on",
-            "gist": "The first word decides the target; every trace holds counts.",
+            "name": "New verbs `stat` and `trace`",
+            "gist": "`jet perf stat` counts and `jet perf trace` lists calls, like Linux.",
             "gains": [
-              "No extra word to type",
-              "Counts come with every run"
+              "Familiar to perf and strace users."
             ],
             "losses": [
-              "A folder and a program with one name collide",
-              "Machines without counters refuse every run"
+              "Two more verbs beside run, test and attach.",
+              "`jet perf stat jet test` overlaps `jet perf test`."
             ],
             "proposed": {
-              "code": "$ jet perf run hash.jet\n$ jet perf run --lens=syscalls hash.jet\n$ jet perf run .jet/build/hash data.bin\n$ jet perf run --lens=syscalls .jet/build/hash data.bin\n$ jet perf run jet build Compiler\n$ jet perf run --lens=syscalls jet build Compiler"
+              "code": "$ jet perf stat jet build Compiler\n$ jet perf trace .jet/build/hash data.bin"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One profiler command and one trace file cover every target. Counts and calls join the existing lenses, and nothing has to guess the target.",
-          "tradeoff": "One extra word, in exchange for no guessing and one file format.",
+          "why": "Attach is already the outside engine. Starting the command itself, and newly following the children it starts, gives it the whole run with no new verb.",
           "gains": [
-            "The speed gate and tests read one JSON view",
-            "Counts of two builds compare with no new tool"
+            "One engine per verb, so a trace's detail is clear from its verb.",
+            "No new verb and no change to run or test.",
+            "Retires every perf stat, time and strace use in the repo except comparisons."
           ],
           "losses": [
             {
-              "loss": "Users may type `jet perf stat` first",
-              "mitigation": "The error prints the matching `jet perf run` line to paste."
+              "loss": "Users of `perf stat` and `strace` may not look under attach.",
+              "mitigation": "`jet perf stat` and `jet perf trace` are refused with the attach line to paste."
             },
             {
-              "loss": "Forgetting `--exec` is an easy slip",
-              "mitigation": "The error repeats the line with `--exec` added."
+              "loss": "Following children started later is new engine work with costs.",
+              "mitigation": "Counts follow children cheaply; ptrace follows forks only when `syscalls` is asked."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Two more commands and a text format the compare command cannot read."
+              "reason": "B puts two engines of different detail under one verb, and outside sampling under two verbs."
             },
             {
               "key": "C",
-              "reason": "Guessing the target is ambiguous, and machines without counters would refuse every run."
+              "reason": "C adds two verbs, and `jet perf stat jet test` overlaps `jet perf test`."
             }
-          ]
+          ],
+          "tradeoff": "Attach's name stretches to a process it starts, in exchange for one engine per verb."
         }
       },
       "designAway": [
         {
-          "loss": "Users who know `perf stat` and `strace` look for those names first.",
+          "loss": "Users of `perf stat` and `strace` may not look under attach.",
           "attempts": [
-            "Add `jet perf stat` and `jet perf trace` as second spellings. Rejected: two ways to do one thing.",
-            "Answer those words with the matching `--lens` and `--exec` line. Kept."
+            "Add `jet perf stat` and `jet perf trace` as second spellings: rejected, two ways to do one job (that is option C).",
+            "Answer those words with E2102 (Jet.UnknownFlag's family for unknown perf actions, Command.jet jet_cli_perf_error) whose fix is the matching attach line: kept.",
+            "List the command form first in `jet perf attach --help` and in the observability guide's table: kept."
           ],
           "result": "Reduced to one paste."
         },
         {
-          "loss": "Forgetting `--exec` before a built program is an easy slip.",
+          "loss": "Outside sampling of a launched jet command is coarser than the inside engine.",
           "attempts": [
-            "Guess the target from the first word, as option C does. Rejected: a folder named like a program makes it ambiguous.",
-            "Refuse an executable first word with the rewritten line. Kept."
+            "Run the compiler from source under the inside engine for the compile-speed profile (c2, c5, c11): kept, unchanged by this ballot.",
+            "Sample from outside at 8,000 a second: rejected, the outside sampler pays a ring per thread per process and the jet CLI's comptime code has no names to gain [INFERENCE].",
+            "Print the engine in the view's header, `engine=outside rate=1000`, and name `jet perf run` in the fix line for a .jet target: kept."
           ],
-          "result": "Reduced: the slip costs one rerun, and the error holds the fix."
+          "result": "Reduced: the coarser view is labeled, and the detailed route is one command away."
+        },
+        {
+          "loss": "A machine without counters or ptrace cannot count or list calls.",
+          "attempts": [
+            "Refuse the run with E2124: rejected, E2124 means the target publishes nothing (Jet.AttachTargetNotObserved).",
+            "Refuse with a new code: possible (E2127 is free) but needs a registry row, UI snapshot and diagnostics.md entry.",
+            "Report the lens `unavailable` with the errno and the setting to change, as the memory and topdown lenses do, and still run the command: kept."
+          ],
+          "result": "Gone as a surprise: the view says which setting to change, and the exit code is the command's."
         }
       ],
       "draftedBy": "Main",
@@ -127815,6 +127812,216 @@
       "created": "2026-11-21T01:37:39.436Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-21"
+    },
+    {
+      "id": "D-PERF-OVERHEAD-BOUND1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "What the 2% profiling-cost promise covers at 8,000 samples a second",
+      "situation": "A sampling profiler stops a program thousands of times a second to see where it is, and each stop costs a little CPU time. Jet promises its profiler costs under 2% of the program's CPU time at the default 8,000 samples a second with whole call stacks. On a quiet machine it costs 1.74%; on a busy test machine it cost 2.2% to 3.3%, so the test failed five suites in a row. About three quarters of that cost is the Linux kernel's own work for each sample, and no design we measured got it under 2% on a busy machine. You are asked what the promise should cover. We recommend it cover Jet's own share, under 1%, and that every profile print the kernel's share beside it.",
+      "gist": "At 8,000 samples a second, profiling costs a busy machine over 2%, mostly in the kernel. What should Jet's promise cover?",
+      "lesson": "A sampling profiler stops a program thousands of times a second to note where it is. Each stop costs CPU time. Part is Jet's own code, which collects the samples. Part is the Linux kernel's, which takes each stop and walks the call stack. Jet controls only the first part.",
+      "explainer": "",
+      "story": "Dana profiles a service on the team's CI box while other builds run. The profile is right, but the receipt says sampling cost 2.7%, over the 2% Jet promised. She cannot tell whether Jet got slower or the box was busy.",
+      "inWild": "$ perf record -F 8000 -g ./burn\n# perf reports no cost of its own; when the sampling interrupt runs long the kernel logs\n# \"perf: interrupt took too long (10658 > 10533), lowering kernel.perf_event_max_sample_rate to 18000\"\n# (seen in this machine's journal, Nov 16-19)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Promise Jet's share, show the kernel's",
+          "detail": "Nothing changes in how you profile. `jet perf run` still samples 8,000 times a second with whole stacks. The receipt keeps its total, overhead_ns. It adds two parts that sum to it exactly. overhead_runtime_ns is what Jet's runtime spent, measured: its handlers, its ring drains and the signals it asked for. overhead_kernel_ns is the kernel's time taking and writing the samples, estimated from timed samples.\n\n`jet perf view` prints both as shares of the CPU time sampled: `overhead=measured runtime=0.54% kernel=1.42%`. The promise becomes: Jet's share stays under 1% at the default rate. The kernel's share has no bar, but it is always shown.\n\nThe kernel's estimate is not yet validated against a direct timing on the same runs. On similar runs it read lower than the probe's direct timing. Quiet, it charged 1.85 us a sample against the probe's 2.3 us. Busy, it charged 1.7 to 2.7 us against 2.4 to 4.0 us. Those were different programs and runs, so the share may read low.\n\nBeginner path: run `jet perf run` and `jet perf view` as today. The profile line says what the profile cost and who paid. Expert path: read the two fields from the .jettrace JSON. overhead_kernel_ns over the sample count gives the kernel's estimated nanoseconds per sample on that machine.",
+          "technical": "Receipt: the profile section of every .jettrace, attach traces included (SourceSampling.jet). overhead_runtime_ns = handler_ns + signals x delivery_ns. Under a perf event the drain timer's signals are already inside handler_ns. overhead_kernel_ns = ring_ns, the PERF_SAMPLES_RING_PS tally, an estimate. Each drained sample is charged the median of the last five kernel timings plus its callchain entries. overhead_ns is their sum, unchanged in meaning.\n\nUnder the CPU-timer sampler (no perf event) overhead_kernel_ns is 0. Both fields are absent exactly when overhead_ns is (overhead_status not_measured). overhead_reason keeps its text, and no other field changes.\n\nThe case Perf/receipt_reports_measured_overhead asserts five lines. overhead_status is \"measured\". overhead_runtime_ns is at least 1 and at most 20000000, 1% of the 2 s sampled. overhead_kernel_ns is at least 0. overhead_ns equals the two parts' sum, by captures. overhead_reason still names its share.\n\nBasis: Jet's share was 4.8 ms quiet and 9.7 to 12.0 ms in three runs at load 163 to 166. So the 1% bar leaves 1.7x headroom over the worst run seen.\n\nCriteria: c44(d) would read: \"Every receipt states the overhead in two parts, the runtime's share measured and the kernel's estimated from timed samples. The runtime's share is under 1% on fib at the default rate.\" c68's last sentence follows c44(d). c105 closes when the case passes three suites in a row.",
+          "code": "// $ jet perf run -O2 burn.jet --out burn.jettrace\n// $ jet perf view burn.jettrace\n// profile method=sampling status=captured coverage=partial rows=12 clocks=cpu,wall\n//   overhead=measured runtime=0.54% kernel=1.42% window=exit ...\n// burn.jettrace, content.profile:\n//   \"overhead_ns\": 39169587,\n//   \"overhead_runtime_ns\": 10792000,  // measured: handlers and drains\n//   \"overhead_kernel_ns\": 28377587,   // estimated from timed samples\n//   \"overhead_status\": \"measured\""
+        },
+        {
+          "key": "B",
+          "name": "One looser total",
+          "detail": "Nothing changes in the receipt or the tools. The promise moves from 2% to 4% of the CPU time sampled at the default rate. Quiet machines still show about 1.7%.\n\nBeginner and expert paths are as today: one total in the receipt, and its parts only in the reason's text.",
+          "technical": "The case's bar becomes overhead_ns <= 80000000, 4% of 2 s; its other lines stay. Basis: p387 to p391 gave 62641683, 58226414, 43276664, 66153400 and 50262488 ns. Three runs at load about 165 gave 39169587, 53652503 and 54463836 ns. The worst, 66.2 ms or 3.3%, leaves 1.2x headroom. c44(d) and c68 read 4% for 2%.",
+          "code": "// $ jet perf view burn.jettrace\n// profile ... overhead=measured ...\n//   \"overhead_ns\": 50262488   // 2.5%: passes the 4% bar"
+        },
+        {
+          "key": "C",
+          "name": "Slow down when the machine is busy",
+          "detail": "The runtime keeps the total under 2% itself. When the measured cost per sample would pass 2% at 8,000 a second, it spaces the samples out just enough. When the machine calms down, it speeds back up. The receipt states the rate used and why. Each sample then stands for more CPU time, and the profile weighs it so.\n\nBeginner path: nothing to set; the profile line says when the rate was lowered. Expert path: read rate_status and rate_reason, and each sample's count in the samples file.",
+          "technical": "Every 1024 drains the runtime recalibrates and sets the sampling period. The period is 125 us, or fifty times the measured cost of one sample (kernel plus runtime) when that is longer. It applies the period to every live sampler with PERF_EVENT_IOC_PERIOD. Each sample's weight is its period, read from its count word (the stack-id samples format).\n\nReceipt: new rate_status (\"held\" or \"lowered\") and rate_reason fields; capture.sampling.interval_us becomes the mean period. The case keeps overhead_ns <= 40000000 and asserts rate_status.\n\nHow it squares with c68: its rate sentence would read \"8 kHz while the measured cost allows it within 2%, else the highest rate within 2%, named in rate_reason\". Four fib tasks still keep 90% of the nominal samples at the rate used. At the measured 3.0 us a sample under load, the rate falls to about 6,700 a second.",
+          "code": "// $ jet perf view burn.jettrace\n// profile ... overhead=measured rate=6700Hz rate_status=lowered ...\n//   \"rate_reason\": \"each sample cost 3.0 microseconds; 8000 a second would cost 2.4%\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Linux perf",
+          "note": "perf record states no cost of its own; the kernel throttles the rate when its sampling interrupt runs long (perf_cpu_time_max_percent). https://man7.org/linux/man-pages/man1/perf-record.1.html",
+          "code": "$ perf record -F 8000 -g ./burn"
+        },
+        {
+          "lang": "Superluminal",
+          "note": "The parity target of #6841 c68: 8 kHz sampling with whole stacks by default. https://superluminal.eu/docs/documentation.html",
+          "code": "Capture settings: sampling frequency 8 kHz"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Jet should promise what Jet controls and show the rest. No design we measured gets the kernel's part under 2% when busy.",
+        "gains": [
+          "A slowdown in Jet's sampler fails the test at once.",
+          "The full cost stays visible, in two named parts.",
+          "The default rate and whole stacks stay as c44 and c68 ratified."
+        ],
+        "losses": [
+          {
+            "loss": "The program still pays the kernel's share at 8,000 samples a second.",
+            "mitigation": "Every profile prints it, estimated from timed samples, so nobody mistakes it for Jet's cost. Any perf-event profiler pays it [INFERENCE]."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hides a doubling of Jet's own cost inside a loose total."
+          },
+          {
+            "key": "C",
+            "reason": "C drops the rate on busy machines, where noise is worst, and makes profiles hard to compare."
+          }
+        ],
+        "tradeoff": "The 2% promise narrows to Jet's share; the kernel's share is shown, not bounded."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "At 8,000 samples a second, profiling costs a busy machine over 2%, mostly in the kernel. What should Jet's promise cover?",
+        "lesson": "A sampling profiler stops a program thousands of times a second to note where it is. Each stop costs CPU time. Part is Jet's own code, which collects the samples. Part is the Linux kernel's, which takes each stop and walks the call stack. Jet controls only the first part.",
+        "trio": {
+          "current": {
+            "note": "Today the test bars the one total at 2%. Quiet, it is 1.74%. In five busy suites it was 2.2% to 3.3%, so the test fails.",
+            "code": "// burn.jet: four tasks call fib(25) for 2 s of CPU time.\n// $ jet perf run -O2 burn.jet --out burn.jettrace\n// burn.jettrace, content.profile:\n//   \"overhead_ns\": 50262488   // 2.5%: over the 2% bar\n//   \"overhead_reason\": \"... 10792 in its handlers and drains ...\n//     28377 microseconds the kernel took to write the 16330 samples ...\""
+          },
+          "wild": {
+            "lang": "Linux perf",
+            "note": "perf record reports no cost of its own. The kernel lowers the allowed rate when sampling interrupts run long. Sources: man7.org perf-record(1); the kernel's sysctl docs.",
+            "code": "$ perf record -F 8000 -g ./burn\n# no cost figure; the kernel logs\n# \"perf: interrupt took too long ... lowering kernel.perf_event_max_sample_rate\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Promise Jet's share, show the kernel's",
+            "gist": "The receipt splits the cost in two. Jet's share stays under 1%. The kernel's is estimated from timed samples.",
+            "gains": [
+              "A slowdown in Jet's own sampler fails the test at once.",
+              "Every profile still shows the whole cost, in two named parts.",
+              "8,000 samples a second with whole stacks stays the default."
+            ],
+            "losses": [
+              "The kernel's share remains: about 1.4% quiet, up to 2.7% busy."
+            ],
+            "proposed": {
+              "code": "// $ jet perf view burn.jettrace\n// profile ... overhead=measured runtime=0.54% kernel=1.42% ...\n//   \"overhead_ns\": 39169587,          // the sum, as today\n//   \"overhead_runtime_ns\": 10792000,  // measured: Jet's handlers and drains\n//   \"overhead_kernel_ns\": 28377587    // estimated from timed samples"
+            }
+          },
+          {
+            "key": "B",
+            "name": "One looser total",
+            "gist": "Keep one total; raise the bar from 2% to 4%.",
+            "gains": [
+              "No new receipt fields.",
+              "The worst suite run seen (3.3%) passes."
+            ],
+            "losses": [
+              "A doubling of Jet's own sampler cost would still pass.",
+              "Busier machines would force the bar up again."
+            ],
+            "proposed": {
+              "code": "// Receipt unchanged: \"overhead_ns\": 50262488   // 2.5%\n// The case's bar: 40000000 (2%) becomes 80000000 (4%)."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Slow down when the machine is busy",
+            "gist": "Lower the sample rate when the cost would pass 2%, and say so.",
+            "gains": [
+              "The total stays under 2% by construction."
+            ],
+            "losses": [
+              "Busy machines like CI get fewer samples when noise is worst.",
+              "Two profiles of one program may differ in rate.",
+              "8,000-a-second parity with Superluminal holds only on quiet machines."
+            ],
+            "proposed": {
+              "code": "// profile ... overhead=measured rate=6700Hz rate_status=lowered ...\n//   \"rate_reason\": \"each sample cost 3.0 microseconds; 8000 a second would cost 2.4%\""
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet should promise what Jet controls and show the rest. No design we measured gets the kernel's part under 2% when busy.",
+          "gains": [
+            "A slowdown in Jet's sampler fails the test at once.",
+            "The full cost stays visible, in two named parts.",
+            "The default rate and whole stacks stay as c44 and c68 ratified."
+          ],
+          "losses": [
+            {
+              "loss": "The program still pays the kernel's share at 8,000 samples a second.",
+              "mitigation": "Every profile prints it, estimated from timed samples, so nobody mistakes it for Jet's cost. Any perf-event profiler pays it [INFERENCE]."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hides a doubling of Jet's own cost inside a loose total."
+            },
+            {
+              "key": "C",
+              "reason": "C drops the rate on busy machines, where noise is worst, and makes profiles hard to compare."
+            }
+          ],
+          "tradeoff": "The 2% promise narrows to Jet's share; the kernel's share is shown, not bounded."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "At 8,000 samples a second with whole stacks the total passes 2% on a busy machine (2.2-3.3% in p387-p391).",
+          "attempts": [
+            "Measured first where the time goes. Quiet (gate-p391 jet, burn.jet): 34.9 ms total = 4.8 ms Jet's handlers and drains + 30.1 ms the kernel writing 16269 samples (1.85 us each). At load ~165 (gate-p392 jet, three runs): totals 39.2, 53.7, 54.5 ms; Jet's share 10.8, 12.0, 9.7 ms; the kernel's 28.4, 41.7, 44.7 ms (1.7-2.7 us a sample). The kernel's part is 72-82% of the cost.",
+            "User-only callchain, kernel frames never walked: already shipped. perf_precise_open sets exclude_kernel and exclude_callchain_kernel (flags 35651681), so no kernel-side walk is left to cut.",
+            "The kernel's floor: a sample with no stack at all (ip and time only) costs 1102 ns quiet (the median in every quiet round of cost4.txt and cost5.txt) and a paired median 1503 ns less than the shipped sample busy (9 rounds, load 186 falling to 29). At 8 kHz that interrupt alone is 0.9% quiet and 1.2-1.8% busy, before any stack.",
+            "Drop the 320-byte stack copy and the user registers, frame-pointer callchain only: quiet 2059 vs 2275 ns (-9%); busy paired median -400 ns (-13%). Rejected as a fix: it loses the caller of a frameless leaf function (Perf/unwinds_without_frame_pointers), and even with it the kernel's part is about 2.6 us a sample busy, 2.1% at 8 kHz.",
+            "Copy 4 KiB of stack and unwind it in the runtime instead of the kernel's walk: busy paired median -692 ns (-23%); quiet 1702 vs 2275 ns. Rejected: a stack deeper than the copy loses its outer frames (c44 requires every sample's whole stack), each record grows to 4 KiB (32 MB/s of ring per thread, raising Jet's drain share), and the kernel's part is still about 2.3 us busy, 1.8% at 8 kHz.",
+            "A larger ring with fewer wakeups (256 pages instead of 16; no sampler is polled or signaled, so the only wakeups are the kernel's own): busy paired median -131 ns, inside the noise (quartiles -159 to -30, range -1363 to +1112). Not worth 1 MiB per thread.",
+            "Hardware cycles (the PMU overflow interrupt) instead of the task clock: busy paired median +571 ns, worse, and it counts cycles, not CPU time.",
+            "Keep a calling-context id in a register, kept by the compiler on every call, so the kernel copies one register instead of walking: rejected without a build. A fib(16) chunk (3,193 calls) takes about 4.4 us quiet in the probe, so 1 ns more per call slows the program itself by about 70% [INFERENCE].",
+            "Take whole stacks on one sample in eight and the program counter on the rest: rejected, it breaks c44's whole stack on every sample.",
+            "A fixed lower default rate, 4 kHz with whole stacks, halves the kernel's share (about 0.9-1.4% busy at the measured 2.3-3.0 us a sample) and would meet 2% in total. Excluded here: c68 ratified 8 kHz parity with Superluminal, and changing the default rate is a separate owner choice."
+          ],
+          "result": "Remains on this kernel: taking and writing a whole-stack sample costs 2.3-3.0 us on a busy machine whatever we tried, 1.8-2.4% at 8 kHz before Jet's own share. Option A bounds Jet's share and prints the kernel's; B and C trade it differently. Method: $JET_SCRATCH_ROOT/lanes/Lens/cost/probe2.py (perf_event_open on one pinned CPU, fib(16) chunks timed, each sampled chunk's excess over the median of the chunks around it); output probe2-9.txt, and the quiet figures cost4.txt, cost5.txt and cost-read2.txt, all in that directory."
+        },
+        {
+          "loss": "Splitting the receipt could look like hiding the kernel's cost.",
+          "attempts": [
+            "Keep overhead_ns as the total, with the two parts adding up to it exactly, and print both shares on `jet perf view`'s profile line: kept."
+          ],
+          "result": "Gone: the total and both parts are in every profile."
+        },
+        {
+          "loss": "A bound on Jet's share alone might be flaky under load too.",
+          "attempts": [
+            "Measured Jet's share under load: 9.7-12.0 ms at load ~165 against 4.8 ms quiet; a 1% bar (20 ms) leaves 1.7x over the worst run seen: kept.",
+            "Jet's handlers and drains are timed on their threads' own CPU clocks, so time spent preempted by other programs is never charged: already shipped (perf_samples_thread_cpu)."
+          ],
+          "result": "Gone at the measured loads; the case's three-suite proof (c105) checks it."
+        }
+      ],
+      "draftedBy": "Lens",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T05:20:16.324Z"
     }
   ],
   "questions": [
@@ -130081,6 +130288,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T05:29:22.671Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05nw9a0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T05:29:01.054Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T05:28:42.108Z",
+      "by": "Lens",
+      "action": "decision.update",
+      "ref": "D-PERF-TARGET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T05:25:14.526Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T05:25:13.268Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T05:20:17.972Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-PERF-OVERHEAD-BOUND1",
+      "note": "reviewed by Main"
+    },
+    {
+      "at": "2026-11-21T05:20:17.137Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-PERF-OVERHEAD-BOUND1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T05:20:16.324Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-PERF-OVERHEAD-BOUND1",
+      "note": "What the 2% profiling-cost promise covers at 8,000 samples a second (draft)"
+    },
+    {
+      "at": "2026-11-21T05:18:11.896Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "26 criteria, soft limit 6: a jet debug gap found while dogfooding the c4 triage; it belongs with the dogfood card"
+    },
+    {
+      "at": "2026-11-21T05:18:11.896Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#26 At a fault inside a runtime routine, jet debug shows at leas"
+    },
+    {
+      "at": "2026-11-21T05:18:11.028Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-21T05:17:12.972Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#102"
+    },
+    {
+      "at": "2026-11-21T04:58:56.437Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T04:53:14.473Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "102 criteria, soft limit 6: a regression of met c67 on this card; owner rule: regressions are criteria on the owning card"
+    },
+    {
+      "at": "2026-11-21T04:53:14.473Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#105 Regression of c67: `Perf/receipt_reports_measured_overhead` "
+    },
+    {
+      "at": "2026-11-21T04:53:05.942Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T04:44:59.118Z",
       "by": "Main",
