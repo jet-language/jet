@@ -1,10 +1,14 @@
 # The semantic index derives each written declaration once, credited to it: the struct, each of its three methods and `run` have one record apiece, read from their own text, so no two records share an id, a subject or a source. The codecs and derives the compiler makes at the struct's name have no text of their own and no record. A struct's record is built from its kind and fields, and a method's from its own signature.
-# `jet inspect semindex` derives the same records from the same text: each declaration's source and the struct's and run's build ids are equal on both sides. The two producers spell a definition's identity differently (`core_compiler.` against `main.`, `fn:` against `method:` for a method), so subjects and claims differ by producer.
+# Typed code reading `compiler.check` gets the same records: typed.jet prints them in the CLI's JSON shape, and each of the text's records is compared whole. `jet inspect semindex` derives the same records from the same text: each declaration's source and the struct's and run's build ids are equal on both sides. The two producers spell a definition's identity differently (`core_compiler.` against `main.`, `fn:` against `method:` for a method), so subjects and claims differ by producer.
 fixture: SemanticIndexDerivesEachDeclarationOnce.fixture
 env: NO_COLOR=1
+step typed: jet run typed.jet
+exit: 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 5 # typed code reads the five records
 step: jet inspect compiler check main.jet
 exit: 0
 json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] == typed # each record whole, as typed code read it
 json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 5 # the struct, its three methods and run
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Counter"] #= 1 # the struct's own record, none for what the compiler made at its name
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.start"] #= 1

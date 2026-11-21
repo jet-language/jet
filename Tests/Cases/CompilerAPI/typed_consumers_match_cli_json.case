@@ -1,5 +1,5 @@
 # Typed code reading `compiler.check` and the CLI's `jet inspect compiler check` see one result: each index fact typed.jet prints from main.jet is the same value in the CLI JSON, and a text with a semantic error keeps its diagnostics and has no index on both sides. A text whose import does not resolve is stopped before anything is checked, so both sides list no function and no effect rather than facts read from its syntax.
-# Covers the members typed code can read: source_digest, definitions, references, calls and effects. The typed index record does not carry state_graphs, fact_registry or derivations, so those are not compared here.
+# Covers every member of the index: source_digest, definitions, references, calls and effects from main.jet, and state_graphs, fact_registry and derivations from machine.jet, a typestate struct with methods. typed_index.jet prints the last three as the JSON document the CLI prints, so its step is compared with the CLI's path by path. Its state spans leave out the file name, so a state is compared by name, terminal, reachable and span bounds.
 # Every section spells the module one way, the way the identities do: main.jet checks as module `core_compiler`, so each `module` field is "core_compiler" and none is the dotted "core.compiler".
 fixture: TypedConsumersMatchCLIJSON.fixture
 env: NO_COLOR=1
@@ -67,3 +67,27 @@ json: stdout doc $.compiler.value.diagnostics[*].code = ["E0603"] # the same dia
 json: stdout doc $.compiler.value.functions = [] # as typed.jet saw: no function
 json: stdout doc $.compiler.value.effects = [] # and no effect
 json: stdout doc $.compiler.value.semantic_index = null
+step typed_index: jet run typed_index.jet
+exit: 0
+json: stdout doc $.compiler.value.semantic_index.state_graphs #= 1 # typed code reads Door's graph
+step: jet inspect compiler check machine.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[*].code = ["L0153"] # only the lint for the unreachable Orphan state, so the index is present
+json: stdout doc $.compiler.value.semantic_index.state_graphs #= 1
+json: stdout doc $.compiler.value.semantic_index.state_graphs[0].owner = "Door"
+json: stdout doc $.compiler.value.semantic_index.state_graphs[0].states[*].name = ["Closed", "Open", "Orphan"]
+json: stdout doc $.compiler.value.semantic_index.state_graphs[0].states[*].reachable = [true, true, false]
+json: stdout doc $.compiler.value.semantic_index.state_graphs[0].transitions #= 2 # close enters Closed, open moves it to Open
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].owner == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].module == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].states[*].name == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].states[*].terminal == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].states[*].reachable == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].states[*].span.start == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].states[*].span.end == typed_index
+json: stdout doc $.compiler.value.semantic_index.state_graphs[*].transitions == typed_index # each transition whole, an entry's absent `from` as null
+json: stdout doc $.compiler.value.semantic_index.fact_registry[?kind="State"][0].members = ["Closed", "Open", "Orphan"]
+json: stdout doc $.compiler.value.semantic_index.fact_registry == typed_index # every declaration whole: the effect roots, Door's states and the tags
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 4 # Door, close, open and run
+json: stdout doc $.compiler.value.semantic_index.derivations #== typed_index # typed code reads as many records
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] == typed_index # and each of this text's records whole, ids, identity, premises, absent observation and payload included
