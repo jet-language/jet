@@ -160,7 +160,7 @@ sema_genmod_check_module: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
         return
     }
     enums: sema_genmod_enums(items, [GenericModuleDef]{})
-    values: sema_genmod_const_values(items, sema_genmod_setting_types(graph.build_facts.settings, enums), enums)
+    values: sema_genmod_const_values(items, sema_genmod_setting_types(sema_build_facts_settings_for(graph.build_facts, module_row.package_identity), enums), enums)
     templates := [SemaGenericModuleTemplate]{}
     module_index: sema_registration_module_index(graph, module_row.module_identity) ?? return
     loop template in templates_by_module[module_index] -> templates.push(template.copy())

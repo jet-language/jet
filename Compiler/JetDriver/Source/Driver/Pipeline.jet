@@ -883,23 +883,27 @@ jet_driver_host_os_key: fn(value: String) -> String Never! {
 // the lock's `[build.stamp]` the host read (request.build_stamp); without one
 // it is no git revision, clean, the compiler's own package version and no time.
 // A compile never captures a fresh stamp from git and the clock: only lock
-// writers do.
+// writers do. Each loaded dependency's settings are its own, at their
+// declared defaults; the entry package's writers never reach them.
 jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
     settings := [SemaBuildSetting]{}
+    package_settings := [String:[SemaBuildSetting]]{}
     package_markers := [Marker]{}
     package_manifest := ""
     purposes := [String]{}
     loop package in load.packages {
-        if package.identity == load.package_identity {
-            package_name = package.name
-            package_version = package.version ?? ""
-            settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
-            package_markers = package.markers
-            package_manifest = package.manifest_path ?? ""
-            purposes = package.purposes
+        if package.identity != load.package_identity {
+            package_settings[package.identity] = jet_driver_build_settings(package, "", [LockedBuildContribution]{}, [BuildSettingOverride]{})
+            next
         }
+        package_name = package.name
+        package_version = package.version ?? ""
+        settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
+        package_markers = package.markers
+        package_manifest = package.manifest_path ?? ""
+        purposes = package.purposes
     }
     package_name = jet_driver_package_name(package_name, request.authorized_sources.entry_path)
     if package_version.len() == 0 -> package_version = "0.0.0"
@@ -929,6 +933,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         stamp_at: stamp_at,
         artifact_build: request.artifact_build,
         settings: settings.move(),
+        package_settings: package_settings.move(),
         compiler_identity: request.host_facts.compiler_identity ?? "",
         package_markers: package_markers.move(),
         package_manifest: package_manifest,

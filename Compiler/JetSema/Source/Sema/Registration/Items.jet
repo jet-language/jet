@@ -821,9 +821,12 @@ SemaBuildFacts: struct {
     stamp_at: String,
     // This compile produces a shipped artifact (`jet build`).
     artifact_build: Bool{false},
-    // The package's declared settings with this build's values
+    // The built package's declared settings with this build's values
     // (`#build.settings.*`, sema_fact_build_setting).
     settings: [SemaBuildSetting]{[SemaBuildSetting]{}},
+    // Each loaded dependency's declared settings with this build's values,
+    // by package identity (sema_build_facts_settings_for).
+    package_settings: [String:[SemaBuildSetting]]{[String:[SemaBuildSetting]]{}},
     // The host's compiler identity ("" when the host names none); a history
     // artifact's `tool` names it (#6410).
     compiler_identity: String{""},
@@ -867,6 +870,13 @@ SemaSettingContribution: struct {
 // release-profile compile rejects any that remain (E3405).
 sema_build_facts_reject_debug_traces: fn(facts: SemaBuildFacts) -> Bool Never! {
     facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
+}
+
+// The declared settings a module of `package_identity` reads: a loaded
+// dependency's own, else the built package's. A dependency never reads the
+// built package's settings (D-DEP-FEATURES1).
+sema_build_facts_settings_for: fn(facts: SemaBuildFacts, package_identity: String) -> [SemaBuildSetting] Never! {
+    facts.package_settings.get(package_identity) ?? facts.settings
 }
 
 // #4319 scaling counters (Tools/Perf/Scaling) of the graph's lookups: module
@@ -3209,7 +3219,8 @@ sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModul
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program. `policies` are its package's checked user
 // policy declarations (Rust Registration: one policy set per package).
-// `settings` are the build's declared settings, which module arguments may read.
+// `settings` are its package's declared settings (sema_build_facts_settings_for),
+// which module arguments may read.
 // `codecs` are the codecs the graph gives the types its declarations hold
 // (sema_derive_foreign_codecs).
 sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, module_text: String, symbols: &SymbolTable, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: [String:Bool], reported: &[Diagnostic]) -> SemaRegistrationModule {
@@ -5395,11 +5406,12 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         module_codecs := codecs.pop() ?? break
         policies: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
         input_text: module_text(table, input.module_identity)
+        settings: sema_build_facts_settings_for(build_facts, input.package_identity)
         bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
         symbols := symbol_keys(symbols_cursor, bound)
         symbols_cursor += bound
         symbols.module_identity = input.module_identity
-        jobs.push(SemaRegistrationPrepareJob{input: input.move(), module_text: input_text, symbols: symbols.move(), templates: templates.move(), policies: policies, settings: build_facts.settings, codecs: module_codecs.move()})
+        jobs.push(SemaRegistrationPrepareJob{input: input.move(), module_text: input_text, symbols: symbols.move(), templates: templates.move(), policies: policies, settings: settings, codecs: module_codecs.move()})
     }
     prepared := sema_registration_prepare_rows(jobs, threads)
     // Each prepared row moves out (front to back) into its module row, after

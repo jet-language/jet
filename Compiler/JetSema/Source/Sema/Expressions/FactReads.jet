@@ -1005,12 +1005,14 @@ sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environ
     None
 }
 
-// `#build.settings.<key>`: the package's declared setting, read as its type.
-// The package declares it in `package.jet` (`settings: {{ key: Type = default }}`);
-// a `build:` profile may set it.
+// `#build.settings.<key>`: a setting the reading module's package declares,
+// read as its type. The package declares it in `package.jet`
+// (`settings: {{ key: Type = default }}`); a `build:` profile may set it. A
+// dependency reads its own settings, never the built package's.
 sema_fact_build_setting: fn(key: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadValue? {
     if program.registration_graph == .Val(graph) {
-        loop setting in graph.build_facts.settings {
+        package: if sema_registration_module_index(graph, environment.module_identity) == .Val(index) -> graph.modules[index].package_identity else -> graph.package_identity
+        loop setting in sema_build_facts_settings_for(graph.build_facts, package) {
             if setting.name == key {
                 return sema_fact_build_setting_value(setting, span, environment, program, diagnostics)
             }
