@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112713,
+    "rev": 112718,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23980,6 +23980,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c10 does not hold today (found by Errors3202-2 on p385): the typed CompilerDiagnostic v2 (JetEval CompilerServices.jet:186/285) has two CLI writers, InspectCompiler.jet:54 for checked results and the hand-written Inspect.jet:1065-1095 for lex, parse and pre-check failures, which differ in span.file and edit; `jet check --json` is a separate encoder (jet.report/v3, Report.jet:31/401) with no source digest; the LSP converts from the internal Diagnostic (JetLSP Diagnostics.jet:118), recomputing severity, URI and range. Ballot D-DIAG-ONESHAPE1 is posted (recommends one record with graded fix_edits, typed v3, jet.report v4 as the record plus a declared extension). The leaking `core.compiler.jet` file label in inspect check output is a defect fixed without the ballot (Errors3202-2 SUB)."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Worktree salvage: the ended Errors3202 lane left 93 modified files on a base 17h old (e2069b5709); saved, then judged against dev cd34962a1f. 68 files match dev and 15 reverse-apply. The 10 conflicting files are superseded: 8bd644f00e (diagnostic origins and schema v2: JetEval CompilerServices, CLI Inspect and InspectCompiler, ComptimeCompiler, RuntimeHandles), e29abd7497 (Sema Diagnostics sema_core_path_unimported), f3befb5834 and d264a6ca6f (UISnapshots), 1d3ef27bbd (meta_ladder stderr names csv.CSVRow deliberately). The audit line numbers and the coverage baseline were regenerated on dev (cd34962a1f, 8140a6477d). Nothing live; the salvage is deleted."
         },
         {
@@ -24114,7 +24119,8 @@
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_diagnostics_"
-          }
+          },
+          "blockedBy": "D-DIAG-ONESHAPE1"
         },
         {
           "n": 11,
@@ -24366,7 +24372,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T01:50:00.991Z",
+      "updated": "2026-11-21T01:54:17.845Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
@@ -127699,76 +127705,76 @@
       "cardId": "c0dktg7a",
       "group": "api",
       "title": "One shape for a compiler error in every machine-readable output",
-      "situation": "When Jet finds a mistake in a program, it can describe it for tools in machine-readable form: a record with fields like code, message, location and the file it came from. Today three outputs write that record with separate code, and their fields have drifted apart. The same `x++` error carries a repair but no file from `jet inspect compiler parse`, and a made-up file name but no repair from `jet inspect compiler check`. `jet check --json` names the file but not which version of its text it read. A tool that combines these outputs, like an editor plugin or a build script, has to special-case each command and can't tell whether two reports describe the same text. We recommend one record written in one place, with repairs kept where they already live and graded for safety, so no tool loses information.",
-      "gist": "Should every machine-readable compiler error come from one record written in one place?",
-      "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it at compile time as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON, and `jet check --json` prints a fuller report. The editor protocol has a fixed shape of its own. The vote decides whether these outputs share one record and one origin.",
+      "situation": "When Jet finds a mistake in a program, it describes it for tools as a record: code, message, location, file and the exact text it read. Today three outputs build that record with separate code, and their fields have drifted. For one `x++` error in main.jet, `jet inspect compiler parse` gives a repair but no file in the span. `jet inspect compiler check` gives the file but no repair. `jet check --json` gives a graded repair, calls the message `what`, and never says which text it read. A tool that merges them must special-case each command. We recommend one record, written in one place, that carries its graded repairs, so no output loses information.",
+      "gist": "Should every machine-readable compiler error be one record, written in one place, with its graded repairs inside?",
+      "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON. `jet check --json` prints a report with more members. The editor protocol converts at the edge. The vote decides whether the value and the report are one record, and whether repairs belong to it.",
       "explainer": "",
-      "story": "A build script runs `jet inspect compiler parse` and then `jet inspect compiler check` on the same file and merges the errors by location. The same `x++` error arrives once with a repair and no file, and once with a file name that doesn't exist and no repair, so the script reports it twice. It also can't match either one to the `jet check --json` report, which names the file but not the text it read.",
-      "inWild": "// rustc --error-format=json: one record for every JSON consumer\n// https://doc.rust-lang.org/rustc/json.html\n{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}",
+      "story": "A build script runs `jet inspect compiler parse`, `jet inspect compiler check` and `jet check --json` on main.jet and merges errors by location. The same `x++` error arrives three times, each with different fields. One has a repair and no file in its span, one has the file and no repair, and one calls its message `what`. The script reports the error three times. It can't tell whether main.jet changed between the commands.",
+      "inWild": "// rustc --error-format=json: one record, repairs inside, graded\n// https://doc.rust-lang.org/rustc/json.html\n{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30,\"suggested_replacement\":\" += 1\",\"suggestion_applicability\":\"MaybeIncorrect\"}]}",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "One record, written once",
-          "detail": "The typed CompilerDiagnostic (version 2) is the one record. `jet inspect compiler lex`, `parse` and `check` all print it through one writer. A query over handed text names no file: its span `file` is empty and `origin.path` is null. The internal label `core.compiler.jet` is no longer printed.\n\n`jet check --json` reports gain an `origin` member: the same path and digest record, taken from the same origin rows. A report with no source has a null origin. Every existing report member stays. The editor protocol keeps its fixed shape and files each diagnostic under the URI of that same origin.\n\nBeginner path: read `code`, `message` and `span` from any output; they mean the same everywhere. Expert path: match reports across commands by `origin.source_digest`, and take repairs from `fix_edits`.",
-          "technical": "Today the compiler-API JSON mirror has two writers. `jet_cli_compiler_checked_value` (Compiler/JetCLI/Source/CLI/InspectCompiler.jet:54) prints the typed value for a checked result. The hand-written `jet_cli_compiler_diagnostics` (Compiler/JetCLI/Source/CLI/Inspect.jet:1065) prints lex, parse and a check that fails before checking. They differ in `span.file` and the extra `edit`.\n\nA deletes the hand writer and its origin copy (Inspect.jet:1086-1095). Every inspect path prints `jet_eval_compiler_services_diagnostic_values` (Compiler/JetEval/Source/CompilerServices.jet:303) through the value writer. The check query span file follows CompilerServices.jet:234-236, empty for handed text, instead of JET_DRIVER_COMPILER_SOURCE_FILE (Compiler/JetDriver/Source/Driver/ComptimeCompiler.jet:63).\n\n`jet_cli_report_json_with` (Compiler/JetCLI/Source/CLI/Report.jet:401) adds `origin` from the same SemaDiagnosticOrigin rows (Compiler/JetSema/Source/Sema/Diagnostics.jet:895-993). The member is optional and additive, so the report stays `jet.report/v3`. The record inside it is versioned by JET_COMPILER_SERVICES_SCHEMA_VERSION 2 (CompilerServices.jet:186), unchanged. Package-model schemas are untouched.\n\nProof cases assert one field set across inspect lex, parse and check, the typed value, the `jet check --json` origin and LSP routing.",
-          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",\"severity\":\"error\",\"message\":\"`++` is not a Jet operator\",\n \"why\":\"Jet updates a number in place with an assignment operator\",\"fix\":\"Write `+= 1`\",\n \"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"}}\n\n// jet check --json main.jet\n{\"schema\":\"jet.report/v3\",\"code\":\"E0003\",...,\"file\":\"main.jet\",\"line\":3,\"col\":6,\n \"span\":{\"start\":28,\"end\":30},\n \"fix_edits\":[{\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}],...,\n \"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"}}\n"
+          "name": "One record with its graded repairs",
+          "detail": "The typed CompilerDiagnostic is the one record. It gains `fix_edits`: every repair the compiler knows, each with its safety grade. One writer prints it in `jet inspect compiler lex`, `parse` and `check`. The same writer prints the first members of each `jet check --json` report.\n\nA file the command read is named in `span.file` and `origin.path`, such as \"main.jet\". Text that Jet code hands to `compiler.check` names no file: `span.file` is \"\" and `origin.path` is null. The digest is always the SHA-256 of the exact bytes checked.\n\nBeginner path: read `code`, `message`, `span` and `fix_edits` from any output; they mean the same everywhere. Expert path: match reports across commands by `origin.source_digest`, and apply only the repair grades you accept.",
+          "technical": "The record moves to version 3: JET_COMPILER_SERVICES_SCHEMA_VERSION goes from 2 to 3 (Compiler/JetEval/Source/CompilerServices.jet:186). Its Jet types:\n\n```jet\nCompilerDiagnostic: struct {\n    code: String, severity: String, message: String, why: String, fix: String,\n    span: SourceSpan?, origin: CompilerDiagnosticOrigin?,\n    fix_edits: [CompilerFixEdit],\n}\nCompilerFixEdit: struct { span: SourceSpan, new_text: String, safety: String }\n```\n\n`safety` is one of the report's words: formatting, behavior-preserving, api-changing, target-changing or needs-review (Compiler/JetCLI/Source/CLI/Report.jet:165). Each edit's `span.file` names its own file. The rows go in CoreRecordRows.jet and the sema host-value lists.\n\nOne writer: `jet_eval_compiler_services_diagnostic_value` (CompilerServices.jet:296). The hand-written inspect writer is deleted (Compiler/JetCLI/Source/CLI/Inspect.jet:1065-1095). Every inspect path prints the value through `jet_cli_compiler_checked_value` (InspectCompiler.jet:54).\n\nThe report moves from jet.report/v3 to jet.report/v4 (Report.jet:31). `jet_cli_report_json_with` (Report.jet:401) prints the record through the same writer, then appends the declared report extension. jet.report/v4 means CompilerDiagnostic version 3 plus that extension, so one string names both. Member by member:\n\n```text\nstay      code, why, fix\nstay      severity: error | lint (the record's words)\nrenamed   what -> message\nmoved     file -> span.file\nmoved     fix_edits -> into the record; fix_edits[].file -> fix_edits[].span.file\nadded     origin {path, source_digest}\nextension schema, moment, name, applicability, detail, denial_kind, call_chain,\n          scope_chain, nearest_granting_scope, line, col, no_fix_reason, cause,\n          labels, clears, reason, operation, expected, actual, build_error\nextension tier: warning | tidy, on a lint (v3 spelled it in severity)\n```\n\nThe language server builds its protocol diagnostic from the internal `Diagnostic`, not from the record (Compiler/JetLSP/Source/LSP/Diagnostics.jet:118). It recomputes severity (:119), the URI (:83-91) and the range from the held text (:121, :219). It reads causes for relatedInformation (:150).\n\nUnder A, the server converts the record and the extension's `cause` at the edge. Severity comes from `severity` and `tier`. The URI comes from `origin.path` against the checked root. The range comes from `span` over the text whose SHA-256 is `origin.source_digest`.\n\nMulti-file: a cause in another file carries its own span and origin, in the report and as LSP relatedInformation. A repair in another file names it in its own `span.file`. Nothing borrows the primary's file.\n\nNo span: `span` and `origin` are null. The report then has no `file`; today it inherits the batch file, which D-BIG-DIAGORIGIN1 forbids. `line` and `col` are null. The LSP places it over the whole document, as today (:122).\n\nChanged file: the digest comes once from the bytes the check held, never from a re-read. A consumer whose current text hashes differently knows the report is stale. The LSP already publishes a version only when the open text equals the checked text (:217, :175); A keys that test by digest.\n\nPackage-model schemas are untouched. Proof cases assert one field set across Jet code, inspect lex, parse and check, the v4 report and LSP routing, for a read file and for handed text.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",\"severity\":\"error\",\"message\":\"...\",\"why\":\"...\",\"fix\":\"...\",\n \"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"},\n \"fix_edits\":[{\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]}\n\n// compiler.check(compiler.parse(text)) in Jet code, the same text handed as a value\n{\"code\":\"E0003\",...,\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"},\n \"fix_edits\":[{\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]}\n\n// jet check --json main.jet: the record, then the report extension\n{\"schema\":\"jet.report/v4\",\"code\":\"E0003\",\"severity\":\"error\",\"message\":\"...\",\"why\":\"...\",\"fix\":\"...\",\n \"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3...\"},\n \"fix_edits\":[{\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}],\n \"moment\":\"compile\",\"name\":\"...\",\"line\":3,\"col\":6,\"cause\":[],\"clears\":0,...}\n"
         },
         {
           "key": "B",
-          "name": "The typed value grows an edit",
-          "detail": "Everything in A, and CompilerDiagnostic gains `edit: CompilerTextEdit?` (`span`, `new_text`), so the one writer keeps printing an `edit` in inspect output and Jet code can read the repair at compile time. Beginner path: as A. Expert path: read a repair from `edit` in Jet code or inspect output, or from `fix_edits` in the check report.",
-          "technical": "Adds a public record member and a new public type (CoreRecordRows, the sema field table and the compile-time value), and moves JET_COMPILER_SERVICES_SCHEMA_VERSION to 3 for every typed consumer. `edit` carries no safety grade and only the primary repair, while `fix_edits` carries every repair with its grade.",
-          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",...,\n \"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"},\n \"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}}\n"
+          "name": "One record, repairs stay in the report",
+          "detail": "The typed CompilerDiagnostic stays at version 2 and is the one record. One writer prints it in `jet inspect compiler lex`, `parse` and `check`, and as the first members of each `jet check --json` report. A file the command read is named, such as \"main.jet\". Text handed at compile time names none: \"\" and null.\n\nRepairs stay a report-only member, so inspect lex and parse lose their `edit`.\n\nBeginner path: read `code`, `message` and `span` from any output. Expert path: match by `origin.source_digest`, and take repairs from the check report.",
+          "technical": "One writer as in A, without `fix_edits` in the record. The typed version stays 2. The report moves from jet.report/v3 to v4 (Report.jet:31), meaning CompilerDiagnostic version 2 plus the report extension. Member by member:\n\n```text\nstay      code, why, fix\nstay      severity: error | lint\nrenamed   what -> message\nmoved     file -> span.file\nadded     origin {path, source_digest}\nextension fix_edits (each item's file moves into its span.file)\nextension every extension member A lists, and tier\n```\n\nThe LSP fix and the edge cases are as in A, except that repairs are not in the record.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet  and  jet inspect compiler check main.jet\n{\"code\":\"E0003\",\"severity\":\"error\",\"message\":\"...\",\"why\":\"...\",\"fix\":\"...\",\n \"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\n \"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3ae8857367143fd76425785e340063450d938f363938eb19dc7756e35\"}}\n\n// compiler.check(compiler.parse(text)) in Jet code\n{\"code\":\"E0003\",...,\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"}}\n\n// jet check --json main.jet\n{\"schema\":\"jet.report/v4\",\"code\":\"E0003\",...,\"message\":\"...\",\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\n \"origin\":{...},\"moment\":\"compile\",\"line\":3,\"col\":6,\n \"fix_edits\":[{\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}],...}\n"
         },
         {
           "key": "C",
           "name": "Keep separate writers",
-          "detail": "Each output keeps its own writer. Inspect lex and parse, and a check that fails before checking, print the hand-written shape: a span without `file`, plus `edit`. A checked result prints the typed value, with the internal label as its file and no repair. `jet check --json` names the file but not the text it read. Beginner path: learn which command prints which fields. Expert path: merge outputs with per-command rules.",
-          "technical": "Leaves Inspect.jet:1065-1095 beside InspectCompiler.jet:54, and Report.jet:401 without the origin record.",
-          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet\n\"span\":{\"start\":28,\"end\":30},\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}\n// jet check --json main.jet\n\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30}\n"
+          "detail": "Each output keeps its own writer. Inspect lex and parse, and a check that fails early, print a span without `file`, plus `edit`. A checked result prints the typed value with the file and no repair. `jet check --json` keeps v3: `what`, a top-level `file`, graded `fix_edits`, and no digest.\n\nBeginner path: learn which command prints which fields. Expert path: merge outputs with per-command rules.",
+          "technical": "Leaves Inspect.jet:1065-1095 beside InspectCompiler.jet:54. Report.jet:401 stays its own encoder at jet.report/v3. The LSP keeps converting from the internal Diagnostic.",
+          "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet\n\"span\":{\"start\":28,\"end\":30},\"origin\":{\"path\":\"main.jet\",...},\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet\n\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"origin\":{\"path\":\"main.jet\",...}\n// compiler.check(text) in Jet code\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\"origin\":{\"path\":null,...}\n// jet check --json main.jet\n\"what\":\"...\",\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30},\"fix_edits\":[...]\n"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust (rustc)",
-          "note": "--error-format=json prints one Diagnostic record type for every consumer; spans carry file_name and byte offsets. https://doc.rust-lang.org/rustc/json.html",
-          "code": "{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}"
+          "note": "--error-format=json prints one Diagnostic record type for every consumer. Suggestions ride in the span with an applicability grade. https://doc.rust-lang.org/rustc/json.html",
+          "code": "{\"message\":\"...\",\"level\":\"error\",\"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30,\"suggestion_applicability\":\"MaybeIncorrect\"}]}"
         },
         {
           "lang": "TypeScript",
-          "note": "tsc and tsserver both start from one ts.Diagnostic record (file, start, length, code, messageText); the editor protocol converts it at the edge. https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API",
+          "note": "tsc and tsserver both start from one ts.Diagnostic record; the editor protocol converts it at the edge. https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API",
           "code": "const d: ts.Diagnostic = program.getSemanticDiagnostics()[0];\nconsole.log(d.file?.fileName, d.start, d.length, d.code);"
         },
         {
           "lang": "Go (go/analysis)",
-          "note": "An analyzer reports one Diagnostic record; gopls turns it into the editor protocol's shape at the edge. https://pkg.go.dev/golang.org/x/tools/go/analysis#Diagnostic",
-          "code": "pass.Report(analysis.Diagnostic{Pos: pos, End: end, Message: msg})"
+          "note": "An analyzer reports one Diagnostic whose SuggestedFixes carry their TextEdits; gopls converts it at the edge. https://pkg.go.dev/golang.org/x/tools/go/analysis#Diagnostic",
+          "code": "pass.Report(analysis.Diagnostic{Pos: pos, End: end, Message: msg,\n    SuggestedFixes: []analysis.SuggestedFix{{TextEdits: edits}}})"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One writer can't drift from itself, and the origin record already ratified for Jet code (D-BIG-DIAGORIGIN1) becomes the one origin every output names. Repairs stay in the one place that grades them for safety.",
+        "why": "One writer can't drift from itself, and the ratified origin record becomes the one origin every output names. Only A loses no information and leaves no ungraded repair.",
         "gains": [
-          "A field added to the record appears in every output at once."
+          "A new record field appears in every output at once."
         ],
         "losses": [
           {
-            "loss": "Inspect lex and parse output lose their own `edit` field.",
-            "mitigation": "`jet check --json` already reports the same repair in `fix_edits`, graded for safety. The inspect field was an ungraded copy."
+            "loss": "Jet callers move to version 3; report readers move to v4.",
+            "mitigation": "Version 3 only adds `fix_edits`. Every report rename is listed, and the schema string names the shape."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B keeps the copy by adding a second, ungraded repair channel to the public record and moves every Jet caller to version 3."
+            "reason": "B reaches one record but drops the repair from inspect lex and parse."
           },
           {
             "key": "C",
-            "reason": "C leaves one error with two shapes and a check report that can't name the text it read."
+            "reason": "C keeps three shapes and a report that can't name its text."
           }
         ],
-        "tradeoff": "Scripts read repairs from `fix_edits` instead of inspect `edit`. In return, every output shares one record."
+        "tradeoff": "Jet callers and report readers each take one version step. In return, every output prints one record with its graded repairs."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -127777,50 +127783,51 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should every machine-readable compiler error come from one record written in one place?",
-        "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it at compile time as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON, and `jet check --json` prints a fuller report. The editor protocol has a fixed shape of its own. The vote decides whether these outputs share one record and one origin.",
+        "gist": "Should every machine-readable compiler error be one record, written in one place, with its graded repairs inside?",
+        "lesson": "A compiler diagnostic is Jet's record of one problem in a program. Jet code reads it as a CompilerDiagnostic value. `jet inspect compiler` prints that value as JSON. `jet check --json` prints a report with more members. The editor protocol converts at the edge. The vote decides whether the value and the report are one record, and whether repairs belong to it.",
         "trio": {
           "current": {
-            "note": "Observed with the current batch compiler: one error, two inspect shapes, and a check report with no digest.",
-            "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet: a repair, no file\n\"span\":{\"start\":28,\"end\":30},...,\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet: an internal file name, no repair\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}\n// jet check --json main.jet: the file, but no digest of its text\n\"file\":\"main.jet\",\"line\":3,\"col\":6,\"fix_edits\":[{\"file\":\"main.jet\",...,\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]"
+            "note": "Observed on the current compiler, after the fix that makes inspect check name main.jet instead of an internal label.",
+            "code": "// main.jet\nrun: fn() {\n    x := 1\n    x++\n    print(x)\n}\n\n// jet inspect compiler parse main.jet: a repair, no file in the span\n\"span\":{\"start\":28,\"end\":30},\"origin\":{\"path\":\"main.jet\",...},\n\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}\n// jet inspect compiler check main.jet: the file, no repair\n\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"origin\":{\"path\":\"main.jet\",...}\n// compiler.check(text) in Jet code: handed text names no file\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\"origin\":{\"path\":null,...}\n// jet check --json main.jet: `what`, a top-level file, a graded repair, no digest\n\"what\":\"...\",\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30},\n\"fix_edits\":[{\"file\":\"main.jet\",\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]"
           },
           "wild": {
             "lang": "Rust (rustc --error-format=json)",
-            "note": "rustc writes one Diagnostic record for every JSON consumer; each span carries its own file_name. Source: https://doc.rust-lang.org/rustc/json.html",
-            "code": "{\"message\":\"...\",\"level\":\"error\",\n \"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30}]}"
+            "note": "rustc writes one record for every JSON consumer, with graded suggestions inside it. Source: https://doc.rust-lang.org/rustc/json.html",
+            "code": "{\"message\":\"...\",\"level\":\"error\",\n \"spans\":[{\"file_name\":\"main.rs\",\"byte_start\":28,\"byte_end\":30,\n   \"suggested_replacement\":\" += 1\",\"suggestion_applicability\":\"MaybeIncorrect\"}]}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "One record, written once",
-            "gist": "Every inspect output prints the typed value through one writer, and `jet check --json` adds the same origin record.",
+            "name": "One record with its graded repairs",
+            "gist": "One writer prints the record everywhere, and the record carries `fix_edits` with safety grades.",
             "gains": [
-              "One error has one shape in every inspect command.",
-              "A check report names the exact text it read, by digest.",
-              "No new public type and no version bump for Jet code."
+              "One error has one shape in Jet code, inspect and the check report.",
+              "Inspect keeps its repairs, now graded, with no ungraded copy.",
+              "Jet code can read graded repairs at compile time."
             ],
             "losses": [
-              "Inspect lex and parse output lose their own `edit` field."
+              "A new public field and type: version 3 for Jet callers.",
+              "The check report moves to v4: `what` is renamed, `file` moves."
             ],
             "proposed": {
-              "code": "// jet inspect compiler parse main.jet, and check alike\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"}\n// jet check --json main.jet: every member as today, plus\n\"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3...\"}"
+              "code": "// inspect parse and check, and inside each jet check --json report\n\"message\":\"...\",\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3...\"},\n\"fix_edits\":[{\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]\n// compiler.check(text) in Jet code: the same, with \"file\":\"\" and \"path\":null"
             }
           },
           {
             "key": "B",
-            "name": "The typed value grows an edit",
-            "gist": "As A, and CompilerDiagnostic gains an `edit` field, so inspect keeps it.",
+            "name": "One record, repairs stay in the report",
+            "gist": "One writer prints the record everywhere; graded repairs stay a report-only member.",
             "gains": [
-              "Inspect output keeps its `edit` field.",
-              "Jet code can read a repair at compile time."
+              "One error has the same core fields in every output.",
+              "No new public type and no version bump for Jet code."
             ],
             "losses": [
-              "A second repair channel beside `fix_edits`, with no safety grade.",
-              "A new public field and type, and version 3 for all Jet code."
+              "Inspect lex and parse lose their repair.",
+              "The check report moves to v4: `what` is renamed, `file` moves."
             ],
             "proposed": {
-              "code": "// jet inspect compiler parse main.jet, and check alike\n\"span\":{\"file\":\"\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":null,\"source_digest\":\"0ed8e6a3...\"},\n\"edit\":{\"span\":{\"start\":28,\"end\":30},\"new_text\":\" += 1\"}"
+              "code": "// inspect parse and check: no repair\n\"message\":\"...\",\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30},\n\"origin\":{\"path\":\"main.jet\",\"source_digest\":\"0ed8e6a3...\"}\n// jet check --json main.jet: the same record, then report members\n...,\"fix_edits\":[{\"span\":{\"file\":\"main.jet\",...},\"new_text\":\" += 1\",\"safety\":\"needs-review\"}]"
             }
           },
           {
@@ -127831,42 +127838,42 @@
               "No output changes."
             ],
             "losses": [
-              "One error keeps two shapes, chosen by the command.",
+              "One error keeps three shapes, chosen by the command.",
               "A check report still can't say which text it read."
             ],
             "proposed": {
-              "code": "// unchanged from today\n\"span\":{\"start\":28,\"end\":30},\"edit\":{...}                // parse\n\"span\":{\"file\":\"core.compiler.jet\",\"start\":28,\"end\":30}  // check"
+              "code": "// unchanged from current\n\"span\":{\"start\":28,\"end\":30},\"edit\":{...}               // inspect parse\n\"span\":{\"file\":\"main.jet\",\"start\":28,\"end\":30}         // inspect check\n\"what\":\"...\",\"file\":\"main.jet\",\"fix_edits\":[...]      // jet check --json"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One writer can't drift from itself, and the origin record already ratified for Jet code (D-BIG-DIAGORIGIN1) becomes the one origin every output names. Repairs stay in the one place that grades them for safety.",
+          "why": "One writer can't drift from itself, and the ratified origin record becomes the one origin every output names. Only A loses no information and leaves no ungraded repair.",
           "gains": [
-            "A field added to the record appears in every output at once."
+            "A new record field appears in every output at once."
           ],
           "losses": [
             {
-              "loss": "Inspect lex and parse output lose their own `edit` field.",
-              "mitigation": "`jet check --json` already reports the same repair in `fix_edits`, graded for safety. The inspect field was an ungraded copy."
+              "loss": "Jet callers move to version 3; report readers move to v4.",
+              "mitigation": "Version 3 only adds `fix_edits`. Every report rename is listed, and the schema string names the shape."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B keeps the copy by adding a second, ungraded repair channel to the public record and moves every Jet caller to version 3."
+              "reason": "B reaches one record but drops the repair from inspect lex and parse."
             },
             {
               "key": "C",
-              "reason": "C leaves one error with two shapes and a check report that can't name the text it read."
+              "reason": "C keeps three shapes and a report that can't name its text."
             }
           ],
-          "tradeoff": "Scripts read repairs from `fix_edits` instead of inspect `edit`. In return, every output shares one record."
+          "tradeoff": "Jet callers and report readers each take one version step. In return, every output prints one record with its graded repairs."
         }
       },
       "draftedBy": "Errors3202",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "Main",
+      "draft": false,
       "status": "open",
       "created": "2026-11-21T01:37:39.436Z"
     }
@@ -130135,6 +130142,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:54:17.846Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T01:54:15.407Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#10: Evidence on p385: the compiler-API typed value (schema v2) has two CLI writers (InspectCompiler.jet:54 and the hand-written Inspect.jet:1065); jet check --json is a separate encoder (jet.report/v3, Report.jet:401); the LSP builds from the internal Diagnostic and recomputes severity, URI and range. The one-shape cutover changes user-visible fields, so it waits on the ballot.; blocked by D-DIAG-ONESHAPE1"
+    },
+    {
+      "at": "2026-11-21T01:54:04.191Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DIAG-ONESHAPE1",
+      "note": "reviewed by Main"
+    },
+    {
+      "at": "2026-11-21T01:54:01.922Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-DIAG-ONESHAPE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T01:53:35.963Z",
+      "by": "Errors3202",
+      "action": "decision.update",
+      "ref": "D-DIAG-ONESHAPE1",
+      "note": ""
+    },
     {
       "at": "2026-11-21T01:50:00.991Z",
       "by": "Main",
