@@ -1576,7 +1576,10 @@ D-DBG-VERBS1=A names the commands:
   with `registers`, `x/16xb $rsp` with `memory $rsp 16`, `info
   breakpoints` with `breaks`.
   Tests/Cases/Debug/registers_and_memory_at_a_stop.case is the worked
-  example.
+  example. The Canvas Debug view shows the same reads in its Registers,
+  Memory and Disassembly panels (canvas-protocol.md, "Debug session");
+  canvas_debug_machine_panels_read_registers_memory_and_code.case is
+  theirs.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main

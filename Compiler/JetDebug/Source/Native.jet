@@ -2802,8 +2802,7 @@ NativeSession: struct {
             }
             "memory" -> {
                 ask: native_memory_ask(operand)
-                name: native_memory_name(ask)
-                path: if name != "" -> self.watch_path(name) else -> native_watch_path_refusal("")
+                path: native_memory_path(self, ask)
                 answer: native_memory_answer(self, ask, path) ?? return Err(err)
                 return Ok(NativeDebugStep{text: answer.text, stop: stop, refused: answer.refused})
             }

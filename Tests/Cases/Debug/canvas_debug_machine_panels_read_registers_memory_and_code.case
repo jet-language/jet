@@ -1,0 +1,86 @@
+# The Canvas Debug view's machine panels through the production protocol. A
+# native session stops at a breakpoint span, and its overlay carries the
+# frame's registers and the instructions around the pc, the pc's row marked
+# `here`. The request's reads answer outside the transcript: a 4096-byte
+# page at $rsp, and a List's items as Ints, each row naming the items that
+# start in it. A `next` in the same frame marks the registers it changed,
+# rip among them. Folded panels are not sent; a disassembly read lists code
+# from an address, and a WHERE the console refuses answers its words. A read
+# of another kind is refused. The client is the raw Core.net HTTP client
+# the other production Canvas debug cases use.
+fixture: CanvasDebugPausedLocals.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+session canvas raw: jet dev jet_debug_canvas_paused_locals.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
+capture: revision = sha256 file jet_debug_canvas_paused_locals.jet
+write: request.json canvas_debug_machine_panels_read_registers_memory_and_code.first.json
+step first: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the native session runs
+stdout: ~ "\"active_line\":12," # to the breakpoint span 162:172, `count += 1`
+stdout: ~ "\"registers\":[{\"name\":\"" # the frame's registers
+stdout: ~ "{\"name\":\"rip\",\"known\":true,\"value\":\"0x" # rip among them, held
+stdout: !~ "\"changed\":true" # the first stop has no earlier one to differ from
+stdout: ~ "\"disassembly\":[{\"address\":\"0x" # the code around the pc
+stdout: ~ "\"here\":true}" # the pc's row marked
+stdout: ~ "\"reads\":[{\"kind\":\"memory\",\"where\":\"$rsp\",\"type\":\"\",\"ok\":true,\"address\":\"0x" # the page read
+stdout: ~ "\"heading\":\"$rsp = 0x" # named as the console's `memory` names it
+stdout: !~ "  $rsp = 0x" # the read never reaches the transcript
+capture: page = text stdout.after_first("\"where\":\"$rsp\"").after_first("\"bytes\":\"").split("\"", 0)
+cap:page: len = 8192 # 4096 bytes in hex
+stdout: ~ "\"where\":\"xs[0]\",\"type\":\"Int\",\"ok\":true," # a List's items as Ints
+stdout: ~ "\"labels\":[{\"offset\":0,\"text\":\"xs[0..1]\"},{\"offset\":16,\"text\":\"xs[2]\"}],\"values\":[\"1\",\"2\",\"3\"]" # each row names the items that start in it
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_machine_panels_read_registers_memory_and_code.next.json
+step next: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the same session steps over the line
+stdout: ~ "\"active_line\":13," # to the print
+stdout: ~ "{\"name\":\"rip\",\"known\":true,\"value\":\"0x" # in the same frame
+capture: rip = text stdout.after_first("{\"name\":\"rip\",\"known\":true,\"value\":\"").split("\"", 0)
+capture: rip_row = text stdout.after_first("{\"name\":\"rip\",").split("}", 0)
+cap:rip_row: $= "\"changed\":true" # rip moved on, so its row is marked changed
+stdout: ~ "{\"address\":\"{cap:rip}\",\"valid\":true,\"bytes\":\"" # the listing holds the new pc
+stdout: ~ "\"reads\":[]" # no read asked, none answered
+write: request.json canvas_debug_machine_panels_read_registers_memory_and_code.folded.json
+step folded: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the stop is read again
+stdout: !~ "\"registers\":[" # a folded panel is not sent
+stdout: !~ "\"disassembly\":[" # nor the other
+stdout: ~ "\"reads\":[{\"kind\":\"disassembly\",\"from\":\"{cap:rip}\",\"skip\":0,\"rows\":[{\"address\":\"{cap:rip}\",\"valid\":true," # code listed from an address
+stdout: ~ "{\"kind\":\"memory\",\"where\":\"nope\",\"type\":\"\",\"ok\":false,\"refused\":" # a WHERE the console refuses
+stdout: ~ "`nope` is not a local of this frame" # answers the console's words
+write: request.json canvas_debug_machine_panels_read_registers_memory_and_code.bad.json
+step bad: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ~ "\"kind\":\"bad_request\"" # a read of another kind is refused
+stdout: ~ "a Canvas debug read is of kind `memory` or `disassembly`" # and says which kinds read
+write: request.json canvas_debug_machine_panels_read_registers_memory_and_code.stop.json
+step stop: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the refusal kept the session, which ends
+stdout: ~ "\"state\":\"stopped\"" # and says so
+signal canvas: INT
+wait: canvas
+exit: any # the case asserts the debug responses, not the dev server's shutdown status

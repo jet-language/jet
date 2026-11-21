@@ -668,7 +668,8 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
         }
         "memory" -> {
             ask: native_memory_ask(operand)
-            return native_memory_answer(session, ask, native_dump_watch_path(native_memory_name(ask)))
+            path: native_memory_dump_path(ask)
+            return native_memory_answer(session, ask, path)
         }
         "task" -> {
             wanted: Int.parse(operand) ?? -1

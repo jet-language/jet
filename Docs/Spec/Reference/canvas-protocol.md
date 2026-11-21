@@ -308,6 +308,8 @@ Requests carry:
 | `breakpoint_spans` | Local source anchors encoded as `start:end`, or `start:end@REVISION` to name the source revision the span was drawn on. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
 | `watches` | Local names evaluated at the stopped frame, or `name@REVISION` to name the revision the watch was drawn on. |
+| `folded` | The machine panels the page has folded, `registers` or `disassembly`; the overlay leaves their fields out. Any other name is refused `bad_request`. |
+| `reads` | Up to 8 reads answered at the stop and kept out of the transcript: `{"kind":"memory","where":WHERE,"count":N,"type":T}`, read as the console's `memory WHERE N as T` (`count` and `type` optional), or `{"kind":"disassembly","from":"0x…","skip":S,"count":N}`, the 1 to 64 instructions that start S instructions from `from` (S at most 64 either way). More reads, another kind or a bad bound are refused `limit` or `bad_request`. |
 | `stop` | Optional boolean that ends a live session without changing source. |
 
 A running response projects one bounded runtime snapshot:
@@ -361,6 +363,30 @@ The overlay's `source` carries the stopped source around the active line:
 `first_line` and up to 12 `lines` on each side, so the Debug view draws source,
 stack, locals, watches and the console transcript from one answer without a
 second request.
+
+At a live stop the overlay also carries the machine panels the request didn't
+fold. `registers` is the selected frame's registers, the console's
+`registers`: each with its `name` and, when the frame holds it, its `value`
+in hex, a small value in `decimal`, the local or symbol in its `label`, and
+`changed` when the page saw the same frame at the previous stop with another
+value; one the frame doesn't hold reads `"known":false`. A queued task that
+hasn't run lists none. `disassembly` is the 16 instructions around the
+frame's pc, the one holding it `"here":true`, each with its `address`,
+`bytes`, `text`, `symbol`, `file` and `line`; an address with no code reads
+`"valid":false`.
+
+The answer's top-level `reads` answers the request's reads in order. A
+disassembly read lists its `rows` like the overlay's `disassembly`. A memory
+read the console refuses answers `"ok":false`, `refused` and the console's
+`message`. Else it answers the `address`, the console's `heading`, the
+`bytes` in hex and a `state` character for each byte (`.` read, `?`
+unmapped, `#` redacted in a dump, `d` the debugger's own), the `pointers`:
+offsets of aligned words that point at readable memory, the `labels` of
+each 16-byte row, the `values` read `as` a number type, and a `note` when
+the read stopped short. The page's Memory panel opens at a clicked local's
+name, a clicked register or a typed WHERE. A click on an underlined pointer
+word follows it, and Back returns. The page keeps at most 64 pages, dropped
+when the program moves, and its folded panels in its local settings.
 
 The page keeps every session it opened. Its session selector lists them,
 each with its engine (`jet dev O0` for `native`, `compiled run replay` for
