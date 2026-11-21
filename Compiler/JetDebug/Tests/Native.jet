@@ -201,6 +201,40 @@ native_test_unwound: fn(pc: Int) -> NativeUnwound {
     assert_eq(shown[0].value, NATIVE_DEBUG_UNAVAILABLE)
 }
 
+// `i`, a parameter of the run of `square` inlined at [0x1040, 0x1060), is
+// in rbx over [0x1040, 0x1050) alone, where the caller's variable it is
+// bound to still holds the value passed; `j`, another, has no location. In
+// the run at 0x1048 `i` shows rbx's 7; at 0x1058 it is not kept. `j` is
+// unavailable even on its own declaration line, never left out as a local
+// still to be bound is. The function's own frame lists neither.
+#Test("an_inlined_parameter_shows_its_value_where_located_and_why_not_elsewhere") {
+    loclists: [U8]{0x04, 0x40, 0x50, 0x01, 0x53, 0x00}
+    i: NativeVariable{name: "i", line: 3, ty: 40, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: 0}
+    j: NativeVariable{name: "j", line: 3, ty: 40, list: -1, base: 0x1000, role: NativeVariableRole.Parameter, site: 0}
+    run: NativeInlined{die: 10, origin: 1, low: 0x1040, high: 0x1060, call_line: 8, parent: -1, file: -1, call_file: -1}
+    function: NativeFunction{low: 0x1000, high: 0x1100, name: "sum_squares", file: -1, variables: [NativeVariable]{i, j}, inlined: [NativeInlined]{run}}
+    types := [Int:NativeType]{}
+    types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    abstracts := [Int:NativeAbstract]{}
+    abstracts[1] = NativeAbstract{name: "square", file: -1}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: abstracts, allocs: [Int:Int]{}, arguments: [NativeCallArgument]{}}
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{}}
+    // rbx, DWARF register 3, is the sixth of the registers ptrace reads.
+    frame := native_test_unwound(0x1048)
+    frame.registers[5] = 7
+    frame.known[5] = true
+    inside: native_frame_locals(image, memory, frame, 0x1048, 0, NativeUnwound?{None})
+    assert_eq(inside.len(), 2)
+    assert_eq(inside[0].name, "i")
+    assert_eq(inside[0].value, "7")
+    assert_eq(inside[1].name, "j")
+    assert_eq(inside[1].value, NATIVE_DEBUG_UNAVAILABLE)
+    past: native_frame_locals(image, memory, frame, 0x1058, 0, NativeUnwound?{None})
+    assert_eq(past.len(), 2)
+    assert_eq(past[0].value, NATIVE_DEBUG_NOT_KEPT)
+    assert_eq(native_frame_locals(image, memory, frame, 0x1048, -1, NativeUnwound?{None}).len(), 0)
+}
+
 // Functions in address order with a gap between them: an address finds the
 // one holding it, and one in the gap, before the first or at the last's end
 // finds none.

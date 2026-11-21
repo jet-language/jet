@@ -814,8 +814,8 @@ ir_lint_function: fn(m: IRModule, context: IRLintContext, f: IRFunction, pass: S
 ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) -> Bool Never! {
     slots: f.slot_type.len()
     code: f.op.len()
-    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots || f.slot_fixed.len() != slots || f.slot_site.len() != slots {
-        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()}, {f.slot_line.len()}, {f.slot_fixed.len()} and {f.slot_site.len()} rows"))
+    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots || f.slot_fixed.len() != slots || f.slot_site.len() != slots || f.slot_formal.len() != slots {
+        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()}, {f.slot_line.len()}, {f.slot_fixed.len()}, {f.slot_site.len()} and {f.slot_formal.len()} rows"))
         return false
     }
     if f.dst.len() != code || f.a.len() != code || f.b.len() != code || f.c.len() != code || f.code_line.len() != code {

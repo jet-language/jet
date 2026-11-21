@@ -4925,16 +4925,18 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // an aggregate parameter's entry value too (the caller's bytes, which it
 // keeps while the call runs).
 // A local belongs to the inline site of its slot (IRFunction.slot_site: a
-// callee's local or parameter inlined here, OptInline.jet ir_opt_splice). A
-// named slot a pass folded into another (IRFunction.binds) is located in
-// that slot's place, or is that slot's constant from its write on. One in
-// the place of storage scalar replacement scattered (IRFunction.scattered)
-// has no location.
+// callee's local or parameter inlined here, OptInline.jet ir_opt_splice),
+// and a slot standing for an inlined function's parameter is a parameter
+// of that site (IRFunction.slot_formal). A named slot a pass folded into
+// another (IRFunction.binds) is located in that slot's place, or is that
+// slot's constant from its write on. One in the place of storage scalar
+// replacement scattered (IRFunction.scattered) has no location.
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     entries: ir_x64_entry_registers(m, f, al)
     // Per slot: the slot its value is in. A bind holds only into a slot
     // written once (a parameter: never), which keeps the value wherever it
-    // is live.
+    // is live; an inlined parameter's bind into a slot written more than
+    // once holds only over its site's code (ir_x64_formal_runs).
     held_in := loop slot in 0..<f.slot_type.len() -> slot
     writes := loop _ in 0..<f.slot_type.len() -> 0
     if !f.binds.is_empty() {
@@ -4943,6 +4945,7 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             if written >= 0 && written < writes.len() -> writes[written] = writes[written] + 1
         }
     }
+    confined := loop _ in 0..<(if f.binds.is_empty() -> 0 else -> f.slot_type.len()) -> false
     bind := 0
     loop bind + 1 < f.binds.len() {
         named: f.binds[bind]
@@ -4952,7 +4955,8 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             next
         }
         once: if held < f.param_count -> writes[held] == 0 else -> writes[held] == 1
-        if once -> held_in[named] = held
+        if once || f.slot_formal[named] -> held_in[named] = held
+        if !once && f.slot_formal[named] -> confined[named] = true
     }
     // Per slot: whether it holds the address of storage scalar replacement
     // scattered into fields (IRFunction.scattered), whose bytes are stale
@@ -4961,18 +4965,26 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
     loop slot in f.scattered {
         if slot >= 0 && slot < scattered.len() -> scattered[slot] = true
     }
-    // Per variable: the slot its value is in.
+    // Per variable: the slot its value is in. Per inlined parameter whose
+    // bind holds only over its site's code: its variable and its slot.
     places := [Int]{}
     first: variables.len()
+    bounded := [Int]{}
+    formals := [Int]{}
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
         ty: ir_x64_type(m, f, slot)
         variable: variables.len()
         indirect: m.types[f.slot_type[slot]].kind == .Aggregate
-        variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: f.slot_site[slot]})
+        parameter: f.slot_kind[slot] == .Param || f.slot_formal[slot]
+        variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: parameter, indirect: indirect, site: f.slot_site[slot]})
         place: held_in[slot]
         places.push(place)
+        if slot < confined.len() && confined[slot] {
+            bounded.push(variable)
+            formals.push(slot)
+        }
         if scattered[place] -> next
         entry: if slot < entries.len() -> entries[slot] else -> -1
         // From the body on: the frame-free prefix keeps its values in
@@ -5040,6 +5052,98 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
             ranges.push(X64VariableRange{variable: first + k, start: start, end: stop, location: location})
         }
     }
+    // An inlined parameter bound to a slot the code writes again (a loop
+    // variable passed in, say) has its location only where that slot still
+    // holds the value passed: none past those runs, never a stale value.
+    if formals.is_empty() {
+        return
+    }
+    runs: ir_x64_formal_runs(f, formals, held_in, positions)
+    loop (k, variable) in bounded {
+        from := 0
+        loop run in 0..<(runs[k].len() /% 2) {
+            if runs[k][2 * run] > from {
+                ir_x64_cut_ranges(ranges, variable, from, runs[k][2 * run])
+            }
+            from = runs[k][2 * run + 1]
+        }
+        if end > from -> ir_x64_cut_ranges(ranges, variable, from, end)
+    }
+}
+
+// The code where each inlined parameter `formals[k]` holds the value its
+// call passed, as [start, stop) offset pairs: it is bound to the slot
+// `held_in[formals[k]]`, which the code writes more than once. A run is a
+// stretch of instructions of the parameter's inline site, or of sites
+// nested in it, entered from code outside them; it ends where the code
+// leaves them or writes that slot, and a write inside it leaves the rest of
+// the stretch with no run. The body inlined never writes that slot
+// (OptInline.jet ir_opt_splice), so over a run it keeps the value passed.
+ir_x64_formal_runs: fn(f: IRFunction, formals: [Int], held_in: [Int], positions: [Int]) -> [[Int]] Never! {
+    runs := loop _ in formals -> [Int]{}
+    sites: f.inline_sites.len() /% IR_INLINE_SITE_WORDS
+    // The formals of each site and those bound to each slot, as lists
+    // threaded through `site_next` and `held_next` (-1 ends one).
+    site_first := loop _ in 0..<(sites + 1) -> -1
+    site_next := loop _ in formals -> -1
+    held_first := [Int:Int]{}
+    held_next := loop _ in formals -> -1
+    loop (k, slot) in formals {
+        site: f.slot_site[slot]
+        if site > 0 && site <= sites {
+            site_next[k] = site_first[site]
+            site_first[site] = k
+        }
+        held_next[k] = held_first.get(held_in[slot]) ?? -1
+        held_first[held_in[slot]] = k
+    }
+    // Per formal: where its open run starts (-1: none), and the last
+    // instruction of its sites seen.
+    opened := loop _ in formals -> -1
+    last := loop _ in formals -> -2
+    loop at in 0..<f.op.len() {
+        site := ir_code_line_site(f.code_line[at])
+        loop site > 0 && site <= sites {
+            k := site_first[site]
+            loop k >= 0 {
+                if last[k] != at - 1 {
+                    // Entered: the open run ended where the code left.
+                    if opened[k] >= 0 {
+                        ir_x64_formal_run(runs, k, opened[k], positions[last[k] + 1])
+                    }
+                    opened[k] = positions[at]
+                }
+                last[k] = at
+                k = site_next[k]
+            }
+            // A site nests in an earlier one (OptInline.jet ir_opt_splice).
+            outer: f.inline_sites[IR_INLINE_SITE_WORDS * (site - 1) + 1]
+            site = if outer < site -> outer else -> 0
+        }
+        written: ir_x64_write(f, at)
+        if written < 0 -> next
+        k := held_first.get(written) ?? -1
+        loop k >= 0 {
+            if opened[k] >= 0 {
+                ir_x64_formal_run(runs, k, opened[k], if last[k] == at -> positions[at] else -> positions[last[k] + 1])
+            }
+            opened[k] = -1
+            k = held_next[k]
+        }
+    }
+    loop (k, start) in opened {
+        if start >= 0 -> ir_x64_formal_run(runs, k, start, positions[last[k] + 1])
+    }
+    runs
+}
+
+// Adds [start, stop) to `runs[k]` unless it is empty.
+ir_x64_formal_run: fn(runs: &[[Int]], k: Int, start: Int, stop: Int) Never! {
+    if stop <= start {
+        return
+    }
+    runs[k].push(start)
+    runs[k].push(stop)
 }
 
 // Cuts start..<stop out of `variable`'s `ranges`, in place: a range across

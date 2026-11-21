@@ -1,0 +1,35 @@
+# Stopped in an inlined function, `locals` lists its parameters with their
+# values. At -O1 and -O2 `square` is inlined into `sum_squares`, which
+# passes its loop variable `i` and then writes it again. Square's `i` is
+# still a parameter of its inlined frame, located where `sum_squares`'s `i`
+# holds the value passed: 0 on the first stop, 1 on the next, never stale.
+# -O0 inlines nothing and shows the same. The fixture must stay in jet fmt
+# form: line 3 is square.
+fixture: InlinedFunctionListsItsParameters.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+stdin: native_lists_an_inlined_function_s_parameters.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:3  in square()\n3 | square: fn(i: Int) -> Int { i * i }        <- here\nLocals:  i = 0\n(Jet) locals\ni: Int = 0\n" # -O0: the first call's argument
+stdout+stderr: ~ "Locals:  i = 1\n(Jet) locals\ni: Int = 1\n" # the next call's
+stdout+stderr: ~ "332833500\nProgram finished" # the program ran to its end
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+stdin: native_lists_an_inlined_function_s_parameters.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:3  in square()\n3 | square: fn(i: Int) -> Int { i * i }        <- here\nLocals:  i = 0\n(Jet) locals\ni: Int = 0\n" # -O1: the inlined frame lists its parameter
+stdout+stderr: ~ "Locals:  i = 1\n(Jet) locals\ni: Int = 1\n" # the next call's value, not a stale one
+stdout+stderr: !~ "No locals here" # never an empty inlined frame
+stdout+stderr: ~ "332833500\nProgram finished" # the program ran to its end
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+stdin: native_lists_an_inlined_function_s_parameters.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:3  in square()\n3 | square: fn(i: Int) -> Int { i * i }        <- here\nLocals:  i = 0\n(Jet) locals\ni: Int = 0\n" # -O2 the same
+stdout+stderr: ~ "Locals:  i = 1\n(Jet) locals\ni: Int = 1\n" # the next call's value, not a stale one
+stdout+stderr: !~ "No locals here" # never an empty inlined frame
+stdout+stderr: ~ "332833500\nProgram finished" # the program ran to its end

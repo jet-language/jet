@@ -1372,7 +1372,10 @@ D-DBG-VERBS1=A names the commands:
   instruction it is at, a caller's call. The program's entry and the
   routines below the innermost Jet frame aren't shown. `up` moves toward
   the callers and `down` back. `locals` and `print <expr>` (`p`) read the
-  selected frame until the program moves.
+  selected frame until the program moves. An inlined frame's `locals`
+  lists its function's parameters at -O1 and -O2 too: each with the value
+  passed where the code still holds it, else `<Unavailable>` with why,
+  never a stale value.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by
