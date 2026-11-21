@@ -1,12 +1,17 @@
-# Under the task clock the samples a run should keep are the task clocks' own
-# count: each thread's CPU time while sampled, over the 125 microsecond
-# period, so the runtime's start and exit outside the samplers give none. A
-# spin of pure user CPU time keeps them all, to within one sample: every
-# sample is taken at a period's end, so it keeps no more than they give, and
-# the kernel's share of the spin, which takes none, is under a period.
-# The process's CPU time gave 8 to 11 for the 3 to 5 samples a half
-# millisecond spin keeps, its start and exit in the kernel and the runtime
-# counted too.
+# Under the task clock the samples a run should keep are its samplers' own
+# counts: each thread's task clock at its sampler's end, over the 125
+# microsecond period, the period ends it reached while sampled, so the
+# runtime's start and exit outside the samplers give none. The kernel takes a
+# sample at each period end that falls in user mode and none at one that
+# falls in kernel mode (exclude_kernel), as the kernel runs for the thread:
+# its page faults and interrupts, and the second thread's system calls.
+# So a run keeps its period ends less those in kernel mode, which its
+# samples' own counts find: two consecutive samples of one thread two or
+# more periods apart, and the ends before a thread's first sample and after
+# its last. The session's reason says how many fell there, and they make up
+# the difference exactly. The samples file a run of the same program writes
+# is checked end by end: each took one sample or fell in kernel mode. Both
+# hold at every optimization level.
 requires: os-name:linux
 requires: probe grep -qx 2 /proc/sys/kernel/perf_event_paranoid # the task clock takes the samples at perf_event_paranoid 2
 fixture: TaskClockNominal.fixture
@@ -15,10 +20,46 @@ step: jet perf run -O2 spin.jet --out {work}/spin.jettrace
 exit: 0
 stdout: = "spun=5702887\n"
 json: file spin.jettrace doc $.content.profile.reason ~ "the task clock took them" # the reason names the sampler
-json: file spin.jettrace doc $.content.profile.reason ~ " ms of CPU time on the threads' task clocks while sampled gives" # and counts by the task clocks
+json: file spin.jettrace doc $.content.profile.reason ~ " ms of CPU time on the threads' task clocks while sampled gives; " # and counts by the task clocks
 capture: reason file spin.jettrace doc $.content.profile.reason
 capture: tally = text cap:reason.split("it kept ", 1).split(" samples that ", 0)
 capture: kept = text cap:tally.split(" ", 0)
 capture: nominal = text cap:tally.split("of the ", 1)
-json: cap:nominal doc $ >= {cap:kept}+0 # it keeps no more samples than the task clocks give
-json: cap:nominal doc $ <= {cap:kept}+1 # and at most one fewer
+capture: kernel = text cap:reason.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
+json: cap:nominal doc $ = {cap:kept}+{cap:kernel} # the period ends are the samples kept and those that fell in kernel mode
+step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin.samples JET_PERF_LENSES=cpu jet run --observe -O2 spin.jet
+exit: 0
+stdout: = "spun=5702887\n"
+step: sh -c 'od -A n -v -t u2 -w8 spin.samples | awk -f period_ends.awk'
+exit: 0
+stdout: = "every period end took one sample or fell in kernel mode\n"
+step: jet perf run -O1 spin.jet --out {work}/spin1.jettrace
+exit: 0
+stdout: = "spun=5702887\n"
+capture: reason1 file spin1.jettrace doc $.content.profile.reason
+capture: tally1 = text cap:reason1.split("it kept ", 1).split(" samples that ", 0)
+capture: kept1 = text cap:tally1.split(" ", 0)
+capture: nominal1 = text cap:tally1.split("of the ", 1)
+capture: kernel1 = text cap:reason1.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
+json: cap:nominal1 doc $ = {cap:kept1}+{cap:kernel1} # at -O1 too
+step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin1.samples JET_PERF_LENSES=cpu jet run --observe -O1 spin.jet
+exit: 0
+stdout: = "spun=5702887\n"
+step: sh -c 'od -A n -v -t u2 -w8 spin1.samples | awk -f period_ends.awk'
+exit: 0
+stdout: = "every period end took one sample or fell in kernel mode\n"
+step: jet perf run -O0 spin.jet --out {work}/spin0.jettrace
+exit: 0
+stdout: = "spun=5702887\n"
+capture: reason0 file spin0.jettrace doc $.content.profile.reason
+capture: tally0 = text cap:reason0.split("it kept ", 1).split(" samples that ", 0)
+capture: kept0 = text cap:tally0.split(" ", 0)
+capture: nominal0 = text cap:tally0.split("of the ", 1)
+capture: kernel0 = text cap:reason0.split(" while sampled gives; ", 1).split(" of their periods ended in kernel mode", 0)
+json: cap:nominal0 doc $ = {cap:kept0}+{cap:kernel0} # and at -O0
+step: env -u JET_OBSERVE JET_PERF_SAMPLES={work}/spin0.samples JET_PERF_LENSES=cpu jet run --observe -O0 spin.jet
+exit: 0
+stdout: = "spun=5702887\n"
+step: sh -c 'od -A n -v -t u2 -w8 spin0.samples | awk -f period_ends.awk'
+exit: 0
+stdout: = "every period end took one sample or fell in kernel mode\n"

@@ -262,7 +262,8 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     pc: jet_cli_perf_pc_json(sampler)
     sampled := JetCLIPerfSamples?{None}
     if samples == .Val(file) {
-        sampled = jet_cli_perf_samples_read(file, parsed.source ?? "", counters, sampler)
+        records: jet_cli_perf_samples_records(file) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        sampled = jet_cli_perf_samples_read(file, records, parsed.source ?? "", counters, sampler)
     }
     reason: if parsed.source == None -> "source sampling requires a source capture" else -> "source sampling requires a readable `.jet` source"
     capture := jet_cli_perf_capture_new(trace_profile_unsupported(reason), [SourceIdentity]{})
@@ -501,8 +502,14 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         // With `--zones=`, the program's zones, frame marks, plots and log
         // spans for that window, and its records in it, before its ring is
         // read.
-        zoned: if zones_ms > 0 -> jet_cli_perf_attach_zones(target_pid, home, zones_ms, path) else -> None
-        if zones_ms > 0 -> read.push("its zones for {zones_ms} ms")
+        zoned := JetCLIPerfZonesTaken?{None}
+        if zones_ms > 0 {
+            if jet_cli_perf_attach_zones(target_pid, home, zones_ms, path) == {
+                .Ok(found) -> zoned = found
+                .Err(failure) -> return jet_cli_perf_error(failure.message, JET_CLI_PERF_FIX, color)
+            }
+            read.push("its zones for {zones_ms} ms")
+        }
         spans := String?{None}
         flight := JetCLIPerfSamples?{None}
         if zoned.move() == .Val(taken) {
@@ -634,7 +641,7 @@ jet_cli_perf_attach_flight: fn(pid: Int, home: String, source: String) -[FS, Env
         perf_files.remove(taken).drop("the attach reads the ring it copied once")
         return None
     }
-    sampled := jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return None
+    sampled := jet_cli_perf_samples_read(taken, perf_files.read_bytes(taken) ?? [U8]{}, source, [TraceCounter]{}, None) ?? return None
     sampled.interval_us = JET_CLI_PERF_FLIGHT_SAMPLE_US
     Val(sampled)
 }
@@ -681,7 +688,7 @@ jet_cli_perf_attach_heap: fn(pid: Int, home: String, source: String) -[FS, Env, 
         perf_files.remove(taken).drop("the attach reads the snapshot it kept once")
         return Err(jet_cli_perf_heap_failed("cannot copy process {pid}'s image: {jet_cli_io_error_text(failure)}"))
     }
-    samples: jet_cli_perf_samples_read(taken, source, [TraceCounter]{}, None) ?? return Err(jet_cli_perf_heap_failed("process {pid}'s heap snapshot names no line: its image has no line table"))
+    samples: jet_cli_perf_samples_read(taken, perf_files.read_bytes(taken) ?? [U8]{}, source, [TraceCounter]{}, None) ?? return Err(jet_cli_perf_heap_failed("process {pid}'s heap snapshot names no line: its image has no line table"))
     Ok(JetCLIPerfAttachHeap{samples: samples, held_ns: link_debug_addr(bytes, 0)})
 }
 
@@ -750,15 +757,15 @@ JET_CLI_PERF_ZONES_RENEW: 10
 // 125 microseconds of CPU time. The request is rewritten every
 // JET_CLI_PERF_ZONES_RENEW waits, as the program removes one unrenewed for
 // a second; it is removed after the window, and two publications awaited,
-// so the program has turned zones off, closed the window and written its
-// rows, the window's row among them (jet_cli_perf_spans_window). The rows,
+// the window's row among them (jet_cli_perf_spans_window). The rows,
 // copied out of the program's way, and the window's records beside a copy
 // of the ring's image, read as a run's samples are with lines in `source`
-// its own; None when it wrote no rows.
-jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: String) -[FS, Env, Time]> JetCLIPerfZonesTaken? Never! {
+// its own; None when it wrote no rows. A window file of another version
+// than this jet reads (jet_cli_perf_samples_records) is refused.
+jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: String) -[FS, Env, Time]> JetCLIPerfZonesTaken? JetCLIReadError! {
     ring: perf_files.join(home, "jet-flight-{pid}.samples")
     request: "{ring}.zones"
-    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return None
+    _: perf_files.create(request, mode: Val(0o600), links: .Refuse) ?? return Ok(None)
     waited := 0
     loop _ in 0..<(window_ms + 24) /% 25 {
         perf_time.sleep(25ms)
@@ -773,17 +780,23 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: St
     perf_time.sleep(250ms)
     stem: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}")
     spans: "{stem}.spans"
-    perf_files.copy("{ring}.spans", spans) ?? return None
-    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+    perf_files.copy("{ring}.spans", spans) ?? return Ok(None)
+    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
     records: "{stem}.window"
     if perf_files.copy("{ring}.window", records) == .Err(_) {
-        return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
     }
     if perf_files.copy("{ring}.image", "{records}.image") == .Err(_) {
         perf_files.remove(records).drop("the attach reads the window it copied once")
-        return Val(JetCLIPerfZonesTaken{spans: spans, samples: None})
+        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None}))
     }
-    Val(JetCLIPerfZonesTaken{spans: spans, samples: jet_cli_perf_samples_read(records, source, [TraceCounter]{}, None, window: Val(window))})
+    words: jet_cli_perf_samples_records(records) ?? {
+        perf_files.remove(records).drop("a refused window is not read")
+        perf_files.remove("{records}.image").drop("a refused window's image is not read")
+        perf_files.remove(spans).drop("a refused window's rows are not read")
+        return Err(err)
+    }
+    Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: jet_cli_perf_samples_read(records, words, source, [TraceCounter]{}, None, window: Val(window))}))
 }
 
 // This user's private directory, where a flight-recorded program publishes

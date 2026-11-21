@@ -120,6 +120,30 @@ or the perf event below where the kernel allows one, so threads that run at
 once each keep their samples, and records the program counter each sample
 interrupted with the call site of each caller, each handler or drain in a
 record buffer of its own so no sample loses its stack to another thread's.
+The samples file, `jet perf run`'s and an attach's zones window's, begins
+with the magic `JETSAMPL` and the version of its records, 2; the session
+refuses a file of another version, or one an older runtime wrote with no
+header, naming its version, so one reader reads one format. A record buffer
+writes its records out 8 KiB at a time. As it writes them, a CPU-time
+sample whose outermost call sites repeat, word for word, two or more of
+those of the CPU-time sample just before it in the same write is kept as a
+cite of that sample: its own program counter, its call sites inside those
+it shares, one cite word holding how many it shares and how far back that
+sample's record is, then its time, task and count word. The sample before
+may itself be a cite, so a recursion that deepens or a branch that
+alternates under one caller keeps only the call sites that changed. The
+comparison runs once per record as a record buffer is written out, by the
+handler whose record would not fit, at exit or as a zones window closes,
+not as each sample is recorded. The session refuses, naming the record, a
+file whose cite reaches past one write, to anything but the CPU-time sample
+just before it, or for more call sites than that sample holds. Each
+CPU-time sample's record ends
+in its time, its task and its count word: the serial of the perf event
+sampler that took it and that event's count as the kernel took it
+(`PERF_SAMPLE_READ`), 0 under the timer; each sampler's end, as its thread
+ends or at exit, is a record of its serial and its final count. The flight
+recorder's ring, which takes each record as it is made, holds no cite, and
+`jet debug` names one in a dump's ring a corrupt record.
 A frame without a frame pointer (code before a function's prologue sets one,
 a compiler-emitted helper such as the stop poll, a frameless runtime
 routine, a C library function) is stepped out of by the image's own call
@@ -174,14 +198,16 @@ image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack.
-Under the task clock that count is the task clocks' own, read from each
-thread's sampler as it closes and from every live one at exit: the CPU time
-each thread ran while sampled, over the period, so the runtime's start and
-exit outside the samplers give none; the kernel's share of it takes no
-sample (`it kept 392 of the 393 samples that 49 ms of CPU time on the
-threads' task clocks while sampled gives, of which time in the kernel takes
-none`). Under another sampler it is the process's CPU time over the
-sampling interval.
+Under the task clock that count is the task clocks' own, from each
+sampler's count at its end: the CPU time each thread ran while sampled,
+over the period, so the runtime's start and exit outside the samplers give
+none. A period end that falls in kernel mode takes no sample, and the
+samples' own counts find each one: an end that no sample's count rounds
+to, before a thread's first sample, between two of its samples or after its
+last (`it kept 392 of the 400 samples that 50 ms of CPU time on the threads'
+task clocks while sampled gives; 8 of their periods ended in kernel mode,
+where the task clock takes no sample`). Under another sampler it is the
+process's CPU time over the sampling interval.
 The
 profile's overhead is `measured`: `overhead_ns` is the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the

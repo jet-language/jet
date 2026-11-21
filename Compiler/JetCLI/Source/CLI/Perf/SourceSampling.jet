@@ -184,7 +184,11 @@ JetCLIPerfInlines: struct {
 // `unwindowed` counts the CPU-time samples a zones window's file held from
 // outside the window, which count nowhere; `entries` holds, per function of
 // `table`, the function a generated entry stands for, -1 for every other
-// (x64_jetline_entry_runs).
+// (x64_jetline_entry_runs). `counts` holds each counted CPU-time sample's
+// count word that a sampler took (its last JET_CLI_PERF_TIMED word, nonzero
+// above JET_CLI_PERF_ADDRESS_BITS), and `ends` each sampler's count of its
+// event at its end by its serial (PerfSamples.jet perf_precise_ended); both
+// are empty for a zones window's file.
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -225,6 +229,8 @@ JetCLIPerfSamples: struct {
     instructions: TraceReceiptSection?{None},
     interval_us: Int{JET_CLI_PERF_SAMPLE_US},
     unwindowed: U64{0},
+    counts: [Int]{[Int]{}},
+    ends: [Int:Int]{[Int:Int]{}},
 }
 
 // A program counter the samples named: its CPU-time samples and, per
@@ -273,8 +279,8 @@ JetCLIPerfSyscall: struct {
 
 // A CPU-time sample on the monotonic clock zones are timed on, at `at_ns`,
 // of the runtime's `task` (0 outside every task), with the innermost line
-// of the checked source on its stack (0 for none): the record's last
-// JET_CLI_PERF_TIMED words.
+// of the checked source on its stack (0 for none): the first two of the
+// record's JET_CLI_PERF_TIMED words.
 JetCLIPerfTimed: struct {
     at_ns: Int,
     task: Int,
@@ -290,11 +296,7 @@ JetCLIPerfTimed: struct {
 // samples the drains took from the kernel's rings, the kernel's time to
 // write them there as the runtime timed it when sampling started, and those
 // whose callchain the kernel cut (0 each under the timer, or from a runtime
-// whose record stops at the seventh); then `events`, the count of the event
-// the perf events took their samples by, summed over every thread: the task
-// clock's nanoseconds of CPU time in user mode, or a precise source's
-// cycles (0 under the timer, or from a runtime whose record stops at the
-// tenth).
+// whose record stops at the seventh).
 JetCLIPerfCost: struct {
     cpu_ns: U64,
     handler_ns: U64,
@@ -304,7 +306,6 @@ JetCLIPerfCost: struct {
     ring_samples: U64,
     ring_ns: U64,
     cut: U64,
-    events: U64,
 }
 
 // The allocations the alloc lens counted at one line for one type
@@ -459,24 +460,25 @@ JetCLIPerfHeapSite: struct {
     bytes: U64,
 }
 
-// The samples file `path` (PerfSamples.jet's records) and the image `jet
-// run` wrote beside it (Host.jet jet_cli_perf_samples_image), named by the
-// image's location table and its DWARF's inlined runs and, outside Jet
-// functions, its symbol table; each line marked `own` when it is in
-// `source`, and named by the program source it is in, whose text is read
-// for its rows (jet_cli_perf_samples_sources). A counter sample
-// weighs its counter's period in `counters`; the CPU-time samples are
-// `sampler`'s. The runtime's threads and host calls come from the files
-// beside it (jet_cli_perf_system_read). Every file is removed once
-// read. None when the samples or the image are missing or the image has no
-// table. The records of an attach's zones `window` are its window file's,
-// read as jet_cli_perf_samples_count reads them.
-jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCounter], sampler: JetCLIPerfSampler?, window: JetCLIPerfZonesWindow?{None}) -[FS, Env]> JetCLIPerfSamples? Never! {
+// The records `words` of the samples file `path` (PerfSamples.jet's
+// records; jet_cli_perf_samples_records reads a samples file's past its
+// header) and the image `jet run` wrote beside it (Host.jet
+// jet_cli_perf_samples_image), named by the image's location table and its
+// DWARF's inlined runs and, outside Jet functions, its symbol table; each
+// line marked `own` when it is in `source`, and named by the program source
+// it is in, whose text is read for its rows
+// (jet_cli_perf_samples_sources). A counter sample weighs its counter's
+// period in `counters`; the CPU-time samples are `sampler`'s. The runtime's
+// threads and host calls come from the files beside it
+// (jet_cli_perf_system_read). Every file is removed once read. None when
+// there are no records or the image is missing or has no table. The
+// records of an attach's zones `window` are its window file's, read as
+// jet_cli_perf_samples_count reads them.
+jet_cli_perf_samples_read: fn(path: String, words: [U8], source: String, counters: [TraceCounter], sampler: JetCLIPerfSampler?, window: JetCLIPerfZonesWindow?{None}) -[FS, Env]> JetCLIPerfSamples? Never! {
     image_path: "{path}.image"
     threads_path: "{path}.threads"
     calls_path: "{path}.syscalls"
-    // A file that can't be read reads as empty: no samples, or no table.
-    words: perf_files.read_bytes(path) ?? [U8]{}
+    // A file that can't be read reads as empty: no table.
     image: perf_files.read_bytes(image_path) ?? [U8]{}
     threads: perf_files.read_bytes(threads_path) ?? [U8]{}
     calls: perf_files.read_bytes(calls_path) ?? [U8]{}
@@ -518,6 +520,30 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     }
     sampled.instructions = jet_cli_perf_instructions_section(image, facts.level, sampled)
     Val(sampled)
+}
+
+// The records of the samples file `path`, `jet perf run`'s or an attach's
+// zones window's, past its header (PerfSamples.jet perf_samples_header):
+// JET_CLI_PERF_SAMPLES_MAGIC, then JET_CLI_PERF_SAMPLES_VERSION, the one
+// version this jet reads. A file that is missing or empty holds none. A
+// file of another version, or one with no header, as a jet before version
+// 2 wrote, is refused, naming its version; so is one with a corrupt cite
+// (jet_cli_perf_cites_corrupt), naming it.
+jet_cli_perf_samples_records: fn(path: String) -[FS]> [U8] JetCLIReadError! {
+    bytes: perf_files.read_bytes(path) ?? return Ok([U8]{})
+    if bytes.len() == 0 -> return Ok(bytes)
+    if bytes.len() < 16 || link_debug_addr(bytes, 0) != JET_CLI_PERF_SAMPLES_MAGIC {
+        return Err(jet_cli_read_error("the samples file {path} has no version header, as an older jet's runtime writes it; this jet reads version {JET_CLI_PERF_SAMPLES_VERSION}: build and run the program with this jet"))
+    }
+    version: link_debug_addr(bytes, 8)
+    if version != JET_CLI_PERF_SAMPLES_VERSION {
+        return Err(jet_cli_read_error("the samples file {path} is version {version}; this jet reads version {JET_CLI_PERF_SAMPLES_VERSION}: build and run the program with this jet"))
+    }
+    records: bytes.slice(16, bytes.len())
+    if jet_cli_perf_cites_corrupt(records) == .Val(problem) {
+        return Err(jet_cli_read_error("the samples file {path} holds a corrupt record {problem}"))
+    }
+    Ok(records)
 }
 
 // The counters the `memory` lens of `jet perf run` asked for, from the file
@@ -655,20 +681,59 @@ jet_cli_perf_sampler_reason: fn(used: JetCLIPerfSampler, total: U64, cpu_ns: U64
     "; the CPU-time timer took them, which the kernel checks once a tick, so each thread takes at most one sample a tick: {why}"
 }
 
-// What the session kept of the samples the sampled CPU time gives, from the
-// clock record `cost`, the sampler `sampler` and the `total` it kept. Under
-// the task clock, the count of each thread's task clock (cost.events):
-// the nanoseconds of CPU time it ran while sampled, over its period, the
-// kernel's share of which takes no sample under exclude_kernel. Else, or
-// from a runtime that kept no count, the process's CPU time over
-// `per_sample` nanoseconds, the time each sample stands for.
-jet_cli_perf_nominal: fn(cost: JetCLIPerfCost, sampler: JetCLIPerfSampler?, total: U64, per_sample: U64) -> String Never! {
-    if sampler == .Val(used) && used.source == 3 && cost.events > (U64{0}) {
-        if checked(U64{used.period}) == .Val(period) && period > (U64{0}) {
-            return "; it kept {total} of the {cost.events / period} samples that {cost.events / U64{1000000}} ms of CPU time on the threads' task clocks while sampled gives, of which time in the kernel takes none"
+// What the session kept of the samples the sampled CPU time gives, `per_sample`
+// nanoseconds of the clock record `cost` each. Under the task clock, from
+// each sampler's count at its end (JetCLIPerfSamples.ends): the periods
+// its thread's task clock completed while sampled, the CPU time it ran,
+// kernel mode's included, over its period; and, from its samples' counts
+// (JetCLIPerfSamples.counts), the period ends no sample took, which fell in
+// kernel mode, where the task clock takes none under exclude_kernel. Each
+// sample's count rounds to the period end that took it, since the kernel
+// forwards its timer by whole periods: an end before a sampler's first
+// sample, between two of its samples or after its last, to its end's, took
+// none. A sampler with no end record ends at its last sample.
+jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_sample: U64) -> String Never! {
+    if sampled.sampler == .Val(used) && used.source == 3 && used.period > 0 && sampled.ends.len() > 0 {
+        period: used.period
+        low: (1 << JET_CLI_PERF_ADDRESS_BITS) - 1
+        nominal := 0
+        ns := 0
+        loop (_, end) in sampled.ends {
+            nominal += end /% period
+            ns += end
         }
+        counts := sampled.counts
+        counts.sort()
+        kernel := 0
+        took := [Int:Bool]{}
+        serial := 0
+        last := 0
+        index := 0
+        loop index <= counts.len() {
+            word: if index < counts.len() -> counts[index] else -> 0
+            owner: (word >> JET_CLI_PERF_ADDRESS_BITS) & 65535
+            if owner != serial {
+                if serial != 0 {
+                    ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> last
+                    if ended > last -> kernel += ended - last
+                    if !sampled.ends.has_key(serial) -> nominal += last
+                    took[serial] = true
+                }
+                serial = owner
+                last = 0
+            }
+            if index == counts.len() -> break
+            at: ((word & low) + period /% 2) /% period
+            if at > last + 1 -> kernel += at - last - 1
+            if at > last -> last = at
+            index += 1
+        }
+        loop (owner, end) in sampled.ends {
+            if !took.has_key(owner) -> kernel += end /% period
+        }
+        return "; it kept {sampled.total} of the {nominal} samples that {ns /% 1000000} ms of CPU time on the threads' task clocks while sampled gives; {kernel} of their periods ended in kernel mode, where the task clock takes no sample"
     }
-    "; it kept {total} of the {cost.cpu_ns / per_sample} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives"
+    "; it kept {sampled.total} of the {cost.cpu_ns / per_sample} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives"
 }
 
 // `count` samples over `ns` nanoseconds as samples per millisecond, to two
@@ -770,7 +835,8 @@ jet_cli_perf_line_ends: fn(text: String) -> [U64] Never! {
 // JET_CLI_PERF_WAIT_KIND for a task's wait, JET_CLI_PERF_WAKE_KIND for a
 // wake and JET_CLI_PERF_IO_KIND for a transfer, whose first words hold a
 // task id in place of the program counter, JET_CLI_PERF_CLOCK_KIND for
-// what sampling cost, JET_CLI_PERF_CAUSAL_KIND for a causal experiment's
+// what sampling cost, a flight ring's tally (1 in the address bits) or a
+// sampler's end (2), JET_CLI_PERF_CAUSAL_KIND for a causal experiment's
 // record, and JET_CLI_PERF_HEAP_MARK_KIND,
 // JET_CLI_PERF_HEAP_SITE_KIND, JET_CLI_PERF_HEAP_BLOCK_KIND and
 // JET_CLI_PERF_HEAP_ROOT_KIND for a heap snapshot's records, whose first
@@ -782,8 +848,128 @@ JET_CLI_PERF_ADDRESS_BITS: 48
 JET_CLI_PERF_KIND_BITS: 59
 
 // The words a CPU-time sample's record of more than its program counter
-// ends with: its time and its task (PerfSamples.jet PERF_SAMPLES_TIMED).
-JET_CLI_PERF_TIMED: 2
+// ends with: its time, its task, and its count word, the serial of the
+// sampler that took it above JET_CLI_PERF_ADDRESS_BITS and its event's count
+// below them, 0 for the timer's (PerfSamples.jet PERF_SAMPLES_TIMED).
+JET_CLI_PERF_TIMED: 3
+
+// A samples file's header (PerfSamples.jet PERF_SAMPLES_MAGIC, "JETSAMPL",
+// and PERF_SAMPLES_VERSION).
+JET_CLI_PERF_SAMPLES_MAGIC: 5498980087985620298
+
+JET_CLI_PERF_SAMPLES_VERSION: 2
+
+// A CPU-time sample's record that cites the CPU-time sample before it in
+// the same write (PerfSamples.jet perf_samples_cite): its first word, its
+// call sites inside those it shares, then its cite word, then its
+// JET_CLI_PERF_TIMED words. The cite word has PERF_SAMPLES_CITE (bit 63,
+// this bit of the word's upper half), the count of the outermost call
+// sites of the sample before it shares in bits 32..47, and the distance
+// back to that sample's record, in words, below.
+JET_CLI_PERF_CITE_BIT: 0x80000000
+
+// PerfSamples.jet PERF_SAMPLES_CITE_LEAST, the fewest call sites a cite
+// shares, and PERF_SAMPLES_OUT_BYTES in words, the most of one write, which
+// a cite reaches back no further than.
+JET_CLI_PERF_CITE_LEAST: 2
+
+JET_CLI_PERF_WRITE_WORDS: 1024
+
+// A record's first word (`first`), its words as its first word gives them
+// (`size`), the words it takes, at least one (`record`), and its kind; an
+// allocations' record (`tallied`) is of kind 0.
+JetCLIPerfHead: struct {
+    first: Int,
+    size: Int,
+    record: Int,
+    kind: Int,
+    tallied: Bool,
+}
+
+// The record at `at` of `words`. An allocations' record sets bit 63, which
+// link_debug_addr reads as -1, so its first word is read from its halves.
+jet_cli_perf_head: fn(words: [U8], at: Int) -> JetCLIPerfHead Never! {
+    upper: link_debug_le(words, at + 4, 4)
+    tallied: upper >= 0x80000000
+    first: if tallied -> link_debug_le(words, at, 4) + (upper - 0x80000000) * 0x100000000 else -> link_debug_addr(words, at)
+    size: if tallied -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 32767 else -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 2047
+    JetCLIPerfHead{first: first, size: size, record: if size < 1 -> 1 else -> size, kind: if tallied -> 0 else -> first >> JET_CLI_PERF_KIND_BITS, tallied: tallied}
+}
+
+// The word at `at` of `words` as a cite word (JET_CLI_PERF_CITE_BIT): the
+// call sites it shares, its distance back in words, and its bits above
+// those it uses, which a sound cite leaves 0. A call site is no cite.
+JetCLIPerfCite: struct {
+    cited: Bool,
+    shared: Int,
+    back: Int,
+    spare: Int,
+}
+
+jet_cli_perf_cite: fn(words: [U8], at: Int) -> JetCLIPerfCite Never! {
+    upper: link_debug_le(words, at + 4, 4)
+    if upper < JET_CLI_PERF_CITE_BIT {
+        return JetCLIPerfCite{cited: false, shared: 0, back: 0, spare: 0}
+    }
+    high: upper - JET_CLI_PERF_CITE_BIT
+    JetCLIPerfCite{cited: true, shared: high & 65535, back: link_debug_le(words, at, 4), spare: high >> 16}
+}
+
+// The call sites, innermost first, of the CPU-time sample whose record at
+// `at` of `words` holds `callers` words before its timed words, its first
+// among them: its own, then, for a cite, the outermost ones it shares of
+// `before`, the call sites of the sample before it.
+// jet_cli_perf_samples_records refuses a file whose cite shares more than
+// `before` holds; here such a cite shares all of `before`.
+jet_cli_perf_sites: fn(words: [U8], at: Int, callers: Int, before: [Int]) -> [Int] Never! {
+    sites := [Int]{}
+    loop k in 1..<callers {
+        if at + k * 8 + 8 > words.len() -> break
+        cite: jet_cli_perf_cite(words, at + k * 8)
+        if cite.cited && k == callers - 1 {
+            shared: if cite.shared < before.len() -> cite.shared else -> before.len()
+            loop index in (before.len() - shared)..<before.len() -> sites.push(before[index])
+            break
+        }
+        sites.push(link_debug_addr(words, at + k * 8))
+    }
+    sites
+}
+
+// What is wrong with the first corrupt cite among the records of `words`,
+// naming its byte past the header; None when every cite is sound: it
+// reaches back to the CPU-time sample just before it, within one write
+// (JET_CLI_PERF_WRITE_WORDS), and shares JET_CLI_PERF_CITE_LEAST or more of
+// that sample's call sites, at most all of them.
+jet_cli_perf_cites_corrupt: fn(words: [U8]) -> String? Never! {
+    before := -1
+    before_sites := 0
+    at := 0
+    loop at + 8 <= words.len() {
+        head: jet_cli_perf_head(words, at)
+        if !head.tallied && head.kind == 0 && head.size > JET_CLI_PERF_TIMED && at + head.size * 8 <= words.len() {
+            sites := head.size - JET_CLI_PERF_TIMED - 1
+            if sites > 0 {
+                cite: jet_cli_perf_cite(words, at + sites * 8)
+                if cite.cited {
+                    problem: if {
+                        cite.back > JET_CLI_PERF_WRITE_WORDS -> "its cite reaches {cite.back} words back, past the {JET_CLI_PERF_WRITE_WORDS} words of one write"
+                        before < 0 || at - cite.back * 8 != before -> "its cite reaches {cite.back} words back, not to the CPU-time sample just before it"
+                        cite.spare != 0 -> "its cite word sets bits above its count of call sites"
+                        cite.shared < JET_CLI_PERF_CITE_LEAST || cite.shared > before_sites -> "its cite shares {cite.shared} call sites of the {before_sites} the sample before it holds"
+                        else -> ""
+                    }
+                    if problem != "" -> return Val("at byte {at} past its header: {problem}")
+                    sites = sites - 1 + cite.shared
+                }
+            }
+            before = at
+            before_sites = sites
+        }
+        at += head.record * 8
+    }
+    None
+}
 
 // PerfSamples.jet PERF_SAMPLES_TOPDOWN and PERF_TOPDOWN_EVENT_BITS.
 JET_CLI_PERF_TOPDOWN_KIND: 7
@@ -934,18 +1120,19 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
     counted := [Int:Int]{}
     // Each heap snapshot's entry in `heaps`, by its number.
     heaps := [Int:Int]{}
+    // The call sites of the latest CPU-time sample, innermost first, of
+    // which the next one's cite shares the outermost (JET_CLI_PERF_CITE_BIT).
+    stack := [Int]{}
     mask: (1 << JET_CLI_PERF_ADDRESS_BITS) - 1
     sample := 0
     at := 0
     loop at + 8 <= words.len() {
-        // An allocations' record sets bit 63, which link_debug_addr reads as
-        // -1, so its first word is read from its halves.
-        upper: link_debug_le(words, at + 4, 4)
-        tallied: upper >= 0x80000000
-        first: if tallied -> link_debug_le(words, at, 4) + (upper - 0x80000000) * 0x100000000 else -> link_debug_addr(words, at)
-        size: if tallied -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 32767 else -> (first >> JET_CLI_PERF_ADDRESS_BITS) & 2047
-        kind: if tallied -> 0 else -> first >> JET_CLI_PERF_KIND_BITS
-        record: if size < 1 -> 1 else -> size
+        opened: jet_cli_perf_head(words, at)
+        tallied: opened.tallied
+        first: opened.first
+        size: opened.size
+        kind: opened.kind
+        record: opened.record
         pc: first & mask
         if tallied {
             sampled.sited = true
@@ -1054,6 +1241,20 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             at += record * 8
             next
         }
+        if kind == JET_CLI_PERF_CLOCK_KIND && pc == 2 {
+            // A sampler's end (PerfSamples.jet perf_precise_ended): its
+            // serial and its event's count. Its thread's end and the exit
+            // may each write one, so the most wins.
+            if record >= 3 && at + record * 8 <= words.len() {
+                serial: link_debug_addr(words, at + 8)
+                ended: link_debug_addr(words, at + 16)
+                if !sampled.ends.has_key(serial) || sampled.ends[serial] < ended {
+                    sampled.ends[serial] = ended
+                }
+            }
+            at += record * 8
+            next
+        }
         if kind == JET_CLI_PERF_CLOCK_KIND {
             if record >= 4 && at + record * 8 <= words.len() {
                 // The records the program could not write, which a runtime
@@ -1072,15 +1273,12 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
                                 spent = earlier.alloc_ns
                             }
                             // The rings' tallies, which a runtime whose
-                            // record stops at the seventh word doesn't keep,
-                            // and the samplers' count of their event, which
-                            // one whose record stops at the tenth doesn't.
+                            // record stops at the seventh word doesn't keep.
                             rings: record >= 10
                             ring_samples: if rings -> checked(U64{link_debug_addr(words, at + 56)}) ?? U64{0} else -> U64{0}
                             ring_ns: if rings -> checked(U64{link_debug_addr(words, at + 64)}) ?? U64{0} else -> U64{0}
                             cut: if rings -> checked(U64{link_debug_addr(words, at + 72)}) ?? U64{0} else -> U64{0}
-                            events: if record >= 11 -> checked(U64{link_debug_addr(words, at + 80)}) ?? U64{0} else -> U64{0}
-                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent, ring_samples: ring_samples, ring_ns: ring_ns, cut: cut, events: events})
+                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery, alloc_count: count, alloc_ns: spent, ring_samples: ring_samples, ring_ns: ring_ns, cut: cut})
                         }
                     }
                 }
@@ -1271,9 +1469,11 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             at += record * 8
             next
         }
-        // A CPU-time sample's record ends in its time and task when it
-        // holds more than its program counter (JET_CLI_PERF_TIMED).
+        // A CPU-time sample's record ends in its JET_CLI_PERF_TIMED words
+        // when it holds more than its program counter.
         callers: if record > JET_CLI_PERF_TIMED -> record - JET_CLI_PERF_TIMED else -> record
+        stack = jet_cli_perf_sites(words, at, callers, stack)
+        depth: stack.len() + 1
         // A sample of a zones window's file stamped before the window
         // opened or after it closed, or unstamped, is the flight
         // recorder's, at its own interval.
@@ -1297,10 +1497,8 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             }
             native: native_at[pc]
             if native >= 0 && sampled.functions[native].name.starts_with(JET_CLI_PERF_HELPER_PREFIX) {
-                loop k in 1..<callers {
-                    word: at + k * 8
-                    if word + 8 > words.len() -> break
-                    held: jet_cli_perf_samples_chain(sampled, places, resolved, owned, link_debug_addr(words, word), true)
+                loop site in stack {
+                    held: jet_cli_perf_samples_chain(sampled, places, resolved, owned, site, true)
                     if held.len() == 0 -> next
                     chain = held
                     sampled.helpers += U64{1}
@@ -1321,14 +1519,12 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         }
         if chain.len() > 0 {
             sampled.lines[chain[0]].count += U64{1}
-            if callers == 1 -> sampled.stackless += U64{1}
+            if depth == 1 -> sampled.stackless += U64{1}
         }
         // The innermost line of the checked source on the sample's stack.
         own := -1
-        loop k in 0..<callers {
-            word: at + k * 8
-            if word + 8 > words.len() -> break
-            held: if k == 0 -> chain else -> jet_cli_perf_samples_chain(sampled, places, resolved, owned, link_debug_addr(words, word), true)
+        loop k in 0..<depth {
+            held: if k == 0 -> chain else -> jet_cli_perf_samples_chain(sampled, places, resolved, owned, stack[k - 1], true)
             if own < 0 -> own = jet_cli_perf_samples_own(sampled, held)
             loop place in held {
                 if counted.has_key(place) && counted[place] == sample -> next
@@ -1339,13 +1535,20 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         if callers < record && at + record * 8 <= words.len() {
             stamp: at + callers * 8
             sampled.timed.push(JetCLIPerfTimed{at_ns: link_debug_addr(words, stamp), task: link_debug_addr(words, stamp + 8), line: if own < 0 -> 0 else -> sampled.lines[own].line})
+            counted_by: link_debug_addr(words, stamp + 16)
+            if ((counted_by >> JET_CLI_PERF_ADDRESS_BITS) & 65535) != 0 {
+                sampled.counts.push(counted_by)
+            }
         }
         at += record * 8
     }
     if window == .Val(open) {
         sampled.interval_us = open.interval_us
-        sampled.cost = Val(JetCLIPerfCost{cpu_ns: open.cpu_ns, handler_ns: open.handler_ns, delivery_ns: open.delivery_ns, alloc_count: U64{0}, alloc_ns: U64{0}, ring_samples: U64{0}, ring_ns: U64{0}, cut: U64{0}, events: U64{0}})
+        sampled.cost = Val(JetCLIPerfCost{cpu_ns: open.cpu_ns, handler_ns: open.handler_ns, delivery_ns: open.delivery_ns, alloc_count: U64{0}, alloc_ns: U64{0}, ring_samples: U64{0}, ring_ns: U64{0}, cut: U64{0}})
         sampled.records_lost = open.lost
+        // A window's samples are its CPU time's, not its samplers' whole runs.
+        sampled.counts = [Int]{}
+        sampled.ends = [Int:Int]{}
     }
     sampled.timed.sort_by(fn(left: JetCLIPerfTimed, right: JetCLIPerfTimed) { (left.at_ns <=> right.at_ns).then(left.task <=> right.task).then(left.line <=> right.line) })
     sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(jet_cli_perf_line_counted(right, 1) <=> jet_cli_perf_line_counted(left, 1)).then(jet_cli_perf_line_counted(right, 0) <=> jet_cli_perf_line_counted(left, 0)).then(right.allocations <=> left.allocations).then(left.name <=> right.name).then(left.line <=> right.line) })
@@ -1977,7 +2180,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     stackless: if sampled.stackless == (U64{0}) -> "" else -> "; {sampled.stackless} samples in Jet code kept no stack: their frames could not be walked, or other threads' samples held every record buffer"
     // The interval a zones window's row gives is above 0 (jet_cli_perf_spans_window).
     per_sample: checked(U64{sampled.interval_us * 1000}) ?? U64{1}
-    nominal: if sampled.cost == .Val(cost) -> jet_cli_perf_nominal(cost, sampled.sampler, sampled.total, per_sample) else -> ""
+    nominal: if sampled.cost == .Val(cost) -> jet_cli_perf_nominal(sampled, cost, per_sample) else -> ""
     windowed: if sampled.unwindowed == (U64{0}) -> "" else -> "; {sampled.unwindowed} samples the zones window's file held from outside the window count nowhere"
     cpu_ns: if sampled.cost == .Val(cost) -> Val(cost.cpu_ns) else -> U64?{None}
     taken: if sampled.sampler == .Val(used) -> jet_cli_perf_sampler_reason(used, sampled.total, cpu_ns) else -> ""
