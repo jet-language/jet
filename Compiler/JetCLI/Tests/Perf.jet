@@ -53,6 +53,7 @@ use {
         jet_cli_perf_instructions_section,
         jet_cli_perf_instructions_summary,
         jet_cli_perf_instructions_view,
+        jet_cli_perf_io_read,
         jet_cli_perf_live_from,
         jet_cli_perf_line_costs_none,
         jet_cli_perf_line_table,
@@ -859,6 +860,70 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)
+}
+
+// A connect is an I/O record (operation 2) that moved nothing: it is no I/O
+// row and no wait, and it is what names the task a listener's accept was
+// waiting for, whether or not the connect itself ever had to wait.
+#Test("a connect's record names the task that ended an accept, and is no I/O row and no wait") {
+    // 127.0.0.1:4000, then 127.0.0.1:5000, as sockaddr_in words: family 2,
+    // the big-endian port, the host and 8 bytes of padding.
+    listener: 0x0100007FA00F0002
+    client: 0x0100007F88130002
+    socket: 3 << 8
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Task 2 connects to the listener from 150 to 160 ns, the peer's
+            // 16 bytes then its own, with no stack.
+            2 | (10 << 48) | (11 << 59),
+            2 | socket | (16 << 16),
+            150,
+            160,
+            0,
+            32,
+            listener,
+            0,
+            client,
+            0,
+            // Then writes 4 bytes to it from 400 to 410 ns.
+            2 | (10 << 48) | (11 << 59),
+            1 | socket | (16 << 16),
+            400,
+            410,
+            4,
+            32,
+            listener,
+            0,
+            client,
+            0,
+        },
+    )
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(sampled.transfers.len(), 2)
+    assert_eq(sampled.transfers[0].operation, 2)
+    assert_eq(sampled.transfers[0].target, "127.0.0.1:4000")
+    assert_eq(sampled.transfers[0].local, "127.0.0.1:5000")
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
+    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    // Task 1's accept on the listener from 100 to 300 ns, which the
+    // runtime's poller woke at 290 ns.
+    waits := [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 300, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "", name: "tcp accept", frames: [TraceStackFrame]{}}}
+    wakes: [JetCLIPerfWake]{JetCLIPerfWake{task: U64{0}, slot: 64, at_ns: 290, line: None}}
+    spawns: [JetCLIPerfSpawn]{JetCLIPerfSpawn{task: U64{2}, parent: U64{1}, line: None}}
+    spans: capture.spans.len()
+    jet_cli_perf_waits_read(capture, waits, wakes, spawns, [U64:U64]{}, sampled.transfers, "fib.jet", 0)
+    assert_eq(capture.spans.len(), spans + 1)
+    accept: capture.spans[capture.spans.len() - 1]
+    assert_eq(accept.symbol.name, "tcp accept")
+    assert_eq(accept.waker, "task")
+    assert_eq(accept.waker_task_id, Val(U64{2}))
+    jet_cli_perf_io_read(capture, sampled.transfers.move(), "fib.jet", 0)
+    assert_eq(capture.io.len(), 1)
+    assert_eq(capture.io[0].operation, "write")
+    assert_eq(capture.io[0].bytes, U64{4})
+    assert_eq(capture.io[0].task_id, Val(U64{2}))
 }
 
 // Past the task row limit, the tasks with the fewest CPU-time samples have

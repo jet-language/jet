@@ -472,6 +472,7 @@ net_route_connect_start: fn(address: I64, scratch: I64) -> I64 {
 net_route_connect_one: fn(address: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("tcp connect")
     if (jet_deadline_remaining_ms() <= I64{0}) { return net_route_timeout(operation, error) }
+    began: perf_samples_io_start()
     scratch: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(scratch, I64{40})
     state: net_route_connect_start(address, scratch)
@@ -501,6 +502,9 @@ net_route_connect_one: fn(address: I64, output: I64, error: I64) -> I64 {
         jet_rt_string_drop(text)
         return result
     }
+    // Under `jet perf run` the connect is recorded (PerfSamples.jet
+    // PERF_SAMPLES_IO_CONNECT) whether or not it waited.
+    perf_samples_io_peer(began, PERF_SAMPLES_IO_CONNECT, I64{0}, state)
     net_put(output, I64{0}, jet_socket_stream_from_fd_raw(state))
     I64{1}
 }
@@ -695,6 +699,7 @@ net_route_socket_address: fn(holder: I64, listener: Bool, peer: Bool, output: I6
 // The same 250ms family-interleaved race as NetHTTP, using owned nonblocking
 // descriptors instead of one blocking OS thread per connection attempt.
 net_route_happy_race: fn(rows: I64, count: I64, output: I64, error: I64) -> I64 {
+    began: perf_samples_io_start()
     order: jet_rt_alloc(count * I64{8}, I64{8})
     states: jet_rt_alloc(count * I64{8}, I64{8})
     thread_zero(states, count * I64{8})
@@ -808,6 +813,8 @@ net_route_happy_race: fn(rows: I64, count: I64, output: I64, error: I64) -> I64 
     jet_rt_free(states, count * I64{8}, I64{8})
     jet_rt_free(order, count * I64{8}, I64{8})
     if (winner != I64{0}) {
+        // The race's connect, recorded as net_route_connect_one's is.
+        perf_samples_io_peer(began, PERF_SAMPLES_IO_CONNECT, I64{0}, winner)
         net_put(output, I64{0}, jet_socket_stream_from_fd_raw(winner))
         return I64{1}
     }
