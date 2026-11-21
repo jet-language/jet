@@ -363,13 +363,6 @@ IR_OWNED_ATTACH_ROUTES: #run { [String]{
     "jet_std_process_exit",
 } }
 
-// The root-free routes besides print that may write stdout (through its
-// buffer, HostStdio.jet host_stdout_write). A main that calls one keeps
-// print's buffered writer, so their lines stay in program order.
-IR_OWNED_STDOUT_ROUTES: #run { [String]{
-    "jet_term_stdio_put_text_raw",
-} }
-
 // Decides the main of the program `m` (built by ir_build_program) and
 // returns why it keeps the process root, or "" when it owns its main: then
 // every stop point, every jet_rt_process_entry_return call and every cleanup
@@ -378,11 +371,13 @@ IR_OWNED_STDOUT_ROUTES: #run { [String]{
 // with a stack check (IRFunction.stack_check), whose growth reads the
 // thread's block (JetRuntime StackSegment.jet). Its
 // process.exit calls jet_std_process_exit_owned, which publishes no stop
-// (there is no root to take one). Unless it calls an IR_OWNED_STDOUT_ROUTES
-// route, its print calls jet_term_write_stdout_line_direct: no other route
-// it may call writes stdout and it runs no test capture, so its lines need
-// no buffer. `owned_observe` is set when it calls jet_rt_observe_link (an
-// observed build, Build.jet ir_observe_link).
+// (there is no root to take one). Its print keeps jet_term_write_stdout_line,
+// the one stdout buffer every program writes through: block-buffered on a
+// pipe or file, line-buffered on a terminal, and drained by the owned main's
+// exit, process.exit, every stop report and the fault report (JetRuntime
+// Host.jet), so the lines and their order match a rooted main's.
+// `owned_observe` is set when it calls jet_rt_observe_link (an observed
+// build, Build.jet ir_observe_link).
 ir_entry_own: fn(m: &IRModule) -> String Never! {
     need: ir_entry_root_need(m)
     if need != "" -> return need
@@ -390,18 +385,10 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     entry_return: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
-    buffered := false
-    loop route in IR_OWNED_STDOUT_ROUTES {
-        row: name_rows_value(m.name_rows, route) ?? -1
-        if row >= 0 && ir_entry_calls(m, row) -> buffered = true
-    }
-    print: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
-    direct: if print >= 0 -> ir_intern_name(m, "jet_term_write_stdout_line_direct") else -> -1
     exit: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
     exit_owned: if exit >= 0 -> ir_intern_name(m, "jet_std_process_exit_owned") else -> -1
     redirect := [Int]{}
     loop _ in 0..<m.names.len() -> redirect.push(-1)
-    if print >= 0 -> redirect[print] = direct
     if exit >= 0 -> redirect[exit] = exit_owned
     cleanup: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
     attach := [Bool]{}

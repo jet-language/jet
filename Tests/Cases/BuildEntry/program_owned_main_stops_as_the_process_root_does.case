@@ -32,7 +32,7 @@ stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same at O2
 step: jet build owned.jet
 exit: 0
 file: .jet/build/owned !~ "jet_rt_root_begin" # the image links no process root
-file: .jet/build/owned ~ "jet_term_write_stdout_line_direct" # its print writes each line straight to fd 1
+file: .jet/build/owned ~ "jet_term_write_stdout_line" # its print goes through the one stdout buffer
 file: .jet/build/owned ~ "jet_rt_thread_attach" # it may allocate (the sum's text), so its main thread gets a TCB
 step: {work}/.jet/build/owned
 exit: 70
@@ -60,7 +60,6 @@ stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the same at O2
 step: jet build rooted.jet
 exit: 0
 file: .jet/build/rooted ~ "jet_rt_root_begin" # the image runs the entry under the root
-file: .jet/build/rooted !~ "jet_term_write_stdout_line_direct" # its print keeps the buffered writer
 file: .jet/build/rooted ~ "jet_rt_thread_attach" # the root runs on an attached main thread
 step: {work}/.jet/build/rooted
 exit: 70

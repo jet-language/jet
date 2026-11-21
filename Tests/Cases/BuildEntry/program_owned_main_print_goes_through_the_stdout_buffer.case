@@ -1,0 +1,52 @@
+# A program that owns its main (JetIR EntryOwned.jet) prints through the same
+# 8192-byte stdout buffer as any other program: 3000 lines of a piped stdout
+# leave in about ten writes, not one write per line. `jet perf run` keeps the
+# owned main and counts every write in its trace's syscalls section;
+# writes.py sums them. The 3000 lines are 82890 bytes: ten full buffers,
+# then the rest at the ending. Every ending drains the buffer first: a
+# return, process.exit, a stop with nothing to clean up and a stack
+# overflow's fault all keep every line, and stdout still drains before each
+# stderr write on one shared descriptor.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:python3
+fixture: OwnedMainPrintGoesThroughTheStdoutBuffer.fixture
+env: NO_COLOR=1
+step: jet inspect decisions many.jet
+exit: 0
+stdout: ~ "Main: program-owned" # the print loop needs no process root
+step many: jet perf run many.jet --out many.jettrace
+exit: 0
+stdout: lines = 3000 # every line arrives
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+step: python3 writes.py many.jettrace
+exit: 0
+json: stdout doc $ >= 10 # the trace counts the writes: at least the ten full buffers
+json: stdout doc $ <= 20 # one write per full buffer, not one per line
+step exit: jet perf run exit.jet --out exit.jettrace
+exit: 3
+stdout: lines = 3000 # process.exit drains the buffer
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+step: python3 writes.py exit.jettrace
+exit: 0
+json: stdout doc $ >= 10 # the trace counts the writes: at least the ten full buffers
+json: stdout doc $ <= 20 # buffered on this ending as well
+step: jet build stop.jet
+exit: 0
+step stop: {work}/.jet/build/stop
+exit: 70
+stdout: lines = 3000 # the stop drains the buffer before its report
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # the overflow's report, written with no root
+step: jet build deep.jet
+exit: 0
+step deep: {work}/.jet/build/deep
+exit: 70
+stdout: lines = 3000 # the fault drains the buffer before its report
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+stderr: ~ "Stop: Jet.StackOverflow: Stack overflow in `deep`" # the fault's report
+step: jet build mixed.jet
+exit: 0
+step mixed: sh -c "exec {work}/.jet/build/mixed > {work}/mixed.merged 2>&1"
+exit: 0
+file: mixed.merged = "1 stdout before stderr\n2 stderr after stdout\n3 stdout after stderr\n4 stderr last\n" # stdout drains before each stderr write
