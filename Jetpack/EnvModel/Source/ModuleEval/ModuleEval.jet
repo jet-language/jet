@@ -220,39 +220,35 @@ envmodel_compute_values: fn(items: [Item], scope: ModuleEvalScope, environment_g
     first: if name_spans.len() > 0 -> name_spans[0] else -> plan.first ?? Span{start: 0, end: 0}
     program: module_values_program(items, scope.source, environment_globals, plan.parts.join("")) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
     outcome: module_values_evaluate(program.text, scope.base_dir) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(first), "the module values could not be evaluated: {err.detail}")})
-    if outcome == {
-        .Refused(diagnostic) -> {
-            // A span in the generated values stands for the source text it
-            // was spelled from; one past them lies in the schema or the
-            // program's own lines: the first value.
-            span := first
-            if diagnostic.span == .Val(at) {
-                if {
-                    at.end <= scope.source.count_bytes() -> { span = at }
-                    at.start >= program.generated_at -> {
-                        span = envmodel_value_place(plan, Span{start: at.start - program.generated_at, end: at.end - program.generated_at}) ?? first
-                    }
+    if outcome.refused == .Val(diagnostic) {
+        // A span in the generated values stands for the source text it was
+        // spelled from; one past them lies in the schema or the program's
+        // own lines: the first value.
+        span := first
+        if diagnostic.span == .Val(at) {
+            if {
+                at.end <= scope.source.count_bytes() -> { span = at }
+                at.start >= program.generated_at -> {
+                    span = envmodel_value_place(plan, Span{start: at.start - program.generated_at, end: at.end - program.generated_at}) ?? first
                 }
             }
-            return Err(EnvModelEvalError{diagnostic: envmodel_value_diagnostic(plan, diagnostic, span)})
         }
-        .Values(values, _) -> {
-            computed := [String:CtValue]{}
-            loop named in values -> computed[named.name] = named.value
-            // Every name is read back from the compiler, literals included.
-            loop (index, name) in names {
-                value: computed.get(name) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[index]), "the module value `{name}` holds a value an environment can't read as data, such as a function")})
-                globals[name] = value
-            }
-            fields := plan.known
-            loop (start, generated) in plan.leaves {
-                if fields.get(start) != None -> next
-                value: computed.get(generated) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(Span{start: start, end: start}), "this value holds a value an environment can't read as data, such as a function")})
-                fields[start] = value
-            }
-            return Ok(ComputedValues{globals: globals, values: fields})
-        }
+        return Err(EnvModelEvalError{diagnostic: envmodel_value_diagnostic(plan, diagnostic, span)})
     }
+    computed := [String:CtValue]{}
+    loop named in outcome.values -> computed[named.name] = named.value
+    // Every name is read back from the compiler, literals included.
+    loop (index, name) in names {
+        value: computed.get(name) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[index]), "the module value `{name}` holds a value an environment can't read as data, such as a function")})
+        globals[name] = value
+    }
+    fields := plan.known
+    loop (start, generated) in plan.leaves {
+        if fields.get(start) != None -> next
+        value: computed.get(generated) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(Span{start: start, end: start}), "this value holds a value an environment can't read as data, such as a function")})
+        fields[start] = value
+    }
+    Ok(ComputedValues{globals: globals, values: fields})
 }
 
 // Plan the values written in the integration imports and the environment,

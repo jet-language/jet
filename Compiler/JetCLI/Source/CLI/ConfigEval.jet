@@ -37,6 +37,7 @@ use {
         diagnostic_from_registry,
         jet_config_data_value,
         jet_config_eval_diagnostic,
+        jet_module_values_refused,
         symbol_key_names,
     ]
     jet_sema.[
@@ -64,7 +65,7 @@ jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigO
 // unreadable. The first error of the check keeps its span, a span of the
 // requester's source.
 jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValuesOutcome {
-    result: jet_config_checked(program, base_dir, true) ?? return JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic}
+    result: jet_config_checked(program, base_dir, true) ?? return jet_module_values_refused(err.diagnostic)
     owner := ""
     loop value in result.comptime_values {
         if value.kind == SemaComptimeItemKind.Constant && symbol_key_names(value.key, JET_CONFIG_VALUE_NAME) {
@@ -72,7 +73,7 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
         }
     }
     if owner == "" {
-        return JetModuleValuesOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "the module values produced no build-time values")}
+        return jet_module_values_refused(jet_config_eval_diagnostic(None, "the module values produced no build-time values"))
     }
     values := [NamedCtValue]{}
     unreadable := [String]{}
@@ -87,7 +88,7 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
             .None -> unreadable.push(name)
         }
     }
-    JetModuleValuesOutcome.Values{values: values, unreadable: unreadable}
+    JetModuleValuesOutcome{values: values, unreadable: unreadable, refused: None}
 }
 
 // The checked `program`, or the refusal of its first error. With `spans` the

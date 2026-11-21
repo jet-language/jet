@@ -67,11 +67,18 @@ JetConfigOutcome: enum {
 
 // The module values of a module-values program: each top-level immutable
 // value by name, and the names of those whose value no wire spelling carries
-// (a function, say). Or the first error of the program's check, its span a
-// span of the program, or None when it lies outside the program.
-JetModuleValuesOutcome: enum {
-    Values(values: [NamedCtValue], unreadable: [String]),
-    Refused(diagnostic: Diagnostic),
+// (a function, say). Or, as `refused` with no values, the first error of the
+// program's check, its span a span of the program, or None when it lies
+// outside the program.
+JetModuleValuesOutcome: struct {
+    values: [NamedCtValue],
+    unreadable: [String],
+    refused: Diagnostic?,
+}
+
+// The outcome of a module-values program its check refused with `diagnostic`.
+jet_module_values_refused: fn(diagnostic: Diagnostic) -> JetModuleValuesOutcome Never! {
+    JetModuleValuesOutcome{values: [NamedCtValue]{}, unreadable: [String]{}, refused: Val(diagnostic)}
 }
 
 // A string with no interpolation, a whole number, or a truth value: the
@@ -552,27 +559,25 @@ compiler_service_comptime_outcome: fn(response: Dyn) -> JetConfigOutcome? Never!
 // A value that no wire spelling carries is named in `unreadable`, as one the
 // evaluator could not read back is.
 compiler_service_module_values_response: fn(outcome: &&JetModuleValuesOutcome) -> String Never! {
-    if outcome == {
-        .Values(values, unreadable) -> {
-            rows := [Dyn]{}
-            names := [Dyn]{}
-            loop name in unreadable -> names.push(Dyn.Text(name))
-            loop named in values {
-                if compiler_service_value_wire(named.value) == .Val(wire) {
-                    rows.push(Dyn.Object(["name": Dyn.Text(named.name), "value": wire]))
-                } else { names.push(Dyn.Text(named.name)) }
-            }
-            compiler_service_render(Dyn.Object(["values": Dyn.Array(rows), "unreadable": Dyn.Array(names)]))
-        }
-        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
+    if outcome.refused == .Val(diagnostic) {
+        return compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
     }
+    rows := [Dyn]{}
+    names := [Dyn]{}
+    loop name in outcome.unreadable -> names.push(Dyn.Text(name))
+    loop named in outcome.values {
+        if compiler_service_value_wire(named.value) == .Val(wire) {
+            rows.push(Dyn.Object(["name": Dyn.Text(named.name), "value": wire]))
+        } else { names.push(Dyn.Text(named.name)) }
+    }
+    compiler_service_render(Dyn.Object(["values": Dyn.Array(rows), "unreadable": Dyn.Array(names)]))
 }
 
 // The outcome a module-values response carries, or None for a response that
 // is not one.
 compiler_service_module_values_outcome: fn(response: Dyn) -> JetModuleValuesOutcome? Never! {
     if compiler_service_get(response, "error") == .Val(wire) {
-        return Val(JetModuleValuesOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
+        return Val(jet_module_values_refused(compiler_service_diagnostic_from_wire(wire) ?? return None))
     }
     values := [NamedCtValue]{}
     loop row in compiler_service_array(response, "values") ?? return None {
@@ -583,7 +588,7 @@ compiler_service_module_values_outcome: fn(response: Dyn) -> JetModuleValuesOutc
     loop row in compiler_service_array(response, "unreadable") ?? return None {
         if row == .Text(name) -> unreadable.push(name) else -> return None
     }
-    Val(JetModuleValuesOutcome.Values{values: values, unreadable: unreadable})
+    Val(JetModuleValuesOutcome{values: values, unreadable: unreadable, refused: None})
 }
 
 compiler_service_check_request: fn(file: &&String, source: &&String) -> String Never! {
