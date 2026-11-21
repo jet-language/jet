@@ -62,6 +62,7 @@ use jet_foundation.[
     DeclID,
     Diagnostic,
     ModuleID,
+    NameTable,
     SymbolID,
     body_codec_get_count,
     body_codec_get_string,
@@ -79,6 +80,8 @@ use jet_foundation.[
     module_find,
     module_is_core,
     module_text,
+    name_intern,
+    name_table_sized,
     symbol_find,
     symbol_table_key,
 ]
@@ -485,16 +488,17 @@ sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never!
     size - wanted.len()
 }
 
-// The keys of the functions whose checks this compile loaded: `loaded` is
-// SemaRegistrationHostHooks.core_bodies_loaded, by position in `bodies`,
-// and each loaded record's key is read from the file once.
-sema_core_bodies_loaded_keys: fn(bodies: SemaCoreBodies?, loaded: [Bool]) -> [String:Bool] Never! {
-    keys := [String:Bool]{}
+// The keys of the functions whose checks this compile loaded, as a table of
+// their names: `loaded` is SemaRegistrationHostHooks.core_bodies_loaded, by
+// position in `bodies`, and each loaded record's key is read from the file
+// once.
+sema_core_bodies_loaded_keys: fn(bodies: SemaCoreBodies?, loaded: [Bool]) -> NameTable Never! {
+    keys := name_table_sized(loaded.len() + 1)
     if bodies == .Val(file) {
         loop position in 0..<loaded.len() {
             if !loaded[position] || position >= file.head.count -> next
             input := sema_core_bodies_record(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, position))
-            keys[body_codec_get_string(file.bytes, input)] = true
+            _ := name_intern(keys, body_codec_get_string(file.bytes, input))
         }
     }
     keys
@@ -686,35 +690,42 @@ SemaCoreBodiesAheadFeed: struct {
     packets: [SemaParallelBody?],
 }
 
+// A function whose packet a module pass may read ahead
+// (sema_core_bodies_ahead): its key and the module it is in.
+SemaCoreBodiesAheadKey: struct {
+    key: String,
+    module_index: Int,
+}
+
 // Reads ahead the packets a module pass loads: those of the functions
-// `keys`, each in the module `rows` maps it to (a Core demand wave's
-// graph.core_wave_rows in graph.core_demand_rows, or the bodies the first
-// body pass checks up front, sema_core_demand_index). A compile that loads
-// Core packets loads them on the module pass's thread, where the host hooks
-// are (sema_core_bodies_held), and decoding a record is most of a load, so
-// a pass of hundreds or thousands of loads would leave the other threads
-// idle. Before the pass this thread finds the records of those functions
-// that sema_core_body_load would load and reads them, and compiler threads
-// decode each as soon as it is read, each with a reader of its own, into
-// SemaRegistrationHostHooks.core_bodies_ahead (sema_core_bodies_ahead_load);
-// sema_core_body_load takes each at its function's turn and counts it as a
-// load of its own. A packet read ahead is the one the turn's load would
-// read: its keys resolve to the same ids once they resolve, and a record
-// whose keys don't resolve yet is left to the turn's load. Each thread's
-// reader has its own pool of spellings (BodyCodecIn.spellings), so a
-// spelling is one String per thread that read it. The pass's end drops what
-// it did not take (sema_core_bodies_ahead_drop).
-sema_core_bodies_ahead: fn(graph: SemaRegistrationGraph, keys: &&[String], rows: [String:Int], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
+// `wanted` (a Core demand wave's graph.core_wave_rows, or the bodies the
+// first body pass checks up front, sema_core_demand_index). A compile that
+// loads Core packets loads them on the module pass's thread, where the host
+// hooks are (sema_core_bodies_held), and decoding a record is most of a
+// load, so a pass of hundreds or thousands of loads would leave the other
+// threads idle. Before the pass this thread finds the records of those
+// functions that sema_core_body_load would load and reads them, and
+// compiler threads decode each as soon as it is read, each with a reader of
+// its own, into SemaRegistrationHostHooks.core_bodies_ahead
+// (sema_core_bodies_ahead_load); sema_core_body_load takes each at its
+// function's turn and counts it as a load of its own. A packet read ahead is
+// the one the turn's load would read: its keys resolve to the same ids once
+// they resolve, and a record whose keys don't resolve yet is left to the
+// turn's load. Each thread's reader has its own pool of spellings
+// (BodyCodecIn.spellings), so a spelling is one String per thread that read
+// it. The pass's end drops what it did not take
+// (sema_core_bodies_ahead_drop).
+sema_core_bodies_ahead: fn(graph: SemaRegistrationGraph, wanted: &&[SemaCoreBodiesAheadKey], host_hooks: SemaHostHookAccess?, threads: CompilerThreads) {
     access: host_hooks ?? return
     if graph.core_seal || !graph.core_bodies_held || compiler_threads_limit(threads) < 2 {
         return
     }
     if access == .Callbacks(hooks) {
-        sorted := keys.move()
+        sorted := wanted.move()
         // In key order, the bodies file's record order.
-        sorted.sort()
+        sorted.sort_by(fn(left: SemaCoreBodiesAheadKey, right: SemaCoreBodiesAheadKey) { left.key <=> right.key })
         permit: hooks.guard_edit()
-        found: sema_core_bodies_ahead_find(permit.value, graph, sorted, rows)
+        found: sema_core_bodies_ahead_find(permit.value, graph, sorted)
         sema_core_bodies_ahead_load(graph, permit.value, found.move(), threads)
     }
 }
@@ -729,20 +740,21 @@ sema_core_bodies_ahead_drop: fn(host_hooks: SemaHostHookAccess?) {
     }
 }
 
-// The records of the functions `keys`, in key order, that
-// sema_core_body_load would load, each in the module `rows` maps it to,
-// found in the bodies file and not yet read; none when the bodies file's
-// context is not this compile's.
-sema_core_bodies_ahead_find: fn(hooks: SemaRegistrationHostHooks, graph: SemaRegistrationGraph, keys: [String], rows: [String:Int]) -> [SemaCoreBodyRecord] {
+// The records of the functions `wanted`, in key order, that
+// sema_core_body_load would load, found in the bodies file and not yet
+// read; none when the bodies file's context is not this compile's. A key
+// `wanted` names twice is found once: its second lookup starts past its
+// record.
+sema_core_bodies_ahead_find: fn(hooks: SemaRegistrationHostHooks, graph: SemaRegistrationGraph, wanted: [SemaCoreBodiesAheadKey]) -> [SemaCoreBodyRecord] {
     records := [SemaCoreBodyRecord]{}
     if hooks.core_bodies == .Val(file) {
         if file.head.context != sema_core_bodies_context(graph) -> return records
         // The keys come in key order, so each lookup starts past the last
         // record found.
         from := 0
-        loop key in keys {
-            module_index: rows.get(key) ?? next
-            if !sema_core_body_module(graph.modules[module_index]) || sema_core_body_stands_in(graph, key) {
+        loop entry in wanted {
+            key: entry.key
+            if !sema_core_body_module(graph.modules[entry.module_index]) || sema_core_body_stands_in(graph, key) {
                 next
             }
             owner: symbol_find(graph.symbols, key) ?? next

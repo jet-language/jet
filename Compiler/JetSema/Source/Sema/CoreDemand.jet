@@ -72,23 +72,24 @@ use jet_foundation.[
     symbol_table_key,
     module_is_core,
     module_text,
+    name_find,
     foundation_byte_text,
 ]
 
 // Indexes the deferred bodies of `graph` for one finalization: none unless
 // `enabled`. Called at the start of each finalization, so a later one over
 // the same graph demands afresh. Returns the Core bodies that stay checked
-// up front and that the first body pass checks, each key mapped to its
-// module, which that pass loads (sema_core_bodies_ahead); none unless
-// `enabled`. A demand-checked derived method waits for its derive wave and
-// a generated codec impl no demand has filled for its codec wave
+// up front and that the first body pass checks, each with its module, which
+// that pass loads (sema_core_bodies_ahead); none unless `enabled`. A
+// demand-checked derived method waits for its derive wave and a generated
+// codec impl no demand has filled for its codec wave
 // (sema_check_method_jobs), so neither is among them.
-sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [String:Int] {
+sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [SemaCoreBodiesAheadKey] {
     graph.core_wave_rows = [String:Bool]{}
     graph.core_stand_in_wave = false
     graph.core_checked = [String:Bool]{}
     rows := [String:Int]{}
-    upfront := [String:Int]{}
+    upfront := [SemaCoreBodiesAheadKey]{}
     if enabled {
         roots: graph.core_lowering_roots ?? [String:Bool]{}
         // Every method an impl that stays checked supplies; a nominal lists
@@ -114,10 +115,11 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) -> [Str
 }
 
 // The deferred bodies of module `module_index`, each key mapped to the
-// module in `rows`, and those that stay checked up front in `upfront`
-// (sema_core_demand_index): none for a module that isn't Core source or is
-// the entry. `roots` and `eager` are the keys that stay checked up front.
-sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int], upfront: &[String:Int]) Never! {
+// module in `rows`, and those that stay checked up front in `upfront`, a key
+// there once per way it stays checked (sema_core_demand_index): none for a
+// module that isn't Core source or is the entry. `roots` and `eager` are the
+// keys that stay checked up front.
+sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int], upfront: &[SemaCoreBodiesAheadKey]) Never! {
     identity: graph.modules[module_index].module_identity
     if !module_is_core(identity) || identity == graph.entry_module_identity {
         return
@@ -127,7 +129,7 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
         if item == .Func(func) {
             key: symbol_key_text(SymbolKind.Function, identity_text, "", func.name)
             if roots.get(key) != None {
-                upfront[key] = module_index
+                upfront.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
                 next
             }
             rows[key] = module_index
@@ -141,7 +143,9 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
             key: symbol_table_key(graph.symbols, method.symbol.id)
             if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(key) != None || roots.get(key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None {
                 derived: method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.id) != None
-                if !derived && eager.get(key) != Val(false) -> upfront[key] = module_index
+                if !derived && eager.get(key) != Val(false) {
+                    upfront.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
+                }
                 next
             }
             rows[key] = module_index
@@ -153,7 +157,9 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
         loop method in implementation.methods {
             key: symbol_table_key(graph.symbols, method.symbol.id)
             if !deferrable || method.declaration.name == "close" || roots.get(key) != None {
-                if !pending -> upfront[key] = module_index
+                if !pending {
+                    upfront.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
+                }
                 next
             }
             rows[key] = module_index
@@ -418,7 +424,7 @@ sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         loop (index, function) in checked.functions {
             if function.stand_in -> next
             spent: took.get(index)
-            if loaded_keys.has_key(function.key) {
+            if name_find(loaded_keys, function.key) != None {
                 loaded += 1
                 if spent == .Val(ns) {
                     load_bodies += 1
@@ -486,7 +492,12 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
             ahead_program := sema_check_shared_take_program(shared_state)
             ahead_plan := sema_check_shared_take_memory_plan(shared_state)
             if ahead_program.registration_graph == .Val(ahead_graph) {
-                sema_core_bodies_ahead(ahead_graph, loop key in ahead_graph.core_wave_rows.keys() -> key, ahead_graph.core_demand_rows, host_hooks, threads)
+                wanted := [SemaCoreBodiesAheadKey]{}
+                loop key in ahead_graph.core_wave_rows.keys() {
+                    module_index: ahead_graph.core_demand_rows.get(key) ?? next
+                    wanted.push(SemaCoreBodiesAheadKey{key: key, module_index: module_index})
+                }
+                sema_core_bodies_ahead(ahead_graph, wanted.move(), host_hooks, threads)
             }
             sema_check_shared_put_tables(shared_state, ahead_program, ahead_plan)
         }

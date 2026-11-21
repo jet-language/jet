@@ -12253,9 +12253,7 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     // per-function trace times each load at its turn.
     timed := false
     if trace_sink == .Val(sink) -> timed = sink.functions()
-    if !timed {
-        sema_core_bodies_ahead(resolved_graph, loop (key, _) in upfront -> key, upfront, hook_access, threads)
-    }
+    if !timed -> sema_core_bodies_ahead(resolved_graph, upfront.move(), hook_access, threads)
     // The body pass's facts serve the codec and derive waves after it while
     // the graph rows they read stay unchanged (sema_finalize_check_modules).
     body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, checked_modules, true, hook_access, threads, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
