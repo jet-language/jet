@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Item, ModuleID, NameRows, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_type, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, diagnostic_with_label, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_type, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, diagnostic_with_label, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -216,7 +216,7 @@ SemaScriptProbeAppended: struct {
 // infallible (sema_eval_held_failure_settle). Each function it calls must
 // be held already: a call of one with no declaration, itself included,
 // doesn't check. Otherwise the module is left as it was, and None.
-sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [FnBody], by_key: NameRows) -> SemaScriptProbeAppended? {
+sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [FnBody], by_key: SemaEvalHeldRows) -> SemaScriptProbeAppended? {
     module_index: probe.module_index
     taken := item.move()
     candidate := false
@@ -311,7 +311,7 @@ sema_script_probe_failed: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 // (sema_eval_held_effect_refusals), it writes no module state, and it
 // takes no function as a value, a trait value's method included, which
 // only the effect pass's value edges would follow.
-sema_script_probe_pure: fn(function: FnBody, functions: [FnBody], by_key: NameRows) -> Bool {
+sema_script_probe_pure: fn(function: FnBody, functions: [FnBody], by_key: SemaEvalHeldRows) -> Bool {
     if function.effects.module_writes.len() > 0 || sema_eval_held_effect_refusals(function, functions, by_key, function.source_span).len() > 0 {
         return false
     }
