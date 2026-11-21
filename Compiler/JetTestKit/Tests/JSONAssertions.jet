@@ -34,6 +34,17 @@ use json: core.encoding.json
     assert(kit_steps_json_test("1", "doc", "$", "#=", "0") != None)
 }
 
+#Test("a failed JSON comparison names its path, operator, bound and actual value") {
+    profile: "{{\"content\":{{\"overhead_ns\":61234567,\"rows\":[1,1,2]}}}}"
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.overhead_ns", "<=", "40000000"), Val("JSON numeric comparison failed: $.content.overhead_ns <= 40000000: actual 61234567"))
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.overhead_ns", ">", "61234567"), Val("JSON numeric comparison failed: $.content.overhead_ns > 61234567: actual 61234567"))
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.rows", "#=", "2"), Val("JSON count comparison failed: $.content.rows #= 2: actual 3"))
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.rows", "#>=", "4"), Val("JSON count comparison failed: $.content.rows #>= 4: actual 3"))
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.rows", "#distinct=", "3"), Val("JSON distinct count differs: $.content.rows #distinct= 3: actual 2"))
+    assert_eq(kit_steps_json_test("{{\"a\":[1],\"b\":[1,2]}}", "doc", "$.a", "#==", "$.b"), Val("JSON same-document counts differ: $.a #== $.b (2): actual 1"))
+    assert_eq(kit_steps_json_test(profile, "doc", "$.content.overhead_ns", ">=", "1"), None)
+}
+
 #Test("JSON wildcard requires every nonempty selected record to match") {
     rows: "{{\"name\":\"needle\",\"mean_ns\":1}}\n\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n"
     assert_eq(kit_steps_json_test(rows, "ndjson", "$", "#=", "2"), None)

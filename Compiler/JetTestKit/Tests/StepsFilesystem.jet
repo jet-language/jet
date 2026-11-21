@@ -26,6 +26,8 @@ use files: core.files
         ["size = 4", "size >= 4", "size <= 2", "size < 3", "size > 3", "sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""] {
         assert_eq(cases_test_advanced(root, "wrong", "fixture: tree\nstep: printf ready\nfile: value {comparison} # original predicate\n").verdict.status, "FAIL")
     }
+    named: cases_test_advanced(root, "named", "fixture: tree\nstep: printf ready\nfile: value size >= 4 # original predicate\n").verdict
+    assert(named.detail.contains("file size comparison failed: value >= 4: actual 3"))
     files.remove_all(root) ?? panic("remove metadata scratch")
 }
 

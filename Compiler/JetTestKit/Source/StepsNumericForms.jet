@@ -33,7 +33,7 @@ kit_steps_f64_test: fn(actual: String, mode: String, value: String, op: String) 
     right: kit_steps_f64_parse(value) ?? return Val(kit_expect_verdict("FAIL", "f64 reference is not a float"))
     // Use IEEE comparisons directly: NaN is unordered, including with itself.
     matches: if op == ">" -> left > right else if op == ">=" -> left >= right else if op == "<" -> left < right else if op == "<=" -> left <= right else if op == "==" -> left == right else -> left != right
-    Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "f64 comparison failed: {op}"))
+    Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "f64 comparison failed: {op} {value}: actual {actual}"))
 }
 
 kit_steps_median_labels: fn(text: String, plan: KitPlan, before: Int) -> [String]? {

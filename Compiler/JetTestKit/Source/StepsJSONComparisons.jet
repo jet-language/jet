@@ -22,14 +22,18 @@ kit_steps_json_same_document: fn(text: String, mode: String, path: String, op: S
         return Val("JSON same-document filter selected no values")
     }
     if op == "#==" {
-        if left.len() != right.len() -> return Val("JSON same-document selection counts differ")
+        if left.len() != right.len() {
+            return Val("JSON same-document selection counts differ: {path} selects {left.len()} values, {other} {right.len()}")
+        }
         loop index in 0..<left.len() {
             a: kit_steps_json_size(left[index]) ?? return Val("JSON left count needs an array or object")
             b: kit_steps_json_size(right[index]) ?? return Val("JSON right count needs an array or object")
-            if a != b -> return Val("JSON same-document counts differ")
+            if a != b {
+                return Val("JSON same-document counts differ: {path} #== {other} ({b}): actual {a}")
+            }
         }
         return None
     }
     equal: kit_steps_json_equal(Dyn.Array(left), Dyn.Array(right))
-    if equal == (op == "==") -> None else -> Val("JSON same-document deep comparison failed: {op}")
+    if equal == (op == "==") -> None else -> Val("JSON same-document deep comparison failed: {path} {op} {other}")
 }
