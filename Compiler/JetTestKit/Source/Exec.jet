@@ -340,12 +340,46 @@ kit_exec_receipt: fn(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Stri
     }
 }
 
-// A child that exits before reading its input breaks the pipe; name its exit
-// and first stderr line so the row shows why it stopped reading.
-kit_exec_input_detail: fn(error: String, code: Int, errors: String) -> String {
-    first: kit_exec_first_line(errors)
-    if first == "" -> return "{error}; child exited {code} without reading it"
-    "{error}; child exited {code} without reading it: {first}"
+// Writes a step's input to its child: the kit's error, or "". A child that
+// exits, or closes its stdin, before it reads every byte leaves the pipe
+// closed (EPIPE). That ends the input, and the step is judged on the child's
+// exit and streams, as one that read it all; whether the child left before
+// or after the write began must not change the verdict.
+kit_exec_feed: fn(child: ProcessChild, bytes: [U8], label: String) -> String {
+    if bytes.len() == 0 -> return ""
+    child.stdin.write_bytes(bytes) ?? return kit_exec_input_failure(label, err)
+    ""
+}
+
+// A write into a closed input is no error (kit_exec_feed); any other write
+// failure is the kit's own, named by `label`.
+kit_exec_input_failure: fn(label: String, error: IOError) -> String {
+    if error == .Closed(_) -> return ""
+    "{label}: {error}"
+}
+
+// Spawns `spec`, retrying only ETXTBSY until `timeout` has passed. A file a
+// case just wrote was opened O_CLOEXEC and closed before its step, but a
+// child another thread spawned in that moment holds a copy of the writer
+// from its clone until its own execve, and Linux refuses to run a file with
+// a writer. That copy is gone once the other child runs, so a retry finds
+// none; any other spawn error, or ETXTBSY past `timeout`, is returned.
+kit_exec_spawn: fn(spec: ProcessSpec, timeout: Duration) -> ProcessChild IOError! {
+    started: time.instant()
+    loop {
+        child: spec.spawn() ?? {
+            if !kit_exec_text_busy(err) || started.elapsed().ns >= timeout.ns -> return Err(err)
+            time.sleep(time.duration_ms(5))
+            next
+        }
+        return Ok(child)
+    }
+}
+
+// ETXTBSY: the spawn's cause is the OS text "Text file busy (os error 26)".
+kit_exec_text_busy: fn(error: IOError) -> Bool {
+    if error == .Other(context) -> return (context.cause ?? "").ends_with("(os error 26)")
+    false
 }
 
 // The first nonblank line of a child's stderr, cut at 160 bytes; "" when it
@@ -398,22 +432,14 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     if terminal == .Val(shape) {
         spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
     }
-    child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
+    child: kit_exec_spawn(spec, env.timeout) ?? return kit_exec_failed("spawn: {err}")
     // A row's files on a memory-backed scratch are memory it holds: the guard
     // counts them beside the child's resident memory.
     files_in_memory: if env.scratch_memory -> scratch.copy() else -> ""
     watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0, scratch: files_in_memory, scratch_due: 0, scratch_bytes: 0}
     cpu_limit: if env.cpu_limit == .Val(limit) -> limit.ns else -> 0
     spent := KitCPU{pid: if cpu_limit > 0 -> child.id() else -> 0, limit: cpu_limit, due: 0, used: 0, killed: false}
-    // Empty input writes nothing: a child that exits before the kit reaches its
-    // stdin closed the pipe, which is no error when there was nothing to send.
-    input_error := ""
-    if stdin.len() > 0 {
-        child.stdin.write_bytes(stdin) ?? {
-            input_error = "stdin: {err}"
-            ()
-        }
-    }
+    input_error := kit_exec_feed(child, stdin, "stdin")
     if terminal == {
         .Val(shape) -> {
             eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
@@ -434,7 +460,9 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
                     child.stdin.write(eof).drop("the child may have exited before its input ended")
                 } else {
                     child.stdin.write(event.text) ?? {
-                        if input_error == "" -> input_error = "terminal input: {err}"
+                        if input_error == "" {
+                            input_error = kit_exec_input_failure("terminal input", err)
+                        }
                         ()
                     }
                 }
@@ -461,7 +489,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         if held > permit.value.bytes -> permit.value.bytes = held
     }
     errors_text: kit_exec_redact(kit_steps_utf8_lossy(errors), overlay)
-    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, errors_text))
+    run := kit_exec_receipt(receipt, started.elapsed().ns, input_error)
     run.stdout = kit_exec_redact(kit_steps_utf8_lossy(output), overlay)
     run.stderr = errors_text
     run.stdout_bytes = Val(output)

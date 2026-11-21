@@ -274,7 +274,7 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
                 if kit_exec_prepare(context.env, context.work, context.scratch, overlay) == .Val(stopped) {
                     return kit_steps_capture_failure(if stopped.refused -> "REFUSED" else -> "ERROR", stopped.error)
                 }
-                child: kit_exec_spec(context.env, argv, context.work, context.scratch, overlay).spawn() ?? {
+                child: kit_exec_spawn(kit_exec_spec(context.env, argv, context.work, context.scratch, overlay), context.env.timeout) ?? {
                     start = index + 1
                     next
                 }
