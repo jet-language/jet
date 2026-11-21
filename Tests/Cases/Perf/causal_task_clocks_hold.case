@@ -1,0 +1,18 @@
+# Under `jet perf run --lens=causal`, the lens times each task from clocks
+# it reads at the task's start and end, outside its 8 kHz sample handler.
+# The fixture runs a fixed count of tasks with almost no work, so many
+# samples land in those reads, and writes the wall time it took over them.
+# A read a sample tore (the handler's clock words half written, or holding
+# another clock) is off by up to the machine's uptime; every time the lens
+# keeps of every task must fall in the wall time, and no task may end
+# before it starts.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: CausalTaskClocks.fixture
+env: NO_COLOR=1
+step: jet perf run -A -O2 main.jet --lens=causal --out clocks.jettrace -- wall.txt
+exit: 0
+stdout: = "done\n"
+step: jet run -A check.jet -- wall.txt clocks.jettrace
+exit: 0
+stdout: = "every task's clocks hold\n"
