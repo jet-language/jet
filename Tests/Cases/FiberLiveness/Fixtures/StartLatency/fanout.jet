@@ -1,0 +1,63 @@
+// A spawn-heavy program: rounds of one to three tasks of uneven length,
+// spawned by the main thread or, every other round, by a task on a carrier,
+// with uneven work on the main thread between rounds. Each task's start
+// less its spawn, in nanoseconds, goes to the file its argument names.
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+ROUNDS: 3000
+
+work: fn(seed: Int, steps: Int) -> Int {
+    total := seed
+    loop step in 0..<steps -> total = (total * 31 + step) % 1000003
+    total
+}
+
+// Between 5,000 and 125,000 steps of work, by `seed`.
+steps_of: fn(seed: Int) -> Int { 5000 + seed * 7919 % 120000 }
+
+// A task's start less `spawned`, then its work.
+begun: fn(spawned: Int, seed: Int) -> [Int] {
+    start: time.instant().start_ns
+    [Int]{start - spawned, work(seed, steps_of(seed))}
+}
+
+// The round's `width` tasks, spawned on this thread and joined: each one's
+// start less its spawn.
+spawn_round: fn(round: Int, width: Int) -> [Int] {
+    handles := [Task<[Int]>]{}
+    loop k in 0..<width {
+        spawned: time.instant().start_ns
+        handles.push(task begun(spawned, round + k))
+    }
+    loop handle in handles -> (handle.join() ?? panic("a task failed"))[0]
+}
+
+// A task that spawns the round's tasks: its own start less its spawn, then
+// theirs.
+spawner: fn(spawned: Int, round: Int, width: Int) -> [Int] {
+    start: time.instant().start_ns
+    starts := [Int]{start - spawned}
+    loop late in spawn_round(round, width) -> starts.push(late)
+    starts
+}
+
+run: fn() {
+    args: process.args()
+    path: if args.len() > 0 -> args[args.len() - 1] else -> panic("usage: fanout FILE")
+    starts := [String]{}
+    loop round in 0..<ROUNDS {
+        width: 1 + round % 3
+        late: if round % 2 == 0 -> spawn_round(round, width) else -> {
+            spawned: time.instant().start_ns
+            (task spawner(spawned, round, width)).join() ?? panic("a spawner failed")
+        }
+        loop each in late -> starts.push("{each}")
+        if work(round, round * 104729 % 60000) < 0 -> print("negative")
+    }
+    files.write(path, "{starts.join(" ")}\n") ?? panic("cannot write {path}")
+    print("measured")
+}

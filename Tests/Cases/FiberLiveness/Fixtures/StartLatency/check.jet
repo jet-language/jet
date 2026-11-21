@@ -1,0 +1,49 @@
+// Checks the task starts two programs recorded against the cost of one
+// futex wake on this host. `jet run check.jet -- BEFORE AFTER CAUSAL FANOUT`:
+// BEFORE and AFTER hold wake.c's 99th percentile wake, taken before the
+// programs ran and after; CAUSAL and FANOUT each task's start less its
+// spawn, in nanoseconds. The bound is the larger wake, so load that drifts
+// over the run falls on it as on the starts. Each program's 99th percentile
+// start must be under it.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+// The CPUs the causal rounds need to start every task at once: one for each
+// of the round's four tasks and one for the main thread that spawns them.
+CPUS_NEEDED: 5
+
+numbers: fn(path: String) -> [Int] {
+    text: files.read(path) ?? panic("cannot read {path}")
+    loop word in text.trim().split(" ").to_list() -> Int.parse(word) ?? panic("{path}: `{word}` is not a whole number")
+}
+
+percentile99: fn(values: [Int]) -> Int {
+    if values.len() == 0 -> panic("no values")
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() * 99 /% 100]
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 4 -> panic("usage: check BEFORE AFTER CAUSAL FANOUT")
+    base: args.len() - 4
+    if sys.cpu_count() < CPUS_NEEDED {
+        print("the host has fewer than five CPUs, so the causal rounds' tasks cannot all start at once; no start was checked")
+        return
+    }
+    bound: max(percentile99(numbers(args[base])), percentile99(numbers(args[base + 1])))
+    wrong := [String]{}
+    loop (at, name) in ["the causal fixture", "the fan-out"] {
+        starts: numbers(args[base + 2 + at])
+        late: percentile99(starts)
+        eprint("{name}: {starts.len()} task starts, 99th percentile {late /% 1000} us after the spawn; one futex wake's 99th percentile {bound /% 1000} us")
+        if late < bound -> print("{name}'s tasks started within one futex wake of their spawn") else {
+            wrong.push("{name}'s 99th percentile task start came {late /% 1000} us after its spawn, not under one futex wake's {bound /% 1000} us")
+        }
+    }
+    if wrong.len() > 0 -> panic(wrong.join("; "))
+}
