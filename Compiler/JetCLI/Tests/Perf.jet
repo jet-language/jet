@@ -48,6 +48,7 @@ use {
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
         jet_cli_perf_cites_corrupt,
+        jet_cli_perf_dropped_label,
         jet_cli_perf_file_pid,
         jet_cli_perf_flame_profile,
         jet_cli_perf_head,
@@ -716,7 +717,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(jet_cli_perf_timed_first(sampled.timed, 1501), 2)
     assert_eq(jet_cli_perf_timed_first(sampled.timed, 9000), 4)
     zone: JetCLIPerfZoneTotal{name: "solve", count: 1, total: 3000, longest: 3000, samples: 3, lines: [Int:Int]{5: 2}}
-    section: jet_cli_perf_zones_section([JetCLIPerfZoneTotal]{zone}, [Int]{}, [JetCLIPerfPlotTotal]{}, [JetCLIPerfZoneSampled]{JetCLIPerfZoneSampled{name: "solve", start_ns: U64{0}, end_ns: U64{3000}, samples: 3, line: 5}}, "fib.jet", "", "")
+    section: jet_cli_perf_zones_section([JetCLIPerfZoneTotal]{zone}, [Int]{}, [JetCLIPerfPlotTotal]{}, [JetCLIPerfZoneSampled]{JetCLIPerfZoneSampled{name: "solve", start_ns: U64{0}, end_ns: U64{3000}, samples: 3, line: 5}}, "fib.jet", "", "", [Int]{})
     json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
     assert(json.contains(`"sampled":[{"end_ns":3000,"line":5,"name":"solve","samples":3,"start_ns":0}]`))
     assert(json.contains(`"source":"fib.jet"`))
@@ -1041,6 +1042,36 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
     assert(json.starts_with(`{"cut":"the spans file reached its 16 MiB bound, so the rows after this were dropped","frames":`))
     assert(json.contains(`"name":"solve"`))
+    assert_eq(jet_cli_perf_dropped_label(capture.receipts[capture.receipts.len() - 1].value), "")
+}
+
+// Past its bound the spans file counts the rows it drops, by kind, and at
+// exit gives the counts in a row of four words (the runtime's
+// perf_spans_flush): log spans, zones, frame marks, plotted values. The
+// last such row counts; the zones section keeps its counts, and `jet perf
+// view` puts each kind that lost any after the cut's reason. The words
+// are no text, and the rows after them are still read.
+#Test("a spans file cut at its bound counts the rows it dropped, by kind, in the zones section") {
+    reason: "the spans file reached its 16 MiB bound, so the rows after this were dropped"
+    row := jet_cli_perf_test_words([Int]{100, 400, 7, 5 | (1 << 32)})
+    row.extend("solve".bytes())
+    row.extend(jet_cli_perf_test_words([Int]{0, 0, 0, reason.len() | (5 << 32)}))
+    row.extend(reason.bytes())
+    row.extend(jet_cli_perf_test_words([Int]{500, 500, 0, 32 | (7 << 32), 1, 9, 0, 0}))
+    row.extend(jet_cli_perf_test_words([Int]{900, 900, 0, 32 | (7 << 32), 2, 1534080, 0, 3}))
+    row.extend(jet_cli_perf_test_words([Int]{950, 990, 7, 5 | (1 << 32)}))
+    row.extend("solve".bytes())
+    path: "{perf_test_sys.temp_dir()}/jet-perf-zone-dropped-{perf_test_process.current_pid()}.spans"
+    perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
+    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    spans: capture.spans.len()
+    jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, [JetCLIPerfTimed]{})
+    assert_eq(capture.spans.len(), spans + 2)
+    section: capture.receipts[capture.receipts.len() - 1].value
+    json: String.from_bytes(canonical_json_bytes(section)) ?? panic("the section is UTF-8")
+    assert(json.contains(`"dropped":{"frames":0,"log_spans":2,"plots":3,"zones":1534080}`))
+    assert(json.contains(`"count":2,`))
+    assert_eq(jet_cli_perf_dropped_label(section), ": 1534080 zones, 2 log spans, 3 plotted values")
 }
 
 // An attach's zones window ends in its row (the runtime's

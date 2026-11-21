@@ -2492,10 +2492,12 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // of `source` they were on. Every zone, frame mark and plotted value counts
 // in the `zones` receipt section, the rows past the limit too
 // (jet_cli_perf_zones_section), and so does why zones could not turn on (a
-// JET_CLI_PERF_ZONE_REFUSED row's name) and that the file reached its bound
-// and dropped the rows after it (a JET_CLI_PERF_ZONE_CUT row's name), which
-// are no timeline rows. Each task's first zone or log span, the earliest
-// opened and of those the longest, names its phase (`capture.task_phases`).
+// JET_CLI_PERF_ZONE_REFUSED row's name), that the file reached its bound
+// and dropped the rows after it (a JET_CLI_PERF_ZONE_CUT row's name) and
+// how many of each kind it dropped (the last JET_CLI_PERF_ZONE_DROPPED
+// row's words), which are no timeline rows. Each task's first zone or log
+// span, the earliest opened and of those the longest, names its phase
+// (`capture.task_phases`).
 // The file is removed once read; a row cut short ends the read.
 jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
@@ -2510,6 +2512,9 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
     sampled := [JetCLIPerfZoneSampled]{}
     refused := ""
     cut := ""
+    // The rows the bound dropped: log spans, zones, frame marks and plotted
+    // values, empty without a JET_CLI_PERF_ZONE_DROPPED row.
+    dropped := [Int]{}
     // The start and end of each task's phase, by its runtime id.
     opened := [U64:Int]{}
     closed := [U64:Int]{}
@@ -2525,6 +2530,14 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
         // A zones window's row holds words, not a name
         // (jet_cli_perf_spans_window).
         if kind == JET_CLI_PERF_ZONE_WINDOW {
+            at += 32 + length
+            next
+        }
+        // So does the row of how many rows the bound dropped.
+        if kind == JET_CLI_PERF_ZONE_DROPPED {
+            if length >= 32 {
+                dropped = [Int]{link_debug_addr(bytes, at + 32), link_debug_addr(bytes, at + 40), link_debug_addr(bytes, at + 48), link_debug_addr(bytes, at + 56)}
+            }
             at += 32 + length
             next
         }
@@ -2608,7 +2621,7 @@ jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, sourc
     if zones.len() > 0 || frames.len() > 0 || plots.len() > 0 || refused != "" || cut != "" {
         zones.sort_by(fn(left: JetCLIPerfZoneTotal, right: JetCLIPerfZoneTotal) { (right.total <=> left.total).then(left.name <=> right.name) })
         frames.sort()
-        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source, refused, cut))
+        capture.receipts.push(jet_cli_perf_zones_section(zones, frames, plots, sampled, source, refused, cut, dropped))
     }
 }
 
@@ -2645,9 +2658,11 @@ JetCLIPerfZoneSampled: struct {
 // name, start and end, with how many and the line most were on; when
 // the runtime could not turn zones on, why (`refused`, empty otherwise);
 // and when the spans file reached its bound, that its later rows were
-// dropped (`cut`, empty otherwise). `jet perf view` shows them
+// dropped (`cut`, empty otherwise) and how many log spans, zones, frame
+// marks and plotted values it dropped (`dropped`, in that order, empty
+// when the run gave no counts). `jet perf view` shows them
 // (jet_cli_perf_zone_lines, jet_cli_perf_timeline).
-jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String, cut: String) -> TraceReceiptSection Never! {
+jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plots: [JetCLIPerfPlotTotal], sampled: [JetCLIPerfZoneSampled], source: String, refused: String, cut: String, dropped: [Int]) -> TraceReceiptSection Never! {
     widest := 0
     loop at in 1..<frames.len() {
         if frames[at] - frames[at - 1] > widest -> widest = frames[at] - frames[at - 1]
@@ -2708,6 +2723,21 @@ jet_cli_perf_zones_section: fn(zones: [JetCLIPerfZoneTotal], frames: [Int], plot
     if cut != "" {
         fields.push(CanonicalJSONField{key: "cut", value: CanonicalJSON.String("{cut}")})
     }
+    if dropped.len() == 4 {
+        fields.push(
+            CanonicalJSONField{
+                key: "dropped",
+                value: CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "frames", value: CanonicalJSON.Integer("{dropped[2]}")},
+                        {key: "log_spans", value: CanonicalJSON.Integer("{dropped[0]}")},
+                        {key: "plots", value: CanonicalJSON.Integer("{dropped[3]}")},
+                        {key: "zones", value: CanonicalJSON.Integer("{dropped[1]}")},
+                    },
+                ),
+            },
+        )
+    }
     fields.push(
         CanonicalJSONField{
             key: "frames",
@@ -2743,8 +2773,8 @@ JetCLIPerfZoneLine: struct {
 
 // What a row of the spans file is (PerfSamples.jet PERF_ZONE_LOG and the
 // others): a closed log span, a closed zone, a frame mark, a plot, why
-// zones could not turn on, the file's bound reached, or an attach's zones
-// window.
+// zones could not turn on, the file's bound reached, an attach's zones
+// window, or how many rows of each kind the bound dropped.
 JET_CLI_PERF_ZONE_ZONE: 1
 
 JET_CLI_PERF_ZONE_FRAME: 2
@@ -2756,6 +2786,8 @@ JET_CLI_PERF_ZONE_REFUSED: 4
 JET_CLI_PERF_ZONE_CUT: 5
 
 JET_CLI_PERF_ZONE_WINDOW: 6
+
+JET_CLI_PERF_ZONE_DROPPED: 7
 
 // The last zones window of the spans file's `bytes`: a JET_CLI_PERF_ZONE_WINDOW
 // row, its start and end then its five little-endian words, the interval

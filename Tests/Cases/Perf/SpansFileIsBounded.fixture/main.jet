@@ -1,9 +1,16 @@
 // Closes 200000 log spans named by 64 bytes each: 96-byte rows of the
-// spans file under `jet perf run`, more than its 16 MiB holds.
-use log: core.log
+// spans file under `jet perf run`, more than its 16 MiB holds. Then closes
+// 1000 zones, which the bound drops too.
+use {
+    log: core.log
+    perf: core.perf
+}
+
+tick: fn() { _tick: perf.zone("tick") }
 
 run: fn() {
     name: "s".repeat(64)
     loop _ in 0..<200000 -> _span: log.span(name)
+    loop _ in 0..<1000 -> tick()
     print("closed")
 }

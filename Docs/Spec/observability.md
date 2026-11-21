@@ -1085,9 +1085,13 @@ Tests/Cases/Perf/zones_request_lapses_unrenewed.case are the worked examples.
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
 rows: a program that closes more zones, log spans, frame marks and plots
-keeps those that fit and a last row saying the rest were dropped, which
-the trace's `zones` section keeps as `cut` and `jet perf view` shows as
-`spans cut: <reason>`. A new zones request empties the flight ring's file
+keeps those that fit and a row saying the rest were dropped, which
+the trace's `zones` section keeps as `cut`. The runtime counts each
+dropped row by kind, and at exit, or as an attach's zones window closes,
+writes the counts in a last row. The `zones` section keeps them as
+`dropped`. `jet perf view` shows both as `spans cut: <reason>: 1534080
+zones, 2 log spans`, naming each kind that lost any. A zone's `count`
+is the zones the file kept. A new zones request empties the flight ring's file
 first. At a normal exit the program removes its ring, the ring's image, its
 `.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
 `jet perf attach` removes, from the temporary directory and the user's
