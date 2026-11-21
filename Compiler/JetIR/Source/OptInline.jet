@@ -159,6 +159,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
     loop value in caller.binds -> out.binds.push(value)
+    loop value in caller.scattered -> out.scattered.push(value)
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     // The stop point after a quiet site goes (its poll through its If's End).
     skip_from := -1
@@ -499,6 +500,11 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
     loop pair in 0..<(callee.binds.len() /% 2) {
         f.binds.push(map[callee.binds[2 * pair]])
         f.binds.push(map[callee.binds[2 * pair + 1]])
+    }
+    // A scattered address is a local of the callee's (never a parameter,
+    // whose map is the caller's argument).
+    loop slot in callee.scattered {
+        if slot >= callee.param_count -> f.scattered.push(map[slot])
     }
     dst: caller.dst[at]
     callee_facts: ir_opt_facts(callee)

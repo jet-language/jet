@@ -1058,6 +1058,8 @@ ir_opt_propagate_binds: fn(f: &IRFunction, facts: OptFacts, replace: [Int]) Neve
         kept.push(source)
     }
     f.binds = kept
+    // A scattered address a replaced slot held is its source's now.
+    loop k in 0..<f.scattered.len() -> f.scattered[k] = ir_opt_renamed(replace, f.scattered[k])
 }
 
 // Renames `from` to `to` among the slots IRFunction.binds locates named
@@ -1065,6 +1067,9 @@ ir_opt_propagate_binds: fn(f: &IRFunction, facts: OptFacts, replace: [Int]) Neve
 ir_opt_rebind: fn(f: &IRFunction, from: Int, to: Int) Never! {
     loop k in 0..<(f.binds.len() /% 2) {
         if f.binds[2 * k + 1] == from -> f.binds[2 * k + 1] = to
+    }
+    loop k in 0..<f.scattered.len() {
+        if f.scattered[k] == from -> f.scattered[k] = to
     }
 }
 

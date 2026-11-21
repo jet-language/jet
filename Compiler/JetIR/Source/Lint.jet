@@ -844,6 +844,11 @@ ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding
     }
     ir_lint_slot_rows(f, pass, "split", f.splits, out)
     ir_lint_slot_rows(f, pass, "bind", f.binds, out)
+    loop (k, slot) in f.scattered {
+        if slot < 0 || slot >= f.slot_type.len() {
+            out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "scattered row {k} names slot {slot} of {f.slot_type.len()}"))
+        }
+    }
     if f.open.len() > 0 {
         out.push(ir_lint_finding(f, pass, IR_LINT_CONTROL, "{f.open.len()} constructs left open by its builder"))
     }

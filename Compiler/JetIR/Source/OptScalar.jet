@@ -193,6 +193,16 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
         replaced += 1
     }
     if replaced == 0 -> return 0
+    // Lent storage stays, its bytes the fields only around each loan, so
+    // its address and the aliases of it no longer locate a variable
+    // (IRFunction.scattered).
+    loop slot in 0..<count {
+        base: if candidate[slot] -> slot else -> root[slot]
+        if base < 0 || !candidate[base] || offsets[base].len() == 0 || !lent[base] || f.scattered.contains(slot) {
+            next
+        }
+        f.scattered.push(slot)
+    }
     // Rewrite the accesses in the order they were recorded; lent storage
     // gets its fields back around each loan.
     cursor := [Int]{}
@@ -542,4 +552,39 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         }
     }
     true
+}
+
+// rec(): a 16-byte frame record, its address bound to the named `items`,
+// one field stored and loaded back through it. Lent to a Drop (with
+// `promote`), the storage stays for the loan with its field in a slot, so
+// the address and its alias are scattered (IRFunction.scattered): no
+// variable is located in its stale bytes. Not lent, the storage goes and
+// nothing is scattered.
+#Test("Lent storage split into fields leaves its address and aliases scattered") {
+    cases: [Bool]{true, false}
+    loop lent in cases {
+        m := ir_module_new()
+        word: ir_word_row(m)
+        f := ir_function_new("rec", "test:rec.jet.rec", "", "rec.jet", 1)
+        base: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        items: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "items"), 2)
+        v: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.StackAddress, base, 16, -1, -1, 1)
+        _ := ir_emit(f, IROp.Move, items, base, -1, -1, 2)
+        _ := ir_emit(f, IROp.Const, v, 7, -1, -1, 2)
+        _ := ir_emit(f, IROp.Store, -1, items, 0, v, 2)
+        _ := ir_emit(f, IROp.Load, got, items, 0, -1, 3)
+        if lent -> _ := ir_emit(f, IROp.Drop, -1, base, -1, -1, 4)
+        _ := ir_emit(f, IROp.Return, -1, got, -1, -1, 4)
+        assert_eq(ir_opt_scalar_replace(m, f, true), 1)
+        if lent {
+            assert(f.scattered.contains(base), "the lent storage's address")
+            assert(f.scattered.contains(items), "its alias, the named items")
+            assert_eq(f.scattered.len(), 2)
+        } else {
+            assert_eq(f.scattered.len(), 0)
+            loop op in f.op -> assert(op != .StackAddress, "storage with no loan goes")
+        }
+    }
 }
