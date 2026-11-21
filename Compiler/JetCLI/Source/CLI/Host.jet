@@ -1333,9 +1333,14 @@ jet_cli_symbols_store: fn(root: String) -> String Never! { "{root}/.jet/symbols/
 // package at `root`'s symbol store, `<store>/<first two hex digits of the
 // build id>/<the rest>.debug`, the layout debuggers and profilers search.
 // The side file moves there, and its name beside the image, which the
-// image's `.gnu_debuglink` gives, becomes a link to it: a debugger handed
-// the image follows the debug link into the store. Across file systems
-// (an output directory on another disk) the store gets the bytes instead.
+// image's `.gnu_debuglink` gives, becomes a hard link to it, a second name
+// of the same file: a debugger handed the image reads it there, and no
+// source walk of the package refuses it as it refuses a symbolic link
+// (Request.jet jet_cli_walk_held_sources). The next build removes that
+// name before it writes its own (jet_cli_native_write), so the store's file
+// is never written through it. Across file systems (an output directory on
+// another disk) the store gets the bytes and the side file keeps them, and
+// a file system with no hard links gets the bytes in both.
 jet_cli_symbols_file: fn(root: String, executable: X64Executable, path: String) -[FS]> JetCLINativeFailure? Never! {
     if executable.build_id.len() == 0 -> return None
     id: sha256_hex_bytes(executable.build_id)
@@ -1345,8 +1350,11 @@ jet_cli_symbols_file: fn(root: String, executable: X64Executable, path: String) 
     side: "{path}.debug"
     if cli_files.rename(side, file) == .Err(_) {
         cli_files.write_bytes(file, executable.debug_file) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {file}: {err}"})
+        return None
     }
-    cli_files.symlink(file, side, replace: true) ?? return Val(JetCLINativeFailure.Write{what: "couldn't link {side} to {file}: {err}"})
+    if cli_files.hard_link(file, side) == .Err(_) {
+        cli_files.write_bytes(side, executable.debug_file) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {side}: {err}"})
+    }
     None
 }
 

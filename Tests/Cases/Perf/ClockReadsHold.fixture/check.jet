@@ -1,0 +1,33 @@
+// Checks the sampler's own time in a trace of main.jet against the CPU time
+// it sampled. The handlers and the ring drains time themselves on their
+// thread's CPU clock (JetRuntime PerfSamples.jet perf_samples_charge), the
+// drains outside the handler on words no handler writes; a read a sample
+// tore is off by up to the machine's uptime, and its charge with it. The
+// sampler's time is part of its threads' CPU time, so it is within the CPU
+// time sampled. `jet run check.jet -- TRACE` prints that it is.
+use {
+    files: core.files
+    process: core.process
+}
+
+// The integer after `key` in `text`; None when `key` is absent.
+number_after: fn(text: String, key: String) -> Int? {
+    parts: text.split(key).to_list()
+    if parts.len() < 2 -> return None
+    Val(Int.parse(parts[1].split(",").to_list()[0].split(" ").to_list()[0]) ?? return None)
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 1 -> panic("usage: check.jet -- TRACE")
+    trace: files.read(args[args.len() - 1]) ?? panic("cannot read {args[args.len() - 1]}")
+    if !trace.contains("\"overhead_status\":\"measured\"") {
+        panic("the trace does not measure the sampler's time")
+    }
+    took: number_after(trace, "\"overhead_ns\":") ?? panic("the trace has no overhead_ns")
+    cpu: number_after(trace, "% of the ") ?? panic("the overhead's reason gives no CPU time sampled")
+    if took < 0 || took > cpu * 1000 {
+        panic("the sampler took {took} ns, outside the {cpu * 1000} ns of CPU time sampled")
+    }
+    print("the sampler's time is within the CPU time it sampled")
+}

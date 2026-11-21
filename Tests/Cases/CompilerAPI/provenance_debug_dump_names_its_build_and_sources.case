@@ -1,0 +1,42 @@
+# A dump names what it was built from. `jet debug` of a dump gives the
+# build (the hash of the image the run ran) and each source the build was
+# compiled from, with the sha256 of the bytes it read, and the stop shows
+# its source line. Once the source changes, the dump still opens at its
+# stop, but it says the source changed since that build, gives the sha256
+# now, and shows none of the new lines as the run's. An image that is not
+# the dump's build is refused, naming both builds.
+# The fixture must stay in jet fmt form; changed.src keeps its line count.
+requires: os-name:linux
+fixture: ProvenanceDebug.fixture
+env: NO_COLOR=1
+step: jet run --observe crash.jet
+exit: nonzero
+stderr: ~ "count too high: 21" # the panic's own report
+stderr: ~ "dump written: " # and where its dump went
+capture: source_sha = sha256 file crash.jet
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+capture: image = sole-entry .jet/dumps ext = "image"
+step: jet debug {cap:dump}
+stdin: null
+exit: 0
+stdout: ~ "\nBuild: " # the image's identity
+stdout: ~ "\nSource: crash.jet, sha256 {cap:source_sha}\n" # the source it was built from, by the digest of its bytes
+stdout: ~ "Stopped  crash.jet:3  in check()" # the stop
+stdout: ~ "3 |     if total > 20 -> panic(\"count too high: " # and its line, which is the run's
+capture: build = text stdout.after_first("Build: ").split(",", 0)
+copy: changed.src crash.jet
+capture: changed_sha = sha256 file crash.jet
+step: jet debug {cap:dump}
+stdin: null
+exit: 0
+stdout: ~ "Build: {cap:build}," # the same build
+stdout: ~ "\nSource: crash.jet, sha256 {cap:source_sha}; it has changed since this build (sha256 {cap:changed_sha} now), so its lines are not shown\n" # the changed source is named as changed
+stdout: ~ "Stopped  crash.jet:3  in check()" # the stop is still the run's
+stdout: !~ "far too high" # no line of the changed source is shown as the run's
+poke: {cap:image} at mid xor "01"
+step: jet debug {cap:dump}
+stdin: null
+exit: 1
+stdout: = "" # nothing of the stop is shown from an image that is not its build's
+stderr: ~ "names build {cap:build}: it is another build's image, or a changed one" # the foreign image is refused, naming the dump's build
+stderr: !~ "holds build {cap:build}" # and the build its bytes hash to, which is another

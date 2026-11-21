@@ -120,6 +120,30 @@ or the perf event below where the kernel allows one, so threads that run at
 once each keep their samples, and records the program counter each sample
 interrupted with the call site of each caller, each handler or drain in a
 record buffer of its own so no sample loses its stack to another thread's.
+The samples file, `jet perf run`'s and an attach's zones window's, begins
+with the magic `JETSAMPL` and the version of its records, 2; the session
+refuses a file of another version, or one an older runtime wrote with no
+header, naming its version, so one reader reads one format. A record buffer
+writes its records out 8 KiB at a time. As it writes them, a CPU-time
+sample whose outermost call sites repeat, word for word, two or more of
+those of the CPU-time sample just before it in the same write is kept as a
+cite of that sample: its own program counter, its call sites inside those
+it shares, one cite word holding how many it shares and how far back that
+sample's record is, then its time, task and count word. The sample before
+may itself be a cite, so a recursion that deepens or a branch that
+alternates under one caller keeps only the call sites that changed. The
+comparison runs once per record as a record buffer is written out, by the
+handler whose record would not fit, at exit or as a zones window closes,
+not as each sample is recorded. The session refuses, naming the record, a
+file whose cite reaches past one write, to anything but the CPU-time sample
+just before it, or for more call sites than that sample holds. Each
+CPU-time sample's record ends
+in its time, its task and its count word: the serial of the perf event
+sampler that took it and that event's count as the kernel took it
+(`PERF_SAMPLE_READ`), 0 under the timer; each sampler's end, as its thread
+ends or at exit, is a record of its serial and its final count. The flight
+recorder's ring, which takes each record as it is made, holds no cite, and
+`jet debug` names one in a dump's ring a corrupt record.
 A frame without a frame pointer (code before a function's prologue sets one,
 a compiler-emitted helper such as the stop poll, a frameless runtime
 routine, a C library function) is stepped out of by the image's own call
@@ -174,14 +198,16 @@ image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
 the session kept, and counts any sample in Jet code that kept no stack.
-Under the task clock that count is the task clocks' own, read from each
-thread's sampler as it closes and from every live one at exit: the CPU time
-each thread ran while sampled, over the period, so the runtime's start and
-exit outside the samplers give none; the kernel's share of it takes no
-sample (`it kept 392 of the 393 samples that 49 ms of CPU time on the
-threads' task clocks while sampled gives, of which time in the kernel takes
-none`). Under another sampler it is the process's CPU time over the
-sampling interval.
+Under the task clock that count is the task clocks' own, from each
+sampler's count at its end: the CPU time each thread ran while sampled,
+over the period, so the runtime's start and exit outside the samplers give
+none. A period end that falls in kernel mode takes no sample, and the
+samples' own counts find each one: an end that no sample's count rounds
+to, before a thread's first sample, between two of its samples or after its
+last (`it kept 392 of the 400 samples that 50 ms of CPU time on the threads'
+task clocks while sampled gives; 8 of their periods ended in kernel mode,
+where the task clock takes no sample`). Under another sampler it is the
+process's CPU time over the sampling interval.
 The
 profile's overhead is `measured`: `overhead_ns` is the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
@@ -942,6 +968,8 @@ program started without `--observe` does, is sampled from outside: `jet perf
 attach <pid>` with no `--source` asks the kernel to sample the CPU time of
 each thread of it and of the processes it started, and theirs (a `jet
 check` runs its compile-time work in one), every millisecond for a second,
+or for the window `--for=<duration>` gives (`--for=20s`; whole `ms` or `s`,
+at most 10 minutes, D-PERF-ATTACH-WINDOW1),
 each sample its frame-pointer call chain, and names the frames by the
 functions of the ELF images of each process's executable: its own, and
 each one it holds as a part, as a jet holds the runtime image its
@@ -971,9 +999,15 @@ depth first and the heaviest call first). A hung `jet check` or `jet debug`
 started plainly is profiled
 this way. When the kernel won't sample it (another user's process, or
 `perf_event_paranoid` above 2), the attach is E2124 with the flag to start
-it with.
+it with. The window ends early when the process exits: the section's
+`exited_ms` says how far into it, and the view prints `exited 420 ms into
+the 3000 ms window` after the `functions` line. `--for=` reads nothing a
+program publishes, so with `--source`, or on a devserver browser session,
+it is refused (`Jet.UnknownFlag`, exit 2); `--zones=` is that path's
+window.
 Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
-example.
+example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
+attaches to a busy `jet check` for 3 seconds.
 
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the
@@ -1117,9 +1151,15 @@ naming the build; so is one whose image file's bytes hash to another build
 (another build's image, or a changed copy), naming both builds. It shows
 `Dump of process <pid>, <n> flight events`, `Image: <n> bytes, with <n>
 bytes of records`, `Build: <build>, its image in <program>-<build>.image
-beside the dump`, then `Memory: <n> bytes held, within
-the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
-frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
+beside the dump`, a `Source: <path>, sha256 <hex>` line for each source the
+build was compiled from (by path from the entry root, sorted, with the
+sha256 of the bytes the build read, as the image records them; a file that
+no longer holds those bytes adds `; it has changed since this build (sha256
+<hex> now), so its lines are not shown`, or `; it is gone, so its lines are
+not shown`, and the Canvas refuses the dump for such an entry source), then
+`Memory: <n> bytes held, within the 33554432-byte budget; <n> bytes cut off
+past it`, then the innermost Jet frame of the stop (`Stopped  main.jet:9  in
+check()`), its source line (none when its source changed) and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
 live session reads one, with typed locals; a `Secret` shows as
 `<redacted>`, a value whose bytes the dump cut off as `<cut off>`, and a
@@ -1339,11 +1379,42 @@ D-DBG-VERBS1=A names the commands:
   ``No function `NAME` `` and `No code on FILE:LINE`.
   Tests/Cases/Debug/disassemble_marks_stop_and_breakpoint.case is the
   worked example.
+- `symbols` lists the image's symbol table, one row a symbol in address
+  order (then by name): its address in hexadecimal in a column of 20, its
+  size in bytes in a column of 10, its kind (`function`, `object`,
+  `thread`, `label` or `other`) in a column of 10, then its name.
+  `segments` lists the image's program headers in file order: its type
+  (`LOAD`, `GNU_STACK`, …) in a column of 13, then `offset`, `address`,
+  `file` and `memory` sizes, `flags` (`r-x`) and `align`, each named. Both
+  read the image's file (D-DEBUG-LISTING1): a stripped image's symbols come
+  from the side file its `.gnu_debuglink` names, and an image with neither
+  answers `` `IMAGE` keeps no symbol table ``. With that side file gone,
+  `segments` still lists and `symbols` says where the file should be.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
   thread.
 - `help` (`h`) lists the commands and `quit` (`q`) ends the session.
+
+`--do 'COMMAND'` (repeatable) runs console commands in order, then exits,
+with no prompt (D-DEBUG-LISTING1). Before anything starts, `jet debug
+IMAGE` reads the image's file, which answers `symbols`, `segments`,
+`disas NAME` and `help` with nothing run, even for an image that keeps no
+Jet debug information; plain `disas` there lists all the image's code in
+its executable segments, by function and symbol, or each segment whole as
+`segment 0`, `segment 1` when the image keeps no symbols. The first
+command that needs the program running starts it as the console does,
+shows its first stop, and runs the rest there. The end of the commands or
+`quit` ends the program (an attached one is let go on); a command left
+once the program has ended is refused with a line of its own. A
+`.jetdump` runs them against the dump, with no banner. It exits 0, or 1
+when the console refused a command (one it doesn't know, or a run-control
+command on a dump) or the program ended with a status other than 0 or a
+signal. `--do` is refused with `--dap` (E2102).
+`jet debug .jet/build/main --do segments --do 'disas main.run__entry'`
+checks a build's machine code with no other tool.
+Tests/Cases/Debug/do_runs_commands_against_the_image_file_then_the_running_program.case
+is the worked example.
 
 Every thread of the program is traced. A stop stops them all, so `tasks`
 and `print` see the whole program still. `continue` runs them all again,
@@ -1361,6 +1432,15 @@ selected, and `through …` names the runtime routines between it and the
 exit, outermost first. `bt`, `locals` and `print` read the stack there,
 and the next run command lets the program end. `jet debug --dap` reports
 the pause as an `exception` stop described by its status.
+
+A program whose allocator counts (`allocator: mem.Counting.over(...)` in its
+package) has its totals read as it exits, whatever its status, and its end
+report names them ahead of `Program finished`: `Allocator: counting, 82689
+allocations, high water 147240 bytes`, the allocations made and the most
+bytes live at once. The debugger reads them from the runtime's allocator
+state, which the image exports as `jet_rt_alloc_root`
+(`Compiler/JetRuntime/Source/Alloc.jet`). A program under the system
+allocator ends without the line.
 
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way

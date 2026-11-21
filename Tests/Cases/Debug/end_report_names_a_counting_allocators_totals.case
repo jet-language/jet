@@ -1,0 +1,40 @@
+# jet debug reads a counting program allocator's totals as the program
+# exits, its memory still there, whatever its exit status, and its end report
+# names them ahead of `Program finished`: the allocations made and the most
+# bytes live at once. An -O2 image is read as the read_into memory check
+# reads it, with no other debugger; a program under the system allocator
+# shows no such line.
+fixture: EndReportCountingAllocator.fixture
+env: NO_COLOR=1
+step: jet build -O2 main.jet
+cwd: counted
+exit: 0
+step: jet debug {work}/counted/.jet/build/main
+cwd: counted
+stdin: end_report_names_a_counting_allocators_totals.stdin
+exit: 0
+stdout+stderr: ~ "words: 1000\n" # the program ran to its end
+stdout+stderr: ~ "Allocator: counting, " # the end report names the counting allocator
+stdout+stderr: ~ " allocations, high water " # its allocations and its high water
+stdout+stderr: ~ " bytes\nProgram finished\n" # just ahead of the end line
+stdout+stderr: !~ "Allocator: counting, 0 allocations" # the thousand strings were counted
+step: jet debug {work}/counted/.jet/build/main -- stop
+cwd: counted
+stdin: end_report_names_a_counting_allocators_totals.stop.stdin
+exit: 0 # the program's own status is reported; the session ends cleanly
+stdout+stderr: ~ "Program exiting with status 70" # a stop pauses the program as it ends
+stdout+stderr: ~ " bytes\nProgram finished with exit status 70\n" # and its end report names the totals too
+step: jet debug main.jet
+cwd: counted
+stdin: end_report_names_a_counting_allocators_totals.stdin
+exit: 0
+stdout+stderr: ~ " bytes\nProgram finished\n" # a dev build of the same package reports them alike
+step: jet build -O2 main.jet
+cwd: plain
+exit: 0
+step: jet debug {work}/plain/.jet/build/main
+cwd: plain
+stdin: end_report_names_a_counting_allocators_totals.stdin
+exit: 0
+stdout+stderr: ~ "words: 1000\nProgram finished\n" # the system allocator adds no line
+stdout+stderr: !~ "Allocator:" # anywhere in the session

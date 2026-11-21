@@ -1,21 +1,24 @@
-# hot.sh PLAIN ZONED: whether ZONED's hot code (its first read+execute load
-# segment) exceeds PLAIN's by no more than its zone sites' stubs, and up to
-# 15 bytes a site of the site itself and the padding that keeps a grown
-# function's successors aligned. ZONED names its sites in its
-# `jet.zone_sites` part note (JetBackend Image/StaticLink.jet
-# link_zone_write): past the note's 16-byte head and the 16-byte name, the
-# site count, then per site a rel32 from the field's end to the site and a
-# zero word. A site, while zones are off, is a `test eax, imm32` (a9) over
-# the rel32 of the jump to its stub; the stub ends in the first jump back
-# to the instruction after the site, read from the image's bytes (a jmp
-# rel32, e9, or rel8, eb): a release image keeps no section headers, so a
-# disassembly would show none of its code.
+# hot.sh JET PLAIN ZONED: whether ZONED's hot code (its first read+execute
+# load segment) exceeds PLAIN's by no more than its zone sites' stubs, and
+# up to 15 bytes a site of the site itself and the padding that keeps a
+# grown function's successors aligned. The segments are read with
+# `JET debug IMAGE --do segments`, one row a program header: its type, then
+# `offset`, `address` (hexadecimal), `file` and `memory` (bytes) and
+# `flags`. ZONED names its sites in its `jet.zone_sites` part note (JetBackend
+# Image/StaticLink.jet link_zone_write): past the note's 16-byte head and the
+# 16-byte name, the site count, then per site a rel32 from the field's end to
+# the site and a zero word. A site, while zones are off, is a `test eax,
+# imm32` (a9) over the rel32 of the jump to its stub; the stub ends in the
+# first jump back to the instruction after the site, read from the image's
+# bytes (a jmp rel32, e9, or rel8, eb).
+jet=$1
+shift
 hot() {
-    objdump -p "$1" | awk '/LOAD/ { getline; if ($6 == "r-x") { print $2; exit } }'
+    "$jet" debug "$1" --do segments | awk '$1 == "LOAD" && $11 == "r-x" { print $7; exit }'
 }
 plain=$(($(hot "$1")))
 zoned=$(($(hot "$2")))
-objdump -p "$2" > zoned.headers
+"$jet" debug "$2" --do segments > zoned.headers
 od -An -v -tu1 "$2" > zoned.bytes
 spans=$(awk '
 function hex(s,    i, v) {
@@ -41,8 +44,7 @@ FILENAME == ARGV[1] {
         kind[rows] = $1
         off[rows] = hex($3)
         vaddr[rows] = hex($5)
-        getline
-        size[rows] = hex($2)
+        size[rows] = $7
     }
     next
 }

@@ -1,7 +1,22 @@
 #!/bin/sh
-# Stand-in for `jet build -O2 --quiet --output-dir=OUT main.jet`:
-# OUT/main is a program that prints the pair's expected output and, on
-# stderr, its read count, as each arm of the pair does.
+# Stand-in for two jet commands.
+# `jet build -O2 --quiet --output-dir=OUT main.jet`: OUT/main is a program
+# that prints the pair's expected output and, on stderr, its read count, as
+# each arm of the pair does.
+# `jet debug BINARY` given `continue` and `quit`: runs BINARY with its output
+# in the session's, then ends the report with the counting policy's facts,
+# fixed per arm (the counted surface build allocates less than the plain one).
+if [ "$1" = debug ]; then
+  binary=$2
+  "$binary" 2>&1 || exit 3
+  case $binary in
+    */surface-counted/*) echo "Allocator: counting, 49841 allocations, high water 145240 bytes" ;;
+    */plain-counted/*) echo "Allocator: counting, 82689 allocations, high water 147240 bytes" ;;
+    *) exit 4 ;;
+  esac
+  echo "Program finished"
+  exit 0
+fi
 for arg in "$@"; do
   case $arg in
     --output-dir=*) out=${arg#--output-dir=} ;;

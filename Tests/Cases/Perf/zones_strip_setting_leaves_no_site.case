@@ -10,11 +10,10 @@ exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "total 166\n"
-when tool objdump
-step: objdump -d .jet/build/main
+step: jet debug .jet/build/main --do disas
 exit: 0
-stdout: !~ "<jet_perf_zone_open>" # no zone site calls the routine
-end when
+stdout: ~ "<jet_rt_host_main_arguments>" # the listing names the routines the code calls,
+stdout: !~ "<jet_perf_zone_open>" # and no zone site calls the routine
 step: jet perf run --zones=strip main.jet --out strip.jettrace
 exit: 0
 stdout: = "total 166\n"

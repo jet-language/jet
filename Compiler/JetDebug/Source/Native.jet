@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_hex: core.encoding.hex
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -536,6 +536,12 @@ NativeSession: struct {
     // The address of the runtime's task registry root (0: the program has
     // none, as it starts no task).
     observe_root: Int,
+    // The address of the runtime allocator's root (X64_ALLOC_ROOT_SYMBOL;
+    // 0: the image exports none), and the end report's line of a counting
+    // program allocator, read as the program exits (allocator_facts; "" for
+    // none yet, or a system allocator).
+    alloc_root: Int{0},
+    allocator: String{""},
     breakpoints: [NativeBreakpoint],
     // What each breakpoint with a condition, a log message or a console
     // listing does when hit, by number; one without stops.
@@ -682,7 +688,7 @@ NativeSession: struct {
         codes: native_elf_codes(elf, ".text")
         openings: native_openings(image, codes)
         text: native_eval_reach(codes)
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes), syscall: text.syscall, text_end: text.end, root_stop: native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0})
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, alloc_root: native_elf_symbol(elf, X64_ALLOC_ROOT_SYMBOL) ?? 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0, replay_start: native_elf_symbol(elf, NATIVE_REPLAY_START_SYMBOL) != None, program_entry: native_image_entry(image, codes), syscall: text.syscall, text_end: text.end, root_stop: native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (a base name or a path,
@@ -1994,6 +2000,7 @@ NativeSession: struct {
         // (stopping_exit).
         self.exits = x64_trace_follow_exits(self.trace, self.trace.pid, kill: true)
         self.ending = false
+        self.allocator = ""
         if self.root_stop != 0 && !self.trap(self.root_stop) {
             return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(self.root_stop)}"})
         }
@@ -2038,6 +2045,7 @@ NativeSession: struct {
         self.sites = [Int:Int]{}
         self.forget_placed()
         self.watches = [NativeWatch]{}
+        self.allocator = ""
         self.threads = [NativeThread]{}
         // A thread may start while the others are taken: the threads are
         // listed again until no new one shows.
@@ -2098,6 +2106,7 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(err)
         self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
+        self.alloc_root = native_elf_symbol(elf, X64_ALLOC_ROOT_SYMBOL) ?? 0
         self.root_stop = native_elf_symbol(elf, NATIVE_ROOT_STOP_SYMBOL) ?? 0
         codes: native_elf_codes(elf, ".text")
         self.openings = native_openings(image, codes)
@@ -2517,7 +2526,7 @@ NativeSession: struct {
             "rs" | "reverse-step" | "rn" | "reverse-next" | "rf" | "reverse-finish" | "rc" | "reverse-continue" -> {
                 refusal: self.reverse_refusal()
                 if refusal != "" {
-                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
                 }
                 short: if word == {
                     "rs" | "reverse-step" -> "s"
@@ -2535,7 +2544,7 @@ NativeSession: struct {
             "jump" | "back" -> {
                 refusal: self.replay_refusal("`{word}`")
                 if refusal != "" {
-                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
                 }
                 latest: self.latest_event()
                 event := -1
@@ -2561,7 +2570,10 @@ NativeSession: struct {
             }
             "events" -> {
                 refusal: self.replay_refusal("`events`")
-                text = if refusal != "" -> native_debug_refused(refusal) else -> self.events_text()
+                if refusal != "" {
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
+                }
+                text = self.events_text()
             }
             "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
             "log" -> text = self.log_command(operand, file) ?? return Err(err)
@@ -2600,10 +2612,11 @@ NativeSession: struct {
             "disassemble" | "disas" -> {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)
             }
+            "symbols" | "segments" -> text = native_image_listing(self.binary, word) ?? return Err(err)
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}"
+            else -> return Ok(NativeDebugStep{text: "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}", stop: stop, refused: true})
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }
@@ -3448,7 +3461,7 @@ NativeSession: struct {
         self.notes = ""
         if stop.kind == {
             .Exited -> {
-                text = "{text}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
+                text = "{text}{if self.allocator != "" -> "{self.allocator}\n" else -> ""}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
             }
             .Signaled -> { text = "{text}Program stopped by {stop.reason}\n" }
             .Paused -> {
@@ -3820,6 +3833,7 @@ NativeSession: struct {
             // logpoints logged read before it ends.
             if (status >> 16) == X64_TRACE_EVENT_EXIT {
                 self.threads[at].exiting = true
+                self.allocator_facts(stop.thread)
                 exiting: self.stopping_exit(stop.thread)
                 if exiting > 0 || self.clock != 0 {
                     if self.drain_halted() == {
@@ -4122,6 +4136,35 @@ NativeSession: struct {
         }
         code: (status >> 8) & 0xff
         if native_debug_stopping_status(code) -> code else -> 0
+    }
+
+    // The end report's line of the program allocator, read once as thread
+    // `id` stops in the program's exit_group, its memory still there: when
+    // the allocator counts, its allocations and high water from the state
+    // page the runtime's alloc_root points at (JetRuntime
+    // Alloc.jet: mode144, 1 counting; allocations160; high-water184). A
+    // system allocator, or an image without the root, adds no line.
+    allocator_facts: fn(&self, id: Int) {
+        if self.alloc_root == 0 || self.allocator != "" {
+            return
+        }
+        current: self.trace.thread
+        self.trace.thread = id
+        registers: x64_trace_registers(self.trace) ?? [Int]{}
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        self.trace.thread = current
+        if registers.len() == 0 || registers[X64_TRACE_ORIG_RAX] != NATIVE_DEBUG_EXIT_GROUP {
+            return
+        }
+        root: native_debug_read(memory, self.alloc_root, 8, 1) ?? return
+        if root[0] == 0 {
+            return
+        }
+        words: native_debug_read(memory, root[0] + NATIVE_ALLOC_MODE, 8, NATIVE_ALLOC_WORDS) ?? return
+        if words[0] != 1 {
+            return
+        }
+        self.allocator = "Allocator: counting, {words[NATIVE_ALLOC_ALLOCATIONS]} allocations, high water {words[NATIVE_ALLOC_HIGH_WATER]} bytes"
     }
 
     // Thread `id`, stopped by a trap byte it ran, back on that byte; by a
@@ -5585,6 +5628,18 @@ NATIVE_DEBUG_TRAP: 0xcc
 // reads and writes through in one piece rather than two.
 NATIVE_DEBUG_PATCH_GAP: 4096
 
+// The program allocator's words on the runtime's allocator state page
+// (JetRuntime Alloc.jet: mode144, cap152, allocations160, requested168,
+// live176, high-water184): the offset of the first, how many are read from
+// it, and the index of allocations and high water among them.
+NATIVE_ALLOC_MODE: 144
+
+NATIVE_ALLOC_WORDS: 6
+
+NATIVE_ALLOC_ALLOCATIONS: 2
+
+NATIVE_ALLOC_HIGH_WATER: 5
+
 NATIVE_DEBUG_SIGTRAP: 5
 
 // The CPU's debug address registers (DR0 to DR3) a watch's spans take.
@@ -6293,7 +6348,7 @@ native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
@@ -6353,14 +6408,16 @@ NATIVE_DEBUG_RED_ZONE: 128
 // How deep a readout follows a value's members and elements.
 NATIVE_DEBUG_SHOWN_DEPTH: 4
 
-// What one console command printed, where it left the program, and the
-// move it made the program take: the short word of its run (`s`, `n`, `f`,
+// What one console command printed, where it left the program, the move
+// it made the program take: the short word of its run (`s`, `n`, `f`,
 // `c`, a reverse one's `rs`, `rn`, `rf`, `rc`, or `jump`), "" when the
-// program didn't run.
+// program didn't run; and whether the console refused the command (one it
+// doesn't know, or a replay's alone), after which `jet debug --do` exits 1.
 NativeDebugStep: struct {
     text: String,
     stop: NativeStop,
     moved: String{""},
+    refused: Bool{false},
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {

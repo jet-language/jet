@@ -11,6 +11,19 @@ step: jet perf attach 4242 --lens=alloc
 exit: 2
 stdout: = ""
 stderr: = ../../CLI/perf_attach_alloc_needs_source.txt
+step: jet perf attach 4242 --for=3s --source live.jet --out timed.jettrace
+exit: 2
+stdout: = ""
+stderr: ~ "Error: Jet.UnknownFlag: `--for=` sets how long jet samples a process from outside, and `--source` reads what the program publishes instead" # a window for the outside sampler, on a program read by what it publishes
+stderr: ~ "Fix: Attach with `--zones=<duration>` for a window on what it publishes, or drop `--source` to sample it from outside" # names that path's window
+file: timed.jettrace absent # refused before it traced anything
+step: jet perf attach 4242 --for=601s
+exit: 2
+stderr: ~ "Error: Jet.UnknownFlag: `--for=601s` isn't a window jet understands" # longer than 10 minutes
+stderr: ~ "at most 10 minutes, as `--for=500ms` or `--for=20s`" # and the fix says the bound and the form
+step: jet perf attach 4242 --for=3
+exit: 2
+stderr: ~ "Error: Jet.UnknownFlag: `--for=3` isn't a window jet understands" # a duration names its unit
 step: jet perf attach 4294967295 --source live.jet --out gone.jettrace
 exit: 1
 stdout: = ""

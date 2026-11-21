@@ -17,23 +17,20 @@ exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "part0,part1,part2\n"
-when tool objdump
-step: objdump -t .jet/build/main
+step: jet debug .jet/build/main --do symbols
 exit: 0
-stdout: !~ "jet_rt_alloc_check_init" # the unchecked image links none of the checked allocator: not its start-up hook,
+stdout: ~ "jet_rt_alloc_check_take_code" # the listing holds the code word every image keeps,
+stdout: !~ "jet_rt_alloc_check_init" # but the unchecked image links none of the checked allocator: not its start-up hook,
 stdout: !~ "jet_rt_alloc_check_sweep" # its exit sweep,
 stdout: !~ "unit.alloc_check_fail" # or its failure report
-end when
 step: jet build --checked-alloc main.jet
 exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "part0,part1,part2\n"
-when tool objdump
-step: objdump -t .jet/build/main
+step: jet debug .jet/build/main --do symbols
 exit: 0
 stdout: ~ "jet_rt_alloc_check_init" # the checked image links its start-up hook
-end when
 step: jet run --checked-alloc main.jet
 exit: 0
 stdout: = "part0,part1,part2\n"

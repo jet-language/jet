@@ -1,0 +1,78 @@
+# Claim: `jet debug --do COMMAND` (repeatable) runs console commands in
+# order, then exits, with no prompt. A built image's own file answers
+# `symbols`, `segments`, `disas NAME` and plain `disas` before anything
+# starts, so the program never runs: no stop, no output. A command
+# that needs the program running starts it, its first stop shown, and the
+# rest run there; the end of the commands ends the program. A command the
+# console refuses, or one left once the program has ended, exits 1. An image
+# with no Jet debug information still lists from its file, by its symbols; a
+# split image's symbols come from its side file, and once that is gone its
+# segments still list while `symbols` says why it can't. `--do` with `--dap`
+# and a bare `--do` are refused. No other debugger or disassembler is on
+# PATH. The fixture's line 3 is fib's sum, and fib(10) is 55.
+fixture: DisassembleMarksStopAndBreakpoint.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --do symbols --do segments --do 'disas fib' --do 'disas nosuch'
+exit: 0
+stdout: ~ "  function  prog.fib\n" # a symbol row: address, size, kind, name
+stdout: ~ "  function  main\n" # the image's own entry too
+stdout: ~ "LOAD         offset 0x" # a program header row, its fields named
+stdout: ~ "flags r-x align " # the executable segment
+stdout: ~ "fib  prog.jet:1-3  -O0  0x" # a function by name, read from the file, under its lines
+stdout: ~ "prog.jet:3   fib(n - 1) + fib(n - 2)\n" # with its source line's header
+stdout: ~ "No function `nosuch`\n" # a name with no code
+stdout: !~ "(Jet)" # no prompt
+stdout: !~ "Breakpoint hit" # nothing started
+stdout: !~ "Program finished" # nor ran
+step: jet debug {work}/.jet/build/prog --do disas
+exit: 0
+stdout: ~ "fib  prog.jet:1-3  -O0  0x" # plain `disas` before the start lists every function in the code
+stdout: ~ "prog.jet:6   run: fn() " # the entry's too
+stdout: !~ "Breakpoint hit" # still nothing started
+step: jet debug prog.jet --break prog.jet:3 --do bt --do 'disas --bytes prog.jet:3' --do segments
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in fib()" # `bt` needs the program: it starts and stops at the breakpoint
+stdout: ~ "#0  fib()" # then `bt` reads the stop
+stdout: ~ "fib  prog.jet:3  -O0  0x" # one line's rows at the stop
+stdout: ~ " e8 " # with their bytes: a call's opcode
+stdout: ~ "flags r-x align " # `segments` at a stop
+stdout: !~ "55\n" # the end of the commands ended the program before it printed
+stdout: !~ "Program finished" # it never ran to its end
+step: jet debug prog.jet --do continue --do bt
+exit: 1
+stdout: ~ "Breakpoint hit  prog.jet:6  in run()" # `continue` starts the program at its entry's first line
+stdout: ~ "55\n" # then runs it on
+stdout: ~ "Program finished" # to its end
+stdout: ~ "`bt` not run: the program has ended\n" # a command left once it has ended is refused
+step: jet debug {work}/.jet/build/prog --do nosuch
+exit: 1
+stdout: ~ "Unknown command `nosuch`." # the console refuses a command it doesn't know
+stdout: !~ "The program doesn't read the console's input" # and has no stdin to say it of
+step: jet debug --dap prog.jet --do bt
+exit: 2
+stderr: ~ "`--do` runs the console's commands, but `--dap` serves the session to an editor" # the adapter takes its commands from the editor
+step: jet debug prog.jet --do=
+exit: 2
+stderr: ~ "`--do` needs a COMMAND" # a bare flag is a usage error
+step: jet build -O0 --debug-info=false prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --do symbols --do 'disas prog.fib'
+exit: 0
+stdout: ~ "  function  prog.fib\n" # an image with no Jet debug information keeps its symbol table
+stdout: ~ "prog.fib  0x" # and lists a function's code by its symbol
+step: jet build -O2 --debug-info=split prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --do symbols --do segments
+exit: 0
+stdout: ~ "  function  prog.fib\n" # the image keeps no symbol table: its side file's are listed
+stdout: ~ "flags r-x align " # and its own segments
+remove: .jet/symbols
+step: jet debug {work}/.jet/build/prog --do segments
+exit: 0
+stdout: ~ "flags r-x align " # with the side file gone, the image's segments still list
+step: jet debug {work}/.jet/build/prog --do symbols
+exit: 1
+stderr: ~ "keeps its DWARF in `prog.debug`, which is not beside it" # and `symbols` says why it can't

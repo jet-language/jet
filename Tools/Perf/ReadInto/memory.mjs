@@ -11,7 +11,7 @@
 // harness's rule that only strictly below plain wins. --write replaces the
 // row's memory_evidence_file; without it the result is printed.
 //
-//   node Tools/Perf/ReadInto/memory.mjs --artifact <jet> --gdb <gdb> [--write]
+//   node Tools/Perf/ReadInto/memory.mjs --artifact <jet> [--write]
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -59,44 +59,25 @@ function build(jet, source, dir, counted) {
   return binary;
 }
 
-function readsOf(stderr) {
-  const match = /reads=(\d+)/.exec(stderr);
-  if (!match) throw new Error(`no reads= line in stderr: ${stderr}`);
+function readsOf(output) {
+  const match = /reads=(\d+)/.exec(output);
+  if (!match) throw new Error(`no reads= line in the program's output: ${output}`);
   return Number(match[1]);
 }
 
-// The counting policy's own facts, read by gdb at exit_group: the program's
-// image keeps no fact export, so the script finds the allocator root through
-// jet_rt_alloc_init's first instruction (`lea <root>(%rip)`) and reads the
-// words Alloc.jet lays out there: mode144, allocations160, high-water184.
-const FACTS_SCRIPT = `import gdb, re
-line = gdb.execute("x/1i jet_rt_alloc_init", to_string=True)
-found = re.search(r"lea\\s+0x[0-9a-f]+\\(%rip\\),%\\w+\\s+# (0x[0-9a-f]+)", line)
-if not found:
-    raise gdb.GdbError("jet_rt_alloc_init does not start with the root lea: " + line)
-memory = gdb.selected_inferior()
-word = lambda at: int.from_bytes(bytes(memory.read_memory(at, 8)), "little", signed=True)
-root = word(int(found.group(1), 16))
-print("ALLOCATOR-FACTS mode=%d allocations=%d high_water=%d" % (word(root + 144), word(root + 160), word(root + 184)))
-`;
+// The counting policy's own facts, from the end report of `jet debug`: the
+// debugger reads the allocator's totals as the program exits and names them
+// ahead of `Program finished`. The program's output, its read count on
+// stderr included, comes in the session's output before them.
+const DEBUG_COMMANDS = "continue\nquit\n";
 
-function counted(gdb, binary, scratch, label) {
-  const errFile = path.join(scratch, `${label}.err`);
-  const script = path.join(scratch, "facts.py");
-  writeFileSync(script, FACTS_SCRIPT);
-  const result = run(gdb, [
-    "-q", "-batch",
-    "-ex", "set pagination off",
-    "-ex", "catch syscall exit_group",
-    "-ex", `run 2>${errFile}`,
-    "-x", script,
-    binary,
-  ]);
-  const facts = /ALLOCATOR-FACTS mode=(\d+) allocations=(\d+) high_water=(\d+)/.exec(result.stdout);
-  if (!facts || facts[1] !== "1") throw new Error(`no counting-policy facts from gdb:\n${result.stdout}${result.stderr}`);
-  const reads = readsOf(readFileSync(errFile, "utf8"));
-  const allocations = Number(facts[2]);
-  return { allocations, reads, allocations_per_read: allocations / reads, peak_live_heap_bytes: Number(facts[3]) };
+function counted(jet, binary) {
+  const result = run(jet, ["debug", binary], { input: DEBUG_COMMANDS, env: { ...process.env, NO_COLOR: "1" } });
+  const facts = /Allocator: counting, (\d+) allocations, high water (\d+) bytes\nProgram finished\n/.exec(result.stdout);
+  if (!facts) throw new Error(`no counting-policy facts from jet debug:\n${result.stdout}${result.stderr}`);
+  const reads = readsOf(result.stdout);
+  const allocations = Number(facts[1]);
+  return { allocations, reads, allocations_per_read: allocations / reads, peak_live_heap_bytes: Number(facts[2]) };
 }
 
 function peakRss(binary, expected) {
@@ -110,7 +91,6 @@ function peakRss(binary, expected) {
 
 function measure(argv) {
   const jet = path.resolve(argument(argv, "--artifact", process.env.JET ?? "jet"));
-  const gdb = argument(argv, "--gdb", "gdb");
   const row = pairRow();
   const scratch = mkdtempSync(path.join(argument(argv, "--scratch", os.tmpdir()), "read-into-memory-"));
   try {
@@ -118,7 +98,7 @@ function measure(argv) {
     const plainBuilds = Object.fromEntries(ARMS.map((arm) => [arm, build(jet, sources[arm], path.join(scratch, arm), false)]));
     const countedBuilds = Object.fromEntries(ARMS.map((arm) => [arm, build(jet, sources[arm], path.join(scratch, `${arm}-counted`), true)]));
     const facts = Object.fromEntries(ARMS.map((arm) => [arm,
-      Array.from({ length: COUNTED_RUNS }, (_value, index) => counted(gdb, countedBuilds[arm], scratch, `${arm}-${index}`))]));
+      Array.from({ length: COUNTED_RUNS }, () => counted(jet, countedBuilds[arm]))]));
     const rss = { surface: [], plain: [] };
     for (let index = 0; index < TRIALS; index += 1) {
       for (const arm of index % 2 === 0 ? ARMS : [...ARMS].reverse()) rss[arm].push(peakRss(plainBuilds[arm], row.expected_output));
@@ -141,8 +121,8 @@ function measure(argv) {
       target: "jet build -O2",
       artifact_sha256: sha256(readFileSync(jet)),
       host: { platform: os.platform(), release: os.release(), arch: os.machine(), cpu_model: os.cpus()[0]?.model ?? null, cpu_count: os.availableParallelism() },
-      generated_command: "node Tools/Perf/ReadInto/memory.mjs --artifact <jet> --gdb <gdb> --write",
-      counting_policy: "mem.Counting.over(mem.Heap, cap: 2.gb) in each arm's package block; facts read at exit_group",
+      generated_command: "node Tools/Perf/ReadInto/memory.mjs --artifact <jet> --write",
+      counting_policy: "mem.Counting.over(mem.Heap, cap: 2.gb) in each arm's package block; facts read by jet debug as the program exits",
       counted_runs: facts,
       rss_runs: TRIALS,
       surface_allocations_per_read: perRead("surface"),

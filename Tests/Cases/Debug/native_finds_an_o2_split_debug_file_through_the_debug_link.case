@@ -1,24 +1,31 @@
 # jet debug's own engine reads an O2 image built with split debug info. The
 # image holds no Jet debug information; its `.gnu_debuglink` names the side
-# file by its name beside the image, which links to the package's symbol
-# store. Given only the image, jet debug follows the link: a breakpoint by Jet
-# file and line resolves and is hit. Once the store is gone the link leads
-# nowhere, and jet debug names the side file it looked for beside the image.
+# file by its name beside the image, a hard link to the package's symbol
+# store's file. Given only the image, jet debug reads the side file beside
+# it: a breakpoint by Jet file and line resolves and is hit. With that name
+# gone it finds the same file in the store by the image's build id; with
+# both gone, it names the side file it looked for beside the image.
 # The fixture is the lldb interop case's.
 fixture: LldbFindsAnO2SplitDebugFileThroughTheDebugLink.fixture
 env: NO_COLOR=1
 step: jet build -O2 --debug-info=split prog.jet
 exit: 0
-file: .jet/build/prog.debug is-symlink # the side file's name beside the image links to the store
+file: .jet/build/prog.debug not-symlink # the side file's name beside the image is no symbolic link
+file: .jet/build/prog.debug is-file # but the store's file by a second name
 step: jet debug {work}/.jet/build/prog --break prog.jet:3
 stdin: native_finds_an_o2_split_debug_file_through_the_debug_link.stdin
 exit: any # `quit` ends the session; only the breakpoint is the subject
-stdout+stderr: ~ "Breakpoint set  prog.jet:3" # the line table came from the store's side file
+stdout+stderr: ~ "Breakpoint set  prog.jet:3" # the line table came from the side file
 stdout+stderr: ~ "Breakpoint hit  prog.jet:3" # and the breakpoint is hit
+remove: .jet/build/prog.debug
+step: jet debug {work}/.jet/build/prog --break prog.jet:3
+stdin: native_finds_an_o2_split_debug_file_through_the_debug_link.stdin
+exit: any # `quit` ends the session; only the breakpoint is the subject
+stdout+stderr: ~ "Breakpoint hit  prog.jet:3" # the store's file, found by build id, is the same file
 remove: .jet/symbols
 step: jet debug {work}/.jet/build/prog --break prog.jet:3
 exit: 1
-stdout+stderr: ~ "Jet.DebuggerUnavailable" # without the store the link leads nowhere
+stdout+stderr: ~ "Jet.DebuggerUnavailable" # with neither name the link leads nowhere
 stdout+stderr: ~ "keeps its DWARF in `prog.debug`, which is not beside it" # and jet debug says why
 step: {work}/.jet/build/prog
 exit: 0

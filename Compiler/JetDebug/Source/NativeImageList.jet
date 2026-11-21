@@ -1,0 +1,341 @@
+// A built image read from its file with nothing run: what `jet debug
+// IMAGE` answers before it starts the program, and the console's `symbols`
+// and `segments` at a stop and in a crash dump.
+// `symbols` lists the image's symbol table, `segments` its program
+// headers, and `disassemble` (NativeListing.jet) its code: plain, every
+// function and routine in its executable segments; with a name or a line,
+// what the console lists at a stop. Symbols come from the image's
+// `.symtab`, or the side debug file its `.gnu_debuglink` names when it
+// keeps none (a release image keeps its symbols there); code comes from its
+// loaded segments, so an image with no section headers still lists. An
+// image with no Jet line table lists its code under its symbols alone.
+use {
+    native_image_files: core.files
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, x64_hex, x64_jetline_find, x64_jetline_text]
+}
+
+// One symbol of a symbol table: its address, its size, what it names
+// (native_image_symbol_kind) and its name.
+NativeImageSymbol: struct {
+    address: Int,
+    size: Int,
+    kind: String,
+    name: String,
+}
+
+// One program header: its type's name, its file offset, its address, its
+// bytes in the file and in memory, its `rwx` flags and its alignment.
+NativeImageSegment: struct {
+    kind: String,
+    offset: Int,
+    address: Int,
+    file: Int,
+    memory: Int,
+    flags: String,
+    align: Int,
+}
+
+// "\x7fELF" read as a little-endian word, and the class byte of a 64-bit
+// image.
+NATIVE_IMAGE_MAGIC: 1179403647
+
+NATIVE_IMAGE_CLASS_64: 2
+
+// The program header type of a loaded segment, and the flag of an
+// executable one.
+NATIVE_IMAGE_LOAD: 1
+
+NATIVE_IMAGE_EXECUTE: 1
+
+// The `.symtab` section type, and the symbol types that name no code or
+// data: a section and a source file.
+NATIVE_IMAGE_SYMTAB: 2
+
+NATIVE_IMAGE_SYMBOL_SECTION: 3
+
+NATIVE_IMAGE_SYMBOL_FILE: 4
+
+// `symbols` or `segments` (`word`) of the image at `binary`, read from its
+// file. Its segments need the image alone; its symbols the side file its
+// `.gnu_debuglink` names when it keeps no `.symtab`, so a side file that
+// is gone is refused for `symbols` only.
+native_image_listing: fn(binary: String, word: String) -[FS.Read]> String NativeDebugError! {
+    elf: native_image_bytes(binary) ?? return Err(err)
+    if word == "segments" {
+        return Ok(native_image_segments_text(binary, native_image_segments(elf)))
+    }
+    side := [U8]?{None}
+    if native_image_side(binary, elf) == {
+        .Ok(found) -> { side = found }
+        .Err(failure) -> return Err(failure)
+    }
+    listed: if side == .Val(apart) -> native_image_symbols(apart) else -> native_image_symbols(elf)
+    Ok(native_image_symbols_text(binary, listed))
+}
+
+// The bytes of the 64-bit ELF image at `binary`.
+native_image_bytes: fn(binary: String) -[FS.Read]> [U8] NativeDebugError! {
+    elf: native_image_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the image `{binary}`: {err}"})
+    if elf.len() < 64 || native_number(elf, 0, 4, X64DebugEncoding.Unsigned) != NATIVE_IMAGE_MAGIC || native_number(elf, 4, 1, X64DebugEncoding.Unsigned) != NATIVE_IMAGE_CLASS_64 {
+        return Err(NativeDebugError{detail: "`{binary}` is not a 64-bit ELF image"})
+    }
+    Ok(elf)
+}
+
+// The side debug file the image `elf` at `binary` keeps its symbols in:
+// the one its `.gnu_debuglink` names when it keeps no `.symtab` of its
+// own; None when it keeps one, or names none.
+native_image_side: fn(binary: String, elf: [U8]) -[FS.Read]> [U8]? NativeDebugError! {
+    if native_elf_header(elf, ".symtab") != None -> return Ok(None)
+    link: native_elf_section(elf, ".gnu_debuglink") ?? return Ok(None)
+    side: native_side_file(binary, elf, link) ?? return Err(err)
+    Ok(Val(side))
+}
+
+// The defined symbols of `elf`'s `.symtab`, in address order then by name:
+// every one but the undefined ones and those naming a section or a file.
+native_image_symbols: fn(elf: [U8]) -> [NativeImageSymbol] Never! {
+    found := [NativeImageSymbol]{}
+    headers: native_dump_word(elf, 40)
+    size: native_number(elf, 58, 2, X64DebugEncoding.Unsigned)
+    count: native_number(elf, 60, 2, X64DebugEncoding.Unsigned)
+    if headers <= 0 || size < 64 -> return found
+    loop k in 0..<count {
+        header: headers + k * size
+        if header + size > elf.len() -> break
+        if native_number(elf, header + 4, 4, X64DebugEncoding.Unsigned) != NATIVE_IMAGE_SYMTAB {
+            next
+        }
+        table: native_dump_word(elf, header + 24)
+        length: native_dump_word(elf, header + 32)
+        link: native_number(elf, header + 40, 4, X64DebugEncoding.Unsigned)
+        if table < 0 || length < 0 || table + length > elf.len() || link >= count -> next
+        names: native_dump_word(elf, headers + link * size + 24)
+        loop s in 0..<length.div_euclid(24) {
+            at: table + s * 24
+            kind: native_number(elf, at + 4, 1, X64DebugEncoding.Unsigned) & 15
+            if native_number(elf, at + 6, 2, X64DebugEncoding.Unsigned) == 0 || kind == NATIVE_IMAGE_SYMBOL_SECTION || kind == NATIVE_IMAGE_SYMBOL_FILE {
+                next
+            }
+            name: x64_jetline_text(elf, names + native_number(elf, at, 4, X64DebugEncoding.Unsigned))
+            if name == "" -> next
+            found.push(NativeImageSymbol{address: native_dump_word(elf, at + 8), size: native_dump_word(elf, at + 16), kind: native_image_symbol_kind(kind), name: name})
+        }
+    }
+    found.sort_by(fn(left: NativeImageSymbol, right: NativeImageSymbol) { (left.address <=> right.address).then(left.name <=> right.name) })
+    found
+}
+
+// What a symbol of ELF type `kind` names.
+native_image_symbol_kind: fn(kind: Int) -> String Never! {
+    if {
+        kind == 0 -> "label"
+        kind == 1 -> "object"
+        kind == 2 || kind == 10 -> "function"
+        kind == 6 -> "thread"
+        else -> "other"
+    }
+}
+
+// One row a symbol: its address, its size in bytes, what it names and its
+// name, as `0x401000  31  function  main`, in columns of 20, 10 and 10.
+native_image_symbols_text: fn(binary: String, symbols: [NativeImageSymbol]) -> String Never! {
+    if symbols.len() == 0 -> return "`{binary}` keeps no symbol table\n"
+    text := ""
+    loop symbol in symbols {
+        text = "{text}{native_listing_pad(x64_hex(symbol.address), 20)}{native_listing_pad("{symbol.size}", 10)}{native_listing_pad(symbol.kind, 10)}{symbol.name}\n"
+    }
+    text
+}
+
+// `elf`'s program headers, in their order.
+native_image_segments: fn(elf: [U8]) -> [NativeImageSegment] Never! {
+    found := [NativeImageSegment]{}
+    if elf.len() < 64 -> return found
+    table: native_dump_word(elf, 32)
+    entry: native_number(elf, 54, 2, X64DebugEncoding.Unsigned)
+    count: native_number(elf, 56, 2, X64DebugEncoding.Unsigned)
+    if table <= 0 || entry < 56 -> return found
+    loop index in 0..<count {
+        at: table + index * entry
+        if at + 56 > elf.len() -> break
+        flags: native_number(elf, at + 4, 4, X64DebugEncoding.Unsigned)
+        rwx: "{if (flags & 4) != 0 -> "r" else -> "-"}{if (flags & 2) != 0 -> "w" else -> "-"}{if (flags & NATIVE_IMAGE_EXECUTE) != 0 -> "x" else -> "-"}"
+        found.push(NativeImageSegment{kind: native_image_segment_kind(native_number(elf, at, 4, X64DebugEncoding.Unsigned)), offset: native_dump_word(elf, at + 8), address: native_dump_word(elf, at + 16), file: native_dump_word(elf, at + 32), memory: native_dump_word(elf, at + 40), flags: rwx, align: native_dump_word(elf, at + 48)})
+    }
+    found
+}
+
+// The name of program header type `kind`, as readelf names it; another
+// type by its number.
+native_image_segment_kind: fn(kind: Int) -> String Never! {
+    if {
+        kind == 0 -> "NULL"
+        kind == NATIVE_IMAGE_LOAD -> "LOAD"
+        kind == 2 -> "DYNAMIC"
+        kind == 3 -> "INTERP"
+        kind == 4 -> "NOTE"
+        kind == 6 -> "PHDR"
+        kind == 7 -> "TLS"
+        kind == 0x6474e550 -> "GNU_EH_FRAME"
+        kind == 0x6474e551 -> "GNU_STACK"
+        kind == 0x6474e552 -> "GNU_RELRO"
+        kind == 0x6474e553 -> "GNU_PROPERTY"
+        else -> x64_hex(kind)
+    }
+}
+
+// One row a program header, its fields named, as `LOAD  offset 0x2000
+// address 0x401000  file 1234 memory 1234  flags r-x  align 4096`: the
+// offset and address in hexadecimal, the sizes and alignment in bytes.
+native_image_segments_text: fn(binary: String, segments: [NativeImageSegment]) -> String Never! {
+    if segments.len() == 0 -> return "`{binary}` has no program headers\n"
+    text := ""
+    loop segment in segments {
+        text = "{text}{native_listing_pad(segment.kind, 13)}offset {native_listing_pad(x64_hex(segment.offset), 12)}address {native_listing_pad(x64_hex(segment.address), 20)}file {native_listing_pad("{segment.file}", 10)}memory {native_listing_pad("{segment.memory}", 10)}flags {segment.flags} align {segment.align}\n"
+    }
+    text
+}
+
+// The image `symbols` and `segments` read in `session`: a dump's image
+// beside it, else the session's program.
+native_image_of: fn(session: &NativeSession) -> String Never! {
+    if session.dump == .Val(dumped) && dumped.image != "" -> return dumped.image
+    session.binary
+}
+
+// A session over the image at `binary` that never runs: its code is its
+// loaded segments', read as a dump reads its image's, and its symbols are
+// its own or its side file's (none when that file is gone). An image with
+// no Jet line table, or whose side file holds none, has no functions, so
+// its code lists by its symbols alone. The image's bytes back its memory.
+native_image_session: fn(binary: String) -[FS.Read]> NativeSession NativeDebugError! {
+    elf: native_image_bytes(binary) ?? return Err(err)
+    side := [U8]?{None}
+    if native_image_side(binary, elf) == {
+        .Ok(found) -> { side = found }
+        .Err(_) -> {}
+    }
+    image: native_image_load(binary, elf) ?? NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    codes: native_elf_codes(elf, ".text")
+    openings: native_openings(image, codes)
+    program_entry: native_image_entry(image, codes)
+    symbols: if side == .Val(apart) -> native_fix_symbols(apart) else -> native_fix_symbols(elf)
+    code: native_elf_code(elf)
+    facts: Shared{NativeEvalImage{symbols: symbols, code: code, owned: native_eval_owned(symbols, code)}}
+    blocks := [NativeBlock]{}
+    native_dump_loaded(blocks, elf, 0, 0)
+    dump: NativeDump{tasks: [NativeDumpTask]{}, memory: NativeMemory{trace: None, blocks: blocks, backing: elf.move()}, registry: 0, image: "{binary}"}
+    Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: false, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0, program_entry: program_entry, eval_image: Val(facts)})
+}
+
+// One command of `jet debug IMAGE` before the program starts, answered by
+// `session` (native_image_session) from the file: `symbols`, `segments`,
+// `disassemble` and `help`. None for a command that needs the program
+// running, which starts it. `file`, with the text `lines`, is the
+// program's source.
+native_image_command: fn(session: &NativeSession, line: String, file: String, lines: [String]) -> String? NativeDebugError! {
+    command: line.trim()
+    word: command.before(" ")
+    operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
+    if word == {
+        "symbols" | "segments" -> {
+            text: native_image_listing(session.binary, word) ?? return Err(err)
+            Ok(Val(text))
+        }
+        "disassemble" | "disas" -> {
+            named: loop part in operand.split(" ") {
+                if part != "" && part != "--bytes" {
+                    break true
+                }
+            } ?? false
+            if !named {
+                return Ok(Val(native_image_code_text(session, bytes: operand.contains("--bytes"))))
+            }
+            text: native_disassemble(session, operand, file, lines) ?? return Err(err)
+            Ok(Val(text))
+        }
+        "h" | "help" -> Ok(Val("{NATIVE_DEBUG_HELP}\n"))
+        "" -> Ok(Val(""))
+        else -> Ok(None)
+    }
+}
+
+// Every function of the line table and every sized symbol of the image
+// whose code is in its executable segments, in address order, each as
+// `disassemble` lists it, with each row's `bytes` when asked; with
+// neither, each executable segment whole, as `segment 0`, `segment 1` and
+// on.
+native_image_code_text: fn(session: &NativeSession, bytes: Bool{false}) -> String Never! {
+    runs := [NativeImageSegment]{}
+    if session.dump == .Val(dumped) {
+        loop segment in native_image_segments(dumped.memory.backing) {
+            if segment.kind == "LOAD" && segment.flags.ends_with("x") -> runs.push(segment)
+        }
+    }
+    symbols: native_listing_symbols(session)
+    ask: NativeListingAsk{pc: -1, first: 0, last: 0, bytes: bytes, places: ""}
+    text := ""
+    loop symbol in symbols {
+        if !native_image_in_runs(runs, symbol.address) -> next
+        index: x64_jetline_find(session.image.lines, symbol.address)
+        function: if index >= 0 && session.image.lines.functions[index].low == symbol.address -> index else -> -1
+        block: native_listing_block(session, symbols, function, symbol.address, symbol.address + symbol.size, symbol.name, ask, "", [String]{})
+        if block == "" -> next
+        text = "{text}{if text == "" -> "" else -> "\n"}{block}"
+    }
+    if text != "" -> return text
+    loop (index, run) in runs {
+        block: native_listing_block(session, symbols, -1, run.address, run.address + run.file, "segment {index}", ask, "", [String]{})
+        text = "{text}{if text == "" -> "" else -> "\n"}{block}"
+    }
+    text
+}
+
+// Whether `address` is in one of the segments `runs`.
+native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never! {
+    loop run in runs {
+        if address >= run.address && address < run.address + run.file -> return true
+    }
+    false
+}
+
+#Test("an image's symbols and segments list from its own bytes, and a file that is no image is refused") {
+    dir: native_image_files.temp_dir("jet-image-list") ?? panic("temp dir: {err}")
+    path: native_image_files.join(dir.path, "not-an-image")
+    native_image_files.write(path, "hello") ?? panic("write: {err}")
+    if native_image_listing(path, "symbols") == {
+        .Ok(_) -> { panic("a text file listed as an image") }
+        .Err(refused) -> assert_eq(refused.detail, "`{path}` is not a 64-bit ELF image")
+    }
+    assert_eq(native_image_segment_kind(1), "LOAD")
+    assert_eq(native_image_segment_kind(0x6474e551), "GNU_STACK")
+    assert_eq(native_image_segment_kind(0x60000000), "0x60000000")
+    assert_eq(native_image_symbol_kind(2), "function")
+    assert_eq(native_image_symbols_text("img", [NativeImageSymbol]{}), "`img` keeps no symbol table\n")
+    row: native_image_segments_text("img", [NativeImageSegment]{NativeImageSegment{kind: "LOAD", offset: 8192, address: 4198400, file: 100, memory: 120, flags: "r-x", align: 4096}})
+    assert_eq(row, "LOAD         offset 0x2000      address 0x401000            file 100       memory 120       flags r-x align 4096\n")
+    // This test's own process runs an image with an executable segment.
+    own: native_image_listing("/proc/self/exe", "segments") ?? panic("segments: {err.detail}")
+    assert(own.contains("flags r-x"))
+}
+
+#Test("a file-only session answers from the image and leaves a running command to the program") {
+    session := native_image_session("/proc/self/exe") ?? panic("session: {err.detail}")
+    assert(!session.started)
+    segments: native_image_command(session, "segments", "", [String]{}) ?? panic("segments unanswered")
+    assert(segments.contains("flags r-x"))
+    symbols: native_image_command(session, "symbols", "", [String]{}) ?? panic("symbols unanswered")
+    assert(symbols.contains("function"))
+    help: native_image_command(session, "help", "", [String]{}) ?? panic("help unanswered")
+    assert_eq(help, "{NATIVE_DEBUG_HELP}\n")
+    nothing: native_image_command(session, "disas no.such.function", "", [String]{}) ?? panic("disas unanswered")
+    assert_eq(nothing, "No function `no.such.function`\n")
+    running_words: [String]{"bt", "continue"}
+    loop running in running_words {
+        if native_image_command(session, running, "", [String]{}) == {
+            .Ok(answer) -> { assert(answer == None) }
+            .Err(failure) -> panic("{running}: {failure.detail}")
+        }
+    }
+}

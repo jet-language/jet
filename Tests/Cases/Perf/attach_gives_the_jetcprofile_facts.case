@@ -1,0 +1,39 @@
+# `jet perf attach --for=3s` profiles a running compiler with every fact
+# Tools/Perf/JetcProfile took from `perf record` before it moved to attach:
+# a window longer than a second, each hot function's
+# declaration file and line, the split of its CPU by package (the
+# compiler's phases), the samples' folded stacks with their flame graph,
+# and how far their stacks unwound. The `jet check` of the JetCLI package
+# runs for several seconds on every package of the compiler; the attach
+# starts once it has run 0.3 s of user CPU (its /proc stat utime, in 10 ms
+# ticks), so the window falls inside its work, and the check runs through
+# the whole window, so no `exited` line ends it early.
+requires: os-name:linux
+requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' schedstat run time
+env: NO_COLOR=1
+spawn busy: jet check {root}/Compiler/JetCLI
+stdout: null
+stderr: null
+poll working: sh -c 'test "$(cut -d " " -f 14 /proc/{pid:busy}/stat)" -ge 30' until exit: 0 timeout 120s every 20ms # the check is at work
+step: jet perf attach {pid:busy} --for=3s --out check.jettrace
+exit: 0
+stderr: ~ " window_ms=3000 " # the window asked for, three seconds
+stderr: !~ "\nexited " # the check ran through all of it
+stderr: ~ "stacks unwound=" # how far the samples' stacks unwound, were cut or broke
+stderr: ~ " at Compiler/Jet" # a hot function by its declaration's file and line
+stderr: ~ "\ncpu by package\n" # the samples split by the package they worked for
+stderr: ~ "\n  Compiler/JetSema samples=" # the checking phase among them
+stderr: ~ "Trace: "
+json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.window_ms = 3000 # the trace keeps the window asked for
+json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.exited_ms = null # and that the check outlived it
+json: file check.jettrace doc $.content.profile.window_wall_ns > 3000000000 # the window the samplers were open, longer than a second
+json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.stacks #>= 1 # the samples' folded stacks
+step: jet perf view check.jettrace
+exit: 0
+stdout: ~ " window_ms=3000 " # the view shows the section's lines
+stdout: ~ " at Compiler/Jet" # with each function's declaration
+stdout: ~ "\ncpu by package\n" # the split by package
+stdout: ~ "flamegraph\n0 " # and the flame graph of the folded stacks, from their outermost frame
+signal busy: KILL
+wait: busy
+exit: any # the case's KILL ends the check if it is still running

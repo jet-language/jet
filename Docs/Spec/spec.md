@@ -6049,7 +6049,10 @@ in `package.jet` replaces both). Under `split`, `jet build` writes the DWARF,
 the location table, the symbol table and the section headers to a side file
 filed in the package's symbol store as
 `.jet/symbols/.build-id/<first two hex digits>/<rest>.debug`, and
-`<image>.debug` beside the image is a link to it. The image keeps its loaded
+`<image>.debug` beside the image is a hard link to it, a second name of the
+same file, so an output directory inside the package holds no symbolic link
+for the next command's source walk to refuse (a copy across file systems,
+or where the file system has no hard links). The image keeps its loaded
 segments and a GNU build-id note under one `PT_NOTE` header, with section
 headers naming that note and a `.gnu_debuglink` that gives the side file's
 name, `<image>.debug`, and its CRC-32; it names no directory, so the image is

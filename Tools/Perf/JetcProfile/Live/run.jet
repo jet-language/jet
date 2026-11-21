@@ -1,9 +1,10 @@
 // The Jet twin of Tools/Perf/JetcProfile/Live.sh: `jet perf attach` samples a
-// running jet, and the processes it started, from outside for a second, and
-// `jet perf view` shows which of their functions the CPU was in. It attaches
-// only; it never starts or restarts the compiler.
+// running jet, and the processes it started, from outside for the window
+// given (`500ms`, `20s`; 20 seconds when none is), and `jet perf view` shows
+// which of their functions the CPU was in. It attaches only; it never starts
+// or restarts the compiler.
 //
-//   jet Tools/Perf/JetcProfile/Live/run.jet -- PID
+//   jet Tools/Perf/JetcProfile/Live/run.jet -- PID [WINDOW]
 //
 // JET names the jet that attaches, else the one on PATH. JET_PROFILE_OUT names
 // the output directory; its default and the roots under it come from
@@ -11,11 +12,14 @@
 // its report on stderr.
 use core.[files, process, regex, sys, term, time]
 
-USAGE: "usage: live.sh <pid>"
+USAGE: "usage: live.sh <pid> [<window>, as 500ms or 20s]"
 
 run: fn() -> Never Err! {
     args: process.args()
-    if args.len() != 1 || !regex.is_match(Regex{"^[1-9][0-9]*$"}, args[0]) -> process.fail(2, USAGE)
+    window: if args.len() == 2 -> args[1] else -> "20s"
+    if args.len() < 1 || args.len() > 2 || !regex.is_match(Regex{"^[1-9][0-9]*$"}, args[0]) || !regex.is_match(Regex{"^[1-9][0-9]*(ms|s)$"}, window) {
+        process.fail(2, USAGE)
+    }
     pid: args[0]
     step(Sh{"kill -0 {pid}"}.status())
     jet: process.env_nonempty("JET") ?? "jet"
@@ -33,9 +37,9 @@ run: fn() -> Never Err! {
     )
     out: roots["JET_PROFILE_OUT"]
     files.create_dir_all(out)
-    term.eprint("Sampling PID {pid} for 1s; output: {out}")
+    term.eprint("Sampling PID {pid} for {window}; output: {out}")
     trace: files.join(out, "attach.jettrace")
-    step(Sh{"{jet} perf attach {pid} --out {trace}"}.status())
+    step(Sh{"{jet} perf attach {pid} --for={window} --out {trace}"}.status())
     view: Sh{"{jet} perf view {trace}"}.run()
     step(view.code)
     shown: files.join(out, "view.txt")

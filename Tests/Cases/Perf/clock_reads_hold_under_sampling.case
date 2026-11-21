@@ -1,0 +1,23 @@
+# Code outside `jet perf run`'s 8 kHz sample handler reads its clocks into
+# words no handler writes, so no sample tears a read. The fixture reads the
+# monotonic and the wall clock a fixed count of times in many short tasks,
+# four at a time, and requires every monotonic read to be at or after the
+# one before it and every read of either clock within the span that clock
+# gives over the tasks; a torn read is off by up to the machine's uptime.
+# Each task's start and end also drain its thread's samples outside the
+# handler, timed on the thread's CPU clock, so the sampler's own time must
+# be within the CPU time sampled. The causal lens, which also pauses
+# threads in the handler and outside it, keeps every read whole too.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: ClockReadsHold.fixture
+env: NO_COLOR=1
+step: jet perf run -A -O2 main.jet --out cpu.jettrace
+exit: 0
+stdout: = "1000000 reads of each clock held\n"
+step: jet run -A check.jet -- cpu.jettrace
+exit: 0
+stdout: = "the sampler's time is within the CPU time it sampled\n"
+step: jet perf run -A -O2 main.jet --lens=causal --out causal.jettrace
+exit: 0
+stdout: = "1000000 reads of each clock held\n"

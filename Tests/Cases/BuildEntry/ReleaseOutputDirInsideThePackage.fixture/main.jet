@@ -1,0 +1,13 @@
+use core.process
+
+depth: fn(n: Int) -> Int {
+    if n == 0 -> return 0
+    depth(n - 1) + 1
+}
+
+// Given an argument, the run overflows the stack, so its release image
+// writes a raw report for `jet crash` to name.
+run: fn() {
+    print("depth: {depth(3)}")
+    if process.args().len() > 0 -> print("depth: {depth(100000000)}")
+}
