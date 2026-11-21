@@ -18,6 +18,7 @@ use {
         X64ImageFunction,
         X64Jetline,
         X64JetlineFunction,
+        X64SampleMapping,
         X64SampleRing,
         X64Samples,
         x64_image_function_find,
@@ -185,23 +186,28 @@ JetCLIPerfOutsideMoment: struct {
 
 // What an outside sampling has made of the samples it read so far
 // (jet_cli_perf_outside_take). `images` are the sampled processes'
-// executables' images. Each process's mapped code is a slot of
-// `processes`, read at drain `read_at`; `slots` gives each pid's current
-// slot (-1 when it must be read), `before` its slot before its last
-// execve, and `execs` that execve's time. Then the functions the samples
-// were in (`rows`, by name in `named`), their call tree, the samples by
-// package (`working`), how far each stack unwound (`depth` is the kernel's
-// frame limit), and each sample's moment on the `timeline`, timed from
-// `origin_ns` on the samples' clock, those past
-// JET_CLI_PERF_OUTSIDE_TIMELINE `dropped`. `pids` and `tids` are the
+// executables' images, and `unreadable` the files none could be read of.
+// Each process's mapped code is a slot of `processes`, read at drain
+// `read_at`; `slots` gives each pid's current slot (-1 when it must be
+// read), `before` its slot before its last execve, and `execs` that
+// execve's time. A sampled command's `mappings` are the code its processes
+// mapped, as the kernel reported it, and `parents` each process's parent.
+// Then the functions the samples were in (`rows`, by name in `named`),
+// their call tree, the samples by package (`working`), how far each stack
+// unwound (`depth` is the kernel's frame limit), and each sample's moment
+// on the `timeline`, timed from `origin_ns` on the samples' clock, those
+// past JET_CLI_PERF_OUTSIDE_TIMELINE `dropped`. `pids` and `tids` are the
 // processes and threads sampled.
 JetCLIPerfOutsideFold: struct {
     images: [JetCLIPerfOutsideImage],
+    unreadable: [String:Bool],
     processes: [[JetCLIPerfOutsideRange]],
     read_at: [Int],
     slots: [Int:Int],
     before: [Int:Int],
     execs: [Int:Int],
+    mappings: [X64SampleMapping],
+    parents: [Int:Int],
     drains: Int,
     failure: String,
     rows: [JetCLIPerfOutsideRow],
@@ -275,7 +281,7 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         return Err(jet_cli_read_error(why))
     }
     fold.origin_ns = sampler.origin_ns
-    taken := X64Samples{words: [Int]{}, execs: [Int]{}, samples: 0, lost: 0}
+    taken := X64Samples{words: [Int]{}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 0, lost: 0}
     // The window opens once the samplers are open and closes before they
     // are closed, so the CPU the sampled threads ran in it is the CPU the
     // samples stand for. Its last drain follows its close, so no sample
@@ -308,11 +314,12 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
 // its end (x64_sampled_start), and write the trace to `out`, or where any
 // attach writes it. The trace holds the `functions` and `timeline`
 // sections (jet_cli_perf_outside_sections), and its run window is the
-// command's whole run. A process's frames are named by its executable when
-// its first sample is read, so a process that ends within a drain of its
-// start may name none. The command shares jet's terminal, and its exit
-// code is the attach's. The trace's recorded argv takes the command's
-// words once the run has started.
+// command's whole run. A process's frames are named by the mappings of
+// code the kernel reported it made (jet_cli_perf_outside_recorded), so
+// one that ends before its first sample is read names them too. The
+// command shares jet's terminal, and its exit code is the attach's. The
+// trace's recorded argv takes the command's words once the run has
+// started.
 jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
@@ -321,7 +328,7 @@ jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [S
     run := x64_sampled_start(path, command, None, cpus, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
     fold := jet_cli_perf_outside_fold()
     fold.origin_ns = run.sampler.origin_ns
-    taken := X64Samples{words: [Int]{}, execs: [Int]{}, samples: 0, lost: 0}
+    taken := X64Samples{words: [Int]{}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 0, lost: 0}
     // The rings are drained every 20 ms, well before one fills, until the
     // command is reaped; the last drain follows its reap.
     loop !x64_sampled_reaped(run) {
@@ -377,11 +384,14 @@ jet_cli_perf_outside_cpus: fn() -[FS.Read]> [Int] JetCLIReadError! {
 jet_cli_perf_outside_fold: fn() -[FS.Read]> JetCLIPerfOutsideFold Never! {
     JetCLIPerfOutsideFold{
         images: [JetCLIPerfOutsideImage]{},
+        unreadable: [String:Bool]{},
         processes: [[JetCLIPerfOutsideRange]]{},
         read_at: [Int]{},
         slots: [Int:Int]{},
         before: [Int:Int]{},
         execs: [Int:Int]{},
+        mappings: [X64SampleMapping]{},
+        parents: [Int:Int]{},
         drains: 0,
         failure: "",
         rows: [JetCLIPerfOutsideRow]{},
@@ -403,16 +413,20 @@ jet_cli_perf_outside_fold: fn() -[FS.Read]> JetCLIPerfOutsideFold Never! {
 }
 
 // Read where process `pid`'s code is mapped into a new slot of `fold`, its
-// pid's current one: the slot. A process whose executable or mappings
-// can't be read has no code there, and the first such failure is the
-// fold's.
+// pid's current one: the slot. Where the kernel reported a sampled
+// command's mappings, those (jet_cli_perf_outside_recorded), so a process
+// that has ended still names its frames; else the process's /proc files. A
+// process whose executable or mappings can't be read has no code there, and
+// the first such failure is the fold's.
 jet_cli_perf_outside_read: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> Int Never! {
     slot: fold.processes.len()
-    mapped := [JetCLIPerfOutsideRange]{}
-    if jet_cli_perf_outside_process(pid, fold.images) == {
-        .Ok(found) -> { mapped = found }
-        .Err(failure) -> {
-            if fold.failure == "" -> fold.failure = failure.message
+    mapped := jet_cli_perf_outside_recorded(fold, pid)
+    if mapped.len() == 0 {
+        if jet_cli_perf_outside_process(pid, fold.images) == {
+            .Ok(found) -> { mapped = found }
+            .Err(failure) -> {
+                if fold.failure == "" -> fold.failure = failure.message
+            }
         }
     }
     fold.processes.push(mapped)
@@ -438,14 +452,59 @@ jet_cli_perf_outside_slot: fn(fold: &JetCLIPerfOutsideFold, pid: Int, time: Int)
 jet_cli_perf_outside_reread: fn(fold: &JetCLIPerfOutsideFold, pid: Int, slot: Int) -[FS.Read]> Bool Never! {
     if fold.slots[pid, or: -1] != slot || fold.read_at[slot] >= fold.drains -> return false
     fold.read_at[slot] = fold.drains
+    recorded: jet_cli_perf_outside_recorded(fold, pid)
+    if recorded.len() > 0 {
+        fold.processes[slot] = recorded.move()
+        return true
+    }
     mapped: jet_cli_perf_outside_process(pid, fold.images) ?? return false
     fold.processes[slot] = mapped
     true
 }
 
-// Fold the samples and execs `taken` holds into `fold`, each sample's
-// frames named by its process's executable, and empty them; their totals
-// stay. An execve's process names its later samples by its new executable.
+// Where process `pid`'s code is mapped, by the mappings of code the kernel
+// reported it made since its last execve; a process that has made none
+// since its fork runs its parent's. Each mapped file's images are read
+// into `fold.images` unless an earlier mapping's were; a file none can be
+// read of (an anonymous mapping's, the vDSO's) names none of its code.
+// None when the kernel reported no mapping of it.
+jet_cli_perf_outside_recorded: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> [JetCLIPerfOutsideRange] Never! {
+    ranges := [JetCLIPerfOutsideRange]{}
+    owner := pid
+    // Each step goes to a parent, so a pid reused as an ancestor's ends it.
+    loop _ in 0..<fold.parents.len() + 1 {
+        since: fold.execs[owner, or: -1]
+        mapped := false
+        loop mapping in fold.mappings {
+            if mapping.pid != owner || mapping.time < since -> next
+            mapped = true
+            if !jet_cli_perf_outside_known(fold.images, fold.unreadable, mapping.path) -> next
+            range: jet_cli_perf_outside_mapped(mapping.start, mapping.end, mapping.offset, mapping.path, fold.images)
+            if range.image >= 0 -> ranges.push(range)
+        }
+        if mapped -> break
+        owner = fold.parents[owner, or: -1]
+        if owner < 0 -> break
+    }
+    ranges
+}
+
+// Whether the images of file `path` are in `images`, read now when no
+// earlier mapping's were, unless the file is `unreadable`, as it is once
+// its own image can't be read.
+jet_cli_perf_outside_known: fn(images: &[JetCLIPerfOutsideImage], unreadable: &[String:Bool], path: String) -[FS.Read]> Bool Never! {
+    if unreadable[path, or: false] -> return false
+    if jet_cli_perf_outside_load(images, path, path) != "" {
+        unreadable[path] = true
+        return false
+    }
+    true
+}
+
+// Fold the samples, execs, mappings and forks `taken` holds into `fold`,
+// each sample's frames named by its process's code, and empty them; their
+// totals stay. An execve's process names its later samples by its new
+// executable.
 jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) -[FS.Read]> Never! {
     fold.drains += 1
     at := 0
@@ -454,6 +513,12 @@ jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) 
         fold.before[pid] = fold.slots[pid, or: -1]
         fold.slots[pid] = -1
         fold.execs[pid] = taken.execs[at + 1]
+        at += 2
+    }
+    fold.mappings.extend(taken.maps.move())
+    at = 0
+    loop at + 1 < taken.forks.len() {
+        fold.parents[taken.forks[at]] = taken.forks[at + 1]
         at += 2
     }
     at = 0
@@ -523,6 +588,8 @@ jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) 
     }
     taken.words = [Int]{}
     taken.execs = [Int]{}
+    taken.maps = [X64SampleMapping]{}
+    taken.forks = [Int]{}
 }
 
 // The sections of what `fold` made of the samples `taken` read, of
@@ -825,25 +892,30 @@ jet_cli_perf_outside_process: fn(pid: Int, images: &[JetCLIPerfOutsideImage]) -[
     // A replaced executable's link says so; its mappings name the path alone.
     path: if exe.ends_with(" (deleted)") -> exe.slice(0..<exe.len() - 10) else -> exe
     // The link opens the file the process runs, replaced or not.
-    file: "/proc/{pid}/exe"
-    known := false
-    loop image in images {
-        if image.path == path {
-            known = true
-            break
-        }
-    }
-    if !known {
-        own: jet_cli_perf_outside_image(file, path, 0) ?? return Err(jet_cli_read_error("process {pid}'s executable {path} {err.message}"))
-        images.push(own)
-        // A part whose functions can't be read leaves its code unnamed.
-        loop base in jet_cli_perf_outside_parts(file) {
-            part: jet_cli_perf_outside_image(file, path, base) ?? next
-            images.push(part)
-        }
+    failure: jet_cli_perf_outside_load(images, "/proc/{pid}/exe", path)
+    if failure != "" {
+        return Err(jet_cli_read_error("process {pid}'s executable {path} {failure}"))
     }
     maps: perf_files.read("/proc/{pid}/maps") ?? return Err(jet_cli_read_error("process {pid}'s mappings can't be read: {jet_cli_io_error_text(err)}"))
     Ok(jet_cli_perf_outside_ranges(maps, path, images))
+}
+
+// Read the images of the executable file `path`, opened as `file`, into
+// `images` unless an earlier process runs the same file: its own, then
+// each part it holds whose functions can be read. Why its own can't be
+// read, "" when it can.
+jet_cli_perf_outside_load: fn(images: &[JetCLIPerfOutsideImage], file: String, path: String) -[FS.Read]> String Never! {
+    loop image in images {
+        if image.path == path -> return ""
+    }
+    own: jet_cli_perf_outside_image(file, path, 0) ?? return err.message
+    images.push(own)
+    // A part whose functions can't be read leaves its code unnamed.
+    loop base in jet_cli_perf_outside_parts(file) {
+        part: jet_cli_perf_outside_image(file, path, base) ?? next
+        images.push(part)
+    }
+    ""
 }
 
 // The ELF image at offset `base` of the executable file `file`, which
@@ -913,9 +985,8 @@ jet_cli_perf_outside_parts: fn(file: String) -[FS.Read]> [Int] Never! {
 }
 
 // The executable code of `maps` (a process's /proc/<pid>/maps) that the
-// images of the executable file mappings name `path` hold: each mapping in
-// the smallest loadable segment of them that holds its file offset. A
-// mapping starts at the page that holds its segment's first byte.
+// images of the executable file mappings name `path` hold
+// (jet_cli_perf_outside_mapped).
 jet_cli_perf_outside_ranges: fn(maps: String, path: String, images: [JetCLIPerfOutsideImage]) -> [JetCLIPerfOutsideRange] Never! {
     ranges := [JetCLIPerfOutsideRange]{}
     loop line in maps.split("\n").to_list() {
@@ -927,22 +998,31 @@ jet_cli_perf_outside_ranges: fn(maps: String, path: String, images: [JetCLIPerfO
         start: jet_cli_perf_outside_hex(bounds[0]) ?? next
         end: jet_cli_perf_outside_hex(bounds[1]) ?? next
         offset: jet_cli_perf_outside_hex(words[2]) ?? next
-        found := JetCLIPerfOutsideRange{start: start, end: end, delta: 0, image: -1}
-        size := 0
-        loop (index, image) in images {
-            if image.path != path -> next
-            loop segment in image.segments {
-                holds: offset >= segment.offset - segment.offset % 4096 && offset < segment.offset + segment.size
-                if holds && (found.image < 0 || segment.size < size) {
-                    found.delta = segment.address + offset - segment.offset - start
-                    found.image = index
-                    size = segment.size
-                }
-            }
-        }
+        found: jet_cli_perf_outside_mapped(start, end, offset, path, images)
         if found.image >= 0 -> ranges.push(found)
     }
     ranges
+}
+
+// The range of a mapping from `start` to `end` of file `path` from file
+// offset `offset`, by the smallest loadable segment of the file's images
+// that holds the offset: image -1 when none does. A mapping starts at the
+// page that holds its segment's first byte.
+jet_cli_perf_outside_mapped: fn(start: Int, end: Int, offset: Int, path: String, images: [JetCLIPerfOutsideImage]) -> JetCLIPerfOutsideRange Never! {
+    found := JetCLIPerfOutsideRange{start: start, end: end, delta: 0, image: -1}
+    size := 0
+    loop (index, image) in images {
+        if image.path != path -> next
+        loop segment in image.segments {
+            holds: offset >= segment.offset - segment.offset % 4096 && offset < segment.offset + segment.size
+            if holds && (found.image < 0 || segment.size < size) {
+                found.delta = segment.address + offset - segment.offset - start
+                found.image = index
+                size = segment.size
+            }
+        }
+    }
+    found
 }
 
 // The little-endian `width`-byte word at `at` of `bytes`.

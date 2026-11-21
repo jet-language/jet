@@ -3281,9 +3281,12 @@ LOADER_PERF_ATTR_FLAGS: 0x2200060
 // and of every thread and process it starts (`inherit`), one event a CPU,
 // since the kernel maps no ring of an inherited event that follows its
 // tasks across CPUs. Each is opened disabled and enabled at the command's
-// execve (`disabled`, `enable_on_exec`), and each execve of its processes is
-// a timed COMM record (`comm`, `comm_exec`, `sample_id_all`).
-LOADER_PERF_COMMAND_FLAGS: 0x3241263
+// execve (`disabled`, `enable_on_exec`); each execve of its processes is a
+// timed COMM record (`comm`, `comm_exec`, `sample_id_all`), each mapping of
+// code they make a timed MMAP record (`mmap`), and each process they start
+// a timed FORK record (`task`), so their code is named by where the kernel
+// said it was mapped even once they have ended.
+LOADER_PERF_COMMAND_FLAGS: 0x3243363
 
 LOADER_PERF_FLAG_FD_CLOEXEC: 8
 
@@ -3313,9 +3316,13 @@ LOADER_PERF_DATA_TAIL: 1032
 
 // The record types the ring holds that the sampler reads, and the COMM
 // record's flag for one an execve wrote (PERF_RECORD_MISC_COMM_EXEC).
+LOADER_PERF_RECORD_MMAP: 1
+
 LOADER_PERF_RECORD_LOST: 2
 
 LOADER_PERF_RECORD_COMM: 3
+
+LOADER_PERF_RECORD_FORK: 7
 
 LOADER_PERF_RECORD_SAMPLE: 9
 
@@ -3348,13 +3355,29 @@ X64Sampler: struct {
 // What x64_sampler_drain read: each sample as its process, its thread, its
 // monotonic time in nanoseconds, its frame count and then its frames,
 // innermost first (`words`); each execve of a sampled process as its pid
-// and the time it replaced the process's image (`execs`); and the samples
-// the rings lost when they were full.
+// and the time it replaced the process's image (`execs`); each mapping of
+// code a sampled command's process made (`maps`); each process one of them
+// started as its pid and its parent's (`forks`); and the samples the rings
+// lost when they were full.
 X64Samples: struct {
     words: [Int],
     execs: [Int],
+    maps: [X64SampleMapping],
+    forks: [Int],
     samples: Int,
     lost: Int,
+}
+
+// A mapping of code an MMAP record reports: process `pid` mapped the file
+// `path` (as the kernel names it) from file offset `offset` at `start` to
+// `end`, at monotonic time `time`.
+X64SampleMapping: struct {
+    pid: Int,
+    start: Int,
+    end: Int,
+    offset: Int,
+    path: String,
+    time: Int,
 }
 
 // Sample each of `threads` (thread ids of one process) every `period_ns`
@@ -3428,8 +3451,8 @@ loader_sampler_origin: fn(sampler: &X64Sampler, scratch: Int) {
     sampler.origin_unix_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
 }
 
-// Move the samples and execs each ring holds into `into`, freeing the rings
-// for more.
+// Move the samples, execs, mappings and forks each ring holds into `into`,
+// freeing the rings for more.
 x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
     size: LOADER_PERF_RING_PAGES * OS_PAGE_SIZE
     loop sampled in sampler.rings {
@@ -3476,6 +3499,36 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
                     // Its pid, then its sample_id's time, the record's last word.
                     into.execs.push(os_load_word(data + (at + 8) % size) & 0xffffffff)
                     into.execs.push(os_load_word(data + (at + length - 8) % size))
+                } else if kind == LOADER_PERF_RECORD_MMAP && length >= 64 {
+                    // Its pid and thread, address, length and file offset,
+                    // the file's NUL-ended name, then its sample_id: the
+                    // pid and thread, and the time, the record's last word.
+                    name := [U8]{}
+                    loop k in 40..<length - 16 {
+                        byte: os_load_byte(data + (at + k) % size)
+                        if byte == 0 -> break
+                        name.push(U8{byte})
+                    }
+                    start: os_load_word(data + (at + 16) % size)
+                    into.maps.push(
+                        X64SampleMapping{
+                            pid: os_load_word(data + (at + 8) % size) & 0xffffffff,
+                            start: start,
+                            end: start + os_load_word(data + (at + 24) % size),
+                            offset: os_load_word(data + (at + 32) % size),
+                            path: String.from_bytes(name) ?? "",
+                            time: os_load_word(data + (at + length - 8) % size),
+                        },
+                    )
+                } else if kind == LOADER_PERF_RECORD_FORK && length >= 24 {
+                    // Its pid and its parent's; a thread's are the same.
+                    ids: os_load_word(data + (at + 8) % size)
+                    pid: ids & 0xffffffff
+                    parent: (ids >> 32) & 0xffffffff
+                    if pid != parent {
+                        into.forks.push(pid)
+                        into.forks.push(parent)
+                    }
                 }
                 at += length
             }
