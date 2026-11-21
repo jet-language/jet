@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112750,
+    "rev": 112761,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26817,11 +26817,11 @@
         {
           "n": 15,
           "text": "One copy meaning: `.copy()` forks every component whose type has a fork meaning (Clock, or any type with __fork), recursively, whatever holds it (list, option, struct, tuple, map, enum payload or a nesting of these), by one type-driven walk; today only list and option are covered. Proof: `jet test Compiler --profile cases --filter copy_forks_` with one case per holder kind on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:14:15.651Z"
+          "evidence": "p391 full suite (batch compiler = census build of dev 55614ffe3b): `jet test Compiler --profile cases --filter copy_forks_` selects 10 cases in Tests/Cases/CoreTimeFoundations, all PASS, each running jet run -O0, -O1 and -O2. One per holder kind: list (clock_nested_aggregate: [Clock].copy()), fixed list (clock_fixed_list), option, map and result fields (clock_nested_holder: Shelf{timers, latest: Timer?, named: [String:Timer], outcome}), struct (clock_struct), tuple (clock_tuple), map (clock_map), enum payload (clock_enum_payload), union (clock_union), nesting (clock_nested_holder), recursive holders through the generated fork function (clock_recursive_holder), and the plain Clock (clock_ordinary).",
+          "at": "2026-11-21T04:37:42.701Z"
         },
         {
           "n": 16,
@@ -26844,7 +26844,7 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-18T01:54:34.575Z",
+      "updated": "2026-11-21T04:37:42.701Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -32307,11 +32307,11 @@
         {
           "n": 13,
           "text": "The follow-on E0003 ('found the keyword `fn`') caused by the same unclosed block is not reported, so t03 prints 1 problem, and when several diagnostics print the root cause prints first. Proof: `jet test Compiler --profile ui --filter t03_unclosed`. (was #3720 c29)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:11:21.731Z"
+          "evidence": "p391 full suite (batch compiler = census build of dev 55614ffe3b): `jet test Compiler --profile ui --filter t03_unclosed` selects Tests/UI/t03_unclosed.jet, PASS. Its snapshot Tests/UI/t03_unclosed.stderr holds exactly one diagnostic, the root cause (Error: Jet.UnclosedDelimiter, the `if` opened on line 9 is never closed), with no follow-on E0003 for the keyword `fn`.",
+          "at": "2026-11-21T04:37:29.996Z"
         },
         {
           "n": 14,
@@ -32341,7 +32341,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-19T20:55:54.257Z",
+      "updated": "2026-11-21T04:37:29.996Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -37004,11 +37004,11 @@
         {
           "n": 7,
           "text": "The string_view fixtures pass, and every tracked binding stays a view through lowering. Proof: `jet test Compiler --profile cases --filter string_view` on O0, O1 and O2. (was #6634 c6)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:11:40.886Z"
+          "evidence": "p391 full suite (batch compiler = census build of dev 55614ffe3b), `jet test Compiler --profile cases` rows selected by `string_view`: 8 rows, all PASS: ViewCopySemantics/string_view_runtime_reads_agree_across_native_tiers, ViewCopySemantics/list_string_view_materialization_runs_across_native_tiers, ViewCopySemantics/string_view_runtime_read_leaves_accept_text_without_materialization, ViewCopySemantics/string_view_materialization_uses_string_kernel_and_list_view_uses_list_kernel, ViewCopySemantics/list_string_view_materialization_runs_on_awaited_web, DevPartsRoutine/returned_string_view_field_matches_all_execution_tiers, Ownership/core_string_view_copy_edit_names_consuming_expression, PolicyScope/package_copies_policy_restores_string_view_refusal. No row selected is KNOWN-FAILING or skipped.",
+          "at": "2026-11-21T04:36:50.886Z"
         }
       ],
       "refs": [
@@ -37026,7 +37026,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-17T02:09:11.437Z",
+      "updated": "2026-11-21T04:36:50.886Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -38702,6 +38702,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "ScriptBench receipt on the p391 batch compiler (dev 55614ffe3b), `jet Tools/Perf/Scriptbench/Bench.jet --only w02,w05,w13`, quiet machine (loop paused), 3 rounds x (2 warmup + 5 runs), receipt in $JET_SCRATCH_ROOT/lanes/Main/bench/out-p391-w02-w05-w13/cells.tsv. c2 NOT met. w13 release binary (jet-bin, 27 cells) loses 8: peak RSS 187 MB vs luajit 76 (2.45), lua 84 (2.21), php 86 (2.17), python 94 (2.00), ruby 150 (1.25), perl 151 (1.24); php also wins wall 1.22 and cpu 1.23 (Jet 201 ms, php 165). The RSS gap is the main root to chase: the Set or its input holds about 2x the peers' memory."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c2 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
@@ -38753,7 +38758,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:09.880Z",
-      "updated": "2026-11-17T01:41:48.412Z",
+      "updated": "2026-11-21T04:42:44.145Z",
       "updatedBy": "Main"
     },
     {
@@ -38911,6 +38916,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "ScriptBench receipt on the p391 batch compiler (dev 55614ffe3b), `jet Tools/Perf/Scriptbench/Bench.jet --only w02,w05,w13`, quiet machine (loop paused), 3 rounds x (2 warmup + 5 runs), receipt in $JET_SCRATCH_ROOT/lanes/Main/bench/out-p391-w02-w05-w13/cells.tsv. c2 NOT met. w05 release binary (jet-bin, 27 cells) loses 12 on wall and cpu: bun 2.19/1.56, perl 1.58/1.58, node 1.25/1.14, deno 1.05/1.02, luajit 1.05/1.05, lua 1.03/1.02 (Jet 429 ms wall, bun 196, perl 271, node 344). Wins every RSS cell."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c2 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
@@ -38992,7 +39002,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:14.678Z",
-      "updated": "2026-11-17T01:41:51.512Z",
+      "updated": "2026-11-21T04:42:43.365Z",
       "updatedBy": "Main"
     },
     {
@@ -39359,6 +39369,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "ScriptBench receipt on the p391 batch compiler (dev 55614ffe3b), `jet Tools/Perf/Scriptbench/Bench.jet --only w02,w05,w13`, quiet machine (loop paused), 3 rounds x (2 warmup + 5 runs), receipt in $JET_SCRATCH_ROOT/lanes/Main/bench/out-p391-w02-w05-w13/cells.tsv. c2 NOT met. w02 release binary (jet-bin, 30 cells) loses 6: wall vs lua 1.24, luajit 1.27, php 1.07; cpu vs lua 1.14, luajit 1.14, php 1.03 (Jet 42.3 ms wall, lua 34.1, luajit 33.4, php 39.5). Wins every other peer and every RSS cell."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c2 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
@@ -39435,7 +39450,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:22.602Z",
-      "updated": "2026-11-17T01:41:56.093Z",
+      "updated": "2026-11-21T04:42:42.575Z",
       "updatedBy": "Main"
     },
     {
@@ -54938,11 +54953,11 @@
         {
           "n": 55,
           "text": "Causal profiling: `--lens=causal` predicts the whole-program gain of speeding each hot line, with automatic progress points (closed zones, answered requests, finished tasks); on the fixture, the prediction for a line later sped up by hand is within the stated interval, a run too short to rank is refused with the reason, and a run whose threads waited for a CPU (runqueue wait from each thread's schedstat above a stated share of its run time) withholds its gains and says that they would under-read under CPU contention, naming the measured wait. Proof: `jet test Compiler --profile cases --filter Perf/causal_profile_predicts_speedup`, which accepts a prediction within the interval or the stated contention refusal, plus Compiler/JetCLI/Tests/Perf.jet units over a dedicated and a contended record. (Docs/Audits/2026-11-18-best-debugger-profiler.md R13)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T19:35:27.645Z",
+          "evidence": "On the p391 batch compiler (census build of dev 55614ffe3b):\n- p391 full suite: `jet test Compiler --profile cases --filter Perf/causal_profile_predicts_speedup` gives PASS.\n- `jet test Compiler/JetCLI/Tests/Perf.jet --filter causal`: 7 passed, 0 failed. The contended record is the test \"a causal run whose threads waited for a CPU most of their run time is refused with the wait, its gains withheld\" (80% wait over the 20% share, refused naming 192 ms waited of 240 ms run). The dedicated records are the rate, clock-drop and idle-fit tests, whose gains are kept.",
+          "at": "2026-11-21T04:43:50.083Z",
           "unblockedFrom": "D-PERF-CAUSAL1"
         },
         {
@@ -55463,7 +55478,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T04:32:21.291Z",
+      "updated": "2026-11-21T04:43:50.083Z",
       "updatedBy": "Main",
       "criteriaLastN": 104
     },
@@ -65460,11 +65475,11 @@
         {
           "n": 4,
           "text": "A panic inside a Close while a panic is already unwinding is process-fatal, as Docs/Spec/core-library-native-contract.md says: exit 70 with a Stop E3001 report, on run and --release. On 2026-11-07, Tests/Run/Ownership/ReleaseDeferClosePanic.jet (the body panics, then the second close panics) printed 'body / close second', then 'panic in a destructor during cleanup', and exited 1 on both tiers. Proof: `jet test Compiler --profile golden --filter Ownership/ReleaseDeferClosePanic` passes on O0, O1 and O2, and its known-failing row is removed. (was #5989 c17)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:11.024Z"
+          "evidence": "On the p391 batch compiler (census build of dev 55614ffe3b):\n- p391 full suite: `jet test Compiler --profile golden --filter Ownership/ReleaseDeferClosePanic` gives PASS on o0, o1 and o2. The row is PASS, not KNOWN-FAILING or UNEXPECTED-PASS, so no known-failing row remains.\n- Run by hand: `jet run ReleaseDeferClosePanic.jet` exits 70 and prints \"body\", \"close second\", then \"Stop: Jet.Panic: `panic: close stop` --> ReleaseDeferClosePanic.jet:10 in close\" (the E3001 report under its current Jet.Panic heading). The second close panics while the body's panic unwinds, which is process-fatal: the first close does not run.\n- `jet build -O2` of the same program, run as a binary: the same output and exit 70.",
+          "at": "2026-11-21T04:43:49.273Z"
         }
       ],
       "refs": [],
@@ -65475,7 +65490,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:30:05.200Z",
-      "updated": "2026-11-17T01:50:06.046Z",
+      "updated": "2026-11-21T04:43:49.273Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -72370,11 +72385,11 @@
         {
           "n": 19,
           "text": "Every runtime-stop report names its source line: web_app_port_busy and web_settings_decode_stops_before_bind print a stop with no `-->` line (found by the 42-snapshot Stop: sweep on 2026-11-20); each gains the `-->` line naming the user code that bound the port or decoded the settings, at every tier (release images through `jet crash`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T14:18:08.524Z",
+          "evidence": "On the p391 batch compiler (census build of dev 55614ffe3b): both stops now carry the `-->` line naming the user code, at every tier.\n- p391 suite: ui rows Tests/UI/web_app_port_busy.jet and web_settings_decode_stops_before_bind.jet PASS, their snapshots holding `--> ...web_app_port_busy.jet:19 in run` (the serve_on call) and `--> ...web_settings_decode_stops_before_bind.jet:26 in run` (the web.bind<Settings> call).\n- By hand, from a fresh directory: `jet run -O0` and `jet run -O1` of each, then `jet build -O2` and `jet build --release` images run directly. All four print the same Stop with the same `-->` line (exit 70 for AppPortUnavailable, 78 for EnvDecodeFailed).\n- The release image names the line itself, so no `jet crash` step is needed. `jet crash` on that stderr refuses with Jet.CrashReportWithoutBuild, as it should for a report that is not a raw frame dump.",
+          "at": "2026-11-21T04:44:42.638Z",
           "proof": {
             "profile": "ui",
             "filter": "web_"
@@ -72431,6 +72446,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T04:05:17.853Z"
+        },
+        {
+          "n": 24,
+          "text": "Perf/attach_samples_a_plain_jet_process (the proof of c13) gives the same verdict under full-suite load as it does alone. In the p391 suite it FAILED with `functions ... samples > 250: actual 186`; alone on the same p391 compiler it passed 3 of 3 right after. The 250 bar assumes the spinning thread gets about a second of CPU in the attach window, which suite load takes away. Fix it without weakening detection, inside D-PERF-ATTACH-WINDOW1=A: make the window load-robust (e.g. bound it in target CPU time rather than wall time) or derive the bar from the CPU the target actually used, never a looser fixed bar. Proof: the case passes in 3 consecutive full suites, and a sampler that keeps no samples still fails it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T04:36:07.139Z"
+        },
+        {
+          "n": 25,
+          "text": "A release build never breaks the next command in its package. Found proving c19 on the p391 batch compiler: `jet build --release --output-dir=rel app.jet` inside a package writes `rel/app.debug` as a symbolic link to `.jet/symbols/.build-id/..`. The next `jet run app.jet` in that package then fails with Jet.DriverOperationFailed: \"Can't securely read the sources ... rel/app.debug is a symbolic link\", and its Fix tells the user to remove a file Jet itself wrote. Jet's own build outputs (the image, its debug link, .jet/) never count as package sources, or the debug file is written so no source walk trips on it. Proof: a case that builds --release with --output-dir inside the package, then runs `jet run` and `jet check` there with exit 0, and `jet crash` still names the frames of that release image's raw report.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T04:44:59.118Z"
         }
       ],
       "refs": [],
@@ -72438,9 +72471,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T04:05:20.306Z",
+      "updated": "2026-11-21T04:44:59.118Z",
       "updatedBy": "Main",
-      "criteriaLastN": 23
+      "criteriaLastN": 25
     },
     {
       "id": "c0c3gh6u",
@@ -130048,6 +130081,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T04:44:59.118Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "25 criteria, soft limit 6: a debug-tool friction found while proving c19 of this card; no other card owns the release debug-info link"
+    },
+    {
+      "at": "2026-11-21T04:44:59.118Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#25 A release build never breaks the next command in its package"
+    },
+    {
+      "at": "2026-11-21T04:44:42.638Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-21T04:43:50.083Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#55"
+    },
+    {
+      "at": "2026-11-21T04:43:49.273Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rw1zt7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-21T04:42:44.145Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e7sc5b",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T04:42:43.366Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lkpkuc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T04:42:42.575Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08m4yum",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T04:37:42.701Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jxsy7l",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-21T04:37:29.996Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08i9ox6",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-21T04:36:50.886Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bmxzrb",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-21T04:36:07.139Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "24 criteria, soft limit 6: a regression in the proof case of this card own c13; it belongs with the profiler work it guards"
+    },
+    {
+      "at": "2026-11-21T04:36:07.139Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#24 Perf/attach_samples_a_plain_jet_process (the proof of c13) g"
+    },
     {
       "at": "2026-11-21T04:32:46.669Z",
       "by": "Main",
