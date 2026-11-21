@@ -94,12 +94,12 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
 }
 
 #Test("a control flag written wrong or on a command that does not take it is refused") {
-    assert_eq(controls_test_refused([String]{"check", "--keep-going=yes", "x.jet"}), "E2102")
+    assert_eq(controls_test_refused([String]{"check", "--keep-going=yes", "x.jet"}), "E2104")
     assert_eq(controls_test_refused([String]{"build", "--keep-going-report", "x.jet"}), "E2104")
     assert_eq(controls_test_refused([String]{"build", "--trace=", "x.jet"}), "E2104")
     assert_eq(controls_test_refused([String]{"build", "--trace-detail=everything", "x.jet"}), "E2104")
     assert_eq(controls_test_refused([String]{"build", "--opt-disable=no-such-pass", "x.jet"}), "E2104")
-    assert_eq(controls_test_refused([String]{"check", "--opt-dump=main", "x.jet"}), "E2102")
+    assert_eq(controls_test_refused([String]{"check", "--opt-dump=main", "x.jet"}), "E2104")
 }
 
 #Test("jet env vars lists the controls a command takes with the source that won") {
@@ -119,7 +119,7 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     } else { panic("`jet env vars --json` writes its status") }
     assert_eq(controls_test_refused([String]{"env", "vars", "--command=nope"}), "E2104")
     assert_eq(controls_test_refused([String]{"env", "vars", "--", "--keep-going"}), "E2104")
-    assert_eq(controls_test_refused([String]{"env", "vars", "--command=check", "--", "--opt-dump=main"}), "E2102")
+    assert_eq(controls_test_refused([String]{"env", "vars", "--command=check", "--", "--opt-dump=main"}), "E2104")
 }
 
 #Test("jet env vars names the setting key the command's settings use") {

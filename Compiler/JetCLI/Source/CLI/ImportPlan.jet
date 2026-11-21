@@ -63,8 +63,11 @@ JetCLIImportArguments: struct {
     mode: JetCLIImportMode,
 }
 
+// A refused import command line: `code` is E2102 for a flag import doesn't
+// have, else E2104.
 #Error
 JetCLIImportUsageError: struct {
+    code: String,
     what: String,
     fix: String,
 }
@@ -86,18 +89,18 @@ jet_cli_import_parse_args: fn(raw: [String]) -> JetCLIImportArguments JetCLIImpo
         arg: raw[index]
         if arg == "--dry-run" || arg == "--update" {
             if mode != JetCLIImportMode.Create {
-                return Err(JetCLIImportUsageError{what: "--dry-run and --update cannot be combined", fix: "choose preview (--dry-run) or merge (--update)"})
+                return Err(JetCLIImportUsageError{code: "E2104", what: "--dry-run and --update cannot be combined", fix: "choose preview (--dry-run) or merge (--update)"})
             }
             mode = if arg == "--dry-run" -> JetCLIImportMode.DryRun else -> JetCLIImportMode.Update
             next
         }
         if arg.starts_with("-") {
-            return Err(JetCLIImportUsageError{what: "'{arg}' is not an import flag", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+            return Err(JetCLIImportUsageError{code: "E2102", what: "'{arg}' is not an import flag", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
         }
         positionals.push(arg.copy())
     }
     if positionals.len() != 2 {
-        return Err(JetCLIImportUsageError{what: "source import needs a language and directory", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+        return Err(JetCLIImportUsageError{code: "E2104", what: "source import needs a language and directory", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
     }
     Ok(JetCLIImportArguments{language: positionals[0].copy(), source: positionals[1].copy(), mode: mode})
 }

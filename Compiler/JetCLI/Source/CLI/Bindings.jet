@@ -11,9 +11,9 @@ jet_cli_data_bind_usage: fn(format: String) -> String Never! {
     "Usage: jet inspect bind {format} <input> [--type <Type>] [-o <output>]\n"
 }
 
-jet_cli_data_bind_argument_error: fn(format: String, what: String, color: Bool) -> JetCLIPlan Never! {
-    shared: jet_cli_diagnostic_copy("E2102")
-    output := jet_cli_report_output("", "E2102", what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+jet_cli_data_bind_argument_error: fn(format: String, code: String, what: String, color: Bool) -> JetCLIPlan Never! {
+    shared: jet_cli_diagnostic_copy(code)
+    output := jet_cli_report_output("", code, what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
     output.stderr = "{output.stderr}{jet_cli_data_bind_usage(format)}"
     JetCLIPlan.Done{output: output}
 }
@@ -64,17 +64,17 @@ jet_cli_data_bind_prepare: fn(format: String, args: [String], color: Bool) -[FS]
         if argument == "--type" || argument == "-o" || argument == "--out" {
             flag: if argument == "--type" -> "--type" else -> "-o"
             if index + 1 >= args.len() {
-                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "inspect bind {format} requires a value after {flag}", color)}
+                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} requires a value after {flag}", color)}
             }
             value: args[index + 1]
             if value == "" {
                 field: if argument == "--type" -> "type name" else -> "output path"
-                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "inspect bind {format} {field} cannot be empty", color)}
+                return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "E2104", "inspect bind {format} {field} cannot be empty", color)}
             }
             if argument == "--type" -> root_type = Val(value) else -> output = Val(value)
             index += 2
         } else {
-            return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, "unknown inspect bind {format} argument {argument}", color)}
+            return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_argument_error(format, if argument.starts_with("-") -> "E2102" else -> "E2104", "unknown inspect bind {format} argument {argument}", color)}
         }
     }
     input: binding_files.read(input_path) ?? return JetCLIDataBindPreparation.Done{plan: jet_cli_data_bind_io_error(format, input_path, "read", "the input could not be read ({err})", color)}

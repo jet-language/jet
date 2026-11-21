@@ -907,7 +907,7 @@ is one capture of that side (`jet perf run main.jet --out base/1.jettrace`
 creates the folder). An empty folder is refused. Every capture must share
 the first base capture's toolchain digest and hardware fingerprint unless
 `--override-identity`, and each side's captures must have run one source
-(the same path and digest for every source file); either refusal is E2102
+(the same path and digest for every source file); either refusal is E2104
 naming the capture. The `Captures:` line lists each side's captures. The
 wall, CPU and allocation deltas and the budget line set the sides' means
 against each other; the receipt and heap deltas set the first capture of
@@ -974,7 +974,7 @@ no flight ring, or no live list for `--lens=alloc`), is E2124
 observed. A command line that names no one process (no pid, two pids, or a
 word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
 that conflicts with the others, such as `--lens=alloc` without `--source`,
-stays `Jet.UnknownFlag` (exit 2).
+is `Jet.InvalidCommandInput` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
 
 A process that publishes nothing about itself, as the jet CLI does and as a
@@ -1017,7 +1017,7 @@ it with. The window ends early when the process exits: the section's
 `exited_ms` says how far into it, and the view prints `exited 420 ms into
 the 3000 ms window` after the `functions` line. `--for=` reads nothing a
 program publishes, so with `--source`, or on a devserver browser session,
-it is refused (`Jet.UnknownFlag`, exit 2); `--zones=` is that path's
+it is refused (`Jet.InvalidCommandInput`, exit 2); `--zones=` is that path's
 window.
 Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
@@ -1324,7 +1324,7 @@ console while it is stopped. Otherwise the program's stdin is empty, so
 its reads end at once, and the console's answer to a command it doesn't
 know says that `--stdin=FILE` gives the program its input. `--stdin` is
 refused with `--dap`, `--attach`, `--replay` and a `.jetdump`, and when
-it names the console's own piped stdin (E2102); a FILE that can't be read
+it names the console's own piped stdin (E2104); a FILE that can't be read
 is E2105. `jet debug --dap` keeps stdin for its protocol: its program reads
 the file the launch configuration's `stdin` names, or an empty stdin.
 D-DBG-VERBS1=A names the commands:
@@ -1475,7 +1475,7 @@ once the program has ended is refused with a line of its own. A
 `.jetdump` runs them against the dump, with no banner. It exits 0, or 1
 when the console refused a command (one it doesn't know, or a run-control
 command on a dump) or the program ended with a status other than 0 or a
-signal. `--do` is refused with `--dap` (E2102).
+signal. `--do` is refused with `--dap` (E2104).
 `jet debug .jet/build/main --do segments --do 'disas main.run__entry'`
 checks a build's machine code with no other tool.
 Tests/Cases/Debug/do_runs_commands_against_the_image_file_then_the_running_program.case

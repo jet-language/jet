@@ -734,9 +734,9 @@ jet_cli_positionals: fn(jet_argv: [String]) -> [String] Never! {
 }
 
 // `check_flags`: the first flag no registry row has teaches E2102, a `--flag`
-// and a single-dash word alike, and so does the first registered flag whose
-// own registry row scopes it to other commands (`--canvas` is dev's, `-o`
-// cc's). A single-dash flag (`-A`, `-O1`) goes wherever jet accepts it. The word
+// and a single-dash word alike. The first registered flag whose own registry
+// row scopes it to other commands (`--canvas` is dev's, `-o` cc's) is E2104.
+// A single-dash flag (`-A`, `-O1`) goes wherever jet accepts it. The word
 // after a separate-value flag is its value, never a flag.
 jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
     external_fmt := false
@@ -791,17 +791,17 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
     None
 }
 
-// E2102 for a value written after a flag whose registry row takes none: a
+// E2104 for a value written after a flag whose registry row takes none: a
 // Switch takes no `=value` (`--check=true`), and a Bool takes only `=true`
 // or `=false`. Never ignored, so a value cannot quietly turn a flag off.
 jet_cli_flag_value_refusal: fn(argument: String, head: String, spec: JetCLIFlagSpec, color: Bool) -> JetCLIPlan? Never! {
     if argument == head -> return None
     value: argument.slice(head.len() + 1..<argument.len())
     if spec.value == {
-        .Switch -> return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes no value", jet_cli_why("E2102"), "write `{head}` alone", color, JET_DRIVER_EXIT_USAGE))
+        .Switch -> return Val(jet_cli_fail("E2104", "`{head}` takes no value, but `{argument}` gives it one", jet_cli_why("E2104"), "write `{head}` alone", color, JET_DRIVER_EXIT_USAGE))
         .Bool -> {
             if value != "true" && value != "false" {
-                return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes `=true` or `=false`", jet_cli_why("E2102"), "write `{head}` or `{head}=false`", color, JET_DRIVER_EXIT_USAGE))
+                return Val(jet_cli_fail("E2104", "`{head}` takes `=true` or `=false`, not `={value}`", jet_cli_why("E2104"), "write `{head}` or `{head}=false`", color, JET_DRIVER_EXIT_USAGE))
             }
         }
         .Value | .Optional | .Repeated -> {}
@@ -839,7 +839,7 @@ jet_cli_unknown_flag: fn(head: String, command: String, color: Bool) -> JetCLIPl
     jet_cli_fail("E2102", what, why, fix, color, JET_DRIVER_EXIT_USAGE)
 }
 
-// E2102 for a registered flag the command does not take: names the commands
+// E2104 for a registered flag the command does not take: names the commands
 // whose registry row takes it (the cli_registry test keeps that list nonempty).
 jet_cli_misplaced_flag: fn(flag: String, command: String, takers: [String], color: Bool) -> JetCLIPlan Never! {
     names := [String]{}
@@ -848,7 +848,7 @@ jet_cli_misplaced_flag: fn(flag: String, command: String, takers: [String], colo
     if names.len() > 1 {
         listed = "{jet_cli_prefix(names, names.len() - 1).join(", ")} or {names[names.len() - 1]}"
     }
-    jet_cli_fail("E2102", "`{flag}` is only valid with {listed}", jet_cli_why("E2102"), "drop `{flag}` from `jet {command}`, or run `jet {takers[0]} {flag}`", color, JET_DRIVER_EXIT_USAGE)
+    jet_cli_fail("E2104", "`{flag}` is only valid with {listed}", jet_cli_why("E2104"), "drop `{flag}` from `jet {command}`, or run `jet {takers[0]} {flag}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The directory part of `path`, as Rust `Path.parent` reads it.
@@ -912,7 +912,7 @@ jet_cli_status: fn(status_args: [String], color: Bool, json: Bool) -[FS, Env, Ti
     explicit := String?{None}
     if jet_cli_project_status_target(status_args) == {
         .Ok(found) -> explicit = found
-        .Err(message) -> return jet_cli_fail("E2102", message.message, "jet status accepts one project target and registered output flags", "run `jet status [<file.jet|dir>]` with one target", color, JET_DRIVER_EXIT_USAGE)
+        .Err(refusal) -> return jet_cli_fail(refusal.code, refusal.message, "jet status accepts one project target and registered output flags", "run `jet status [<file.jet|dir>]` with one target", color, JET_DRIVER_EXIT_USAGE)
     }
     notices := [String]{}
     target := explicit ?? ""
@@ -1133,7 +1133,7 @@ jet_cli_threads: fn(jet_argv: [String], command: String, color: Bool) -> JetCLIT
         }
         text: value ?? next
         if !compiling {
-            return JetCLIThreads.Refused{plan: jet_cli_fail("E2102", "`--threads` is only valid with a command that compiles", jet_cli_why("E2102"), "use it with `jet build`, `run`, `check`, `test`, `dev`, or `inspect`", color, JET_DRIVER_EXIT_USAGE)}
+            return JetCLIThreads.Refused{plan: jet_cli_fail("E2104", "`--threads` is only valid with a command that compiles", jet_cli_why("E2104"), "use it with `jet build`, `run`, `check`, `test`, `dev`, or `inspect`", color, JET_DRIVER_EXIT_USAGE)}
         }
         count: Int.parse(text) ?? 0
         if count < 1 {
@@ -1789,7 +1789,7 @@ JetCLIAuthorityFlags: enum {
 
 // `parse_authority_flags`: the `--allow`/`--deny` rows of a build or run,
 // canonical and deduplicated, and `-A` (`--allow-all`), which allows every
-// right; a right both allowed and denied is E2102.
+// right; a right both allowed and denied is E2104.
 jet_cli_authority_flags: fn(jet_argv: [String], color: Bool) -> JetCLIAuthorityFlags Never! {
     all := false
     allow := [String]{}
@@ -1845,7 +1845,7 @@ jet_cli_authority_flags: fn(jet_argv: [String], color: Bool) -> JetCLIAuthorityF
     }
     loop right in allow {
         if deny.contains(right) {
-            return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", color, JET_DRIVER_EXIT_USAGE)}
+            return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", color, JET_DRIVER_EXIT_USAGE)}
         }
     }
     if !all && allow.len() == 0 && deny.len() == 0 {
@@ -2657,7 +2657,7 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
 // `jet lint [--a11y|--complexity|--cost] <file>` (`"lint"`):
 // with no target the command's help is a usage error. With no category flag
 // the command lists the file's reports, its advice (`"report"`); at most one
-// category is allowed (E2102). The target resolves as `resolve_source_path` does (a
+// category is allowed (E2104). The target resolves as `resolve_source_path` does (a
 // directory is its project's stock entry; a file keeps its typed spelling, or
 // gains `.jet`). Every category consumes checked Driver facts.
 jet_cli_lint: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
@@ -2670,7 +2670,7 @@ jet_cli_lint: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
     if complexity -> categories += 1
     if cost -> categories += 1
     if categories > 1 {
-        return jet_cli_fail("E2102", "usage: jet lint [--a11y|--complexity|--cost] <file.jet>", "`lint` takes at most one category flag", "run `jet lint <file.jet>` for the reports, or one of `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>` and `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "usage: jet lint [--a11y|--complexity|--cost] <file.jet>", "`lint` takes at most one category flag", "run `jet lint <file.jet>` for the reports, or one of `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>` and `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
     }
     target: args[1]
     file := target
@@ -2706,7 +2706,7 @@ jet_cli_missing_target: fn(command: String, quiet: Bool) -> JetCLIPlan Never! {
 JET_CLI_EMIT_TIERS: [String]{"ast", "ir"}
 
 // `jet emit --ast|--ir <file>`: with no target the command's help is a usage
-// error; a target needs exactly one mode flag (E2102); the file is read as
+// error; a target needs exactly one mode flag (E2104); the file is read as
 // typed. `--fn NAME` selects one function's tree.
 jet_cli_emit: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_missing_target("emit", quiet)
@@ -2715,10 +2715,10 @@ jet_cli_emit: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
         if jet_argv.contains("--{tier}") -> modes.push(tier)
     }
     if modes.len() == 0 {
-        return jet_cli_fail("E2102", "usage: jet emit --ast|--ir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --ir <file.jet>`; `--ast` prints the parsed tier", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "usage: jet emit --ast|--ir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --ir <file.jet>`; `--ast` prints the parsed tier", color, JET_DRIVER_EXIT_USAGE)
     }
     if modes.len() > 1 {
-        return jet_cli_fail("E2102", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
     }
     tier: modes[0]
     function := String?{None}
@@ -3213,7 +3213,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS
         if jet_cli_check_flags(jet_argv, command, color) == .Val(refusal) -> return refusal
     }
     if command != "dev" && jet_argv.contains("--canvas") {
-        return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2104"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
     if JET_CLI_PINNED_VERBS.contains(command) {
         target := String?{None}

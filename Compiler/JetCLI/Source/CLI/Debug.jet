@@ -88,7 +88,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         }
         if flag == "--attach" || flag.starts_with("--attach=") {
             value: if flag == "--attach" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--attach=")
-            attach = Int.parse(value) ?? return jet_cli_fail("E2102", "`--attach {value}` isn't a process id", jet_cli_why("E2102"), "name the running program's process id, as `jet debug --attach 4242`", color, JET_DRIVER_EXIT_USAGE)
+            attach = Int.parse(value) ?? return jet_cli_fail("E2104", "`--attach {value}` isn't a process id", jet_cli_why("E2104"), "name the running program's process id, as `jet debug --attach 4242`", color, JET_DRIVER_EXIT_USAGE)
             next
         }
         if flag == "--raw-frames" -> return jet_cli_not_ported("debug --raw-frames", color)
@@ -97,7 +97,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         if flag == "--dap" -> dap = true
         if flag != "--break" && !flag.starts_with("--break=") -> next
         spec: if flag == "--break" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--break=")
-        wanted: jet_cli_debug_break(spec) ?? return jet_cli_fail("E2102", "`--break {spec}` isn't a breakpoint jet understands", jet_cli_why("E2102"), "write the file and the line, as `--break main.jet:12`", color, JET_DRIVER_EXIT_USAGE)
+        wanted: jet_cli_debug_break(spec) ?? return jet_cli_fail("E2104", "`--break {spec}` isn't a breakpoint jet understands", jet_cli_why("E2104"), "write the file and the line, as `--break main.jet:12`", color, JET_DRIVER_EXIT_USAGE)
         breaks.push(wanted)
     }
     replay: if {
@@ -117,37 +117,37 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         return jet_cli_fail("E2104", "`--stdin` needs a FILE", jet_cli_why("E2104"), "write `--stdin=FILE`, the file the program reads as its standard input", color, JET_DRIVER_EXIT_USAGE)
     }
     if input != "" && dap {
-        return jet_cli_fail("E2102", "`--stdin` gives the console's program its input, but `--dap` takes it from the editor", jet_cli_why("E2102"), "drop `--stdin`, and set `stdin` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--stdin` gives the console's program its input, but `--dap` takes it from the editor", jet_cli_why("E2104"), "drop `--stdin`, and set `stdin` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
     }
     if dos.len() > 0 && dap {
-        return jet_cli_fail("E2102", "`--do` runs the console's commands, but `--dap` serves the session to an editor, which sends its own", jet_cli_why("E2102"), "drop `--dap` to run the commands, or `--do` to serve the editor", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--do` runs the console's commands, but `--dap` serves the session to an editor, which sends its own", jet_cli_why("E2104"), "drop `--dap` to run the commands, or `--do` to serve the editor", color, JET_DRIVER_EXIT_USAGE)
     }
     if input != "" && replay != "" {
-        return jet_cli_fail("E2102", "`--replay` answers the program's input from its recording, so it takes no `--stdin`", jet_cli_why("E2102"), "drop `--stdin`: the replay reads what the recorded run read", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--replay` answers the program's input from its recording, so it takes no `--stdin`", jet_cli_why("E2104"), "drop `--stdin`: the replay reads what the recorded run read", color, JET_DRIVER_EXIT_USAGE)
     }
     record: jet_cli_record_flag(jet_argv) ?? return jet_cli_fail("E2104", "`--record` needs a NAME", jet_cli_why("E2104"), "write `--record=NAME` with letters, digits, `-`, or `_`", color, JET_DRIVER_EXIT_USAGE)
     if record != "" && replay != "" {
-        return jet_cli_fail("E2102", "`--record` makes a new recording, but `--replay` reruns one already made", jet_cli_why("E2102"), "record first with `jet debug --record={record} <file.jet>`, then replay it with `jet debug --replay={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--record` makes a new recording, but `--replay` reruns one already made", jet_cli_why("E2104"), "record first with `jet debug --record={record} <file.jet>`, then replay it with `jet debug --replay={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
     }
     if dap && breaks.len() > 0 {
-        return jet_cli_fail("E2102", "`--break` sets the console's breakpoints, but `--dap` takes them from the editor", jet_cli_why("E2102"), "drop `--break`, and set the breakpoints in the editor", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--break` sets the console's breakpoints, but `--dap` takes them from the editor", jet_cli_why("E2104"), "drop `--break`, and set the breakpoints in the editor", color, JET_DRIVER_EXIT_USAGE)
     }
     program_args: passthrough ?? [String]{}
     if dap && program_args.len() > 0 {
-        return jet_cli_fail("E2102", "the words after `--` are the console's program arguments, but `--dap` takes them from the editor", jet_cli_why("E2102"), "drop the words after `--`, and set `args` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "the words after `--` are the console's program arguments, but `--dap` takes them from the editor", jet_cli_why("E2104"), "drop the words after `--`, and set `args` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
     }
     if attach >= 0 {
         if dap || breaks.len() > 0 || program_args.len() > 0 {
-            return jet_cli_fail("E2102", "`--attach` debugs a program already running, so it takes no `--dap`, `--break` or program arguments", jet_cli_why("E2102"), "run `jet debug --attach PID` alone, and set breakpoints at the `(Jet)` prompt; an editor attaches with the adapter's `attach` request", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`--attach` debugs a program already running, so it takes no `--dap`, `--break` or program arguments", jet_cli_why("E2104"), "run `jet debug --attach PID` alone, and set breakpoints at the `(Jet)` prompt; an editor attaches with the adapter's `attach` request", color, JET_DRIVER_EXIT_USAGE)
         }
         if replay != "" {
-            return jet_cli_fail("E2102", "`--attach` debugs a program already running, so it has no recording to replay", jet_cli_why("E2102"), "drop `--replay`, or replay the program: `jet debug --replay={replay} <file.jet|image>`", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`--attach` debugs a program already running, so it has no recording to replay", jet_cli_why("E2104"), "drop `--replay`, or replay the program: `jet debug --replay={replay} <file.jet|image>`", color, JET_DRIVER_EXIT_USAGE)
         }
         if record != "" {
-            return jet_cli_fail("E2102", "`--attach` takes a program already running, so its run can't be recorded from its start", jet_cli_why("E2102"), "drop `--record`, or record a new run: `jet debug --record={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`--attach` takes a program already running, so its run can't be recorded from its start", jet_cli_why("E2104"), "drop `--record`, or record a new run: `jet debug --record={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
         }
         if input != "" {
-            return jet_cli_fail("E2102", "`--attach` takes a program already running, which reads its own standard input", jet_cli_why("E2102"), "drop `--stdin`, or debug a new run of the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "`--attach` takes a program already running, which reads its own standard input", jet_cli_why("E2104"), "drop `--stdin`, or debug a new run of the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
         }
         if args.len() > 1 {
             return jet_cli_fail("E2104", "`jet debug --attach` takes the process id alone, but got `{args[1]}` too", jet_cli_why("E2104"), "Run `jet debug --attach PID`; the image's own line table names its source.", color, JET_DRIVER_EXIT_USAGE)
@@ -170,7 +170,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
             return jet_cli_fail("E2104", "a crash dump runs nothing to record", jet_cli_why("E2104"), "drop `--record`, or record the program: `jet debug --record={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
         }
         if input != "" {
-            return jet_cli_fail("E2102", "a crash dump runs nothing to read `--stdin`", jet_cli_why("E2102"), "drop `--stdin`, or debug the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
+            return jet_cli_fail("E2104", "a crash dump runs nothing to read `--stdin`", jet_cli_why("E2104"), "drop `--stdin`, or debug the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
         }
         return jet_cli_debug_dump(args[1], dos, color)
     }
@@ -178,7 +178,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         return jet_cli_fail("E2105", "couldn't open `{input}`, the program's standard input", jet_cli_why("E2105"), "check that the file exists and is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     if input != "" && !cli_term.stdin().is_tty() && (cli_files.samefile(input, "/dev/stdin") ?? false) {
-        return jet_cli_fail("E2102", "`--stdin={input}` names the console's own stdin, which carries its commands", jet_cli_why("E2102"), "give the program another file, or the console its commands through another pipe", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2104", "`--stdin={input}` names the console's own stdin, which carries its commands", jet_cli_why("E2104"), "give the program another file, or the console its commands through another pipe", color, JET_DRIVER_EXIT_USAGE)
     }
     scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     plan: if attach >= 0 -> jet_cli_debug_attach(attach, scratch.path, deep_checks, dos, color) else -> jet_cli_debug_target(args[1], scratch.path, deep_checks, breaks, program_args, input, dap, replay, record, dos, color)

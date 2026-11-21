@@ -37,7 +37,7 @@ JetCLIBudgetOptions: struct {
     annotations: String,
 }
 
-// A usage error, or a failure before a valid report exists.
+// A failure before a valid report exists.
 #Error
 JetCLIBudgetFailure: struct {
     message: String,
@@ -51,7 +51,7 @@ jet_cli_budget_failure: fn(message: String) -> JetCLIBudgetFailure Never! {
 // project is the manifest root at or above the working directory, else the
 // working directory, and its entry is the stock project entry.
 jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
-    options: jet_cli_budget_parse(raw) ?? return jet_cli_fail("E2102", err.message, jet_cli_why("E2102"), JET_CLI_BUDGET_USAGE, color, JET_DRIVER_EXIT_USAGE)
+    options: jet_cli_budget_parse(raw) ?? return jet_cli_fail(err.code, err.message, jet_cli_why(err.code), JET_CLI_BUDGET_USAGE, color, JET_DRIVER_EXIT_USAGE)
     cwd: cli_sys.current_dir() ?? return JetCLIPlan.Done{output: jet_cli_budget_tool_failure(options, "cannot resolve current workspace: {jet_cli_io_error_text(err)}", color)}
     source_root: jet_cli_manifest_root(cwd) ?? cwd
     root: cli_files.realpath(source_root) ?? source_root
@@ -69,16 +69,16 @@ jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
     JetCLIPlan.Budget{options: options, root: root, entry: entry, color: color}
 }
 
-jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIBudgetFailure! {
+jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIUsageError! {
     command: if raw.get(1) == {
         .Val(word) -> if word == {
             "check" | "update" -> word.copy()
             else -> {
-                return Err(jet_cli_budget_failure("unknown `jet budget` subcommand `{word}`"))
+                return Err(jet_cli_usage_error("E2101", "unknown `jet budget` subcommand `{word}`"))
             }
         }
         .None -> {
-            return Err(jet_cli_budget_failure("`jet budget` needs `check` or `update`"))
+            return Err(jet_cli_usage_error("E2104", "`jet budget` needs `check` or `update`"))
         }
     }
     out := JetCLIBudgetOptions{command: command, baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, quiet: false, annotations: "auto"}
@@ -87,7 +87,9 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIBudgetFailu
     loop index < raw.len() {
         flag: raw[index]
         key: if flag == "-y" -> "--yes" else -> flag.copy()
-        if seen.contains(key) -> return Err(jet_cli_budget_failure("flag `{flag}` is repeated"))
+        if seen.contains(key) {
+            return Err(jet_cli_usage_error("E2104", "flag `{flag}` is repeated"))
+        }
         seen.push(key)
         if flag == {
             "--json" -> out.json = true
@@ -98,37 +100,39 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIBudgetFailu
             "--accept-regression" -> out.accept_regression = true
             "--baseline" | "--reason" | "--annotations" -> {
                 index += 1
-                value: raw.get(index) ?? return Err(jet_cli_budget_failure("flag `{flag}` needs a value"))
+                value: raw.get(index) ?? return Err(jet_cli_usage_error("E2104", "flag `{flag}` needs a value"))
                 if value.starts_with("-") {
-                    return Err(jet_cli_budget_failure("flag `{flag}` needs a value"))
+                    return Err(jet_cli_usage_error("E2104", "flag `{flag}` needs a value"))
                 }
                 if flag == "--baseline" -> out.baseline = Val(value.copy()) else if flag == "--reason" {
                     out.reason = Val(value.copy())
                 } else {
                     if value != "auto" && value != "none" && value != "github" {
-                        return Err(jet_cli_budget_failure("`--annotations` accepts auto, none, or github"))
+                        return Err(jet_cli_usage_error("E2104", "`--annotations` accepts auto, none, or github"))
                     }
                     out.annotations = value.copy()
                 }
             }
-            else -> { return Err(jet_cli_budget_failure("unknown flag or argument `{flag}`")) }
+            else -> {
+                return Err(jet_cli_usage_error(if flag.starts_with("-") -> "E2102" else -> "E2104", "unknown flag or argument `{flag}`"))
+            }
         }
         index += 1
     }
     if command == "check" && (out.baseline != None || out.bootstrap || out.accept_regression || out.reason != None || out.yes) {
-        return Err(jet_cli_budget_failure("update-only flags cannot be used with `budget check`"))
+        return Err(jet_cli_usage_error("E2104", "update-only flags cannot be used with `budget check`"))
     }
     if command == "update" && out.baseline == None {
-        return Err(jet_cli_budget_failure("`budget update` requires `--baseline <name>`"))
+        return Err(jet_cli_usage_error("E2104", "`budget update` requires `--baseline <name>`"))
     }
     if out.baseline == .Val(baseline) && !sema_budget_baseline_name(baseline) {
-        return Err(jet_cli_budget_failure("invalid `--baseline` value: invalid BaselineName"))
+        return Err(jet_cli_usage_error("E2104", "invalid `--baseline` value: invalid BaselineName"))
     }
     if out.bootstrap && out.accept_regression {
-        return Err(jet_cli_budget_failure("`--bootstrap` and `--accept-regression` are mutually exclusive"))
+        return Err(jet_cli_usage_error("E2104", "`--bootstrap` and `--accept-regression` are mutually exclusive"))
     }
     if (out.bootstrap || out.accept_regression) != (out.reason != None) {
-        return Err(jet_cli_budget_failure("`--reason` is required with, and only accepted with, bootstrap or accept-regression"))
+        return Err(jet_cli_usage_error("E2104", "`--reason` is required with, and only accepted with, bootstrap or accept-regression"))
     }
     if out.json -> out.annotations = "none"
     Ok(out)

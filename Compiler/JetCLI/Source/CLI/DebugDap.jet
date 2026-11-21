@@ -931,8 +931,8 @@ JetCLIDap: struct {
     // the program reads as its standard input from the start of each run,
     // as `jet debug --stdin=FILE` gives it; `/dev/null` without one, so the
     // program's reads end at once. None once `request` is refused: a
-    // `stdin` that is no path is E2236, a file that can't be read E2105,
-    // and the adapter's own stdin, which carries the protocol, E2102.
+    // `stdin` that is no path, or the adapter's own stdin, which carries the
+    // protocol, is E2236, and a file that can't be read E2105.
     stdin_of: fn(&self, request: JetCLIDapRequest, members: [{key: String, value: Dyn}]) -[FS, IO, Time.Wait]> String? {
         loop member in members {
             if member.key != "stdin" -> next
@@ -947,7 +947,7 @@ JetCLIDap: struct {
                 return None
             }
             if dap_files.samefile(path, "/dev/stdin") ?? false {
-                self.refuse_with(request, diagnostic_from_registry("E2102", None, "`stdin` names the adapter's own stdin, which carries the protocol", jet_cli_why("E2102"), "name another file in the launch configuration's `stdin`"))
+                self.refuse(request, NATIVE_ATTACH_INVALID, "field stdin names the adapter's own stdin, which carries the protocol")
                 return None
             }
             return Val(path)

@@ -5,7 +5,7 @@
 // (one line per item of a List or an Iter, nothing for a unit value or a
 // statement); code that names an undefined binding is refused with E0107
 // before anything runs. `jet run -e CODE` runs it the same way; a `-e` after
-// a run's program is refused with E2104, and `jet dev -e` with E2102. Runs
+// a run's program is refused with E2104, and `jet dev -e` too. Runs
 // with its own XDG cache.
 // Usage: jet run Compiler/JetCLI/Tests/RunEval.fixture/RunEval.jet -- <jet> <scratch>
 // Run from the repository root: it is the toolchain root the runs use.
@@ -138,8 +138,8 @@ run: fn() {
     if dev.code == 0 || dev.output != "" {
         fail("jet dev -e: code={dev.code} stdout {dev.output.debug()}, expected a refusal")
     }
-    if !dev.errors.contains("Jet.UnknownFlag") {
-        fail("jet dev -e: stderr names no Jet.UnknownFlag:\n{dev.errors}")
+    if !dev.errors.contains("Jet.InvalidCommandInput") {
+        fail("jet dev -e: stderr names no Jet.InvalidCommandInput:\n{dev.errors}")
     }
     term.print("run-eval: `jet -e` and `jet run -e` print, separate statements with `;`, rerun their entry file, refuse an undefined name before running and refuse a `-e` after the program or with `jet dev`: ok")
 }
