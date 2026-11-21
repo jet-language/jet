@@ -7,9 +7,11 @@
 // the record (jet_cli_debug_eval_stale). The held check of the package's
 // cut opens at every session, and gains the functions of a source that an
 // expression reaches, callees first (jet_cli_debug_eval_held_reach); the
-// first stop shows, and an evaluation answers, once it is open.
+// first stop shows, and an evaluation answers, once it is open. The held
+// check of the program finds a stop's node in the text of the source it
+// read (jet_cli_debug_eval_held_source).
 use {
-    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_cut_wait, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale, jet_cli_debug_eval_unchanged]
+    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_cut_wait, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_held_source, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale, jet_cli_debug_eval_unchanged]
     jet_debug.[NativeEvalBinder]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot]
     held_time: core.time
@@ -111,6 +113,13 @@ held_test_names: fn(declared: JetCLIDebugEvalDeclared, order: [Int]?) -> [String
     assert(!jet_cli_debug_eval_image_same(running, ["prog.jet": [U8]{1, 3}]))
     assert(!jet_cli_debug_eval_image_same(running, ["prog.jet": [U8]{1, 2}, "more.jet": [U8]{4}]))
     assert(!jet_cli_debug_eval_image_same([String:[U8]]{}, [String:[U8]]{}))
+}
+
+#Test("the held check reads a stop's node in the text it checked of the longest source path that names the stop's") {
+    stamp: JetCLIDebugEvalHeldStamp{sources: ["/p/util.jet": "top", "/p/lib/util.jet": "nested"], keys: [String:String]{}}
+    assert_eq(jet_cli_debug_eval_held_source(stamp, "./lib/util.jet"), "nested")
+    assert_eq(jet_cli_debug_eval_held_source(stamp, "/p/util.jet"), "top")
+    assert_eq(jet_cli_debug_eval_held_source(stamp, "other.jet"), "")
 }
 
 #Test("an image that records its sources opens the held check of the program, which keeps what it read") {

@@ -49,6 +49,7 @@ use {
         SemaScriptProbeAppended,
         SemaScriptProbeChecked,
         sema_script_probe_append,
+        sema_script_probe_answer,
         sema_script_probe_check_func,
         sema_script_probe_enter,
         sema_script_probe_over,
@@ -5437,16 +5438,24 @@ jet_driver_compile_borrowed: fn(request: JetDriverCompileRequest) -> JetDriverCo
 jet_driver_eval_probes: fn(ask: JetDriverEvalAsk?, inputs: [SemaRegistrationModuleInput]) -> SemaEvalProbes? {
     asked: ask ?? return None
     loop input in inputs {
-        loop segment in input.source_segments {
-            if !jet_driver_eval_path_matches(segment.source_file, asked.path) || asked.offset < segment.source_start {
-                next
-            }
-            at: segment.generated.start + asked.offset - segment.source_start
-            if at >= segment.generated.end -> next
-            parsed: sema_eval_probe_parse(asked.text, at)
-            expression: parsed.expression ?? return None
-            return Val(sema_eval_probes([SemaEvalProbe]{SemaEvalProbe{module_identity: input.module_identity, offset: at, expressions: [Expr]{expression}}}))
+        at: jet_driver_eval_segment_offset(input.source_segments, asked.path, asked.offset) ?? next
+        parsed: sema_eval_probe_parse(asked.text, at)
+        expression: parsed.expression ?? return None
+        return Val(sema_eval_probes([SemaEvalProbe]{SemaEvalProbe{module_identity: input.module_identity, offset: at, expressions: [Expr]{expression}}}))
+    }
+    None
+}
+
+// The generated offset of byte `offset` of the source file `path` in the
+// module whose source segments are `segments`; None when no segment holds
+// it.
+jet_driver_eval_segment_offset: fn(segments: [SemaSourceSegment], path: String, offset: Int) -> Int? Never! {
+    loop segment in segments {
+        if !jet_driver_eval_path_matches(segment.source_file, path) || offset < segment.source_start {
+            next
         }
+        at: segment.generated.start + offset - segment.source_start
+        if at < segment.generated.end -> return Val(at)
     }
     None
 }
@@ -6864,6 +6873,9 @@ JetDriverHeldEval: struct {
     probe: SemaScriptProbe,
     rows: SemaEvalHeldRows,
     modules: [String:ModuleID],
+    // The program's memory plan, whose rewrite of a function is the body a
+    // check of it reads (jet_driver_held_eval_answer).
+    plan: SemaFunctionMemoryPlan,
 }
 
 // A held program opened for the debugger (jet_driver_held_eval_open): its
@@ -6879,14 +6891,16 @@ JetDriverHeldOpened: struct {
     types: [TTypeDef],
 }
 
-// The held program `held` opened, its probe at the entry module. None when
-// the registration has no entry module.
-jet_driver_held_eval_open: fn(held: &&JetDriverHeldState) -> JetDriverHeldOpened? {
+// The held program `held` opened, its probe at the entry module, its memory
+// plan computed on `threads`. None when the registration has no entry
+// module.
+jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, threads: CompilerThreads) -> JetDriverHeldOpened? {
     taken := held.move()
     modules := [String:ModuleID]{}
     loop checked in taken.modules -> modules["{checked.source_file}"] = checked.module_identity
     probe := sema_script_probe_over(taken.registration, taken.modules, taken.load.entry_module_identity) ?? return None
     graph := probe.program.registration_graph.move() ?? return None
+    plan: sema_function_memory_plan_from_graph(graph, threads)
     symbols := graph.symbols.move()
     graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     probe.program.registration_graph = Val(graph.move())
@@ -6898,7 +6912,7 @@ jet_driver_held_eval_open: fn(held: &&JetDriverHeldState) -> JetDriverHeldOpened
     }
     rows: sema_eval_held_rows(taken.functions)
     inputs := JetDriverLoweringInputs{functions: taken.functions.move(), modules: taken.modules.move(), decls: DeclTable{}, symbols: symbols.move(), sources: sources.move(), entry_module_identity: taken.load.entry_module_identity, canonical_effect_module_identity: taken.canonical_effect_module_identity, module_table: taken.load.module_table.move(), entry_key: None}
-    Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move(), rows: rows.move(), modules: modules.move()}, inputs: inputs.move(), types: types.move()})
+    Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move(), rows: rows.move(), modules: modules.move(), plan: plan.move()}, inputs: inputs.move(), types: types.move()})
 }
 
 // The function in the source `text`, the debugger's expression function
@@ -6955,6 +6969,52 @@ jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, path: String, functions
 // and checked types lent to it.
 JetDriverHeldChecked: struct {
     checked: SemaScriptProbeChecked,
+    symbols: SymbolTable,
+    types: [TTypeDef],
+}
+
+// The answer (SemaEvalProbeAnswer) for the debugger's expression `text` at
+// byte `offset` of the source file `path`, where a frame stopped, from
+// `held`'s probe (sema_script_probe_answer): the function of the module
+// whose source file is `path` (JetDriverHeldEval.modules) that holds the
+// stop, checked again with the expression asked there. So the answer reads
+// the stop's locals, their types and what the frame moved as a compile of
+// the program with the question does (jet_driver_eval_probes), and only
+// that function is checked. The program's symbol table `symbols` and
+// checked types `types` are lent as jet_driver_held_eval_check lends them.
+// None when no checked module has `path`, the text doesn't parse there, or
+// no function there answers.
+jet_driver_held_eval_answer: fn(held: &JetDriverHeldEval, path: String, offset: Int, text: String, symbols: &&SymbolTable, types: &&[TTypeDef]) -> JetDriverHeldAnswer {
+    going: jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), symbols.move(), types.move())
+    held.probe.program.registration_graph = going.graph.move()
+    held.probe.program.checked_types = going.types.move()
+    answer := SemaEvalProbeAnswer?{None}
+    if held.modules.get(path) == .Val(module_identity) {
+        if sema_script_probe_enter(held.probe, module_identity) {
+            answer = jet_driver_held_eval_answer_in(held, path, offset, text)
+        }
+    }
+    back: jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), going.symbols.move(), held.probe.program.checked_types.move())
+    held.probe.program.registration_graph = back.graph.move()
+    held.probe.program.checked_types = [TTypeDef]{}
+    JetDriverHeldAnswer{answer: answer.move(), symbols: back.symbols.move(), types: back.types.move()}
+}
+
+jet_driver_held_eval_answer_in: fn(held: &JetDriverHeldEval, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
+    at := Int?{None}
+    if held.probe.program.registration_graph == .Val(graph) {
+        at = jet_driver_eval_segment_offset(graph.modules[held.probe.module_index].source_segments, path, offset)
+    }
+    stop: at ?? return None
+    parsed: sema_eval_probe_parse(text, stop)
+    expression: parsed.expression.move() ?? return None
+    sema_script_probe_answer(held.probe, held.plan, stop, expression)
+}
+
+// A held answer (jet_driver_held_eval_answer), and the symbol table and
+// checked types lent to it.
+JetDriverHeldAnswer: struct {
+    answer: SemaEvalProbeAnswer?,
     symbols: SymbolTable,
     types: [TTypeDef],
 }
