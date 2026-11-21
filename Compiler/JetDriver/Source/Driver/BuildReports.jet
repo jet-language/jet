@@ -184,9 +184,10 @@ jet_driver_build_generated_handoffs: fn(row: BuildSessionGeneratedModule) -> Str
 // are the values' own, in declaration order: `.jet/build/receipt.json` (the
 // BuildGraph it built, then `kept`: the digest of each kept output's bytes
 // as the build left them, then `generated`: each module `build: fn` made, as
-// the plan's rows say it, jet_driver_build_generated_json) and
+// the plan's rows say it, jet_driver_build_generated_json, then `settings`:
+// each package's resolved settings and their writers) and
 // `.jet/build/times.json` (its BuildTimes).
-jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], generated: [BuildSessionGeneratedModule]) -> String Never! {
+jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], generated: [BuildSessionGeneratedModule], settings: [JetDriverBuildSetting]) -> String Never! {
     targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)},\"plugin\":{jet_driver_build_id(target.plugin)}}}"
     actions: loop action in graph.actions -> jet_driver_build_action_json(action)
     keys: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
@@ -200,7 +201,8 @@ jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], g
     }
     held: loop row in kept -> "{{\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.digest)}}}"
     made: loop row in generated -> jet_driver_build_generated_json(row)
-    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}]}}\n"
+    resolved: loop row in settings -> jet_driver_build_setting_json(row)
+    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}],\"settings\":[{resolved.join(",")}]}}\n"
 }
 
 jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
@@ -214,6 +216,31 @@ jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
 JetDriverBuildKept: struct {
     path: String,
     digest: String,
+}
+
+// One package's resolved setting as the receipt records it: the value its
+// sources compile with, and every writer of its chain
+// (jet_driver_setting_writers). Not a core.build field: a receipt row only.
+JetDriverBuildSetting: struct {
+    package: String,
+    name: String,
+    value: String,
+    writers: [JetDriverBuildSettingWriter],
+}
+
+// One writer of a receipt setting: its contribution layer, where it is
+// written (its chain's source label), the value it writes, and whether the
+// contribution law selects it (`effective`) or not (`shadowed`).
+JetDriverBuildSettingWriter: struct {
+    layer: String,
+    source: String,
+    value: String,
+    state: String,
+}
+
+jet_driver_build_setting_json: fn(row: JetDriverBuildSetting) -> String Never! {
+    writers: loop writer in row.writers -> "{{\"layer\":{foundation_json_quote(writer.layer)},\"source\":{foundation_json_quote(writer.source)},\"value\":{foundation_json_quote(writer.value)},\"state\":{foundation_json_quote(writer.state)}}}"
+    "{{\"package\":{foundation_json_quote(row.package)},\"name\":{foundation_json_quote(row.name)},\"value\":{foundation_json_quote(row.value)},\"writers\":[{writers.join(",")}]}}"
 }
 
 // One core.build BuildTime row as the compiler writes it. The compiler is

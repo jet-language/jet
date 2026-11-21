@@ -134,9 +134,22 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
     if writers.len() == 0 {
         return SemaBuildSetting{name: setting.name, ty: setting.ty, value: setting.default, default: setting.default, contributions: [SemaSettingContribution]{}}
     }
+    at: jet_driver_setting_selected(writers)
+    rows := [SemaSettingContribution]{}
+    loop (index, writer) in writers {
+        rows.push(SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
+    }
+    SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
+}
+
+// The index in `writers` of the writer the contribution law selects. When
+// the law refuses the chain, its last writer stands in (the refusal is
+// reported by jet_driver_setting_writer_diagnostics).
+jet_driver_setting_selected: fn(writers: [JetDriverSettingWriter]) -> Int Never! {
+    at := writers.len() - 1
+    if at < 0 -> return at
     contributions := [FactContribution]{}
     loop writer in writers -> contributions.push(writer.contribution)
-    at := writers.len() - 1
     if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Ok(resolved) {
         if resolved == .Val(fact) {
             effective: fact.provenance[fact.effective]
@@ -148,11 +161,43 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
             }
         }
     }
-    rows := [SemaSettingContribution]{}
-    loop (index, writer) in writers {
-        rows.push(SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
+    at
+}
+
+// The entry writers of dependencies' settings that another entry overrides:
+// over the manifests' writers alone (each default and every entry), each
+// entry the contribution law does not select, such as a library's entry the
+// entry package's own entry overrides. The lock records them beside the
+// entry package's build rows (jet_cli_record_build_contributions), so they
+// stay the same whatever profile or `--set` a run takes. A load that fails,
+// or a chain the law refuses, records none; the compile reports why.
+jet_driver_overridden_entry_writers: fn(request: JetDriverCompileRequest) -> [FactContribution] Never! {
+    overridden := [FactContribution]{}
+    load: jet_driver_load_reach(request, false) ?? return overridden
+    if !load.complete || jet_driver_has_errors(load.diagnostics) -> return overridden
+    loop package in load.packages {
+        if package.identity == load.package_identity -> next
+        loop setting in package.settings {
+            writers := [JetDriverSettingWriter]{}
+            contributions := [FactContribution]{}
+            loop writer in jet_driver_setting_writers(load, package, setting, request) {
+                layer: writer.contribution.layer
+                if layer != .Declaration && layer != .DependencyEntry && layer != .RootEntry -> next
+                contributions.push(writer.contribution.copy())
+                writers.push(writer)
+            }
+            if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Err(_) {
+                next
+            }
+            at: jet_driver_setting_selected(writers)
+            loop (index, writer) in writers {
+                if index != at && writer.contribution.layer != .Declaration {
+                    overridden.push(writer.contribution.copy().with_reason("overridden by a more explicit entry"))
+                }
+            }
+        }
     }
-    SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
+    overridden
 }
 
 // The ContributionKind variant of a setting writer's layer
