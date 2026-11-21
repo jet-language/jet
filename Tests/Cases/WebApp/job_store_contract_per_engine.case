@@ -6,7 +6,9 @@
 # - the job's row survives the restart, and the next server takes it again
 #   once the stopped server's hold has lapsed, running that job and only it.
 # An in-memory database keeps the same contract while it is open: its jobs
-# last as long as the rows that queued them. core.app has no public
+# last as long as the rows that queued them. Each job runs on a task of its
+# own, in no order the contract gives, so `ran:` lists the jobs a server
+# started by ID, not by when they started. core.app has no public
 # job-store slot, so app code can name neither the calls an outbox joins
 # nor the hook that joins them.
 fixture: JobStoreContractPerEngine.fixture

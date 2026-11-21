@@ -71,10 +71,16 @@ kept_jobs: fn(store: db.Store) -> String {
     }
 }
 
+// The jobs started in a server, by ID. Each job runs on a task of its own,
+// and core.app promises no order between two calls' jobs, so job 3 may
+// start before job 2 does.
 ran_of: fn(ran: Shared<[Int]>) -> String {
     held: ran.guard_read()
+    started := [Int]{}
+    loop id in held.value -> started.push(id)
+    started.sort()
     ids := [String]{}
-    loop id in held.value -> ids.push("{id}")
+    loop id in started -> ids.push("{id}")
     if ids.len() == 0 -> "none" else -> ids.join(", ")
 }
 
