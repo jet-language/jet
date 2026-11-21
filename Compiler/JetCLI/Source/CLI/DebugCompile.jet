@@ -1928,18 +1928,27 @@ jet_cli_debug_core_row: fn(path: String) -> String Never! {
 
 // Whether the checked source file `source` is `path`, the line table's: the
 // same path, or one is the other's trailing components, either without its
-// leading `./` (an image built where it is debugged records its entry under
-// the compilation directory `.`, and a snapshot's sources are absolute).
+// leading `./` and `../` components (an image built where it is debugged
+// records its entry under the compilation directory `.`, a snapshot's
+// sources are absolute, and its checked sources are relative to the entry's
+// root, so a path dependency's lie under `../`).
 debug_eval_path_same: fn(source: String, path: String) -> Bool Never! {
     plain_source: debug_eval_path_plain(source)
     plain_path: debug_eval_path_plain(path)
     plain_source == plain_path || plain_source.ends_with("/{plain_path}") || plain_path.ends_with("/{plain_source}")
 }
 
-// `path` without its leading `./` components.
+// `path` without its leading `./` and `../` components.
 debug_eval_path_plain: fn(path: String) -> String Never! {
     at := 0
-    loop path.slice(at..<path.len()).starts_with("./") -> at += 2
+    loop {
+        rest: path.slice(at..<path.len())
+        if {
+            rest.starts_with("./") -> at += 2
+            rest.starts_with("../") -> at += 3
+            else -> break
+        }
+    }
     path.slice(at..<path.len())
 }
 
@@ -1949,6 +1958,13 @@ debug_eval_path_plain: fn(path: String) -> String Never! {
     assert(debug_eval_path_same("prog.jet", "/work/prog.jet"))
     assert(!debug_eval_path_same("/work/prog.jet", "./other.jet"))
     assert(!debug_eval_path_same("/work/myprog.jet", "./prog.jet"))
+}
+
+#Test("a path dependency's checked source beside the entry's root is the stop's absolute source") {
+    assert(debug_eval_path_same("../lib/lib.jet", "/work/pkgs/lib/lib.jet"))
+    assert(debug_eval_path_same("../../tools/lib/lib.jet", "/work/tools/lib/lib.jet"))
+    assert(!debug_eval_path_same("../lib/lib.jet", "/work/pkgs/mylib/lib.jet"))
+    assert(!debug_eval_path_same("../lib/lib.jet", "/work/pkgs/app/lib.jet"))
 }
 
 #Test("a stop's Core source is its Core row, never a file under the working directory") {

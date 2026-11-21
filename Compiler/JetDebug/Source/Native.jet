@@ -1214,6 +1214,12 @@ NativeSession: struct {
     // `text` compiled before the node at `line` and `column` of the source
     // `path`: the kept one, or the evaluator's, which may read `binders`
     // (NativeEvaluator) and builds as the image's `main` runs the program.
+    // The evaluator takes the source as the file source_file finds for it,
+    // by its absolute path: the line table's `path` is relative to the
+    // directory the image was built from, which need not be the working
+    // directory, nor where the program's compile roots its sources. A
+    // source no file holds as this build read it is taken as `path` names
+    // it, and the evaluator says why it can't read it or that it changed.
     compiled: fn(&self, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?) -> Shared<NativeEval> NativeEvalRefused! {
         key: "{path}:{line}:{column}:{text}"
         if self.evals.get(key) == .Val(found) -> return Ok(found)
@@ -1221,7 +1227,9 @@ NativeSession: struct {
         owned: facts.guard_read().value.owned
         made := NativeEval?{None}
         if self.evaluator == .Val(evaluator) {
-            made = Val(evaluator.compile(path, line, column, text, binders, owned, self.image.sources) ?? return Err(err))
+            found: self.source_file(path) ?? path
+            file: if found.starts_with(MODULE_CORE_PREFIX) -> found else -> native_files.resolve(found) ?? found
+            made = Val(evaluator.compile(file, line, column, text, binders, owned, self.image.sources) ?? return Err(err))
         }
         code: made ?? return Err(native_eval_refused("this session has no compiler to evaluate expressions with"))
         cell: Shared{code.move()}

@@ -5465,9 +5465,35 @@ jet_driver_eval_segment_offset: fn(segments: [SemaSourceSegment], path: String, 
 }
 
 // Whether the source path `source` and the line table's `asked` name one
-// file: the same path, or one is the other's trailing components.
+// file: the same path, or one is the other's trailing components, either
+// without its leading `./` and `../` components (a module's source is
+// relative to the entry's root, so a path dependency's lies under `../`,
+// while the debugger asks by the stop's absolute path).
 jet_driver_eval_path_matches: fn(source: String, asked: String) -> Bool Never! {
-    source == asked || source.ends_with("/{asked}") || asked.ends_with("/{source}")
+    plain_source: jet_driver_eval_path_plain(source)
+    plain_asked: jet_driver_eval_path_plain(asked)
+    plain_source == plain_asked || plain_source.ends_with("/{plain_asked}") || plain_asked.ends_with("/{plain_source}")
+}
+
+// `path` without its leading `./` and `../` components.
+jet_driver_eval_path_plain: fn(path: String) -> String Never! {
+    at := 0
+    loop {
+        rest: path.slice(at..<path.len())
+        if {
+            rest.starts_with("./") -> at += 2
+            rest.starts_with("../") -> at += 3
+            else -> break
+        }
+    }
+    path.slice(at..<path.len())
+}
+
+#Test("a path dependency's module source beside the entry's root is the asked absolute source") {
+    assert(jet_driver_eval_path_matches("../lib/lib.jet", "/work/pkgs/lib/lib.jet"))
+    assert(jet_driver_eval_path_matches("Source/Main.jet", "/work/app/Source/Main.jet"))
+    assert(jet_driver_eval_path_matches("./prog.jet", "prog.jet"))
+    assert(!jet_driver_eval_path_matches("../lib/lib.jet", "/work/pkgs/mylib/lib.jet"))
 }
 
 JetDriverCompileSelectionRestore: struct {
