@@ -188,10 +188,22 @@ native_listing_block: fn(session: &NativeSession, symbols: [X64ListingSymbol], f
         }
     }
     text = "{text}{ask.places}"
-    // The console's own source reads as `lines`, any other as the session
-    // reads a frame's (NativeSession.source_text).
-    own: base == file && !path.starts_with(MODULE_CORE_PREFIX)
-    other: if function >= 0 && !own -> (session.source_text(path) ?? "").split("\n").to_list() else -> [String]{}
+    // The console's own source reads as `lines` (none: the console has no
+    // text of it), any other as the session reads a frame's
+    // (NativeSession.source_text), or a line says why it can't. A session
+    // with no evaluator (a built image's file before it runs, a dump)
+    // reads no Core source at all, which says nothing of this function,
+    // so a Core function's rows there keep their `file:line` headings
+    // without a note.
+    core: path.starts_with(MODULE_CORE_PREFIX)
+    own: base == file && !core && lines.len() > 0
+    other := [String]{}
+    if function >= 0 && !own && (session.evaluator != None || !core) {
+        if session.source_text(path) == {
+            .Ok(found) -> { other = found.split("\n").to_list() }
+            .Err(failure) -> text = "{text}  source unavailable: {failure.detail}\n"
+        }
+    }
     described: native_function_at(session.image, low)
     line := 0
     run := -1

@@ -6,8 +6,9 @@
 # rest run there; the end of the commands ends the program. A command the
 # console refuses, or one left once the program has ended, exits 1. An image
 # with no Jet debug information still lists from its file, by its symbols; a
-# split image's symbols come from its side file, and once that is gone its
-# segments still list while `symbols` says why it can't. `--do` with `--dap`
+# split image's symbols come from its side file, beside it by a second name
+# of the symbol store's file, and once both names are gone its segments
+# still list while `symbols` says why it can't. `--do` with `--dap`
 # and a bare `--do` are refused. No other debugger or disassembler is on
 # PATH. The fixture's line 3 is fib's sum, and fib(10) is 55.
 fixture: DisassembleMarksStopAndBreakpoint.fixture
@@ -30,7 +31,9 @@ stdout: !~ "Program finished" # nor ran
 step: jet debug {work}/.jet/build/prog --do disas
 exit: 0
 stdout: ~ "fib  prog.jet:1-3  -O0  0x" # plain `disas` before the start lists every function in the code
+stdout: ~ "prog.jet:3   fib(n - 1) + fib(n - 2)\n" # under its source lines, read as `disas fib` reads them
 stdout: ~ "prog.jet:6   run: fn() " # the entry's too
+stdout: !~ "source unavailable" # the program's own source is found
 stdout: !~ "Breakpoint hit" # still nothing started
 step: jet debug prog.jet --break prog.jet:3 --do bt --do 'disas --bytes prog.jet:3' --do segments
 exit: 0
@@ -69,6 +72,7 @@ step: jet debug {work}/.jet/build/prog --do symbols --do segments
 exit: 0
 stdout: ~ "  function  prog.fib\n" # the image keeps no symbol table: its side file's are listed
 stdout: ~ "flags r-x align " # and its own segments
+remove: .jet/build/prog.debug
 remove: .jet/symbols
 step: jet debug {work}/.jet/build/prog --do segments
 exit: 0

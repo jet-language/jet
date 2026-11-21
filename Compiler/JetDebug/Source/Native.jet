@@ -9,6 +9,7 @@ use {
     native_files: core.files
     native_hex: core.encoding.hex
     native_math: core.math
+    native_crypto: core.crypto
     jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
@@ -676,6 +677,10 @@ NativeSession: struct {
     // run to (native_image_entry), as an index of the line table's
     // functions; -1 when the image names none.
     program_entry: Int{-1},
+    // The directories an absolute source path a breakpoint names shows the
+    // image was built in (root_named), latest last, where source_file looks
+    // for a source the line table records relative to that place.
+    source_roots: [String]{[String]{}},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -695,7 +700,30 @@ NativeSession: struct {
     // native_line_addresses): its number, or None when no code is on that
     // line.
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
+        if native_files.is_absolute(file) -> self.root_named(file)
         self.place(self.line_starts(file, line))
+    }
+
+    // Keeps the directory the absolute source path `file` (a breakpoint's)
+    // shows the image was built in, for source_file: what is left of `file`
+    // before the longest source path the line table records relative to
+    // that directory that `file` ends with. Nothing when none does.
+    root_named: fn(&self, file: String) Never! {
+        root := ""
+        matched := 0
+        loop function in self.image.lines.functions {
+            recorded: native_line_source(function.dir, function.file)
+            if recorded.starts_with(MODULE_CORE_PREFIX) || native_files.is_absolute(recorded) {
+                next
+            }
+            source: native_files.normalize(recorded)
+            if source.starts_with("../") || source.len() <= matched || !file.ends_with("/{source}") {
+                next
+            }
+            matched = source.len()
+            root = file.slice(0, file.len() - source.len() - 1)
+        }
+        if root != "" && !self.source_roots.contains(root) -> self.source_roots.push(root)
     }
 
     // Where a breakpoint on `line` of `file` traps: native_line_addresses,
@@ -1050,24 +1078,110 @@ NativeSession: struct {
     }
 
     // The text of the line `frame` stops at: the console's file `file`
-    // reads as `lines`, any other source as source_text reads it by the
-    // frame's path; "" when none does.
+    // reads as `lines` (none: the console has no text of it), any other
+    // source as source_line reads it by the frame's path. When the source
+    // can't be shown, why, naming the path; "" for a frame with no line.
     frame_source: fn(self, frame: NativeFrame, file: String, lines: [String]) -> String Never! {
-        if frame.file == file && !frame.path.starts_with(MODULE_CORE_PREFIX) {
+        if frame.file == file && !frame.path.starts_with(MODULE_CORE_PREFIX) && lines.len() > 0 {
+            if frame.line > lines.len() {
+                return "(source unavailable: `{frame.path}` has no line {frame.line})"
+            }
             return native_source_line(lines, frame.line)
         }
         if frame.line < 1 || frame.path == "" -> return ""
-        text: self.source_text(frame.path) ?? return ""
-        native_source_line(text.split("\n").to_list(), frame.line)
+        self.source_line(frame.path, frame.line)
     }
 
-    // The text of the source `path` names (NativeFrame.path, source_at) as
-    // the session's evaluator reads it (NativeEvaluator.source), a Core
-    // source as the Core the program was compiled with; None without an
-    // evaluator or when it can't be read.
-    source_text: fn(self, path: String) -> String? Never! {
-        evaluator: self.evaluator ?? return None
-        evaluator.source(path)
+    // Line `line` of the source `path` names, as source_text reads it, or
+    // why it can't be shown, naming the path.
+    source_line: fn(self, path: String, line: Int) -> String Never! {
+        text: self.source_text(path) ?? return "(source unavailable: {err.detail})"
+        lines: text.split("\n").to_list()
+        if line > lines.len() -> return "(source unavailable: `{path}` has no line {line})"
+        native_source_line(lines, line)
+    }
+
+    // The text of the source `path` names (NativeFrame.path, source_at),
+    // from the file source_file finds: as the session's evaluator reads it
+    // (NativeEvaluator.source), a Core source as the Core the program was
+    // compiled with. A session with no evaluator (a built image's file
+    // before it runs, a dump) reads the program's files itself, and no
+    // Core source. Why not, naming the path: a Core source without an
+    // evaluator, no such file or only changed ones, or one that can't be
+    // read.
+    source_text: fn(self, path: String) -> String NativeDebugError! {
+        if self.evaluator == None && path.starts_with(MODULE_CORE_PREFIX) {
+            return Err(NativeDebugError{detail: "`{path}` is not read in this session"})
+        }
+        found: self.source_file(path) ?? return Err(err)
+        unread: NativeDebugError{detail: "couldn't read `{found}`"}
+        if self.evaluator == .Val(evaluator) {
+            return Ok(evaluator.source(found) ?? return Err(unread))
+        }
+        Ok(native_files.read(found) ?? return Err(unread))
+    }
+
+    // The file the source `path` (NativeFrame.path, source_at) is read
+    // from, as this build read it: its sha256 is the one the image records
+    // for it (recorded_digest). A Core source is `path` itself (the
+    // evaluator reads it). The line table records a source relative to the
+    // directory the image was built from (JetCLI Host.jet
+    // jet_cli_debug_directory), which the image doesn't name, so a relative
+    // `path` is looked for from the working directory, then under each
+    // directory a breakpoint's path named (root_named), then under the
+    // image's directory and each one above it, as a build's `.jet/build` is
+    // under the directory it was built from. The walk up ends at the first
+    // directory holding `.git`, the checkout a build runs in, else at the
+    // filesystem root. A file whose sha256 differs is passed over; an
+    // image that records no sha256 for `path` takes the first file found.
+    // Why none is taken, naming the path: no file, or only changed ones.
+    source_file: fn(self, path: String) -> String NativeDebugError! {
+        if path == "" -> return Err(NativeDebugError{detail: "the frame names no source"})
+        if path.starts_with(MODULE_CORE_PREFIX) -> return Ok(path)
+        candidates := [String]{path}
+        if !native_files.is_absolute(path) {
+            loop root in self.source_roots {
+                candidates.push(native_files.normalize(native_files.join(root, path)))
+            }
+            directory := native_files.dirname(native_files.resolve(self.binary) ?? self.binary)
+            loop {
+                candidates.push(native_files.normalize(native_files.join(directory, path)))
+                above: native_files.dirname(directory)
+                if above == directory || native_files.exists(native_files.join(directory, ".git")) {
+                    break
+                }
+                directory = above
+            }
+        }
+        built: self.recorded_digest(path)
+        changed := ""
+        loop candidate in candidates {
+            if !native_files.is_file(candidate) -> next
+            digest: built ?? return Ok(candidate)
+            bytes: native_files.read_bytes(candidate) ?? next
+            if native_crypto.sha256(bytes).as_bytes() == digest -> return Ok(candidate)
+            if changed == "" -> changed = candidate
+        }
+        if changed != "" {
+            return Err(NativeDebugError{detail: "`{changed}` has changed since this build"})
+        }
+        if native_files.is_absolute(path) -> return Err(NativeDebugError{detail: "no `{path}`"})
+        roots: if self.source_roots.len() > 0 -> ", a breakpoint's source tree" else -> ""
+        Err(NativeDebugError{detail: "no `{path}` under the working directory{roots} or a directory above the image `{self.binary}`"})
+    }
+
+    // The sha256 the image records for the source `path` names
+    // (NativeImage.sources, keyed by the path from the entry root a
+    // line-table function records as its `file`); None when it records
+    // none for it.
+    recorded_digest: fn(self, path: String) -> [U8]? Never! {
+        if self.image.sources.len() == 0 -> return None
+        loop function in self.image.lines.functions {
+            if native_line_source(function.dir, function.file) == path {
+                return self.image.sources.get(function.file)
+            }
+        }
+        None
     }
 
     // Reads the runtime pack from the session's evaluator
@@ -2461,6 +2575,24 @@ NativeSession: struct {
         if self.program_entry < 0 -> return ""
         found: self.image.lines.functions[self.program_entry]
         native_line_source(found.dir, found.file)
+    }
+
+    // The file the program's entry source (entry_source) is read from
+    // (source_file); entry_source's path when none is found as this build
+    // read it, "" when the image names no entry.
+    entry_file: fn(&self) -> String Never! {
+        source: self.entry_source()
+        self.source_file(source) ?? source
+    }
+
+    // The lines of the program's entry source, from the file source_file
+    // finds; none when none is found as this build read it, so a stop's
+    // line says why (frame_source).
+    entry_lines: fn(&self) -> [String] Never! {
+        source: self.entry_source()
+        found: self.source_file(source) ?? return [String]{}
+        text: native_files.read(found) ?? return [String]{}
+        text.split("\n").to_list()
     }
 
     // The optimization level the program was built at (0, 1 or 2), which an

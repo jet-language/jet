@@ -5,7 +5,7 @@ use {
     native_test_process: core.process
     native_test_files: core.files
     native_test_hex: core.encoding.hex
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_build_id, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64TraceResume, X64_TRACE_RIP, X64_TRACE_RSP, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks, compiler_threads_single]
 }
@@ -828,11 +828,36 @@ NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndou
     }
     assert_eq(resolved, 1)
     session.close()
-    // The name beside the image links to the symbol store's file, which
-    // the image's build id finds without the link; with neither, the report
-    // names the file the link asks for.
+    // The name beside the image is the symbol store's file by a second
+    // name, no symbolic link: the store's file the image's build id names,
+    // in its directory or one above it, is the same file (or, where the file
+    // system has no hard links, its same bytes). The build id finds it
+    // without that name; with neither, the report names the file the link
+    // asks for.
     linked: native_test_files.join(root, "out/prog.debug")
-    stored: native_test_files.read_link(linked) ?? panic("the side file links to the store: {err}")
+    beside: native_test_files.stat(linked) ?? panic("the side file beside the image: {err}")
+    assert(beside.is_file && !beside.is_symlink, "{linked} is a file, no symbolic link")
+    image: native_test_files.read_bytes(native_test_files.join(root, "out/prog")) ?? panic("read the image: {err}")
+    id: native_build_id(image)
+    assert(id.len() > 1, "the image has a build id")
+    named: ".jet/symbols/.build-id/{native_test_hex.encode(id[0..<1])}/{native_test_hex.encode(id[1..<id.len()])}.debug"
+    stored := ""
+    directory := native_test_files.join(root, "out")
+    loop {
+        place: native_test_files.join(directory, named)
+        if native_test_files.exists(place) {
+            stored = place
+            break
+        }
+        above: native_test_files.dirname(directory)
+        if above == directory -> break
+        directory = above
+    }
+    assert(stored != "", "the store holds the side file under the image's build id")
+    kept: native_test_files.stat(stored) ?? panic("the stored side file: {err}")
+    if kept.id != beside.id {
+        assert_eq(native_test_files.read_bytes(linked) ?? panic("read: {err}"), native_test_files.read_bytes(stored) ?? panic("read: {err}"))
+    }
     native_test_files.remove(linked) ?? panic("unlink: {err}")
     by_id := NativeSession.start(native_test_files.join(root, "out/prog"), native_test_files.join(root, "output.txt")) ?? panic("start from the store: {err.detail}")
     by_id.close()

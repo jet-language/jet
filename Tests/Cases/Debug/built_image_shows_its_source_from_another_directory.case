@@ -1,0 +1,23 @@
+# Claim: `jet debug IMAGE` run from a directory other than the one the
+# image was built from still shows each stop's source line. The image
+# records its sources relative to that directory, which it doesn't name,
+# so the debugger looks for them above the image, as a build's
+# `.jet/build` is under it. The stop, `up` and `down` read the same
+# source. The fixture's line 3 is fib's sum; run calls fib on line 6.
+# The breakpoint is then deleted, and the end of stdin runs the program
+# to its end.
+fixture: DisassembleMarksStopAndBreakpoint.fixture
+env: NO_COLOR=1
+mkdir: elsewhere
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:3
+stdin: built_image_shows_its_source_from_another_directory.stdin
+cwd: {work}/elsewhere
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in fib()\n3 |     fib(n - 1) + fib(n - 2)        <- here\n" # the stop's line, read from the source above the image
+stdout: ~ "#1  run()  at prog.jet:6\n6 | run: fn() " # `up` reads its caller's line from the same source
+stdout: ~ "#0  fib()  at prog.jet:3\n3 |     fib(n - 1) + fib(n - 2)\n" # and `down` the stop's again
+stdout: !~ "source unavailable" # every line was found
+stdout: ~ "Deleted breakpoint 1\n" # the stop's breakpoint goes
+stdout: ~ "55\n" # and the program runs to its end
