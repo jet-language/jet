@@ -98,7 +98,9 @@ sema_trait_laws_add: fn(graph: &SemaRegistrationGraph) Never! {
         identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
         loop (index, test) in tests {
             key: checked_test_artifact_key(identity, test)
-            if faults[index] == .Val(fault) -> graph.law_faults.push(SemaTraitLawFault{key: "{key}", fault: "{fault}"})
+            if faults[index] == .Val(fault) {
+                graph.law_faults.push(SemaTraitLawFault{key: "{key}", fault: "{fault}"})
+            }
             _ := symbol_intern(graph.symbols, key)
             graph.modules[module_index].program.items.push(Item.Test{value: test})
         }
