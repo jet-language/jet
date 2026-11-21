@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1638,
+  "total": 1640,
   "counts": {
     "Compiler": 801,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 564,
+    "Tests": 566,
     "Tools": 28
   },
   "regions": [
@@ -8608,6 +8608,20 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Cases/PerfRun/NoCounters.fixture/main.jet",
+      "line": 13,
+      "column": 1,
+      "reason": "`program` is the address of a live struct sock_fprog whose filter block outlives the call; the kernel copies the filter before it returns"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/PerfRun/NoCounters.fixture/main.jet",
+      "line": 90,
+      "column": 5,
+      "reason": "the block holds the filter while seccomp copies it into the kernel, and is released once, after the call"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet",
       "line": 9,
       "column": 5,
@@ -11727,9 +11741,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 564 |
+| Tests | 566 |
 | Tools | 28 |
-| **total** | **1638** |
+| **total** | **1640** |
 
 ### Regions
 
@@ -12929,6 +12943,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/OSNative/ForkUnderLoadChildCompletes.fixture/main.jet | 47:9 | "the child only allocates, resolves and exits; the parent reaps it" |
 | Tests | Tests/Cases/Observe/PanicContextUsesOnlyLexicallyLiveLocals.fixture/unsafe/panic_lexical_unsafe.jet | 4:5 | "the region only binds and prints a local; it reads and writes no raw memory" |
 | Tests | Tests/Cases/OutputCallable/RunnableContractsAndSelectionFailInSema.fixture/probe3/main.jet | 3:1 | "raw boundary" |
+| Tests | Tests/Cases/PerfRun/NoCounters.fixture/main.jet | 13:1 | "`program` is the address of a live struct sock_fprog whose filter block outlives the call; the kernel copies the filter before it returns" |
+| Tests | Tests/Cases/PerfRun/NoCounters.fixture/main.jet | 90:5 | "the block holds the filter while seccomp copies it into the kernel, and is released once, after the call" |
 | Tests | Tests/Cases/Pin/Fixtures/LibraryWiresSelfRefUnderUnsafeAndExposesSafePinAPI/fixture.jet | 9:5 | "node storage is fixed for the returned pin; self_addr names this place" |
 | Tests | Tests/Cases/PlaceWindowLifetimes/BorrowedWindowStaysCallerOwned.fixture/main.jet | 5:5 | "the borrowed value is live in the caller" |
 | Tests | Tests/Cases/PlaceWindowLifetimes/HeapElementWindowStaysAllocatorOwned.fixture/main.jet | 6:5 | "the list element remains heap-owned" |
