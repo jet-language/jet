@@ -280,7 +280,10 @@ host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 /// Joins the scheduler's carrier and timer threads, the safe step before a
 /// raw exec or fork that needs a single-threaded process. False, with nothing
 /// stopped, while a task or a timer is still pending. A task whose join has
-/// returned is not pending. The threads start again on the next task or timer.
+/// returned is not pending. Carriers that retired earlier are joined too, and
+/// each joined thread has left the process by the return, so a thread count
+/// read next sees none of them. The threads start again on the next task or
+/// timer.
 quiesce: fn() -[Exec]> Bool Never! { core.tasks.__quiesce() }
 
 /// Receiver metadata is owned by the scheduler's typed handle.

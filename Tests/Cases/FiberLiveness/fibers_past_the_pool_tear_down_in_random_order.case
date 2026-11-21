@@ -2,8 +2,11 @@
 # with 400 more spawned between the releases: fibers past the pool of idle
 # stacks tear down in an order unrelated to their registration, and each one
 # leaves the live thread registry in O(1) (Thread.jet thread_unregister_tcb).
-# Every task returns what it was sent and no thread is left behind. Same
-# output on jet run and at O0, O1 and O2.
+# Every task returns what it was sent and no thread is left behind: after
+# tasks.quiesce() the thread count equals the one read before any task. The
+# quiesce returns once every scheduler thread, retired carriers included, has
+# left the process (Scheduler.jet jet_rt_scheduler_shutdown), so no wall-time
+# wait and no pool pin is needed. Same output on jet run and at O0, O1 and O2.
 fixture: Fixtures/Teardown
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache

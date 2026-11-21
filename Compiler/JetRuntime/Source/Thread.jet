@@ -468,6 +468,9 @@ rt_thread_entry_address: fn() -> I64 {
     stack_bytes: sync_load(wrapping(start + I64{32}))
     perf_row: sync_load(wrapping(start + I64{40}))
     jet_rt_free(start, THREAD_START_BYTES, I64{8})
+    // Kept past the exit's clear of tid@16, for a join that waits the
+    // thread out of the process (thread_join_gone).
+    sync_store(wrapping(handle + THREAD_HANDLE_ID), thread_tid())
     // Its stack segments: a raw clone's stack is the handle's mapping above
     // its guard; a libc thread's top only a probe finds.
     mapping: sync_load(handle)
@@ -551,10 +554,14 @@ THREAD_STACK_SPACE_SHARE: I64{100}
 // guard page, then the stack), tid@16 (the kernel stores the tid at clone
 // and clears it, waking a shared futex, once the thread is off its stack),
 // state@24 (THREAD_RUNNING, THREAD_DETACHED, THREAD_FINISHED), the entry's
-// result@32, and the reap list link@40. A C closure's thread's handle
-// (thread_libc_spawn) has mapping 0, since its libc owns its stack, and its
-// thread id (musl's pthread_t)@8; tid and the link stay 0.
-THREAD_HANDLE_BYTES: I64{48}
+// result@32, the reap list link@40, and the tid the thread stores at its
+// entry@48 (THREAD_HANDLE_ID), which no exit clears (thread_join_gone). A C
+// closure's thread's handle (thread_libc_spawn) has mapping 0, since its
+// libc owns its stack, and its thread id (musl's pthread_t)@8; tid@16 and
+// the link stay 0.
+THREAD_HANDLE_BYTES: I64{56}
+
+THREAD_HANDLE_ID: I64{48}
 
 THREAD_RUNNING: I64{0}
 
@@ -748,12 +755,25 @@ thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
 // Waits until the handle's thread is off its stack, stores its entry's
 // result at `result` (when nonzero), and releases the stack and the handle:
 // 0, or the C closure's join errno for its thread.
-thread_join: fn(handle: I64, result: I64) -> I64 {
+thread_join: fn(handle: I64, result: I64) -> I64 { thread_join_then(handle, result, false) }
+
+// thread_join, and then waits until the kernel has taken the thread out of
+// the process. The join returns at the kernel's wake from the thread's exit
+// (CHILD_CLEARTID, as musl's join), which comes before that exit's last
+// step: the thread still counts among the process's threads
+// (/proc/self/status Threads:) until it. So a caller that must leave no
+// thread of its own behind (jet_rt_scheduler_shutdown) waits that step out
+// (thread_gone).
+thread_join_gone: fn(handle: I64) -> I64 { thread_join_then(handle, I64{0}, true) }
+
+priv thread_join_then: fn(handle: I64, result: I64, gone: Bool) -> I64 {
     if (sync_load(handle) == I64{0}) {
         status: thread_libc_call(thread_libc_join, sync_load(wrapping(handle + I64{8})), I64{0}, I64{0}, I64{0})
         if (status != I64{0}) { return status }
         if (result != I64{0}) { sync_store(result, sync_load(wrapping(handle + I64{32}))) }
+        id: sync_load(wrapping(handle + THREAD_HANDLE_ID))
         jet_rt_free(handle, THREAD_HANDLE_BYTES, I64{8})
+        if gone -> thread_gone(id)
         return I64{0}
     }
     word: wrapping(handle + I64{16})
@@ -765,8 +785,22 @@ thread_join: fn(handle: I64, result: I64) -> I64 {
         _ := sync_futex_wait_shared(word, tid)
     }
     if (result != I64{0}) { sync_store(result, sync_load(wrapping(handle + I64{32}))) }
+    id: sync_load(wrapping(handle + THREAD_HANDLE_ID))
     thread_release(handle)
+    if gone -> thread_gone(id)
     I64{0}
+}
+
+// Waits until `tid`, a thread of this process that has passed its exit's
+// wake, names none: tgkill's signal 0 answers ESRCH once the kernel has taken
+// the thread off the process, the last step of its exit. Each check yields
+// to that exit, so the wait ends with it, not at a time.
+thread_gone: fn(tid: I64) {
+    if (tid <= I64{0}) {
+        return
+    }
+    process: host_call(I64{39}, I64{0}, I64{0}, I64{0})
+    loop host_call(I64{234}, process, tid, I64{0}) != (I64{-3}) { fiber_spin_yield() }
 }
 
 // Gives up the handle: a finished thread's stack is released by the next
