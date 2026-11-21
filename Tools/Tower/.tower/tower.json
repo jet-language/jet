@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112719,
+    "rev": 112720,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54115,6 +54115,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Perf/task_clock_nominal_matches_kept fails in suite p387 (nominal 335 > kept+1 = 327), and stays failing until fixed. The case premise \"the kernel share of the spin is under a period\" is false. Under exclude_kernel the task clock counts both modes and the kernel skips an overflow that lands in kernel mode, so nominal minus kept is the period ends that fell in the kernel, the second runtime thread's syscall time included. Measured on gate-p387: 408/413, 350/358, 389/399, 4611/4646, 10739/10866, a 1.2-2.8% gap that grows with run length. At perf_event_paranoid 2 no counter separates user time. Decision: no bound widening. Samples carry the task clock count (PERF_SAMPLE_READ), so the dropped period ends D are counted exactly, and the case asserts nominal == kept + D. This lands in one samples-file format bump with the stack-id cites (Lens)."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Sampler overhead, correction to the earlier log: the 0.75% of R2(d) was the POSIX-timer sampler at 1 kHz or less; the rise to about 3% followed the 8 kHz rate (6dda4bf451), not the kernel ring. Per-sample kernel cost on this host, 5 runs: ip-only 1.10 us (the floor, 0.88% at 8 kHz), callchain-only 2.06, current callchain+512 B 2.29; a STACK_USER copy large enough for Jet stacks costs more (16 KiB 2.89, 32 KiB 4.63) and still truncates 95% of compiler samples (deeper than 32 KiB), so drain-time unwinding is rejected. Decision: the 2% budget at the default rate stands (2.5 us/sample all-in at 8 kHz). Keep the callchain; shrink STACK_USER to the largest frameless-leaf frame so the leaf caller recovery stays; cut the handler/drain cost; calibrate from interleaved on/off pairs. The default rate (8 kHz vs 4 kHz) is user-visible and goes to ballot D-PERF-RATE1."
         },
         {
@@ -55434,7 +55439,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T01:44:34.863Z",
+      "updated": "2026-11-21T02:28:45.543Z",
       "updatedBy": "Main",
       "criteriaLastN": 101
     },
@@ -130151,6 +130156,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T02:28:45.543Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T02:16:00.339Z",
       "by": "Main",
