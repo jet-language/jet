@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112982,
+    "rev": 113000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36551,6 +36551,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c1 checked on dev b66642b8bc: the jet_new cases pass (9 of 9 in the a0.0.046 admit run), but Tests/Cases/Pkg/cli_jet_new_creates_project_structure.case still asserts myapp/.jet/lock, and D-LOCKFILE1=A puts the lock at <root>/jet.lock with a one-line .gitignore of .jet/. Not met: jet new and the case still use the old place."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 2 criteria from archived #2218: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -36645,7 +36650,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:14.997Z",
-      "updated": "2026-11-17T01:41:19.984Z",
+      "updated": "2026-11-21T21:03:23.179Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -48296,6 +48301,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c3 checked on dev b66642b8bc: the a0.0.046 admit ran the 85 Web/ golden rows on o0, o1 and o2 (all PASS), and none on the web tier. Not met until a web-tier run passes."
+        },
+        {
           "at": "2026-11-07",
           "by": "Main",
           "text": "fc0de36c7c: Tools/perf/WebBundleCheck.jet now counts every file web.manifest.json names, rt.wasm included, and keeps the committed byte budgets. Against them it fails honestly: rc=1, 12 size regressions over hello, counter and todo. It passes (rc=0, 3 workloads) only against a scratch baseline at today's sizes, which is not committed."
@@ -48336,7 +48346,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T19:26:02.798Z",
-      "updated": "2026-11-17T01:44:08.732Z",
+      "updated": "2026-11-21T21:03:27.170Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -55839,11 +55849,11 @@
         {
           "n": 112,
           "text": "Debug info is byte-deterministic: the same compiler building the same tree writes the same .debug_info, whatever the build order. The a0.0.046 admit (2026-11-21, dev 49abf9184a) failed its pack step because s2 rebuilt a jet-bare whose .debug_info named the Core type `FileReader` bare, where the chain and the p400 census builds named it `<corelib>/core.files.FileReader`. The 21-byte difference changed the jet-bare digest, and with it the runtime pack IDENTITY and compilerSha256 (80f7d3b3… against b181dc0f…). .text, .rodata, .data, .symtab and the Jet debug sections were byte-identical. Proof: a JetBackend/JetIR unit test in which two registration orders give identical .debug_info bytes, and the release admit pack step passing (rebuilt pack byte-identical to pack2).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T08:26:17.433Z"
+          "evidence": "dev b66642b8bc (fix d26dc28a2c): `jet test Compiler/JetIR/Source/X64Module.jet --filter \"debug name does not depend\"` → \"a type row's debug name does not depend on which spelling reached it first: pass\", 1 passed, on gate-p429. The test builds two modules in opposite registration orders and asserts equal row names, the <corelib>/core.files.FileReader spelling and identical .debug_info bytes. The a0.0.046 admit of b66642b8bc: \"pack: PASS rebuilt by s2 without Rust, byte-identical to pack2 (20 files)\", as in the admit of 938d4d84f8.",
+          "at": "2026-11-21T20:45:13.876Z"
         },
         {
           "n": 113,
@@ -55905,7 +55915,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T19:29:52.023Z",
+      "updated": "2026-11-21T20:45:13.876Z",
       "updatedBy": "Main",
       "criteriaLastN": 118
     },
@@ -58095,11 +58105,11 @@
         {
           "n": 2,
           "text": "Every queued or retried remote write carries a request key; the server keeps (account, key) -> result for 24 hours and answers a replay with the stored result. Proof: `jet test Compiler --profile cases --filter WebApp/replayed_write_returns_stored_result` (the first response is dropped).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:11.721Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile cases --filter WebApp/replayed_write_returns_stored_result` → 1 of 1 PASS.",
+          "at": "2026-11-21T21:02:46.326Z"
         },
         {
           "n": 3,
@@ -58207,7 +58217,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-17T01:48:35.813Z",
+      "updated": "2026-11-21T21:02:46.326Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -58815,6 +58825,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c29 checked on dev b66642b8bc: Data/JSON/JSONParseLimits passes on o0, o1 and o2, but `git grep -n parse_with_limits -- Core Jetpack Examples` still prints Core/Encoding/JSON.jet:97 and Examples/Data/JSON/JSONParseLimits.jet:1,27. Not met."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c4 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
@@ -59117,7 +59132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:12.288Z",
-      "updated": "2026-11-17T01:48:51.862Z",
+      "updated": "2026-11-21T21:03:23.965Z",
       "updatedBy": "Main",
       "criteriaLastN": 31
     },
@@ -59497,6 +59512,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c8 checked on dev b66642b8bc: Basics/ passes 165 of 165, but `git grep -n -E \"io\\.(println|sprint|repr)\\(\" -- \"*.jet\"` prints Tests/Cases/CLIPartsRuntime/Fixtures/Print/run.jet:4,6,7, Tests/Cases/CLIPartsSurface/Fixtures/UnresolvedCall/call.jet:5 and Tests/Cases/CLIRuntime/Fixtures/Printfamily/run.jet:4. If those fixtures prove the retired names are refused, the criterion needs to say so; as written it is not met."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Sweep at dev f768b6597e: the c6 and c14 proof goldens pass on O0, O1 and O2 in suite-p392, but neither criterion is met by them. c6: Examples/Collections/ListRemoveSelector.jet calls remove(1, .Slot) and remove(x, .Val) only. Plain remove(x), deleting the first equal item, is never exercised. c14: Examples/Collections/OperationContract.jet covers empty all and any, sum 0 and product 1, the first failure with no partial list, short and padded zips, and remainder continuation. Strict zip runs only on equal lengths, so its refusal of unequal lengths is never shown. Each needs that coverage added to its golden."
         }
       ],
@@ -59553,11 +59573,11 @@
         {
           "n": 6,
           "text": "`remove(x)` deletes the first item equal to x, `remove(i, .Slot)` deletes a slot and `remove(x, .Val)` states the default (D-LISTREMOVE1=F). Proof: `jet test Compiler --profile golden --filter Collections/ListRemove` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:08:53.956Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Collections/ListRemove` → 3 of 3 PASS (o0, o1, o2).",
+          "at": "2026-11-21T21:02:47.230Z"
         },
         {
           "n": 7,
@@ -59633,11 +59653,11 @@
         {
           "n": 14,
           "text": "Examples cover empty all and any, zero, first failure, strict, short and padded zip, and remainder continuation, and no source error prints as a success. Proof: `jet test Compiler --profile golden --filter Collections/OperationContract` on O0, O1 and O2. (was #3325 c8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:15:17.781Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Collections/OperationContract` → 3 of 3 PASS (o0, o1, o2).",
+          "at": "2026-11-21T21:02:48.093Z"
         },
         {
           "n": 15,
@@ -59810,7 +59830,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:06.513Z",
-      "updated": "2026-11-21T05:30:05.677Z",
+      "updated": "2026-11-21T21:03:24.764Z",
       "updatedBy": "Main",
       "criteriaLastN": 32
     },
@@ -60701,6 +60721,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c3 checked on dev b66642b8bc: Tests/Run/TextUnicode/FmtContract.out still pins decimal(0.125, 2) and tie:Fixed(2) as 0.13 (half away from zero), not 0.12 (ties to even). Not met."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c5, c6, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
@@ -60710,11 +60735,11 @@
         {
           "n": 1,
           "text": "fmt.shortest gives the shortest round-trip digits in positional layout with the exact special-value policy (D-FLOAT-POSITIONAL1=A). Proof: `jet test Compiler --profile golden --filter TextUnicode/FmtContract` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:25:54.433Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter TextUnicode/FmtContract` → 3 of 3 PASS (o0, o1, o2).",
+          "at": "2026-11-21T21:02:48.961Z"
         },
         {
           "n": 2,
@@ -60868,7 +60893,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:54.433Z",
-      "updated": "2026-11-17T01:49:04.206Z",
+      "updated": "2026-11-21T21:03:25.570Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -61691,11 +61716,11 @@
         {
           "n": 7,
           "text": "filter_map's callback carrier picks the rule: `-> U?` skips None, an explicit Result keeps success-only selection, and a callback failure propagates; map_while stops at None and find_map continues past it, consuming the triggering item, with no new absence or error type (D-ITER-SELECTION1=A). Proof: `jet test Compiler --profile golden --filter Collections/Iterators/FilterMap` on O0, O1 and O2. (was #3327 c4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:16:29.461Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Collections/Iterators/FilterMap` → 3 of 3 PASS (o0, o1, o2).",
+          "at": "2026-11-21T21:02:49.873Z"
         },
         {
           "n": 8,
@@ -61760,7 +61785,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:32:39.427Z",
-      "updated": "2026-11-21T05:30:06.456Z",
+      "updated": "2026-11-21T21:02:49.873Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -62011,6 +62036,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c1 stays open after D-PLUGIN-ENGINE1=A was ratified: A keeps run-time loads off until its own build is done (the separate x64 checker, the guard reservations, the instance split, the memory-key gates, SA_ONSTACK, the sealed child translator, the per-block jump fix, the spec runner and the fuzzer), the spec suite's core tests pass, the fuzzer has no open crash or checker refusal, and the time check holds. Loading a run-time path before then would let a guest escape. The unlanded sema and route surface for c1 (4 files) is saved as $JET_SCRATCH_ROOT/lanes/Main/wt-save/Rivet-6893-1545.diff and lands with that build."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Ballot D-PLUGIN-ENGINE1 posted to the owner (2026-11-21): the engine that translates a plugin loaded by a run-time path. Drafted by Rivet; Lens reviewed it four times (r0, r1 and r2 rejected with 10, 7 and 6 findings; r3 accepted; r4 applies Lens's three wording notes and was passed by Lens, sha256 0f5c80c3). The sema half of this card stays held until the vote."
         },
         {
@@ -62057,8 +62087,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-21T20:24:59.666Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-21T20:42:49.479Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0gxq09x",
@@ -64733,6 +64763,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c6 checked on dev b66642b8bc: RuntimeStops/every_division_by_zero_stops_at_its_line passes, but it checks the file and line only and asserts no quoted source line, so the column and caret c6 names are neither built nor checked. Not met."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
           "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c6, c8 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
@@ -64862,7 +64897,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:30.758Z",
-      "updated": "2026-11-17T01:49:51.462Z",
+      "updated": "2026-11-21T21:03:26.376Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -66064,11 +66099,11 @@
         {
           "n": 1,
           "text": "Channel outcomes are distinct: capacity 0 (rendezvous) differs from capacity 1, and full, closed-send, dropped-receiver, cancel and receive-after-close each report their own outcome. A public API change needs a ballot. Proof: `jet test Compiler --profile golden --filter Concurrency/ChannelOutcomes` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:18.286Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Concurrency/ChannelOutcomes` → 3 of 3 PASS (o0, o1, o2), with no public API change.",
+          "at": "2026-11-21T21:02:50.719Z"
         },
         {
           "n": 2,
@@ -66201,11 +66236,11 @@
         {
           "n": 14,
           "text": "A task group shows capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation through observed transitions, plus its join, shield and detach obligations. Proof: `jet test Compiler --profile golden --filter Concurrency/ConformanceCapsule` on O0, O1 and O2. (was #3239 c10)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:35.476Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Concurrency/ConformanceCapsule` → 3 of 3 PASS (o0, o1, o2).",
+          "at": "2026-11-21T21:02:51.560Z"
         },
         {
           "n": 15,
@@ -66289,7 +66324,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:58.858Z",
-      "updated": "2026-11-17T01:50:10.738Z",
+      "updated": "2026-11-21T21:02:51.560Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     },
@@ -69649,11 +69684,11 @@
         {
           "n": 1,
           "text": "Every conformance program and every changed gauntlet corpus entry is byte-identical across O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter Conformance` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:17:43.312Z"
+          "evidence": "dev b66642b8bc, the a0.0.046 admit's candidate suite run (s2 compiler, evidence rows-candidate.json): `jet test Compiler --profile golden --filter Conformance` → 3 of 3 PASS (o0, o1, o2), byte-identical to the one .out golden.",
+          "at": "2026-11-21T21:02:52.392Z"
         },
         {
           "n": 2,
@@ -69720,7 +69755,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:40.307Z",
-      "updated": "2026-11-17T01:52:03.322Z",
+      "updated": "2026-11-21T21:02:52.392Z",
       "updatedBy": "Main"
     },
     {
@@ -73087,6 +73122,24 @@
           "verifiedBy": null,
           "evidence": "Landed b11ffab4c2 (D-IMAGE-SECTIONS1 A: `jet debug IMAGE --do sections`, `--bytes` adds their bytes) and 1eb8510abe (p420, dev 4f1f6c1c7f). BuildEntry/a_folded_string_read_only_for_its_length_costs_no_bytes and Debug/sections_list_an_image_and_its_bytes PASS in the p420 full suite, and neither calls readelf, size or nm (checked on 4f1f6c1c7f). CoreActivation (Tools/Perf/CoreActivation.mjs and its Jet twin run.jet) reads section sizes and symbols through `jet debug IMAGE --do sections|symbols`; `jet Tools/Gauntlet/PortBars.jet --entry CoreActivation` on gate-p420: parity PASS 8/8 cases do the job. The same run reports the twin losing the speed port bar (wall 3.15x, peak memory 3.38x the original), which keeps the original running under the port rules; that is a port-bar gap of the entry, not of c29.",
           "at": "2026-11-21T16:14:28.508Z"
+        },
+        {
+          "n": 30,
+          "text": "Expressions evaluate at a stop in the compiler itself. Found by Main on dev b66642b8bc (gate-p429 jet), 2026-11-21, doing c5: `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do \"print function.name\" -- check hello.jet` stops at Casing.jet:219 in sema_casing_function and its Locals show function = Func{… name: \"greet_user\" …}, but `print function.name` and `print function.params.len()` fail: from the tree root \"no Jet function holds Compiler/JetSema/Source/Sema/Casing.jet:219\", and from another directory \"couldn't read Compiler/JetSema/Source/Sema/Casing.jet: not found\". The evaluator finds the stop's function and source by the image's own recorded paths, whatever the working directory. Proof: a Debug case that builds a two-package program, stops in the dependency's function and prints a field and a method call of a parameter, from the root and from another directory.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T20:28:40.021Z"
+        },
+        {
+          "n": 31,
+          "text": "`bt N` prints at most N frames. Found by Main on dev b66642b8bc doing c5: `--do \"bt 3\"` at a stop in the compiler printed all 19 frames. Proof: a Debug case where `bt 2` at a stop three calls deep prints frames #0 and #1 and a line saying how many more there are.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T20:28:41.188Z"
         }
       ],
       "refs": [],
@@ -73094,9 +73147,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T18:18:58.430Z",
+      "updated": "2026-11-21T20:28:41.188Z",
       "updatedBy": "Main",
-      "criteriaLastN": 29
+      "criteriaLastN": 31
     },
     {
       "id": "c0c3gh6u",
@@ -132953,6 +133006,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T21:03:27.170Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08qqzef",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:03:26.377Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlqnvv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:03:25.570Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0r8ohhq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:03:24.764Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jjbpij",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:03:23.965Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zutf08",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:03:23.179Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0etvk8s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:02:52.392Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ipkmlg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T21:02:51.560Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dbs1yh",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-21T21:02:50.719Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dbs1yh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T21:02:49.873Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t3qh8f",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-21T21:02:48.961Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0r8ohhq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T21:02:48.093Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jjbpij",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-21T21:02:47.230Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jjbpij",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-21T21:02:46.326Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m0czk2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-21T20:45:13.876Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#112"
+    },
+    {
+      "at": "2026-11-21T20:42:49.479Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T20:28:41.188Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "31 criteria, soft limit 6: a gap found doing c5, which says every gap is a criterion here"
+    },
+    {
+      "at": "2026-11-21T20:28:41.188Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#31 `bt N` prints at most N frames. Found by Main on dev b66642b"
+    },
+    {
+      "at": "2026-11-21T20:28:40.021Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "30 criteria, soft limit 6: a gap found doing c5, which says every gap is a criterion here"
+    },
+    {
+      "at": "2026-11-21T20:28:40.021Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#30 Expressions evaluate at a stop in the compiler itself. Found"
+    },
     {
       "at": "2026-11-21T20:26:10.853Z",
       "by": "Main",
