@@ -3924,16 +3924,25 @@ ct_measure: fn(what: String, seed: U64, samples: Int, batch: Int, fixed: [U8], o
     worst
 }
 
-/// `ct_measure` up to three times, each with other classes, failing when
-/// every t reaches `bound` in size.
-ct_dudect_within: fn(what: String, bound: Float, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
+/// `ct_measure` up to three times, each with other classes, stopping at the
+/// first t under `bound` in size: every t it measured, in order. A leak is a
+/// list of three, each at least `bound` in size.
+ct_dudect_measures: fn(what: String, bound: Float, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> [Float] {
     seeds: [U64]{U64{88172645463325252}, U64{2463534242}, U64{6364136223846793005}}
     found := [Float]{}
     loop seed in seeds {
         t: ct_measure(what, seed, samples, batch, fixed, op)
-        if ct_abs(t) < bound -> return t
         found.push(t)
+        if ct_abs(t) < bound -> return found
     }
+    found
+}
+
+/// `ct_dudect_measures`, failing when every t reaches `bound` in size.
+ct_dudect_within: fn(what: String, bound: Float, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) -> Int) -[Time, IO]> Float {
+    found: ct_dudect_measures(what, bound, samples, batch, fixed, op)
+    last: found[found.len() - 1]
+    if ct_abs(last) < bound -> return last
     panic("{what}: Welch's t is {found} between the two classes over {samples} runs in each of {found.len()} measurements; the bound is {bound}")
 }
 
@@ -3976,6 +3985,17 @@ ct_early_exit: fn(a: [U8], b: [U8]) -> Int Never! {
     mac: ct_bytes(r, 32)
     t: ct_measure("early-exit compare (the leak dudect must find)", U64{88172645463325252}, 20000, 64, ct_last_flipped(mac), fn(x) { ct_early_exit(mac, x) })
     if ct_abs(t) < (Float{10}) -> panic("dudect missed an early-exit compare: t {t}")
+    // The verdict the timing rows use, which passes on any of its three
+    // measurements under the bound, still fails the leak: all three are over it.
+    found: ct_dudect_measures("early-exit compare (the verdict must fail)", Float{10}, 20000, 64, ct_last_flipped(mac), fn(x) { ct_early_exit(mac, x) })
+    if found.len() < 3 {
+        panic("dudect's three-measurement verdict passed an early-exit compare: t {found}")
+    }
+    loop f in found {
+        if ct_abs(f) < (Float{10}) {
+            panic("dudect's three-measurement verdict passed an early-exit compare: t {found}")
+        }
+    }
 }
 
 #Test("dudect: ctime.memcmp and core.crypto.constant_time_equal_bytes take as long wherever two tags differ") {
