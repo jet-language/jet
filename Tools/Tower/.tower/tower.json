@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113025,
+    "rev": 113029,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36476,7 +36476,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -36525,11 +36525,11 @@
         {
           "n": 3,
           "text": "E0626 for a failing dependency prints that dependency's own diagnostics inline.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T22:52:58.191Z"
+          "evidence": "dev c137227f92 (p436 batch compiler, built from 942f0c6d93): `jet test Compiler --profile ui --filter DependencyPackageErrors` PASS: the snapshot prints the dependency shapes own Jet.ReturnTypeMismatch at shapes/shapes.jet:1:29 inline, then Jet.DependencyCheckFailed (E0626) for `shapes`; `jet test Compiler --profile cases --filter workspace_check_covers_every_member` PASS (a failing member s errors print once).",
+          "at": "2026-11-21T22:52:59.359Z"
         },
         {
           "n": 4,
@@ -36559,9 +36559,10 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-21T22:52:58.191Z",
+      "updated": "2026-11-21T22:53:01.079Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-21T22:53:01.079Z"
     },
     {
       "id": "c0etvk8s",
@@ -73258,11 +73259,11 @@
         {
           "n": 30,
           "text": "Expressions evaluate at a stop in the compiler itself. Found by Main on dev b66642b8bc (gate-p429 jet), 2026-11-21, doing c5: `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do \"print function.name\" -- check hello.jet` stops at Casing.jet:219 in sema_casing_function and its Locals show function = Func{… name: \"greet_user\" …}, but `print function.name` and `print function.params.len()` fail: from the tree root \"no Jet function holds Compiler/JetSema/Source/Sema/Casing.jet:219\", and from another directory \"couldn't read Compiler/JetSema/Source/Sema/Casing.jet: not found\". The evaluator finds the stop's function and source by the image's own recorded paths, whatever the working directory. Proof: a Debug case that builds a two-package program, stops in the dependency's function and prints a field and a method call of a parameter, from the root and from another directory.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T20:28:40.021Z"
+          "evidence": "Fix 717de0191d (on dev c137227f92). On the p436 batch compiler (dev 942f0c6d93): `jet test Compiler --profile cases --filter Debug/print_evaluates_in_a_dependency_from_any_directory` PASS: a two-package image (pkgs/app, pkgs/lib) stops at lib.jet:11 in total() and prints made.count = 3 and made.doubled() = 6, from the build directory and from another directory, with no \"Can't evaluate\".",
+          "at": "2026-11-21T22:53:51.074Z"
         },
         {
           "n": 31,
@@ -73272,6 +73273,15 @@
           "verifiedBy": null,
           "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21): Tests/Cases/Debug/backtrace_count_shows_the_first_frames.case PASS (commit aba25a8ca1: bt 2 three calls deep prints #0 inner and #1 middle, then \"(2 more frames; `bt` shows them all)\").",
           "at": "2026-11-21T21:35:04.009Z"
+        },
+        {
+          "n": 32,
+          "text": "Expressions evaluate at a stop in the compiler itself, the jet binary built from Compiler: on the p436 batch compiler (dev 942f0c6d93), `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do \"print function.name\" --do \"print function.params.len()\" -- check hello.jet` stops at Casing.jet:219 in sema_casing_function, and Locals show function = Func{… name: \"greet_user\" …}, but both prints fail with \"Can't evaluate `function.name`: `Byte` changed its layout (its size changed from 9 to 16 bytes)\". The evaluator compiles against the image's own layout of each type it reads, or reports which declaration differs. Proof: that command prints function.name = \"greet_user\" and the parameter count, and a Debug case covers a stop in a program whose layout facts include Byte.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:54:39.409Z"
         }
       ],
       "refs": [],
@@ -73279,9 +73289,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T22:46:32.825Z",
+      "updated": "2026-11-21T22:54:39.409Z",
       "updatedBy": "Main",
-      "criteriaLastN": 31
+      "criteriaLastN": 32
     },
     {
       "id": "c0c3gh6u",
@@ -133138,6 +133148,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T22:54:39.409Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "30 criteria, soft limit 6: gap found doing c5; it blocks c5"
+    },
+    {
+      "at": "2026-11-21T22:54:39.409Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#32 Expressions evaluate at a stop in the compiler itself, the j"
+    },
+    {
+      "at": "2026-11-21T22:53:51.074Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-21T22:53:01.079Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vzmbkk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-21T22:52:59.359Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vzmbkk",
+      "note": "#3"
+    },
     {
       "at": "2026-11-21T22:52:58.192Z",
       "by": "Main",
