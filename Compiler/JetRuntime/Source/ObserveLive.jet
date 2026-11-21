@@ -397,6 +397,8 @@ observe_cstring: fn(text: I64) -> I64 {
     buffer
 }
 
+// Observe's and the profiler's own calls, which `jet perf run` does not
+// count (HostProcess.jet host_syscall): they are not the program's.
 observe_syscall: fn(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     #Unsafe("the vetted Linux calls of Observe and the profiler take words alone or borrow native buffers only for their duration") {
         return os_syscall_i64(number, a, b, c, d, I64{0}, I64{0})

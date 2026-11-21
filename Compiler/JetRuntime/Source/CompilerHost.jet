@@ -162,10 +162,10 @@ host_getauxval_kernel: fn(kind: I64) -> I64 {
     rt_text_store(page, I64{7310238724270485551})
     rt_text_store(wrapping(page + I64{8}), I64{33346492788860524})
     #Unsafe("page is a fresh private page: the path, then the [type, value] pairs read into it") {
-        fd: os_syscall_i64(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
+        fd: host_syscall(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
-            length: os_syscall_i64(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
-            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            length: host_syscall(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             at := I64{16}
             // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
             loop at <= length {

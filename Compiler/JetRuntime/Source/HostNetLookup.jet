@@ -269,7 +269,7 @@ lk_inet_aton: fn(look: I64, text: I64, output: I64) -> Bool {
 lk_if_index: fn(look: I64, name: I64) -> I64 {
     fd := I64{0}
     #Unsafe("socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0) takes no pointer") {
-        fd = os_syscall_i64(I64{41}, I64{1}, I64{524290}, I64{0}, I64{0}, I64{0}, I64{0})
+        fd = host_syscall(I64{41}, I64{1}, I64{524290}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (fd < I64{0}) {
         lk_errno(look, I64{0} - fd)
@@ -284,8 +284,8 @@ lk_if_index: fn(look: I64, name: I64) -> I64 {
     }
     result := I64{0}
     #Unsafe("ioctl(SIOCGIFINDEX) reads and writes exactly the owned 40-byte ifreq; close releases the descriptor opened here") {
-        result = os_syscall_i64(I64{16}, fd, I64{35123}, request, I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        result = host_syscall(I64{16}, fd, I64{35123}, request, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     index := I64{0}
     if (result < I64{0}) { lk_errno(look, I64{0} - result) } else {
@@ -346,7 +346,7 @@ lk_open: fn(look: I64, path: I64) -> I64 {
     name: fd_c_path(path)
     fd := I64{0}
     #Unsafe("open(2) reads the owned NUL-terminated path; O_RDONLY|O_CLOEXEC retains no pointer") {
-        fd = os_syscall_i64(I64{2}, name, I64{524288}, I64{0}, I64{0}, I64{0}, I64{0})
+        fd = host_syscall(I64{2}, name, I64{524288}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     fd_c_path_drop(name, path)
     if (fd < I64{0}) {
@@ -362,7 +362,7 @@ lk_open: fn(look: I64, path: I64) -> I64 {
 
 lk_close: fn(reader: I64) {
     #Unsafe("close(2) releases the descriptor lk_open opened") {
-        _ := os_syscall_i64(I64{3}, net_word(reader, I64{0}), I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{3}, net_word(reader, I64{0}), I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(net_word(reader, I64{8}), LK_READ, I64{1})
     jet_rt_free(reader, I64{48}, I64{8})
@@ -378,7 +378,7 @@ lk_getc: fn(look: I64, reader: I64) -> I64 {
         if lk_eof(reader) -> return I64{-1}
         count := I64{0}
         #Unsafe("read(2) fills at most LK_READ bytes of the reader's owned buffer") {
-            count = os_syscall_i64(I64{0}, net_word(reader, I64{0}), buffer, LK_READ, I64{0}, I64{0}, I64{0})
+            count = host_syscall(I64{0}, net_word(reader, I64{0}), buffer, LK_READ, I64{0}, I64{0}, I64{0})
         }
         if (count <= I64{0}) {
             if (count == I64{0}) { net_put(reader, I64{32}, I64{1}) } else {

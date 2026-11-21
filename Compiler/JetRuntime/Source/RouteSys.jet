@@ -112,7 +112,7 @@ SYS_NSCD_GROUPS_MAX: I64{65536}
 
 sys_close: fn(fd: I64) {
     #Unsafe("close(2) releases a descriptor this route opened") {
-        _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -122,7 +122,7 @@ sys_read_full: fn(fd: I64, at: I64, size: I64) -> I64 {
     loop got < size {
         count := I64{0}
         #Unsafe("read(2) fills at most the caller's remaining owned bytes") {
-            count = os_syscall_i64(I64{0}, fd, wrapping(at + got), size - got, I64{0}, I64{0}, I64{0})
+            count = host_syscall(I64{0}, fd, wrapping(at + got), size - got, I64{0}, I64{0}, I64{0})
         }
         if (count < I64{0}) { return count }
         if (count == I64{0}) { break }
@@ -144,7 +144,7 @@ sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
     loop {
         fd := I64{0}
         #Unsafe("socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC) retains no memory") {
-            fd = os_syscall_i64(I64{41}, I64{1}, I64{524289}, I64{0}, I64{0}, I64{0}, I64{0})
+            fd = host_syscall(I64{41}, I64{1}, I64{524289}, I64{0}, I64{0}, I64{0}, I64{0})
         }
         // EAFNOSUPPORT: musl reads the answer from /dev/null, not found.
         if (fd < I64{0}) { return if (fd == I64{-97}) -> I64{0} else -> fd }
@@ -160,7 +160,7 @@ sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
         rt_text_bytes_copy(wrapping(address + I64{2}), rt_text_data(path), rt_text_len(path))
         status := I64{0}
         #Unsafe("connect(2) reads the owned 23-byte address") {
-            status = os_syscall_i64(I64{42}, fd, address, I64{23}, I64{0}, I64{0}, I64{0})
+            status = host_syscall(I64{42}, fd, address, I64{23}, I64{0}, I64{0}, I64{0})
         }
         jet_rt_free(address, I64{24}, I64{8})
         if (status < I64{0}) {
@@ -176,7 +176,7 @@ sys_nscd_initgroups: fn(user: I64, length: I64, found: I64) -> I64 {
         net_store_uint(wrapping(request + I64{8}), I64{4}, length + I64{1})
         rt_text_bytes_copy(wrapping(request + I64{12}), user, length + I64{1})
         #Unsafe("sendto(2) with MSG_NOSIGNAL reads the owned request") {
-            status = os_syscall_i64(I64{44}, fd, request, length + I64{13}, I64{16384}, I64{0}, I64{0})
+            status = host_syscall(I64{44}, fd, request, length + I64{13}, I64{16384}, I64{0}, I64{0})
         }
         jet_rt_free(request, length + I64{13}, I64{4})
         if (status < I64{0}) {
@@ -618,7 +618,7 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     name: fd_c_path(path)
     result := I64{0}
     #Unsafe("utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call") {
-        result = os_syscall_i64(I64{280}, I64{-100}, name, times, I64{0}, I64{0}, I64{0})
+        result = host_syscall(I64{280}, I64{-100}, name, times, I64{0}, I64{0}, I64{0})
     }
     fd_c_path_drop(name, path)
     jet_rt_free(times, I64{32}, I64{8})

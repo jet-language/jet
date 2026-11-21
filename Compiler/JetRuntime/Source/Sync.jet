@@ -63,7 +63,7 @@ sync_futex_wake: fn(address: I64, count: I64) {
         return
     }
     #Unsafe("futex wake borrows a live aligned word and retains no pointer") {
-        _ := os_syscall_i64(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{202}, address, I64{129}, count, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -87,12 +87,12 @@ sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     }
     #Unsafe("futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns") {
         if (deadline_ns < I64{0}) {
-            return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
+            return host_syscall(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
         }
         timeout: wrapping(os_tls_base_i64() + I64{216})
         os_store_i64(timeout, deadline_ns /% I64{1000000000})
         os_store_i64(wrapping(timeout + I64{8}), deadline_ns % I64{1000000000})
-        return os_syscall_i64(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
+        return host_syscall(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
     }
 }
 
@@ -102,7 +102,7 @@ sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
 sync_futex_wait_shared: fn(address: I64, expected: I64) -> I64 {
     if (jet_rt_host_can_wait() != I64{0}) { return jet_rt_host_wait(address, expected, I64{-1}) }
     #Unsafe("futex borrows a live aligned word and retains no pointer") {
-        return os_syscall_i64(I64{202}, address, I64{0}, expected, I64{0}, I64{0}, I64{0})
+        return host_syscall(I64{202}, address, I64{0}, expected, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -233,6 +233,9 @@ sync_clock_read: fn(clock: I64, timespec: I64) {
         }
     }
     if (status != I64{0} && status != I64{-22}) {
+        // Not counted (HostProcess.jet host_syscall): perf's sampler handler
+        // reads its clock here (PerfSamples.jet perf_samples_read), and so
+        // does a counted call where the vDSO has no clock (perf_syscall_now).
         #Unsafe("clock_gettime writes the caller's two timespec words") {
             status = os_syscall_i64(I64{228}, clock, timespec, I64{0}, I64{0}, I64{0}, I64{0})
         }
@@ -371,14 +374,14 @@ sync_sole_end: fn() {
     }
     #Unsafe("membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0") {
         sync_sole = I64{0}
-        fenced := os_syscall_i64(I64{324}, I64{16}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+        fenced := host_syscall(I64{324}, I64{16}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
         if fenced {
-            fenced = os_syscall_i64(I64{324}, I64{8}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+            fenced = host_syscall(I64{324}, I64{8}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
         }
-        if !fenced -> _ := os_syscall_i64(I64{324}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        if !fenced -> _ := host_syscall(I64{324}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         loop {
             if (sync_sole_inflight == I64{0}) { break }
-            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
 }

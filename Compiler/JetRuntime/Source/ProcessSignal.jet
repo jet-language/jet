@@ -330,7 +330,7 @@ signal_hub_install: fn(hub: I64, number: I64) -> I64 {
     saved: wrapping(sync_load(wrapping(hub + I64{48})) + (number - I64{1}) * I64{32})
     status := I64{0}
     #Unsafe("rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none") {
-        status = os_syscall_i64(I64{13}, number, I64{0}, saved, I64{8}, I64{0}, I64{0})
+        status = host_syscall(I64{13}, number, I64{0}, saved, I64{8}, I64{0}, I64{0})
     }
     if (status < I64{0}) { return status }
     #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail") {
@@ -343,7 +343,7 @@ signal_hub_install: fn(hub: I64, number: I64) -> I64 {
 signal_hub_restore: fn(hub: I64, number: I64) {
     saved: wrapping(sync_load(wrapping(hub + I64{48})) + (number - I64{1}) * I64{32})
     #Unsafe("rt_sigaction reads the saved four-word action from the hub's table and writes no old action") {
-        _ := os_syscall_i64(I64{13}, number, saved, I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{13}, number, saved, I64{0}, I64{8}, I64{0}, I64{0})
     }
 }
 

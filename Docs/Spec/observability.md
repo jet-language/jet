@@ -711,10 +711,17 @@ row of a table the sampler maps at the start, with the Jet call sites of
 the spawning stack, and fills it as it runs: its kernel id, the function
 it runs, its stack's bytes, its time alive and, as it ends, its CPU time;
 a thread still running at the exit has its CPU time read then, from its
-own CPU-time clock. The main thread's row has its stack limit. Every host
-call through the runtime's central wrapper (HostProcess.jet `host_call`)
-is counted in a row keyed by its number and its calling stack, with its
-time: a vfork child's PATH probes count in the table it shares with its
+own CPU-time clock. The main thread's row has its stack limit. Every system
+call the runtime makes for the program through its syscall gate
+(HostProcess.jet `host_syscall`), and every unbuffered line's `writev`, is
+counted in a row keyed by its number and its calling stack, with its time.
+Not counted: the calls of perf and Observe themselves, of `jet test`'s read
+recorder, of code only a signal handler runs and of a fatal report; the
+memory family (`mmap`, `mprotect`, `munmap`, `mremap`, `madvise`), which
+the memory audit reads at the raw call; and the few calls that borrow
+stack words (signal actions, `stat` facts, terminal `ioctl`s, a thread's
+`clone`). So a run's `write` and `writev` counts are the program's own
+writes. A vfork child's PATH probes count in the table it shares with its
 parent, and a call that never returns, a successful `execve`, counts with
 no time. At most 256 threads and 1024 numbers and stacks are kept; the
 rest are counted. The trace records the `threads` receipt section (type

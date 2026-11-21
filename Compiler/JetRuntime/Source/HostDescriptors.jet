@@ -178,7 +178,7 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     count := I64{-4}
     loop count == (I64{-4}) {
         #Unsafe("bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open") {
-            count = os_syscall_i64(I64{17}, descriptor, bytes, cap, at, I64{0}, I64{0})
+            count = host_syscall(I64{17}, descriptor, bytes, cap, at, I64{0}, I64{0})
         }
     }
     if (count < I64{0}) {
@@ -371,7 +371,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
         // struct pollfd {fd, events} with revents cleared.
         net_put(scratch, I64{0}, descriptor & I64{4294967295} | events << I64{32})
         #Unsafe("scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open") {
-            ready = os_syscall_i64(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
+            ready = host_syscall(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
         }
     }
     jet_rt_free(scratch, I64{40}, I64{8})
@@ -398,7 +398,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     count := I64{-4}
     loop count == (I64{-4}) {
         #Unsafe("bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open") {
-            count = os_syscall_i64(I64{0}, descriptor, bytes, cap, I64{0}, I64{0}, I64{0})
+            count = host_syscall(I64{0}, descriptor, bytes, cap, I64{0}, I64{0}, I64{0})
         }
     }
     count = replay_read(bytes, cap, count)
@@ -434,7 +434,7 @@ host_descriptor_wait: fn(descriptor: I64, events: I64, limit: I64) -> I64 {
     wrote := I64{-4}
     loop wrote == (I64{-4}) {
         #Unsafe("packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open") {
-            wrote = os_syscall_i64(I64{1}, descriptor, packed, count, I64{0}, I64{0}, I64{0})
+            wrote = host_syscall(I64{1}, descriptor, packed, count, I64{0}, I64{0}, I64{0})
         }
     }
     if (RT_HOST_U8_STRIDE != I64{1}) { jet_rt_free(packed, count, I64{8}) }

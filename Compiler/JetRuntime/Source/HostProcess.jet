@@ -5,12 +5,43 @@ host_call: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     // `jet test`'s read recorder (TestReads.jet) sees every path syscall here;
     // the first host call of a main resolves it.
     if (test_reads_fd != I64{-1}) { rt_test_reads_call(number, a1, a2, a3) }
-    // Under `jet perf run` the call is counted and timed at its calling
-    // stack (PerfSamples.jet perf_syscall_call).
-    if (perf_system != I64{0}) { return perf_syscall_call(number, a1, a2, a3) }
     #Unsafe("the audited caller supplies the Linux syscall's valid word arguments") {
-        return os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
+        return host_syscall(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
     }
+}
+
+// The gate of the runtime's system calls through JetBackend's
+// os_syscall_i64. Under `jet perf run` it counts the call at its calling
+// stack before it enters the kernel, so a successful execve, which never
+// returns, counts too, then times it (PerfSamples.jet perf_syscall_row,
+// perf_syscall_now, perf_syscall_spent); otherwise it is one load and
+// branch before the leaf. host_write_line counts its writev the same way.
+// A few calls stay raw, each with its reason at its site: perf's and
+// Observe's own (observe_syscall) and `jet test`'s read recorder's, which
+// are not the program's; the code only a signal handler runs; the thread
+// block's own GS changes, before which the clock words a count reads are
+// not this thread's; and the fatal reports whose GS may be broken. So do
+// the memory family (mmap, mprotect, munmap, mremap, madvise), which the
+// memory audit reads at the raw call, and the other JetBackend leaves,
+// which borrow stack words (signal actions, stat facts, ioctl words,
+// clone). Helpers that a signal handler shares with other code
+// (thread_tid, futex, write_all, the stdout flush) go through the gate: a
+// count is safe in a handler that interrupts another count. It allocates
+// nothing and takes no lock. It reads the caller's frames for its key and
+// claims its row with a CAS; a handler that finds the row it interrupted
+// mid-claim only adds to its count. It reads the vDSO clock into a word
+// pair of this thread's own per nesting depth and adds the time atomically.
+// Neither the clock read nor the frame walk runs program code (JetIR
+// BuildLibrary.jet IR_STOP_LEAF_CODE): the gate stops no more than the raw call.
+#Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments")
+host_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
+    table: perf_system
+    if (table == I64{0}) { return os_syscall_i64(number, a1, a2, a3, a4, a5, a6) }
+    row: perf_syscall_row(table, number)
+    began: perf_syscall_now()
+    result: os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
+    perf_syscall_spent(row, began)
+    result
 }
 
 // Route Int arguments are encoded exact-Int words, not necessarily i64.
@@ -222,7 +253,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     // caller lends the tuple's Bool byte and three Int words.
     result := I64{0}
     #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel writes") {
-        result = os_syscall_i64(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
+        result = host_syscall(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
     }
     rt_text_put(available, I64{1})
     rt_text_store(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> rt_text_word(buffer)))
@@ -250,7 +281,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     rt_text_store(buffer, low)
     rt_text_store(wrapping(buffer + I64{8}), high)
     #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain") {
-        host_sample_out(os_syscall_i64(I64{302}, I64{0}, native, buffer, I64{0}, I64{0}, I64{0}), available, value, errno)
+        host_sample_out(host_syscall(I64{302}, I64{0}, native, buffer, I64{0}, I64{0}, I64{0}), available, value, errno)
     }
     jet_rt_free(buffer, I64{16}, I64{8})
 }
@@ -296,7 +327,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     jet_rt_stdout_flush()
     rt_text_store(status, I64{0})
     #Unsafe("status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer") {
-        result: os_syscall_i64(I64{61}, native_pid, status, native_options, I64{0}, I64{0}, I64{0})
+        result: host_syscall(I64{61}, native_pid, status, native_options, I64{0}, I64{0}, I64{0})
         host_sample_out(result, available, value, errno)
     }
 }

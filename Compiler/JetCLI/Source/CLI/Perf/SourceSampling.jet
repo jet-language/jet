@@ -267,9 +267,9 @@ JetCLIPerfThread: struct {
     spawn: [JetCLIPerfSite],
 }
 
-// The host calls of one number from one calling stack (PerfSamples.jet
-// perf_syscall_call): the number, how many, their time, and the calling
-// sites, innermost first, the counting's own frames left out.
+// The host calls of one number from one calling stack (HostProcess.jet
+// host_syscall): the number, how many, their time, and the calling sites,
+// innermost first, the counting's own frames left out.
 JetCLIPerfSyscall: struct {
     number: U64,
     count: U64,
@@ -1799,7 +1799,7 @@ jet_cli_perf_system_read: fn(sampled: &JetCLIPerfSamples, owned: [Bool], threads
         width: link_debug_addr(calls, 0)
         lost: link_debug_addr(calls, 16)
         if lost > 0 -> sampled.syscalls_lost = U64{lost}
-        plumbing: [String]{"perf_syscall_key", "perf_syscall_row", "perf_syscall_call", "host_call"}
+        plumbing: [String]{"perf_syscall_key", "perf_syscall_row", "host_syscall", "host_call", "host_call4", "host_call5", "trap_syscall"}
         at := 24
         loop width >= 4 && at + width * 8 <= calls.len() {
             count: link_debug_addr(calls, at + 8)
@@ -2024,8 +2024,9 @@ jet_cli_perf_sites_json: fn(sites: &&[JetCLIPerfSite]) -> CanonicalJSON Never! {
     )
 }
 
-// The x86-64 Linux name of host call `number`, as the runtime's host calls
-// use them (HostProcess.jet host_call); `syscall <number>` for another.
+// The x86-64 Linux name of host call `number`, as the runtime's system
+// calls use them (HostProcess.jet host_syscall); `syscall <number>` for
+// another.
 jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
     if number == {
         0 -> "read"
@@ -2044,6 +2045,7 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         16 -> "ioctl"
         17 -> "pread64"
         18 -> "pwrite64"
+        20 -> "writev"
         21 -> "access"
         23 -> "select"
         24 -> "sched_yield"
@@ -2051,6 +2053,7 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         33 -> "dup2"
         35 -> "nanosleep"
         39 -> "getpid"
+        40 -> "sendfile"
         41 -> "socket"
         42 -> "connect"
         43 -> "accept"
@@ -2058,6 +2061,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         45 -> "recvfrom"
         49 -> "bind"
         50 -> "listen"
+        54 -> "setsockopt"
+        55 -> "getsockopt"
         56 -> "clone"
         57 -> "fork"
         58 -> "vfork"
@@ -2080,9 +2085,14 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         97 -> "getrlimit"
         102 -> "getuid"
         110 -> "getppid"
+        111 -> "getpgrp"
+        131 -> "sigaltstack"
+        138 -> "fstatfs"
+        149 -> "mlock"
         186 -> "gettid"
         200 -> "tkill"
         202 -> "futex"
+        204 -> "sched_getaffinity"
         217 -> "getdents64"
         228 -> "clock_gettime"
         230 -> "clock_nanosleep"
@@ -2093,6 +2103,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         247 -> "waitid"
         257 -> "openat"
         262 -> "newfstatat"
+        271 -> "ppoll"
+        280 -> "utimensat"
         281 -> "epoll_pwait"
         288 -> "accept4"
         290 -> "eventfd2"
@@ -2102,6 +2114,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         302 -> "prlimit64"
         318 -> "getrandom"
         322 -> "execveat"
+        324 -> "membarrier"
+        326 -> "copy_file_range"
         332 -> "statx"
         424 -> "pidfd_send_signal"
         434 -> "pidfd_open"

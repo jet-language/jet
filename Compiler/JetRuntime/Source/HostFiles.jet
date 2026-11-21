@@ -449,7 +449,7 @@ fd_zero: fn(result: I64, zero: I64) {
     if (fd_word(directory, I64{16}) == I64{0}) {
         rt_test_reads_open(fd_word(directory, I64{8}), name, bits)
         #Unsafe("the held directory and terminated source-approved single name stay live through openat") {
-            result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits | I64{524288}, native_mode & I64{4294967295}, I64{0}, I64{0})
+            result = host_syscall(I64{257}, fd_word(directory, I64{8}), name, bits | I64{524288}, native_mode & I64{4294967295}, I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
@@ -472,7 +472,7 @@ fd_zero: fn(result: I64, zero: I64) {
     if (fd_word(directory, I64{16}) == I64{0}) {
         rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal") {
-            opened = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, I64{2752512}, I64{0}, I64{0}, I64{0})
+            opened = host_syscall(I64{257}, fd_word(directory, I64{8}), name, I64{2752512}, I64{0}, I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
@@ -579,7 +579,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
     key: fd_c_path(attribute)
     result := I64{0}
     #Unsafe("both terminated borrowed names and the caller's optional compact byte output remain live only through lgetxattr") {
-        result = os_syscall_i64(I64{192}, name, key, bytes, requested, I64{0}, I64{0})
+        result = host_syscall(I64{192}, name, key, bytes, requested, I64{0}, I64{0})
     }
     fd_c_path_drop(key, attribute)
     fd_c_path_drop(name, path)
@@ -611,7 +611,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
     if (fd_word(directory, I64{16}) == I64{0}) {
         rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory, terminated plain name and writable byte range are borrowed only through readlinkat") {
-            result = os_syscall_i64(I64{267}, fd_word(directory, I64{8}), name, bytes, requested, I64{0}, I64{0})
+            result = host_syscall(I64{267}, fd_word(directory, I64{8}), name, bytes, requested, I64{0}, I64{0})
         }
     }
     fd_unlock(directory)
@@ -639,7 +639,7 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
     new_name: fd_c_path(new)
     result := I64{0}
     #Unsafe("held directory duplicates and terminated names prevent any descriptor-close/reuse race during renameat2") {
-        result = os_syscall_i64(I64{316}, a, old_name, b, new_name, native_flags & I64{4294967295}, I64{0})
+        result = host_syscall(I64{316}, a, old_name, b, new_name, native_flags & I64{4294967295}, I64{0})
     }
     fd_c_path_drop(old_name, old)
     fd_c_path_drop(new_name, new)

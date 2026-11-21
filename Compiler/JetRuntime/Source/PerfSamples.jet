@@ -331,6 +331,18 @@ PERF_SAMPLES_CALIBRATIONS: I64{64}
 // the monotonic clock into (perf_samples_clock).
 PERF_SAMPLES_TCB_CLOCK: I64{744}
 
+// This thread's TCB word (Thread.jet) holding how many counted host calls
+// are reading the clock (perf_syscall_now): a signal handler's call nests
+// inside the one it interrupted.
+PERF_SYSCALLS_TCB_DEPTH: I64{784}
+
+// This thread's TCB word pairs (Thread.jet) a counted host call reads the
+// monotonic clock into, one pair per depth (perf_syscall_now).
+PERF_SYSCALLS_TCB_CLOCK: I64{792}
+
+// The depths that have a clock pair.
+PERF_SYSCALLS_CLOCKS: I64{4}
+
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
@@ -637,10 +649,10 @@ perf_samples_start: fn() {
     if (flight) { fd = perf_flight_open() }
     if (!flight && rt_text_len(path) != I64{0}) {
         name: fd_c_path(path)
-        fd = host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
+        fd = observe_syscall(I64{2}, name, PERF_SAMPLES_OPEN, I64{384}, I64{0})
         fd_c_path_drop(name, path)
         if (fd >= I64{0} && perf_samples_header(fd) != I64{0}) {
-            _ := host_call(I64{3}, fd, I64{0}, I64{0})
+            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
             fd = I64{-1}
         }
         if (fd >= I64{0}) {
@@ -714,12 +726,12 @@ perf_samples_start: fn() {
         #Unsafe("no timer is armed, so no handler reads the descriptor") {
             perf_samples_fd = I64{-1}
         }
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
-        if (counters >= I64{0}) { _ := host_call(I64{3}, counters, I64{0}, I64{0}) }
-        if (topdown >= I64{0}) { _ := host_call(I64{3}, topdown, I64{0}, I64{0}) }
-        if (sampler >= I64{0}) { _ := host_call(I64{3}, sampler, I64{0}, I64{0}) }
-        if (threads >= I64{0}) { _ := host_call(I64{3}, threads, I64{0}, I64{0}) }
-        if (calls >= I64{0}) { _ := host_call(I64{3}, calls, I64{0}, I64{0}) }
+        _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+        if (counters >= I64{0}) { _ := observe_syscall(I64{3}, counters, I64{0}, I64{0}, I64{0}) }
+        if (topdown >= I64{0}) { _ := observe_syscall(I64{3}, topdown, I64{0}, I64{0}, I64{0}) }
+        if (sampler >= I64{0}) { _ := observe_syscall(I64{3}, sampler, I64{0}, I64{0}, I64{0}) }
+        if (threads >= I64{0}) { _ := observe_syscall(I64{3}, threads, I64{0}, I64{0}, I64{0}) }
+        if (calls >= I64{0}) { _ := observe_syscall(I64{3}, calls, I64{0}, I64{0}, I64{0}) }
         return
     }
     // The CPU time sampled starts once the sampler is chosen, after the
@@ -761,12 +773,12 @@ perf_samples_handle: fn(signal: I64) -> I64 {
 // the thread but not the time it waits preempted, so on a busy machine the
 // other programs' time is not charged to every signal of the run.
 perf_samples_delivery: fn() -> I64 {
-    pid: host_call(I64{39}, I64{0}, I64{0}, I64{0})
-    tid: thread_tid()
+    pid: observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0})
+    tid: perf_own_tid()
     began: perf_samples_cpu_clock_ns(I64{3})
     index := I64{0}
     loop index < PERF_SAMPLES_CALIBRATIONS {
-        _ := host_call(I64{234}, pid, tid, PERF_SAMPLES_SIGNAL)
+        _ := observe_syscall(I64{234}, pid, tid, PERF_SAMPLES_SIGNAL, I64{0})
         index = wrapping(index + I64{1})
     }
     wrapping(perf_samples_cpu_clock_ns(I64{3}) - began) / PERF_SAMPLES_CALIBRATIONS
@@ -844,7 +856,7 @@ perf_samples_timer_start: fn(sampling: Bool) -> I64 {
     // sigev_signo SIGPROF and sigev_notify SIGEV_THREAD_ID (4) after the
     // value word, then the thread's tid.
     rt_text_store(wrapping(scratch + I64{8}), PERF_SAMPLES_SIGNAL | (I64{4} << I64{32}))
-    rt_text_store(wrapping(scratch + I64{16}), thread_tid())
+    rt_text_store(wrapping(scratch + I64{16}), perf_own_tid())
     status := I64{0}
     #Unsafe("timer_create reads the sigevent and writes the timer id in the scratch words") {
         status = os_syscall_i64(I64{222}, I64{3}, scratch, wrapping(scratch + I64{64}), I64{0}, I64{0}, I64{0})
@@ -988,8 +1000,8 @@ perf_samples_rate: fn(interval_us: I64) {
 perf_system_start: fn(threads: I64, calls: I64) {
     table: if (threads >= I64{0} && calls >= I64{0}) -> alloc_map_try(perf_system_bytes()) else -> I64{0}
     if (table == I64{0}) {
-        if (threads >= I64{0}) { _ := host_call(I64{3}, threads, I64{0}, I64{0}) }
-        if (calls >= I64{0}) { _ := host_call(I64{3}, calls, I64{0}, I64{0}) }
+        if (threads >= I64{0}) { _ := observe_syscall(I64{3}, threads, I64{0}, I64{0}, I64{0}) }
+        if (calls >= I64{0}) { _ := observe_syscall(I64{3}, calls, I64{0}, I64{0}, I64{0}) }
         return
     }
     rt_text_store(table, perf_system_pid())
@@ -998,7 +1010,7 @@ perf_system_start: fn(threads: I64, calls: I64) {
     soft: thread_rlimit_soft(I64{3})
     rt_text_store(wrapping(main + I64{16}), if (soft < I64{0}) -> I64{0} else -> soft)
     rt_text_store(wrapping(main + I64{24}), time_host_monotonic_i64())
-    rt_text_store(main, thread_tid())
+    rt_text_store(main, perf_own_tid())
     #Unsafe("set once, before the table is published; a host call or spawn that reads perf_system 0 keeps no row") {
         perf_threads_fd = threads
         perf_syscalls_fd = calls
@@ -1049,7 +1061,7 @@ perf_threads_begin: fn(row: I64, stack_bytes: I64) {
     }
     rt_text_store(wrapping(row + I64{16}), stack_bytes)
     rt_text_store(wrapping(row + I64{24}), time_host_monotonic_i64())
-    sync_store(row, thread_tid())
+    sync_store(row, perf_own_tid())
 }
 
 // A spawned thread's last words in its row `row` (0 for none), as its
@@ -1063,23 +1075,47 @@ perf_threads_end: fn(row: I64) {
     sync_store(wrapping(row + I64{48}), I64{1})
 }
 
-// A host call (HostProcess.jet host_call) under `jet perf run`: counted at
-// its row (perf_syscall_row) before it enters the kernel, so an execve
-// that succeeds, which never returns, counts too, and timed on the
-// monotonic clock once it returns. The child of a vfork (HostSpawn.jet
-// spawn_vfork) counts its calls, its PATH's execve probes, in the table it
-// shares with its parent, which waits meanwhile.
-perf_syscall_call: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
-    row: perf_syscall_row(perf_system, number)
-    began: time_host_monotonic_i64()
-    result := I64{0}
-    #Unsafe("host_call's audited caller supplies the Linux syscall's valid word arguments") {
-        result = os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
+// A system call under `jet perf run` is counted at its row
+// (perf_syscall_row) before it enters the kernel, then timed on the
+// monotonic clock (perf_syscall_now) once it returns, by its gate
+// (HostProcess.jet host_syscall) or host_write_line. The child of a vfork
+// (HostSpawn.jet spawn_vfork) counts its calls, its PATH's execve probes,
+// in the table it shares with its parent, which waits meanwhile. Nothing
+// here allocates or locks, so a signal handler may count a call while the
+// code it interrupted counts another. Add the time since `began` to
+// `row`'s nanoseconds, unless the call found no row or its clock read
+// nothing.
+perf_syscall_spent: fn(row: I64, began: I64) {
+    if (row == I64{0} || began == I64{0}) {
+        return
     }
-    if (row != I64{0}) {
-        _ := sync_add(wrapping(row + I64{24}), wrapping(time_host_monotonic_i64() - began))
-    }
-    result
+    _ := sync_add(wrapping(row + I64{24}), wrapping(perf_syscall_now() - began))
+}
+
+// The monotonic clock in nanoseconds for a counted system call, read into a
+// pair of this thread's PERF_SYSCALLS_TCB_CLOCK words that nothing else
+// uses. Each nesting depth has its own pair: a signal handler's counted call
+// that interrupts this read takes the next depth, and puts the depth word
+// back before the read it interrupted resumes. A read nested deeper than
+// PERF_SYSCALLS_CLOCKS times nothing. The read is the vDSO's, or the raw
+// clock_gettime where the vDSO has no clock (Sync.jet sync_clock_read), so
+// no call it times is counted. It returns 0 before the vDSO is resolved,
+// since resolving it may read the auxiliary vector through the gate, and
+// on a thread with no block of its own, whose GS names the zero word.
+perf_syscall_now: fn() -> I64 {
+    if (sync_vdso_clock == I64{0}) { return I64{0} }
+    base: thread_base()
+    if (base == I64{0}) { return I64{0} }
+    depth_word: wrapping(base + PERF_SYSCALLS_TCB_DEPTH)
+    depth: sync_load(depth_word)
+    if (depth < I64{0} || depth >= PERF_SYSCALLS_CLOCKS) { return I64{0} }
+    sync_store(depth_word, wrapping(depth + I64{1}))
+    scratch: wrapping(wrapping(base + PERF_SYSCALLS_TCB_CLOCK) + wrapping(depth * I64{16}))
+    sync_clock_read(I64{1}, scratch)
+    seconds: sync_load(scratch)
+    nanos: sync_load(wrapping(scratch + I64{8}))
+    sync_store(depth_word, depth)
+    wrapping(wrapping(seconds * I64{1000000000}) + nanos)
 }
 
 // The row of host call `number` from this thread's calling stack in
@@ -1201,7 +1237,35 @@ perf_system_write: fn(fd: I64, bytes: I64, size: I64) {
         return
     }
     _ := observe_syscall(I64{77}, fd, I64{0}, I64{0}, I64{0})
-    _ := host_write_all(fd, bytes, size)
+    _ := perf_own_write(fd, bytes, size)
+}
+
+// Perf's own system calls go through observe_syscall, which is not counted
+// (HostProcess.jet host_syscall), so the syscall view holds the program's
+// calls alone. This thread's id.
+perf_own_tid: fn() -> I64 { observe_syscall(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}) }
+
+// host_write_all, uncounted: 0, -errno or HOST_WRITE_ZERO.
+perf_own_write: fn(fd: I64, bytes: I64, length: I64) -> I64 {
+    at := I64{0}
+    loop at < length {
+        count: observe_syscall(I64{1}, fd, wrapping(bytes + at), wrapping(length - at), I64{0})
+        if (count == I64{-4}) { next }
+        if (count < I64{0}) { return count }
+        if (count == I64{0}) { return HOST_WRITE_ZERO }
+        at = wrapping(at + count)
+    }
+    I64{0}
+}
+
+// scheduler_read_path, uncounted.
+perf_own_read_path: fn(buffer: I64) -> I64 {
+    // openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC).
+    descriptor: observe_syscall(I64{257}, I64{-100}, buffer, I64{524288}, I64{0})
+    if (descriptor < I64{0}) { return descriptor }
+    got: observe_syscall(I64{0}, descriptor, buffer, SCHEDULER_STAT_BYTES, I64{0})
+    _ := observe_syscall(I64{3}, descriptor, I64{0}, I64{0}, I64{0})
+    got
 }
 
 // Choose the CPU lens's sampler once, on the thread that starts sampling,
@@ -1282,7 +1346,7 @@ perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
             _ := os_write_word_i64(file, if (timer) -> I64{1} else -> I64{0}, I64{8})
             _ := os_write_word_i64(file, perf_precise_depth, I64{8})
         }
-        _ := host_call(I64{3}, file, I64{0}, I64{0})
+        _ := observe_syscall(I64{3}, file, I64{0}, I64{0}, I64{0})
     }
     handle
 }
@@ -1292,13 +1356,13 @@ perf_precise_choose: fn(file: I64, timer: Bool) -> I64 {
 // PERF_PARANOID_NONE where it can't be read.
 perf_samples_sysctl: fn(path: I64) -> I64 {
     name: fd_c_path(path)
-    fd: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd: observe_syscall(I64{2}, name, I64{524288}, I64{0}, I64{0})
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return PERF_PARANOID_NONE }
     scratch: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
-    count: host_call(I64{0}, fd, scratch, I64{16})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    count: observe_syscall(I64{0}, fd, scratch, I64{16}, I64{0})
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     negative: count > I64{0} && rt_text_byte(scratch) == I64{45}
     at := if (negative) -> I64{1} else -> I64{0}
     first: at
@@ -1343,11 +1407,11 @@ perf_precise_cycles: fn() -> I64 {
     read := I64{0}
     tries := I64{0}
     loop tries < (I64{1000000}) {
-        read = host_call(I64{0}, fd, attr, I64{16})
+        read = observe_syscall(I64{0}, fd, attr, I64{16}, I64{0})
         if (read != I64{16} || rt_text_word(wrapping(attr + I64{8})) >= goal) { break }
         tries = wrapping(tries + I64{1})
     }
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     count: rt_text_word(attr)
     ran: rt_text_word(wrapping(attr + I64{8}))
     jet_rt_free(attr, I64{72}, I64{8})
@@ -1427,7 +1491,7 @@ perf_precise_open: fn(attr: I64, source: I64, period: I64) -> I64 {
 // negated errno of the call the kernel refused.
 perf_precise_attach: fn(fd: I64) -> I64 {
     if (fd >= PERF_PRECISE_FDS) {
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         return I64{-24}
     }
     ring: alloc_map_shared(perf_precise_ring_bytes(), fd)
@@ -1483,7 +1547,7 @@ perf_precise_end: fn(fd: I64) {
     ring: sync_load(slot)
     sync_store(slot, I64{0})
     if (ring == I64{0}) {
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         return
     }
     timer: sync_load(wrapping(ring + PERF_PRECISE_TIMER))
@@ -1496,10 +1560,10 @@ perf_precise_end: fn(fd: I64) {
     // exit.
     lock: wrapping(ring + PERF_PRECISE_LOCK)
     loop sync_cas(lock, I64{0}, I64{1}) != (I64{0}) {
-        _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+        _ := observe_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     perf_precise_ended(fd, ring)
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     if (sync_load(wrapping(rings + PERF_PRECISE_EXITING)) == I64{0}) {
         alloc_unmap(ring, perf_precise_ring_bytes())
     } else { sync_store(lock, I64{0}) }
@@ -1513,7 +1577,7 @@ perf_precise_end: fn(fd: I64) {
 // lock is held; 0 when the read fails.
 perf_precise_count: fn(fd: I64, ring: I64) -> I64 {
     word: wrapping(ring + PERF_PRECISE_COUNT)
-    if (host_call(I64{0}, fd, word, I64{8}) != I64{8}) { return I64{0} }
+    if (observe_syscall(I64{0}, fd, word, I64{8}, I64{0}) != I64{8}) { return I64{0} }
     rt_text_word(word)
 }
 
@@ -1564,7 +1628,7 @@ perf_precise_ends: fn() {
         if (ring != I64{0}) {
             lock: wrapping(ring + PERF_PRECISE_LOCK)
             loop sync_cas(lock, I64{0}, I64{1}) != (I64{0}) {
-                _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+                _ := observe_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0})
             }
             if (sync_load(slot) == ring) { perf_precise_ended(index, ring) }
             sync_store(lock, I64{0})
@@ -1627,9 +1691,9 @@ perf_precise_cost: fn(source: I64, fd: I64) {
         }
         sync_store(wrapping(rings + PERF_PRECISE_COST_STATE), scratch)
     } else {
-        if (timer >= I64{0}) { _ := host_call(I64{3}, timer, I64{0}, I64{0}) }
+        if (timer >= I64{0}) { _ := observe_syscall(I64{3}, timer, I64{0}, I64{0}, I64{0}) }
         stat: rt_text_word(wrapping(scratch + I64{112}))
-        if (stat >= I64{0}) { _ := host_call(I64{3}, stat, I64{0}, I64{0}) }
+        if (stat >= I64{0}) { _ := observe_syscall(I64{3}, stat, I64{0}, I64{0}, I64{0}) }
         jet_rt_free(scratch, PERF_PRECISE_COST_SCRATCH, I64{8})
     }
     _ := observe_syscall(I64{16}, fd, I64{9216}, I64{0}, I64{0})
@@ -2298,7 +2362,7 @@ perf_samples_put_one: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64) {
 // `fd` is the record socket, whose datagrams are sent whole or, while it
 // is full, not at all (perf_flight_open), and a record it refuses is gone.
 perf_samples_send: fn(fd: I64, record: I64, bytes: I64) {
-    if (host_write_all(fd, record, bytes) != I64{0}) { perf_samples_lost_add() }
+    if (perf_own_write(fd, record, bytes) != I64{0}) { perf_samples_lost_add() }
 }
 
 // The record buffer's count of records the program made and could not
@@ -2355,7 +2419,7 @@ perf_samples_out: fn(fd: I64, side: I64, words: I64) -> I64 {
 // empties the side: a cite reaches back only within the write it is in.
 perf_samples_side_write: fn(fd: I64, side: I64, used: I64) {
     cited: perf_samples_side_cited(side)
-    _ := host_write_all(fd, cited, perf_samples_cite(wrapping(side + I64{8}), used, cited))
+    _ := perf_own_write(fd, cited, perf_samples_cite(wrapping(side + I64{8}), used, cited))
     rt_text_store(side, I64{0})
 }
 
@@ -2434,7 +2498,7 @@ perf_samples_header: fn(fd: I64) -> I64 {
     if (status == I64{0} && rt_text_word(wrapping(words + I64{48})) == I64{0}) {
         rt_text_store(words, PERF_SAMPLES_MAGIC)
         rt_text_store(wrapping(words + I64{8}), PERF_SAMPLES_VERSION)
-        status = host_write_all(fd, words, I64{16})
+        status = perf_own_write(fd, words, I64{16})
     }
     jet_rt_free(words, I64{144}, I64{8})
     status
@@ -2489,7 +2553,7 @@ perf_samples_flush: fn(fd: I64) {
         if (busy != I64{0}) {
             // sched_yield while a handler holds it.
             loop sync_cas(busy, I64{0}, I64{1}) != (I64{0}) {
-                _ := host_call(I64{24}, I64{0}, I64{0}, I64{0})
+                _ := observe_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0})
             }
             side: wrapping(sides + wrapping(index * perf_samples_side_bytes()))
             used: rt_text_word(side)
@@ -2909,10 +2973,10 @@ perf_zone_mem_put: fn(mem: I64, address: I64, value: I64) -> Bool {
 perf_zones_refused: fn() {
     reason: rt_static_text("the system refuses to rewrite the program's code (mprotect and /proc/self/mem), so zone sites stay skipped")
     said: rt_static_text("jet perf: zones off: ")
-    _ := host_write_all(I64{2}, rt_text_data(said), rt_text_len(said))
-    _ := host_write_all(I64{2}, rt_text_data(reason), rt_text_len(reason))
+    _ := perf_own_write(I64{2}, rt_text_data(said), rt_text_len(said))
+    _ := perf_own_write(I64{2}, rt_text_data(reason), rt_text_len(reason))
     newline: rt_static_text("\n")
-    _ := host_write_all(I64{2}, rt_text_data(newline), rt_text_len(newline))
+    _ := perf_own_write(I64{2}, rt_text_data(newline), rt_text_len(newline))
     now: perf_zone_now()
     perf_zone_row(PERF_ZONE_REFUSED, now, now, reason)
 }
@@ -3298,7 +3362,7 @@ perf_spans_write: fn(buffer: I64, rows: I64, size: I64) {
         return
     }
     if (held + size <= PERF_SPANS_FILE_BYTES) {
-        _ := host_write_all(perf_spans_fd, rows, size)
+        _ := perf_own_write(perf_spans_fd, rows, size)
         rt_text_store(wrapping(buffer + I64{16}), held + size)
         return
     }
@@ -3308,7 +3372,7 @@ perf_spans_write: fn(buffer: I64, rows: I64, size: I64) {
     row: jet_rt_alloc(I64{32} + length, I64{8})
     now: perf_zone_now()
     perf_zone_row_store(row, PERF_ZONE_CUT, now, now, I64{0}, rt_text_data(reason), length)
-    _ := host_write_all(perf_spans_fd, row, I64{32} + length)
+    _ := perf_own_write(perf_spans_fd, row, I64{32} + length)
     jet_rt_free(row, I64{32} + length, I64{8})
     rt_text_store(wrapping(buffer + I64{16}), I64{-1})
 }
@@ -3351,7 +3415,7 @@ perf_spans_flush: fn(tally: Bool) {
         row: jet_rt_alloc(I64{64}, I64{8})
         now: perf_zone_now()
         perf_zone_row_store(row, PERF_ZONE_DROPPED, now, now, I64{0}, wrapping(buffer + PERF_SPANS_DROPPED_AT), I64{32})
-        _ := host_write_all(perf_spans_fd, row, I64{64})
+        _ := perf_own_write(perf_spans_fd, row, I64{64})
         jet_rt_free(row, I64{64}, I64{8})
     }
     sync_thread_unlock(buffer)
@@ -3492,7 +3556,7 @@ perf_samples_heap_write: fn(fd: I64, number: I64, name: I64, frame: I64) {
             depth: rt_text_word(wrapping(group + I64{16}))
             record: wrapping(wrapping(depth + I64{3}) * I64{8})
             if (wrapping(used + record) > PERF_SAMPLES_HEAP_BUFFER) {
-                _ := host_write_all(fd, out, used)
+                _ := perf_own_write(fd, out, used)
                 used = I64{0}
             }
             at: wrapping(out + used)
@@ -3507,7 +3571,7 @@ perf_samples_heap_write: fn(fd: I64, number: I64, name: I64, frame: I64) {
         index = wrapping(index + I64{1})
     }
     used = perf_samples_heap_refs(fd, number, out, used, table, capacity, frame)
-    _ := host_write_all(fd, out, used)
+    _ := perf_own_write(fd, out, used)
     alloc_unmap(table, wrapping(capacity * group_bytes))
     alloc_unmap(out, PERF_SAMPLES_HEAP_BUFFER)
 }
@@ -3724,7 +3788,7 @@ perf_samples_heap_room: fn(fd: I64, out: I64, used: I64) -> I64 {
     if (wrapping(used + wrapping(PERF_SAMPLES_HEAP_RECORD * I64{8})) <= PERF_SAMPLES_HEAP_BUFFER) {
         return used
     }
-    _ := host_write_all(fd, out, used)
+    _ := perf_own_write(fd, out, used)
     I64{0}
 }
 
@@ -3973,7 +4037,7 @@ perf_samples_alloc_write: fn(fd: I64, totals: I64) {
             depth: rt_text_word(wrapping(group + I64{16}))
             record: wrapping(wrapping(depth + I64{2}) * I64{8})
             if (wrapping(used + record) > PERF_SAMPLES_HEAP_BUFFER) {
-                _ := host_write_all(fd, out, used)
+                _ := perf_own_write(fd, out, used)
                 used = I64{0}
             }
             at: wrapping(out + used)
@@ -3993,7 +4057,7 @@ perf_samples_alloc_write: fn(fd: I64, totals: I64) {
     alloc_unmap(table, wrapping(capacity * group_bytes))
     alloc_unmap(state, PERF_ALLOC_STATE_BYTES)
     if (out != I64{0}) {
-        _ := host_write_all(fd, out, used)
+        _ := perf_own_write(fd, out, used)
         alloc_unmap(out, PERF_SAMPLES_HEAP_BUFFER)
     }
 }
@@ -4037,7 +4101,7 @@ perf_samples_open_beside: fn(samples: I64, suffix: I64) -> I64 {
     jet_rt_string_builder_push(builder, suffix)
     path: jet_rt_string_builder_finish(builder)
     name: fd_c_path(path)
-    fd: host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
+    fd: observe_syscall(I64{2}, name, PERF_SAMPLES_OPEN, I64{384}, I64{0})
     fd_c_path_drop(name, path)
     jet_rt_string_drop(path)
     fd
@@ -4164,7 +4228,7 @@ perf_samples_wait: fn(slot: I64, name: I64, object: I64, start: I64) {
 perf_samples_sockaddr: fn(descriptor: I64, peer: Bool, into: I64) -> I64 {
     size: wrapping(into + I64{112})
     net_store_uint(size, I64{4}, I64{110})
-    named: host_call(if peer -> I64{52} else -> I64{51}, descriptor, into, size) == I64{0}
+    named: observe_syscall(if peer -> I64{52} else -> I64{51}, descriptor, into, size, I64{0}) == I64{0}
     length: if named -> net_load_uint(size, I64{4}) else -> I64{0}
     if (length > I64{110}) -> I64{110} else -> length
 }
@@ -4443,7 +4507,7 @@ perf_counters_start: fn(buffer: I64, file: I64) {
             if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
         }
     }
-    tid: thread_tid()
+    tid: perf_own_tid()
     index := I64{0}
     loop index < PERF_COUNTERS_COUNT {
         result := status
@@ -4460,7 +4524,7 @@ perf_counters_start: fn(buffer: I64, file: I64) {
         index = wrapping(index + I64{1})
     }
     if (status >= I64{0}) { sync_store(buffer, I64{0}) }
-    _ := host_call(I64{3}, file, I64{0}, I64{0})
+    _ := observe_syscall(I64{3}, file, I64{0}, I64{0}, I64{0})
 }
 
 // Open counter `index` on this thread (`tid`), its attribute words built in
@@ -4495,7 +4559,7 @@ perf_counter_attach: fn(buffer: I64, index: I64, fd: I64, tid: I64) -> I64 {
     }
     if (result < I64{0}) {
         rt_text_store(slot, I64{-1})
-        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         return result
     }
     I64{0}
@@ -4752,12 +4816,12 @@ perf_topdown_period: fn(table: I64, row: I64) -> I64 {
 // file that can't be opened, ENOENT of one that holds no number.
 perf_topdown_pmu: fn(path: I64, scratch: I64) -> I64 {
     name: fd_c_path(path)
-    fd: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd: observe_syscall(I64{2}, name, I64{524288}, I64{0}, I64{0})
     fd_c_path_drop(name, path)
     if (fd < I64{0}) { return fd }
     rt_text_store(scratch, I64{0})
-    count: host_call(I64{0}, fd, scratch, I64{8})
-    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    count: observe_syscall(I64{0}, fd, scratch, I64{8}, I64{0})
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
     value := I64{0}
     at := I64{0}
     loop at < count {
@@ -4813,7 +4877,7 @@ perf_topdown_start: fn(buffer: I64, file: I64) {
         big = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/cpu_core/type"), wrapping(buffer + I64{72}))
         little = perf_topdown_pmu(rt_static_text("/sys/bus/event_source/devices/cpu_atom/type"), wrapping(buffer + I64{72}))
     }
-    tid: thread_tid()
+    tid: perf_own_tid()
     attr: wrapping(buffer + I64{8})
     index := I64{0}
     loop index < count {
@@ -4862,17 +4926,17 @@ perf_topdown_exit: fn() {
     index := I64{0}
     loop index < perf_topdown_count {
         fd: if (buffer == I64{0}) -> I64{-1} else -> rt_text_word(wrapping(perf_counters_table(buffer) + wrapping(wrapping(PERF_COUNTERS_COUNT + index) * I64{8})))
-        read: if (fd < I64{0}) -> I64{0} else -> host_call(I64{0}, fd, values, I64{24})
+        read: if (fd < I64{0}) -> I64{0} else -> observe_syscall(I64{0}, fd, values, I64{24}, I64{0})
         if (read != I64{24}) {
             rt_text_store(values, I64{0})
             rt_text_store(wrapping(values + I64{8}), I64{0})
             rt_text_store(wrapping(values + I64{16}), I64{0})
         }
-        _ := host_write_all(file, values, I64{24})
+        _ := perf_own_write(file, values, I64{24})
         index = wrapping(index + I64{1})
     }
     jet_rt_free(values, I64{24}, I64{8})
-    _ := host_call(I64{3}, file, I64{0}, I64{0})
+    _ := observe_syscall(I64{3}, file, I64{0}, I64{0}, I64{0})
 }
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
@@ -6163,7 +6227,7 @@ perf_flight_file: fn(path: I64, bytes: I64, length: I64) -> Bool {
     // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
     fd: observe_syscall(I64{257}, I64{-100}, name, I64{524865}, I64{384})
     if (fd >= I64{0}) {
-        written: host_write_all(fd, bytes, length)
+        written: perf_own_write(fd, bytes, length)
         _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         if (written == I64{0}) {
             target: observe_cstring(path)
@@ -6357,7 +6421,7 @@ perf_flight_heap: fn(path: I64) {
         // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
         fd: observe_syscall(I64{257}, I64{-100}, file, I64{524865}, I64{384})
         if (fd >= I64{0}) {
-            written := host_write_all(fd, word, I64{8})
+            written := perf_own_write(fd, word, I64{8})
             if (written == I64{0} && tracked) {
                 // The child writes its records after the word; the hold
                 // then takes the word's place (pwrite64 at offset 0).
@@ -6611,7 +6675,7 @@ perf_flight_dump: fn(fault: I64) {
     // on: PERF_FLIGHT_RELEASED once the dump is written or can't be.
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
-    me: thread_tid()
+    me: perf_own_tid()
     sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
     if (fault != I64{0}) { perf_flight_context(stop, fault) } else if (perf_samples_handle(PERF_FLIGHT_CAPTURE_SIGNAL) >= I64{0}) {
         // tgkill of this thread, whose handler copies the registers it
@@ -6719,7 +6783,7 @@ perf_flight_tasks: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
     release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     thread_zero(scratch, wrapping(wrapping(PERF_FLIGHT_TASKS_MAX * PERF_FLIGHT_TASK_WORDS) * I64{8}))
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
-    me: thread_tid()
+    me: perf_own_tid()
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
     first: perf_flight_row(state, I64{0}, perf_flight_task(thread_base(), me == process), PERF_FLIGHT_TASK_STOPPED, rt_text_word(wrapping(stop + I64{16})), rt_text_word(wrapping(stop + I64{24})), rt_text_word(wrapping(stop + I64{32})), me)
     word := I64{6}
@@ -6820,7 +6884,7 @@ perf_flight_capture: fn(context: I64) {
         return
     }
     text: wrapping(state + PERF_FLIGHT_TEXT_AT)
-    tid: thread_tid()
+    tid: perf_own_tid()
     if (tid == sync_load(wrapping(text + PERF_FLIGHT_SELF_AT))) {
         stop: wrapping(text + PERF_FLIGHT_STOP_AT)
         perf_flight_context(stop, context)
@@ -8285,7 +8349,7 @@ perf_causal_rows_write: fn(fd: I64) {
     rt_text_store(head, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (I64{3} << PERF_SAMPLES_ADDRESS_BITS) | I64{4})
     rt_text_store(wrapping(head + I64{8}), claimed)
     rt_text_store(wrapping(head + I64{16}), PERF_CAUSAL_ROWS_MAX)
-    _ := host_write_all(fd, head, I64{24})
+    _ := perf_own_write(fd, head, I64{24})
     rows: rt_text_word(wrapping(state + PERF_CAUSAL_ROWS))
     if (rows == I64{0}) {
         return
@@ -8298,7 +8362,7 @@ perf_causal_rows_write: fn(fd: I64) {
         whole: index < count && sync_load(wrapping(rows + wrapping(index * bytes))) != I64{0}
         if (!whole) {
             if (index > from) {
-                _ := host_write_all(fd, wrapping(rows + wrapping(from * bytes)), wrapping(wrapping(index - from) * bytes))
+                _ := perf_own_write(fd, wrapping(rows + wrapping(from * bytes)), wrapping(wrapping(index - from) * bytes))
             }
             from = wrapping(index + I64{1})
         }
@@ -8339,7 +8403,7 @@ perf_causal_idle_write: fn(fd: I64) {
     }
     record: wrapping(state + PERF_CAUSAL_IDLE_AT)
     rt_text_store(record, (PERF_SAMPLES_CAUSAL << PERF_SAMPLES_KIND_BITS) | (PERF_CAUSAL_IDLE_WORDS << PERF_SAMPLES_ADDRESS_BITS) | I64{2})
-    _ := host_write_all(fd, record, wrapping(PERF_CAUSAL_IDLE_WORDS * I64{8}))
+    _ := perf_own_write(fd, record, wrapping(PERF_CAUSAL_IDLE_WORDS * I64{8}))
 }
 
 // The global delay as this thread parks (Sync.jet sync_park), for
@@ -8378,7 +8442,7 @@ perf_causal_woken: fn(blocked: I64) {
 // This thread's entry, claimed by its tid on its first sample; 0 when the
 // table is full.
 perf_causal_thread: fn(state: I64) -> I64 {
-    tid: thread_tid()
+    tid: perf_own_tid()
     probe := wrapping(tid * I64{2654435761}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
     tries := I64{0}
     loop tries < PERF_CAUSAL_THREADS {
@@ -8483,7 +8547,8 @@ perf_causal_schedstat: fn(state: I64, out: I64) {
         index = wrapping(index + I64{1})
         tid: sync_load(entry)
         if (tid == I64{0}) { next }
-        got: scheduler_task_file(tid, rt_static_text("schedstat"), buffer)
+        scheduler_task_path(tid, rt_static_text("schedstat"), buffer)
+        got: perf_own_read_path(buffer)
         if (got <= I64{0}) { next }
         ran: perf_causal_field(buffer, got, I64{0})
         waited: perf_causal_field(buffer, got, I64{1})
@@ -8517,7 +8582,8 @@ perf_causal_schedstat: fn(state: I64, out: I64) {
 // cannot be read, as on a kernel without cpufreq. `buffer` holds
 // SCHEDULER_STAT_BYTES.
 perf_causal_khz: fn(tid: I64, buffer: I64) -> I64 {
-    got: scheduler_task_file(tid, rt_static_text("stat"), buffer)
+    scheduler_task_path(tid, rt_static_text("stat"), buffer)
+    got: perf_own_read_path(buffer)
     // The fields after the name's last `)` are numbers but the state, the
     // third, which follows it and a space; the CPU is the 37th after that.
     paren := wrapping(got - I64{1})
@@ -8533,7 +8599,7 @@ perf_causal_khz: fn(tid: I64, buffer: I64) -> I64 {
     name: rt_static_text("/cpufreq/scaling_cur_freq")
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), rt_text_len(name))
     rt_text_put(wrapping(buffer + at + rt_text_len(name)), I64{0})
-    read: scheduler_read_path(buffer)
+    read: perf_own_read_path(buffer)
     if (read <= I64{0}) { return I64{0} }
     perf_causal_field(buffer, read, I64{0})
 }
@@ -8585,7 +8651,7 @@ perf_causal_next: fn(state: I64, pc: I64, now: I64) {
         index = wrapping(index + I64{1})
     }
     fd: perf_samples_fd
-    if (fd >= I64{0}) { _ := host_write_all(fd, record, wrapping(words * I64{8})) }
+    if (fd >= I64{0}) { _ := perf_own_write(fd, record, wrapping(words * I64{8})) }
     sync_store(wrapping(state + PERF_CAUSAL_RANGE_COUNT), I64{0})
     random := rt_text_word(wrapping(state + PERF_CAUSAL_RANDOM))
     random = random ~ (random << I64{13})
@@ -8750,6 +8816,6 @@ perf_causal_name: fn(slot: I64, data: I64, length: I64) {
     rt_text_store(wrapping(record + I64{8}), slot)
     rt_text_store(wrapping(record + I64{16}), kept)
     rt_text_bytes_copy(wrapping(record + I64{24}), data, kept)
-    _ := host_write_all(fd, record, bytes)
+    _ := perf_own_write(fd, record, bytes)
     jet_rt_free(record, bytes, I64{8})
 }

@@ -169,7 +169,7 @@ rt_prove_stdin_os_read: fn(into: I64, capacity: I64) -> I64 {
     if replay_replaying() -> return replay_read(into, capacity, I64{0})
     got := I64{0}
     #Unsafe("into lends `capacity` writable bytes for a raw Linux read of stdin") {
-        got = os_syscall_i64(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
+        got = host_syscall(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
     }
     replay_read(into, capacity, got)
 }
@@ -185,26 +185,26 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     owner := I64{0}
     own := I64{0}
     #Unsafe("cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none") {
-        if (os_syscall_i64(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) {
+        if (host_syscall(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) {
             owner = trap_word(cell) & I64{4294967295}
         }
-        own = os_syscall_i64(I64{111}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        own = host_syscall(I64{111}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     handoff: owner > I64{0} && own > I64{0} && owner != own
     if handoff {
         trap_store(wrapping(cell + I64{8}), I64{1} << I64{21})
         trap_store(cell, own)
         #Unsafe("cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP") {
-            _ := os_syscall_i64(I64{14}, I64{0}, wrapping(cell + I64{8}), wrapping(cell + I64{16}), I64{8}, I64{0}, I64{0})
-            _ := os_syscall_i64(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{14}, I64{0}, wrapping(cell + I64{8}), wrapping(cell + I64{16}), I64{8}, I64{0}, I64{0})
+            _ := host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
         }
     }
     got: rt_prove_stdin_os_read(into, capacity)
     if handoff {
         trap_store(cell, owner)
         #Unsafe("cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask") {
-            _ := os_syscall_i64(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
-            _ := os_syscall_i64(I64{14}, I64{2}, wrapping(cell + I64{16}), I64{0}, I64{8}, I64{0}, I64{0})
+            _ := host_syscall(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{14}, I64{2}, wrapping(cell + I64{16}), I64{0}, I64{8}, I64{0}, I64{0})
         }
     }
     jet_rt_free(cell, I64{24}, I64{8})
