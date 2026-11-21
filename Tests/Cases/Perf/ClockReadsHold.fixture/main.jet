@@ -1,0 +1,69 @@
+// A fixed count of clock reads under sampling: TASKS tasks, four at a time,
+// each reading the monotonic and the wall clock READS times. Code outside
+// the sample handler reads its clocks into words no handler writes
+// (JetRuntime Sync.jet sync_now_ns, HostTime.jet time_clock_read); a read
+// a sample tore (its words half the handler's, or another clock's) is off
+// by up to the machine's uptime. Every monotonic read must be at or after
+// the task's last one, and every read of either clock within the span the
+// same clock gives over all the tasks. The many short tasks also make the
+// sampler drain its threads' rings outside the handler as each task starts
+// and ends (PerfSamples.jet perf_samples_turn), whose time it charges on
+// the thread's CPU clock (check.jet). `jet run main.jet` prints the reads
+// it checked.
+use {
+    process: core.process
+    time: core.time
+}
+
+TASKS: 20000
+
+READS: 50
+
+// What one task saw: the first read that broke, "" when none did, and the
+// latest read of each clock.
+Seen: struct {
+    fault: String,
+    monotonic: Int,
+    wall: Int,
+}
+
+// READS reads of each clock, none before `monotonic_low` or `wall_low`.
+reads: fn(monotonic_low: Int, wall_low: Int) -> Seen {
+    last := monotonic_low
+    latest_wall := wall_low
+    loop read in 0..<READS {
+        monotonic: time.instant().start_ns
+        wall: time.unix_ns()
+        if monotonic < last {
+            return Seen{fault: "monotonic read {read} is {monotonic} ns, {last - monotonic} ns before the read before it", monotonic: last, wall: latest_wall}
+        }
+        if wall < wall_low {
+            return Seen{fault: "wall read {read} is {wall} ns, {wall_low - wall} ns before the tasks began", monotonic: monotonic, wall: latest_wall}
+        }
+        last = monotonic
+        if wall > latest_wall -> latest_wall = wall
+    }
+    Seen{fault: "", monotonic: last, wall: latest_wall}
+}
+
+run: fn() {
+    monotonic_low: time.instant().start_ns
+    wall_low: time.unix_ns()
+    seen := [Seen]{}
+    loop wave in 0..<TASKS /% 4 {
+        handles: loop _offset in 0..<4 -> task reads(monotonic_low, wall_low)
+        loop handle in handles -> seen.push(handle.join() ?? panic("a task of wave {wave} failed"))
+    }
+    wall_high: time.unix_ns()
+    monotonic_high: time.instant().start_ns
+    loop one in seen {
+        if one.fault != "" -> process.fail(1, one.fault)
+        if one.monotonic > monotonic_high {
+            process.fail(1, "a monotonic read is {one.monotonic} ns, {one.monotonic - monotonic_high} ns after the tasks ended")
+        }
+        if one.wall > wall_high {
+            process.fail(1, "a wall read is {one.wall} ns, {one.wall - wall_high} ns after the tasks ended")
+        }
+    }
+    print("{seen.len() * READS} reads of each clock held")
+}
