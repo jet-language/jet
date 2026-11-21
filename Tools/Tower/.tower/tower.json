@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112695,
+    "rev": 112698,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73914,7 +73914,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-20T22:29:57.995Z",
+      "updated": "2026-11-21T00:18:14.355Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     }
@@ -131425,6 +131425,189 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-20T23:01:35.531Z"
+    },
+    {
+      "id": "D-DEBUG-LISTING1",
+      "cardId": "c00ni11n",
+      "group": "tooling",
+      "title": "How Jet's own tools list a built program's symbols, segments and code without running it",
+      "situation": "A built program is a file of named pieces of code and data, called symbols, laid out in memory blocks called segments. Jet's tests and speed tools check that file: a hot loop keeps its locked count updates, a feature adds no code when it is off. Today they ask the outside tools objdump, nm and readelf, which Jet's rules allow only as a recorded stopgap. You decide where Jet itself lists a program's symbols, segments and code without running it. We recommend that the jet debug console answer these from the file, before it starts the program, with a one-line form for scripts.",
+      "gist": "Where should Jet list a built program's symbols, segments and code, without running it?",
+      "lesson": "A symbol names a function or a data word in the program file. A segment is a block the system loads, such as the code block. The jet debug console lists code with disas, but only after it starts the program. It cannot list symbols or segments. Under every option, the listing reads the file and runs nothing.",
+      "explainer": "",
+      "story": "A contributor changes how reference counts are updated. Their test must prove a multi-threaded program still uses the locked form. The test machine has no objdump, so the test is skipped there and the change lands unchecked.",
+      "inWild": "// lldb: load the file, run nothing, list symbols, sections and code.\n// https://lldb.llvm.org/use/map.html\n$ lldb ./main -b -o 'image dump symtab' -o 'image dump sections' -o 'disassemble -n main.run__entry'\n// gdb reads a file without running it too.\n$ gdb -batch -ex 'info functions run' -ex 'maint info sections' -ex 'disassemble main.run__entry' ./main",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The debugger answers from the file first",
+          "detail": "jet debug IMAGE reads the file before anything starts. symbols, segments and disas NAME answer from the file alone. A command that needs a running program, such as continue, bt or locals, starts it first. It then stops at the first line, as today. An interactive session looks the same as today: it still starts the program and stops at the first line.\n\nNew surface: the console words symbols and segments, and the repeatable flag --do 'COMMAND'. With --do, jet debug runs each command in order and exits. It prints only their output: no prompts, and no stop banner unless a command starts the program. The exit code is 0, or 1 when a command is refused or the program ends badly. The same words work at a stop and in a crash dump. disas rows keep disas's format.\n\nsymbols prints one row per defined symbol, in address order, then name order. Each row holds the address in hex (a column of 20), the size in bytes (a column of 10), the kind and the name. The kind is function, object, thread, label or other, in a column of 10. segments prints one row per program header, in file order. Each row holds the type, then offset, address, file, memory, flags and align, each named. Tests parse these rows, so columns change only with a decision.\n\nStripped images: symbols come from the side debug file the image names when it keeps none. With neither, symbols prints `IMAGE` keeps no symbol table and exits 0. disas NAME then prints No function `NAME`. Plain disas of the whole code lists each executable segment whole, as segment 0, segment 1, and so on.\n\nBeginner path: jet debug IMAGE --do 'disas NAME'. Expert path: --do symbols to find a specialized name, then --do 'disas THAT'.",
+          "technical": "Not built yet. The reader and rows exist in the held filing Errors3202-image-list (Compiler/JetDebug/Source/NativeImageList.jet). It reads the ELF symbol table, the .gnu_debuglink side file and the program headers. It builds code rows with NativeListing.jet, the same builder disas uses. A file-only session is the crash dump's session over the image's own bytes (NativeDump.jet), so the commands join NATIVE_DEBUG_HELP and NATIVE_DUMP_HELP. The process starts lazily on the first command that needs one.\n\nToday, probed on gate p383 with Tests/Cases/SingleThreadRc/AReachableTaskSpawnKeepsCountsLocked.fixture: piping disas then quit into jet debug IMAGE starts the program and stops at entry. It then lists entry with its three lock inc rows. disas main.run__entry prints No function; symbol lookup is D-DISASM1's ratified expert path and lands without this decision.\n\nUsers moved: CodegenCeiling, the Perf zone cases and hot.sh, AllocatorFamilies (symbols, segments, disas NAME). SingleThreadRc x6 and SimdWitness move to piped disas sessions now.",
+          "code": "// Not built. Segment sizes are illustrative.\n$ jet debug .jet/build/main --do segments --do 'disas nosuch'\nLOAD         offset 0x3000      address 0x402000            file 412160    memory 412160    flags r-x align 4096\nNo function `nosuch`\n$ jet debug stripped --do symbols\n`stripped` keeps no symbol table"
+        },
+        {
+          "key": "B",
+          "name": "A listing mode of jet debug",
+          "detail": "jet debug --listing=symbols|segments|code|code:NAME IMAGE reads the built program, prints, then exits 0. It never starts the program and has no console. code:NAME lists what disas NAME lists. The output contract and stripped-image rows are A's.",
+          "technical": "Built in the held filing Errors3202-image-list (base 5a72afd74a). Parity: Tools/Perf/CodegenCeiling.jet --check on the listing matched all 9 golden rows, and --update left golden.tsv byte-identical. The symbol, function and source columns of its listing file matched the objdump-made file.",
+          "code": "// Segment sizes are illustrative.\n$ jet debug --listing=segments .jet/build/main\nLOAD         offset 0x3000      address 0x402000            file 412160    memory 412160    flags r-x align 4096\n$ jet debug --listing=code:nosuch .jet/build/main\nNo function `nosuch`"
+        },
+        {
+          "key": "C",
+          "name": "A new jet inspect image command",
+          "detail": "jet inspect image IMAGE [--symbols|--segments|--code NAME] reads the file and prints A's rows. jet debug keeps disas for stops only.",
+          "technical": "A new InspectPlane action in Compiler/JetFoundation/Source/Registry/CLICommands.jet, calling the same reader and listing builder. jet inspect build reads source targets today and refuses a program file as not UTF-8 (probed on gate p383).",
+          "code": "// Not built. Segment sizes are illustrative.\n$ jet inspect image .jet/build/main --segments\nLOAD         offset 0x3000      address 0x402000            file 412160    memory 412160    flags r-x align 4096"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "lldb",
+          "note": "target create loads a file without starting it; image dump symtab and image dump sections list it, and disassemble -n lists a function. -b with -o runs commands and exits. This is A's shape.",
+          "code": "$ lldb ./main -b -o 'image dump symtab' -o 'disassemble -n main.run__entry'"
+        },
+        {
+          "lang": "gdb",
+          "note": "gdb -batch -ex runs info functions, maint info sections and disassemble on a file it never starts, and starts it only on run. Also A's shape.",
+          "code": "$ gdb -batch -ex 'maint info sections' -ex 'disassemble main.run__entry' ./main"
+        },
+        {
+          "lang": "GNU binutils",
+          "note": "nm lists symbols, readelf -l segments, objdump -d code: three tools, each file-only, one command per view. This is B's and C's shape.",
+          "code": "$ nm -n ./main\n$ readelf -lW ./main\n$ objdump -d -M intel ./main"
+        },
+        {
+          "lang": "Go",
+          "note": "go tool nm and go tool objdump list a built binary's symbols and code through the toolchain itself, apart from its debugger, Delve. C's shape.",
+          "code": "$ go tool nm ./main\n$ go tool objdump -s main.main ./main"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one console with one set of words for a file, a stop and a crash dump, as lldb and gdb do. Its script form also drives stops, which no other option offers.",
+        "gains": [
+          "Tests and speed tools drop objdump, nm and readelf."
+        ],
+        "losses": [
+          {
+            "loss": "Commands that need a running program must start it first.",
+            "mitigation": "Such a command starts the program itself and stops at its first line, as jet debug does today."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is smaller, but it spells disas a second way and leaves scripted stops to piped input."
+          },
+          {
+            "key": "C",
+            "reason": "C splits code listings across two commands, which the machine code decision chose not to do."
+          }
+        ],
+        "tradeoff": "A adds two console words and a flag where B adds one flag; in return, files, stops and dumps share one console."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Where should Jet list a built program's symbols, segments and code, without running it?",
+        "lesson": "A symbol names a function or a data word in the program file. A segment is a block the system loads, such as the code block. The jet debug console lists code with disas, but only after it starts the program. It cannot list symbols or segments. Under every option, the listing reads the file and runs nothing.",
+        "trio": {
+          "current": {
+            "note": "A test checks that a multi-threaded program keeps its locked count updates. It needs objdump on the machine.",
+            "code": "$ jet build --release --debug-info=true main.jet\n$ objdump -d -M intel --no-show-raw-insn .jet/build/main \\\n    | awk '/<main.run__entry>:/,/^$/'\n  40f098:  lock inc QWORD PTR [r13-0x18]"
+          },
+          "wild": {
+            "lang": "lldb",
+            "note": "lldb loads a program file without starting it, then dumps its symbols and sections and lists a function. Source: https://lldb.llvm.org/use/map.html",
+            "code": "$ lldb ./main -b -o 'image dump symtab' \\\n    -o 'image dump sections' \\\n    -o 'disassemble -n main.run__entry'"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The debugger answers from the file first",
+            "gist": "The console gains symbols and segments, and answers file questions before starting the program; --do runs commands from a script.",
+            "gains": [
+              "One console: the same commands for a file, a stop, a crash dump.",
+              "Scripts can also drive stops, which today means piping input.",
+              "Works like lldb and gdb, which read a file before running it."
+            ],
+            "losses": [
+              "Adds two console commands and a --do flag.",
+              "Commands that need a running program must start it first."
+            ],
+            "proposed": {
+              "code": "$ jet debug .jet/build/main --do 'disas main.run__entry'\nentry  main.jet:7-11  -O2  0x40f050, 2232 bytes\n       0x40f098 <+72>   lock inc QWORD PTR [r13-0x18]\n$ jet debug .jet/build/main --do symbols\n0x40f050  2232  function  main.run__entry"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A listing mode of jet debug",
+            "gist": "jet debug --listing prints symbols, segments, or a function's code, then exits.",
+            "gains": [
+              "One flag, no console: the smallest addition.",
+              "Already built, and checked against objdump's results."
+            ],
+            "losses": [
+              "A second spelling for disas: code:NAME instead of disas NAME.",
+              "Scripts still pipe input to drive a stop."
+            ],
+            "proposed": {
+              "code": "$ jet debug --listing=code:main.run__entry .jet/build/main\nentry  main.jet:7-11  -O2  0x40f050, 2232 bytes\n       0x40f098 <+72>   lock inc QWORD PTR [r13-0x18]\n$ jet debug --listing=symbols .jet/build/main\n0x40f050  2232  function  main.run__entry"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A new jet inspect image command",
+            "gist": "jet inspect gains image, which lists symbols, segments or code of a program file.",
+            "gains": [
+              "Sits with the other read-only views of a build.",
+              "No debugger involved at all."
+            ],
+            "losses": [
+              "A second home for code listings, beside the debugger's disas.",
+              "The machine code choice put listings in the debugger, not inspect."
+            ],
+            "proposed": {
+              "code": "$ jet inspect image .jet/build/main --code main.run__entry\n       0x40f098 <+72>   lock inc QWORD PTR [r13-0x18]\n$ jet inspect image .jet/build/main --symbols\n0x40f050  2232  function  main.run__entry"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps one console with one set of words for a file, a stop and a crash dump, as lldb and gdb do. Its script form also drives stops, which no other option offers.",
+          "gains": [
+            "Tests and speed tools drop objdump, nm and readelf."
+          ],
+          "losses": [
+            {
+              "loss": "Commands that need a running program must start it first.",
+              "mitigation": "Such a command starts the program itself and stops at its first line, as jet debug does today."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B is smaller, but it spells disas a second way and leaves scripted stops to piped input."
+            },
+            {
+              "key": "C",
+              "reason": "C splits code listings across two commands, which the machine code decision chose not to do."
+            }
+          ],
+          "tradeoff": "A adds two console words and a flag where B adds one flag; in return, files, stops and dumps share one console."
+        }
+      },
+      "draftedBy": "Errors3202",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T00:18:01.816Z"
     }
   ],
   "questions": [
@@ -133704,6 +133887,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T00:18:14.355Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DEBUG-LISTING1",
+      "note": "reviewed by Main"
+    },
+    {
+      "at": "2026-11-21T00:18:11.598Z",
+      "by": "Main",
+      "action": "decision.review",
+      "ref": "D-DEBUG-LISTING1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T00:18:01.816Z",
+      "by": "Errors3202",
+      "action": "decision.add",
+      "ref": "D-DEBUG-LISTING1",
+      "note": "How Jet's own tools list a built program's symbols, segments and code without running it (draft)"
+    },
     {
       "at": "2026-11-21T00:16:02.941Z",
       "by": "Main",
