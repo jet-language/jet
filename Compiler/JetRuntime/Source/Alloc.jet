@@ -70,6 +70,11 @@
 // Counted allocations alone own a raw-heap tracker node [ptr,requested,next].
 // Head192 and count200 share the policy lock; system-mode block layout and
 // allocation cost are unchanged. Free skips lookup while tracked count is zero.
+// The runtime object exports alloc_root as jet_rt_alloc_root (JetBackend
+// RuntimeObject.jet X64_ALLOC_ROOT_SYMBOL): `jet debug` reads mode144,
+// allocations160 and high-water184 through it as the program exits and names
+// a counting policy's totals in its end report (JetDebug Native.jet
+// NATIVE_ALLOC_MODE), so the layout above is read from outside the program.
 //
 // Checked mode (alloc_class_limit, the "Checked mode" section below) is on
 // exactly in a program built with `--checked-alloc`: its hook

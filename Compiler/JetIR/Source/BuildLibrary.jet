@@ -9,7 +9,7 @@
 // code) are recognized by name and validated by signature here; ir_call
 // builds each call of one as its machine operation (ir_intrinsic_call).
 use {
-    jet_backend.[LINK_FAULT_REPORT, X64DataExport, X64_DEBUG_EVAL_STORAGE, X64_OBSERVE_ROOT_SYMBOL, x64_debug_eval_symbol]
+    jet_backend.[LINK_FAULT_REPORT, X64DataExport, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_EVAL_STORAGE, X64_OBSERVE_ROOT_SYMBOL, x64_debug_eval_symbol]
     jet_foundation.[AccessConvention, CompilerThreads, DeclTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
@@ -394,10 +394,10 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     // The process-ending flag the inline block release reads (X64Select.jet
     // ir_x64_block_release), the armed word a loop's stop poll reads
     // (X64Select.jet ir_x64_stop_point), the zones word a zone site tests
-    // (X64Select.jet ir_x64_zone_site), the task registry's root the
-    // debugger reads (X64_OBSERVE_ROOT_SYMBOL) and the words the debugger
-    // writes around an evaluation (X64_DEBUG_EVAL_STORAGE), when this
-    // library holds them.
+    // (X64Select.jet ir_x64_zone_site), the task registry's root and the
+    // allocator's root the debugger reads (X64_OBSERVE_ROOT_SYMBOL,
+    // X64_ALLOC_ROOT_SYMBOL) and the words the debugger writes around an
+    // evaluation (X64_DEBUG_EVAL_STORAGE), when this library holds them.
     data := [X64DataExport]{}
     ending: ir_lifecycle_guard(m, p, IR_X64_PROCESS_ENDING_STORAGE)
     if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
@@ -407,6 +407,8 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if zones >= 0 -> data.push(X64DataExport{data: zones, symbol: IR_X64_PERF_ZONES_SYMBOL})
     observed: ir_lifecycle_guard(m, p, IR_OBSERVE_ROOT_STORAGE)
     if observed >= 0 -> data.push(X64DataExport{data: observed, symbol: X64_OBSERVE_ROOT_SYMBOL})
+    allocator: ir_lifecycle_guard(m, p, IR_ALLOC_ROOT_STORAGE)
+    if allocator >= 0 -> data.push(X64DataExport{data: allocator, symbol: X64_ALLOC_ROOT_SYMBOL})
     loop name in X64_DEBUG_EVAL_STORAGE {
         word: ir_lifecycle_guard(m, p, name)
         if word >= 0 -> data.push(X64DataExport{data: word, symbol: x64_debug_eval_symbol(name)})
@@ -417,6 +419,10 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
 // The runtime's task registry root (JetRuntime Observe.jet observe_root),
 // which the runtime object exports as X64_OBSERVE_ROOT_SYMBOL.
 IR_OBSERVE_ROOT_STORAGE: "observe_root"
+
+// The runtime allocator's root (JetRuntime Alloc.jet alloc_root), which the
+// runtime object exports as X64_ALLOC_ROOT_SYMBOL.
+IR_ALLOC_ROOT_STORAGE: "alloc_root"
 
 ir_library_failed: fn(errors: [String]) -> IRLibraryResult Never! {
     IRLibraryResult{program: ir_module_new(), failures: [IRBuildFailure]{}, errors: errors, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}

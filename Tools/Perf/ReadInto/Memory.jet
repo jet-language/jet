@@ -11,7 +11,7 @@
 // harness's rule that only strictly below plain wins. --write replaces the
 // row's memory_evidence_file; without it the result is printed.
 //
-//   jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> --gdb <gdb> [--write] [--scratch <dir>]
+//   jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> [--write] [--scratch <dir>]
 use {
     crypto: core.crypto
     files: core.files
@@ -47,20 +47,11 @@ BOOTSTRAP_LOWER_RANK: 250
 
 BOOTSTRAP_UPPER_RANK: 9750
 
-// The counting policy's own facts, read by gdb at exit_group: the program's
-// image keeps no fact export, so the script finds the allocator root through
-// jet_rt_alloc_init's first instruction (`lea <root>(%rip)`) and reads the
-// words Alloc.jet lays out there: mode144, allocations160, high-water184.
-FACTS_SCRIPT: `import gdb, re
-line = gdb.execute("x/1i jet_rt_alloc_init", to_string=True)
-found = re.search(r"lea\s+0x[0-9a-f]+\(%rip\),%\w+\s+# (0x[0-9a-f]+)", line)
-if not found:
-    raise gdb.GdbError("jet_rt_alloc_init does not start with the root lea: " + line)
-memory = gdb.selected_inferior()
-word = lambda at: int.from_bytes(bytes(memory.read_memory(at, 8)), "little", signed=True)
-root = word(int(found.group(1), 16))
-print("ALLOCATOR-FACTS mode=%d allocations=%d high_water=%d" % (word(root + 144), word(root + 160), word(root + 184)))
-`
+// The counting policy's own facts, from the end report of `jet debug`: the
+// debugger reads the allocator's totals as the program exits and names them
+// ahead of `Program finished`. The program's output, its read count on
+// stderr included, comes in the session's output before them.
+DEBUG_COMMANDS: "continue\nquit\n"
 
 Row: struct {
     id: String,
@@ -187,14 +178,14 @@ build: fn(jet: String, source: String, dir: String, allocator: String) -> String
     binary
 }
 
-counted_run: fn(gdb: String, binary: String, scratch: String, label: String) -> Counted {
-    err_file: files.join(scratch, "{label}.err")
-    script: files.join(scratch, "facts.py")
-    files.write(script, FACTS_SCRIPT) ?? fail("{script}: {err}")
-    result: run_program([String]{gdb, "-q", "-batch", "-ex", "set pagination off", "-ex", "catch syscall exit_group", "-ex", "run 2>{err_file}", "-x", script, binary})
-    facts: regex.match(Regex{"ALLOCATOR-FACTS mode=1 allocations=(\d+) high_water=(\d+)"}, result.output) ?? fail("no counting-policy facts from gdb:\n{result.output}{result.errors}")
-    errors: files.read(err_file) ?? fail("{err_file}: {err}")
-    reads: regex.match(Regex{"reads=(\d+)"}, errors) ?? fail("no reads= line in stderr: {errors}")
+counted_run: fn(jet: String, binary: String) -> Counted {
+    spec: process.cmd([String]{jet, "debug", binary}).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(300))
+    child := spec.spawn() ?? fail("{jet} debug {binary}: {err}")
+    child.stdin.write_bytes(DEBUG_COMMANDS.bytes()).drop("a session that stopped reading says why on stderr")
+    child.stdin.close()
+    result: child.wait() ?? fail("{jet} debug {binary}: {err}")
+    facts: regex.match(Regex{"Allocator: counting, (\d+) allocations, high water (\d+) bytes\nProgram finished\n"}, result.output) ?? fail("no counting-policy facts from jet debug:\n{result.output}{result.errors}")
+    reads: regex.match(Regex{"reads=(\d+)"}, result.output) ?? fail("no reads= line in the program's output: {result.output}")
     allocations: facts.group_int(1) ?? fail("the allocation count is out of Int range")
     count: reads.group_int(1) ?? fail("the read count is out of Int range")
     Counted{allocations: allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
@@ -252,7 +243,6 @@ cpu_model: fn() -> String? {
 
 measure: fn(repo: String, argv: [String]) -> Evidence {
     jet: files.absolute(argument(argv, "--artifact", process.env_get_or("JET", "jet"))) ?? fail("--artifact: {err}")
-    gdb: argument(argv, "--gdb", "gdb")
     row: pair_row(repo)
     scratch: files.join(argument(argv, "--scratch", sys.temp_dir()), "read-into-memory-{process.current_pid()}")
     surface_plain: build(jet, row.surface_source, files.join(scratch, "surface"), "")
@@ -260,12 +250,8 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
     surface_counted: build(jet, row.surface_source, files.join(scratch, "surface-counted"), COUNTING)
     plain_counted: build(jet, row.plain_source, files.join(scratch, "plain-counted"), COUNTING)
     runs := CountedRuns{surface: [Counted]{}, plain: [Counted]{}}
-    loop index in 0..<COUNTED_RUNS {
-        runs.surface.push(counted_run(gdb, surface_counted, scratch, "surface-{index}"))
-    }
-    loop index in 0..<COUNTED_RUNS {
-        runs.plain.push(counted_run(gdb, plain_counted, scratch, "plain-{index}"))
-    }
+    loop _ in 0..<COUNTED_RUNS { runs.surface.push(counted_run(jet, surface_counted)) }
+    loop _ in 0..<COUNTED_RUNS { runs.plain.push(counted_run(jet, plain_counted)) }
     surface_rss := [Int]{}
     plain_rss := [Int]{}
     // Alternate which arm runs first, surface first on even trials.
@@ -294,8 +280,8 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
         target: "jet build -O2",
         artifact_sha256: crypto.sha256(artifact).hex(),
         host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
-        generated_command: "jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> --gdb <gdb> --write",
-        counting_policy: "mem.Counting.over(mem.Heap, cap: 2.gb) in each arm's package block; facts read at exit_group",
+        generated_command: "jet Tools/Perf/ReadInto/Memory.jet --artifact <jet> --write",
+        counting_policy: "mem.Counting.over(mem.Heap, cap: 2.gb) in each arm's package block; facts read by jet debug as the program exits",
         counted_runs: Val(runs),
         rss_runs: TRIALS,
         surface_allocations_per_read: per_read_surface,

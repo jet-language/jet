@@ -1,7 +1,7 @@
 {
   "name": "read-into-memory",
   "mode": "tool",
-  "description": "The read_into memory helper memory.mjs and its Jet twin Memory.jet (#5976 c112): build both arms of the net_read_into_vs_read pair, plain and with the counting allocator, read each counted build's allocation facts through gdb at exit_group, sample peak RSS of the plain builds through the gauntlet timer, and print the per-metric verdicts. The fixtures are stand-ins: a `jet` whose build writes a program printing the pair's expected output and its read count, and a `gdb` that runs it and prints fixed counting facts per arm. The check prints every summary fact but the host and the command line; peak RSS is the timer's real reading, so for it the check shows that it was measured and judged.",
+  "description": "The read_into memory helper memory.mjs and its Jet twin Memory.jet (#5976 c112): build both arms of the net_read_into_vs_read pair, plain and with the counting allocator, read each counted build's allocation facts from the end report of `jet debug`, sample peak RSS of the plain builds through the gauntlet timer, and print the per-metric verdicts. The fixture is a stand-in `jet`: its build writes a program printing the pair's expected output and its read count, and its debug runs that program and ends the report with fixed counting facts per arm. The check prints every summary fact but the host and the command line; peak RSS is the timer's real reading, so for it the check shows that it was measured and judged.",
   "tool": {
     "original": "Tools/Perf/ReadInto/memory.mjs",
     "jet": "Tools/Perf/ReadInto/Memory.jet",
@@ -14,9 +14,7 @@
       {
         "args": [
           "--artifact",
-          "./jet",
-          "--gdb",
-          "./gdb"
+          "./jet"
         ],
         "check": "check.jet",
         "expected": "Expected/summary.out"

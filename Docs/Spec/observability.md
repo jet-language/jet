@@ -1433,6 +1433,15 @@ exit, outermost first. `bt`, `locals` and `print` read the stack there,
 and the next run command lets the program end. `jet debug --dap` reports
 the pause as an `exception` stop described by its status.
 
+A program whose allocator counts (`allocator: mem.Counting.over(...)` in its
+package) has its totals read as it exits, whatever its status, and its end
+report names them ahead of `Program finished`: `Allocator: counting, 82689
+allocations, high water 147240 bytes`, the allocations made and the most
+bytes live at once. The debugger reads them from the runtime's allocator
+state, which the image exports as `jet_rt_alloc_root`
+(`Compiler/JetRuntime/Source/Alloc.jet`). A program under the system
+allocator ends without the line.
+
 A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
