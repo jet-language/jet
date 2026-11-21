@@ -49,7 +49,7 @@ exit: 0
 step: jet debug {work}/.jet/build/main --do sections --do 'sections .data --bytes'
 exit: 0
 stdout.filter(^= ".text ").line(0): ~ " flags AX   align " # -O0 lists as -O2 does
-stdout.filter(^= ".rodata ").line(0): ~ " flags A    align "
+stdout.filter(^= ".rodata ").line(0): ~ " flags A    align " # and its constants as -O2's
 capture: data = text stdout.after_first(" from the file\n")
 step: jet debug {work}/.jet/build/main --break main.jet:3
 stdin: sections_list_an_image_and_its_bytes.stdin
