@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112704,
+    "rev": 112705,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55102,6 +55102,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Sampler overhead, correction to the earlier log: the 0.75% of R2(d) was the POSIX-timer sampler at 1 kHz or less; the rise to about 3% followed the 8 kHz rate (6dda4bf451), not the kernel ring. Per-sample kernel cost on this host, 5 runs: ip-only 1.10 us (the floor, 0.88% at 8 kHz), callchain-only 2.06, current callchain+512 B 2.29; a STACK_USER copy large enough for Jet stacks costs more (16 KiB 2.89, 32 KiB 4.63) and still truncates 95% of compiler samples (deeper than 32 KiB), so drain-time unwinding is rejected. Decision: the 2% budget at the default rate stands (2.5 us/sample all-in at 8 kHz). Keep the callchain; shrink STACK_USER to the largest frameless-leaf frame so the leaf caller recovery stays; cut the handler/drain cost; calibrate from interleaved on/off pairs. The default rate (8 kHz vs 4 kHz) is user-visible and goes to ballot D-PERF-RATE1."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Sampler overhead finding (receipt_reports_measured_overhead, suite p383-p384). The case fails quiet and loaded alike: overhead_ns is 56-60 ms (2.8-3.0%) on burn.jet against the 2% budget (40 ms). The run_delay subtraction works: a run-queue wait 3x the run time leaves the receipt at its quiet value. Cause: 64c616649f moved sampling to the kernel ring with sample_type IP|TIME|CALLCHAIN|REGS_USER|STACK_USER (512-byte copy), and the kernel FP callchain write costs 2.7-3.2 us per sample at about 30 frames. Docs/Audits/2026-11-18-best-debugger-profiler.md:917 R2(d) \"0.75%\" comes from Probes/sampler-overhead.log (d3fbbe5cb4), measured on the earlier SIGPROF sampler, so it is stale for the current sampler: the switch raised overhead about 4x. Decision: the 2% budget stands and the bound does not rise. The cut is to drop CALLCHAIN and unwind FP+CFI inside one larger STACK_USER copy at drain time, marking deeper stacks truncated, with calibration from interleaved on/off pairs. Proof in a quiet window: jet run Tools/Perf/SamplerOverhead/Main.jet -- --jet jet --runs 9 --bar 200, which also re-measures R2(d) on the current sampler."
         },
         {
@@ -56398,7 +56403,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T01:08:33.422Z",
+      "updated": "2026-11-21T01:27:11.467Z",
       "updatedBy": "Main",
       "criteriaLastN": 99
     },
@@ -133964,6 +133969,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:27:11.467Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T01:11:14.337Z",
       "by": "Main",
