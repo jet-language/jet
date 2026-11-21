@@ -119,6 +119,7 @@ pkg_merge_config: fn(root: &PackageFacts, config: ConfigFacts) ComposeError! {
     root.version = pkg_merge_optional_field(root.version, config.version, "version", fallback, config.origin, root.provenance)
     root.source = pkg_merge_optional_field(root.source, config.source, "source", fallback, config.origin, root.provenance)
     pkg_merge_dep_map(root.deps, config.deps, "deps", fallback, config.origin, root.provenance)
+    pkg_merge_dep_settings(root.dep_settings, config.dep_settings, fallback, config.origin, root.provenance)
     pkg_merge_services(root.services, config.services, "services", fallback, config.origin, root.provenance)
     pkg_merge_outputs(root.outputs, config.outputs, "outputs", fallback, config.origin, root.provenance)
     pkg_merge_environments(root.environments, config.environments, "environments", fallback, config.origin, root.provenance)
@@ -189,6 +190,33 @@ pkg_merge_dep_map: fn(current: &[String:DepSource], incoming: [String:DepSource]
         }
         pkg_record_provenance(provenance, path, origin)
     }
+}
+
+// The settings a Config's record entries give dependencies: one entry's
+// settings come from one contributor, so two that differ conflict.
+pkg_merge_dep_settings: fn(current: &[String:[ManifestEntry]], incoming: [String:[ManifestEntry]], fallback: String, origin: String, provenance: &[String:[String]]) ComposeError! {
+    loop key in pkg_manifest_sorted(incoming.keys().to_list()) {
+        path: "deps.{key}.settings"
+        left_origin: pkg_provenance_origin(provenance, path, fallback)
+        right: pkg_dep_settings_display(incoming[key])
+        if current.get(key) == {
+            .Val(existing) -> {
+                left: pkg_dep_settings_display(existing)
+                if left != right {
+                    return Err(ComposeError.Conflict{field: path, left_origin: left_origin, right_origin: origin, left: left, right: right})
+                }
+            }
+            .None -> current[key] = incoming[key]
+        }
+        pkg_record_provenance(provenance, path, origin)
+    }
+}
+
+// `{ loud: true, level: 2 }`, in written order.
+pkg_dep_settings_display: fn(settings: [ManifestEntry]) -> String Never! {
+    parts := [String]{}
+    loop entry in settings -> parts.push("{entry.key}: {entry.value}")
+    "{{ {parts.join(", ")} }}"
 }
 
 pkg_merge_string_map: fn(current: &[String:String], incoming: [String:String], field: String, fallback: String, origin: String, provenance: &[String:[String]]) ComposeError! {

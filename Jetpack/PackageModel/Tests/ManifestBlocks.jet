@@ -1,5 +1,6 @@
-// The dependency-name path boundary and the public redacted dependency display.
-use jet_pkg_model.[DepSource, GitSelector, pkg_dep_display_redacted, pkg_validate_dependency_name]
+// The dependency-name path boundary, the public redacted dependency display,
+// and the record form of a dependency entry.
+use jet_pkg_model.[DepSource, GitSelector, Manifest, ManifestEntry, PackageFacts, pkg_dep_display, pkg_dep_display_redacted, pkg_validate_dependency_name]
 
 #Test("dependency names reject path components") {
     names: [String]{"../escape", "..", "escape/name", "escape\\name", "escape:name"}
@@ -14,4 +15,55 @@ use jet_pkg_model.[DepSource, GitSelector, pkg_dep_display_redacted, pkg_validat
     assert(!display.contains("build-secret"))
     assert(!display.contains("query-secret"))
     assert(!display.contains("private"))
+}
+
+dep_record_facts: fn(deps: String) -> PackageFacts Never! {
+    PackageFacts.parse("name: \"app\"\nversion: \"0.1.0\"\ndeps: {{\n{deps}\n}}\n", "package.jet") ?? panic("the manifest parses")
+}
+
+dep_record_refused: fn(deps: String) -> Bool Never! {
+    if PackageFacts.parse("name: \"app\"\nversion: \"0.1.0\"\ndeps: {{\n{deps}\n}}\n", "package.jet") == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+dep_settings_shown: fn(entries: [ManifestEntry]) -> [String] Never! {
+    loop entry in entries -> "{entry.key} = {entry.value}"
+}
+
+#Test("a dependency record names the same source as its short form") {
+    facts: dep_record_facts("    tool: {{ path: ../tool }},\n    bare: ../tool,\n    kit: {{ git: \"https://example.test/kit\", tag: \"v1\" }},\n    http: {{ version: \"^2\" }},")
+    assert_eq(pkg_dep_display(facts.deps["tool"]), pkg_dep_display(facts.deps["bare"]))
+    assert_eq(pkg_dep_display(facts.deps["tool"]), "../tool")
+    assert_eq(pkg_dep_display(facts.deps["kit"]), "{{ git: \"https://example.test/kit\", tag: \"v1\" }}")
+    assert(facts.deps["http"] == .Version(_))
+    assert_eq(facts.dep_settings.len(), 0)
+    manifest: Manifest.parse("package.jet", "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ tool: {{ path: \"../tool\" }} }}\n") ?? panic("a `path:` record converts")
+    if manifest.dependencies["tool"] == {
+        .Path(path) -> assert_eq(path, "../tool")
+        .Git(_, _) | .Registry(_) | .Foreign(_, _) -> {
+            panic("a `path:` record converts to a path dependency")
+        }
+    }
+}
+
+#Test("a dependency record carries the settings it gives the dependency") {
+    facts: dep_record_facts("    tool: {{ path: ../tool, settings: {{ loud: true, level: 2 }} }},\n    kit: {{ git: \"https://example.test/kit\", rev: \"abc\", settings: {{ mode: \"fast\" }} }},\n    plain: ../plain,")
+    assert_eq(dep_settings_shown(facts.dep_settings["tool"]), [String]{"loud = true", "level = 2"})
+    assert_eq(dep_settings_shown(facts.dep_settings["kit"]), [String]{"mode = \"fast\""})
+    assert(!facts.dep_settings.has_key("plain"))
+    assert(facts.deps["kit"] == .Git(_, _))
+}
+
+#Test("a dependency record names exactly one source and only known fields") {
+    assert(dep_record_refused("    tool: {{ settings: {{ loud: true }} }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, git: \"https://example.test/tool\", tag: \"v1\" }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, tag: \"v1\" }},"))
+    assert(dep_record_refused("    tool: {{ path: tool }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, setings: {{ loud: true }} }},"))
+    assert(dep_record_refused("    tool: {{ git: \"https://example.test/tool\" }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, settings: {{ loud: true, loud: false }} }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, settings: {{ tool.loud: true }} }},"))
+    assert(dep_record_refused("    tool: {{ path: ../tool, settings: true }},"))
 }
