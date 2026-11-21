@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113000,
+    "rev": 113020,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24211,11 +24211,11 @@
         {
           "n": 19,
           "text": "Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations, with values identical in the typed result and the CLI JSON. A semantic-error result keeps its diagnostics and an absent index, with no fallback faking complete facts; a new public record member needs a ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:53:32.074Z",
+          "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21): Tests/Cases/CompilerAPI/typed_consumers_match_cli_json.case PASS (commit f0ac57b289: typed code reads state_graphs, fact_registry and derivations as the ratified D-SEMINDEX-TYPED1=A records, compared value by value with jet inspect compiler check JSON on a typestate fixture; the broken-text step keeps its diagnostics and has no index).",
+          "at": "2026-11-21T21:35:00.034Z",
           "proof": {
             "profile": "cases",
             "filter": "CompilerAPI/typed_consumers_match_cli_json"
@@ -24394,11 +24394,11 @@
         {
           "n": 39,
           "text": "The index derivations give one record per derived item, each credited to the item it derives. Today sema_compiler_index_derivations (JetSema SemanticIndex.jet:1952) lowers a struct methods into Impl items whose span covers only the struct name, so each is credited to the struct. In the typestate fixture Reservation gets 3 records with 2 different source digests, book, pay, check_in and room_key get none, and the 176 records hold only 122 unique ids (54 duplicated). Found by Lens on the p399 jet, 2026-11-21, building c19. Proof: a case over a struct with methods asserts one derivation per method, credited to that method, with unique ids, and the same values in the typed result and `jet inspect semindex --json`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T07:42:23.872Z"
+          "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21): Tests/Cases/CompilerAPI/semantic_index_derives_each_declaration_once.case PASS (commits d2f126df89 and f0ac57b289: a struct with three methods gives 5 records with distinct ids, each credited to its own declaration, the same values in jet inspect semindex and jet inspect compiler check, and a typed step comparing each record whole).",
+          "at": "2026-11-21T21:35:01.151Z"
         },
         {
           "n": 40,
@@ -24446,8 +24446,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T16:45:04.093Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-21T21:35:01.151Z",
+      "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 41
     },
@@ -34281,11 +34281,16 @@
         {
           "n": 6,
           "text": "The adoption receipt, comparing fresh-process and attached overhead on the #2859 corpus, is recorded. Proof: a committed measurement under Docs/Audits with both timings and the commands.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:56:53.526Z"
+          "evidence": "Moved to #6960 c9",
+          "at": "2026-11-21T22:42:13.048Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6960,
+            "n": 9
+          }
         },
         {
           "n": 7,
@@ -34315,7 +34320,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-17T23:30:06.429Z",
-      "updated": "2026-11-17T01:41:03.127Z",
+      "updated": "2026-11-21T22:42:13.048Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -35917,6 +35922,32 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T13:37:03.692Z"
+        },
+        {
+          "n": 39,
+          "text": "The compile-speed profile that ranks the compile-speed epoch comes from `jet perf run` on the compiler compiling Compiler (CPU microseconds per phase and per hot function), with a recorded command, and no external profiler is used. Proof: the command and its .jettrace summary on the card, matching the ranked plan.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:17.355Z",
+          "movedFrom": {
+            "card": 6995,
+            "n": 2
+          }
+        },
+        {
+          "n": 40,
+          "text": "jet perf counts the user-mode retired instructions and cycles of any jet command or built binary, not only of a `jet perf run x.jet` program, so Tools/Perf/CompileThroughput (--against and --batch) drops `perf stat`; the counting surface goes on a ballot first if no existing jet perf form fits. Proof: CompileThroughput runs with no external profiler and its counts match perf stat within 1% on one revision.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:18.294Z",
+          "movedFrom": {
+            "card": 6995,
+            "n": 14
+          }
         }
       ],
       "refs": [],
@@ -35926,9 +35957,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-21T13:37:03.692Z",
+      "updated": "2026-11-21T22:42:18.294Z",
       "updatedBy": "Main",
-      "criteriaLastN": 38
+      "criteriaLastN": 40
     },
     {
       "id": "c0c209zc",
@@ -49843,6 +49874,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "The a0.0.46 admit of b66642b8bc (2026-11-21, the run after b946c4dfc4; its suites all finished, and the speed gate was stopped afterwards): c9: Debug/a_fault_stops_like_a_breakpoint_with_its_stack_readable, MetaSuite/jai_families_and_metadata_rows_each_pass_a_witness and Perf/task_clock_nominal_matches_kept PASS; Perf/causal_profile_predicts_speedup failed (exit 70), and its root fix (#6440 c2, a bounded spin before a carrier parks) is in the p433 landing cycle. c10: the three ToolchainDefaults identity_* cases PASS; throughput was stopped before it finished."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "a0.0.46 admit of b946c4dfc4 (seed gate p407) failed: chain fixed point, packs, jetpack, golden and ui passed; cases lost 1, untracked 9, flaky 1 (receipt_reports_measured_overhead, owned by #6841 c105); registries 433/456, of which 20 also failed alike at a0.0.45 (dispositioned to this card then) and 3 are new (c6, c7); speed INCONCLUSIVE from per-phase spread 13-56% (agents worked during the timing; the rerun takes a quiet slot); throughput failed (c10). fork_under_load_child_completes stays #3594 c19. Next admit from the tip after these land."
         },
         {
@@ -49950,29 +49986,29 @@
         {
           "n": 6,
           "text": "JetRuntime/Tests/Fragments.fixture/SharedPublicationTests passes again: it passed at a0.0.45 (3a012d3674) and at the a0.0.46 admit of b946c4dfc4 shared-weak-fixture.c:185 aborts on jet_rt_program_allocator_fact(2) == base + 96. The accounting or the fixture is fixed at its root, whichever is wrong. Proof: suite:registries of the next admit lists the entry PASS.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T14:23:22.145Z"
+          "evidence": "The a0.0.46 admit of b66642b8bc (2026-11-21, the run after b946c4dfc4; its suites all finished, and the speed gate was stopped afterwards): suite:registries lists JetRuntime/Tests/Fragments.fixture/SharedPublicationTests PASS (\"JET_COMPILER_REGISTRY PASS JetRuntime/Tests/Fragments.fixture/SharedPublicationTests tests=1\", release dir registries/JetRuntime_Tests_Fragments.fixture_SharedPublicationTests.stdout); registries 438 of 458 PASS, with 20 dispositioned.",
+          "at": "2026-11-21T21:42:50.007Z"
         },
         {
           "n": 7,
           "text": "The registry entries JetRuntime/Tests/Fragments.fixture/PerfCitesTests and WaitCycleTests, added after a0.0.45, have a registered transport and a native verdict: the a0.0.46 admit reported both BLOCKED with \"No registered transport\". Proof: suite:registries of the next admit lists both PASS.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T14:23:22.951Z"
+          "evidence": "The a0.0.46 admit of b66642b8bc (2026-11-21, the run after b946c4dfc4; its suites all finished, and the speed gate was stopped afterwards): suite:registries lists both PASS: \"JET_COMPILER_REGISTRY PASS JetRuntime/Tests/Fragments.fixture/PerfCitesTests tests=1\" and \"JET_COMPILER_REGISTRY PASS JetRuntime/Tests/Fragments.fixture/WaitCycleTests tests=1\", each through its registered transport in the receipts.",
+          "at": "2026-11-21T21:42:51.168Z"
         },
         {
           "n": 8,
           "text": "Tests/Cases/LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts.case passes again: PASS at a0.0.45, exit 1 at the a0.0.46 admit of b946c4dfc4. Proof: the case PASS in the next admit and in the landing suite.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T14:23:23.743Z"
+          "evidence": "The a0.0.46 admit of b66642b8bc (2026-11-21, the run after b946c4dfc4; its suites all finished, and the speed gate was stopped afterwards): Tests/Cases/LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts.case PASS (rows-candidate.json, exit 0, 10.2 s), and PASS in the landing suite p431 (dev 7693055e59).",
+          "at": "2026-11-21T21:42:52.276Z"
         },
         {
           "n": 9,
@@ -49998,7 +50034,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-21T14:23:26.179Z",
+      "updated": "2026-11-21T21:42:53.304Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -51674,6 +51710,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Correction to the c13 evidence: across the 50 runs the 1-minute load ran from 25.4 to 246.4, with a median of 138.4, not 138 to 246. Every run was still during the p435 full suite."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c9 not met: WebBrowser/browser_test_ui_mode passed in the 9 full suites p400-p419, but it failed in p399 (11-21 01:32) with the same \"`notes` failed on chromium after 2 attempts: browser protocol failed\", after the late-reply fix dcee077542 (11-20) had landed, and nothing browser-related landed since. The streak is not a root fix; the wait or read that gives up under load is still to be found."
         },
         {
@@ -51794,11 +51835,20 @@
         {
           "n": 13,
           "text": "FiberLiveness/fibers_past_the_pool_tear_down_in_random_order holds under full-suite load, fixed at its root. In the p420 full suite (dev 4f1f6c1c7f, 2026-11-21) its `jet run` step printed \"threads unchanged false\" after passing in the 9 full suites p400-p419; p420 changed no thread or scheduler code. The fixture (Fixtures/Teardown/main.jet) samples /proc/self/status Threads: after a fixed time.sleep(50ms) and again after a fixed time.sleep(100ms) once every task has joined, so a scheduler worker that starts or retires late under load changes the count. The comparison must wait on the runtime reaching its settled state (or compare against the bound the runtime promises), not on wall time. Proof: the case passes 50 times in a row under the cases runner while a full suite runs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ae994a28ce, the p435 batch compiler (it carries the teardown fix 94bedff569 from p431): Tests/Cases/FiberLiveness/fibers_past_the_pool_tear_down_in_random_order.case passed 50 runs in a row (each `jet test Compiler --profile cases --filter ...` rc 0, PASS), every run while the p435 full suite ran, at load 138 to 246 (2026-11-21, $JET_SCRATCH_ROOT/lanes/Main/c13-50-p435.out). It also passed in the p431, p434 and p435 full suites.",
+          "at": "2026-11-21T22:32:05.684Z"
+        },
+        {
+          "n": 14,
+          "text": "Examples/Systems/Process/ProcessRunAllParentDeath holds under full-suite load. In the p435 full suite (dev ae994a28ce, 2026-11-21, load near 250) its o2 golden printed \"job running after its owner died: true\" after waiting 5 s for the killed owner's job to stop; it passed in the 15 suites before. Fix (Main-6772-parent-death-wait): the job sleeps an hour and the check waits up to 10 minutes, then kills a survivor. If it fails again with that wait, the parent-death mark really missed the job and the runtime is at fault. Proof: the golden PASS in 5 full suites in a row.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-21T16:13:02.497Z"
+          "at": "2026-11-21T22:33:55.363Z"
         }
       ],
       "refs": [],
@@ -51806,9 +51856,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-21T16:13:02.497Z",
+      "updated": "2026-11-21T22:33:55.363Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c08zzpo5",
@@ -54192,11 +54242,16 @@
         {
           "n": 46,
           "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both. Review 9 found more carriers: c46 lands only after c50, c51, c54 and c56 (struct field, enum payload, list, defer, method value, Shared to task).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T08:07:57.743Z"
+          "evidence": "Moved to #6962 c10",
+          "at": "2026-11-21T22:42:16.304Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6962,
+            "n": 10
+          }
         },
         {
           "n": 47,
@@ -54348,7 +54403,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-19T19:13:00.011Z",
+      "updated": "2026-11-21T22:42:16.304Z",
       "updatedBy": "Main",
       "criteriaLastN": 62
     },
@@ -55606,11 +55661,11 @@
         {
           "n": 88,
           "text": "G37: The profile timeline draws live from the flight ring while the program runs (Canvas Profile view and an attach follow mode), after a ratified ballot for the new user surface. Proof: a case that sees a zone drawn before the program exits.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:14:11.634Z"
+          "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21): Tests/Cases/Perf/attach_follow_draws_zone_before_exit.case PASS, with attach_turns_zones_on, overlapping_zones_attaches_share_the_window and zones_request_lapses_unrenewed PASS (commits fa4a3a36d7 live zones and 7cebd677d8 follow mode; the surface is D-LIVE-TIMELINE1=A).",
+          "at": "2026-11-21T21:35:02.183Z"
         },
         {
           "n": 89,
@@ -55858,11 +55913,11 @@
         {
           "n": 113,
           "text": "core.tasks quiesce() succeeds once every task group has joined, whatever the machine load: jet_rt_scheduler_shutdown (Scheduler.jet) refuses with -1 while root+256 or root+40 is nonzero, so a joined task whose carrier has not yet released its count makes quiesce report false. In the p406 full suite (dev 113879859e, 2026-11-21) the JetBackend unit \"a trace started on a carrier outlives the carrier, and ends when its lifeline closes\" failed at TraceLifeline.jet:24 `assert(lifeline_tasks.quiesce())`; it passed run alone on the same compiler. Fix: quiesce waits for the joined tasks' carriers to release their counts (bounded by the carriers' exit, not a timer), or names what is still live. Proof: that unit passes under a parallel load (stress-ng or the cases suite running), 20 runs in a row, plus a runtime unit test that joins a group and quiesces at once.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T10:29:20.778Z"
+          "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21) (commit 96a924e9f3): the JetBackend unit \"a trace started on a carrier outlives the carrier, and ends when its lifeline closes\" passed 20 runs in a row (each \"1 passed, 0 failed\", rc 0) while the p431 full suite ran, at load 8.4 to 232.8; Tests/Cases/RuntimeFragments/the_scheduler_fragment_runs_as_a_program.case PASS, whose Scheduler fragment joins a group and quiesces right after it 1000 times on pools of 1, 2 and 8 carriers.",
+          "at": "2026-11-21T21:35:03.112Z"
         },
         {
           "n": 114,
@@ -55915,7 +55970,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T20:45:13.876Z",
+      "updated": "2026-11-21T21:35:03.112Z",
       "updatedBy": "Main",
       "criteriaLastN": 118
     },
@@ -63351,11 +63406,16 @@
         {
           "n": 3,
           "text": "The edit-stream latency run prints p50 and p95 cancel-to-release and edit-to-current-verdict latencies, peak in-flight checks and the binary and input identity, attached to the card. Proof: `jet test Compiler --profile cases --filter LSP/lsp_repeated_edit_stream_latency` (opt-in).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:56.814Z"
+          "evidence": "Moved to #6960 c10",
+          "at": "2026-11-21T22:42:14.058Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6960,
+            "n": 10
+          }
         },
         {
           "n": 4,
@@ -63464,7 +63524,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-19T20:55:55.196Z",
+      "updated": "2026-11-21T22:42:14.058Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -63759,11 +63819,16 @@
         {
           "n": 6,
           "text": "Embedded runtime size and call speed (#6386): The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M host-to-guest calls of a small function finish faster than `lua_pcall` on the equivalent Lua function (Jet/Lua < 1.00). Proof: `node Tools/Gauntlet/Harness/run.mjs --entry embed-runtime` shows no loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:21.138Z"
+          "evidence": "Moved to #6953 c38",
+          "at": "2026-11-21T22:42:15.219Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6953,
+            "n": 38
+          }
         },
         {
           "n": 7,
@@ -63792,7 +63857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:25.159Z",
-      "updated": "2026-11-18T08:30:48.493Z",
+      "updated": "2026-11-21T22:42:15.219Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -69648,6 +69713,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:17:42.373Z"
+        },
+        {
+          "n": 38,
+          "text": "Embedded runtime size and call speed (#6386): The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M host-to-guest calls of a small function finish faster than `lua_pcall` on the equivalent Lua function (Jet/Lua < 1.00). Proof: `node Tools/Gauntlet/Harness/run.mjs --entry embed-runtime` shows no loss.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:15.219Z",
+          "movedFrom": {
+            "card": 6906,
+            "n": 6
+          }
         }
       ],
       "refs": [],
@@ -69658,9 +69736,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:38.317Z",
-      "updated": "2026-11-17T01:52:00.745Z",
+      "updated": "2026-11-21T22:42:15.219Z",
       "updatedBy": "Main",
-      "criteriaLastN": 37
+      "criteriaLastN": 38
     },
     {
       "id": "c0ipkmlg",
@@ -70366,6 +70444,32 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T08:11:52.815Z"
+        },
+        {
+          "n": 9,
+          "text": "The adoption receipt, comparing fresh-process and attached overhead on the #2859 corpus, is recorded. Proof: a committed measurement under Docs/Audits with both timings and the commands.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:13.048Z",
+          "movedFrom": {
+            "card": 5050,
+            "n": 6
+          }
+        },
+        {
+          "n": 10,
+          "text": "The edit-stream latency run prints p50 and p95 cancel-to-release and edit-to-current-verdict latencies, peak in-flight checks and the binary and input identity, attached to the card. Proof: `jet test Compiler --profile cases --filter LSP/lsp_repeated_edit_stream_latency` (opt-in).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:14.058Z",
+          "movedFrom": {
+            "card": 6903,
+            "n": 3
+          }
         }
       ],
       "refs": [],
@@ -70376,9 +70480,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:45.070Z",
-      "updated": "2026-11-21T08:11:52.815Z",
+      "updated": "2026-11-21T22:42:14.058Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 10
     },
     {
       "id": "c01b7gdb",
@@ -70543,6 +70647,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-19T17:22:56.019Z"
+        },
+        {
+          "n": 10,
+          "text": "A from return is a real loan at run time: a function returning T? or T from a borrowed owner (fn(item: X) -> T? from item with a read parameter, and a method -> T? from self, called directly or through trait dispatch) carries a pointer into the owner's payload, with no new cell, no byte copy and no retain, on O0, O1 and O2. Two cases must stay safe first: (a) an argument converted at the call (a Point passed where a union is expected) lives in a temporary cell that is released right after the call (op 16 in the IR, probe z04), so the loan must keep that temporary alive for the result's life, or the call is refused; (b) a body that returns a fresh value, or a copy of another parameter, on some path under from item (probe z05) has no owner to point into, so that path either stays a copy that jet audit reports or is refused. Today the from form and the same function without from emit identical IR at O0 (a 24-byte optional cell, a byte copy and a retain), and jet audit counts only the one without from (p207-p209; D-PRIM-ANY1 reviews 6 and 7, probes y12_from_val_copy_audit.jet with its .ir.out in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes, z01, z01b, z04 and z05 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes). Proof: a cases row whose IR or jet audit shows no copy for each form, a case or UI row for (a) and for (b), and a paired size/speed cell against the copy form. Before lowering, two more cases must be checked (D-PRIM-ANY1 review 8): a view captured by a lambda (c50) and a view of a Shared field written through any handle (c51); c46 lands only after both. Review 9 found more carriers: c46 lands only after c50, c51, c54 and c56 (struct field, enum payload, list, defer, method value, Shared to task).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T22:42:16.304Z",
+          "movedFrom": {
+            "card": 6839,
+            "n": 46
+          }
         }
       ],
       "refs": [],
@@ -70554,9 +70671,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:48.351Z",
-      "updated": "2026-11-19T17:27:36.336Z",
+      "updated": "2026-11-21T22:42:16.304Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c0oymlrt",
@@ -72743,6 +72860,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c5 part 1 transcript (dev b66642b8bc, the gate-p429 jet, 2026-11-21): `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do continue --do \"print category\" --do \"bt 3\" -- check hello.jet` (hello.jet declares greet_user and run) → \"Breakpoint set Compiler/JetSema/Source/Sema/Casing.jet:216\", \"Breakpoint hit Casing.jet:219 in sema_casing_function()\", \"219 | if function.name != \\\"Ok\\\" && function.name != \\\"Err\\\" { <- here\", \"Locals: category = \\\"function\\\" diagnostics = [] function = Func{span: Span{start: 0, end: 59}, is_pub: true, … name: \\\"greet_user\\\", …}\"; after continue the same stop for run (Func{span: Span{start: 61, end: 103} … name: \\\"run\\\"}); \"category = \\\"function\\\"\"; then the stack #0 sema_casing_function Casing.jet:219, #1 sema_casing_item Casing.jet:241, #2 sema_casing_program Casing.jet:790, #3 sema_registration_prepare_module_row Items.jet:3266 … #10 jet_driver_compile Pipeline.jet:5420 … #15 jet_cli_compile_check Host.jet:302. Exit 0, 25 s. Gaps found and added here: c30 (print of a field of a parameter fails at a stop in the compiler) and c31 (bt N ignores N). Part 2, the jet perf run of jet build Compiler, waits for a quiet slot."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c16 (2026-11-21): the first slice was written but never submitted: perf attach failure lines with status, errno, ptrace_scope and reason, plus detached and setuid. It was lost when its scratch clone was deleted, and no copy exists. c16 restarts from this criterion text."
         },
         {
@@ -72845,20 +72967,25 @@
         {
           "n": 1,
           "text": "A guard (in Tests/Guards, run by every lane check) refuses a committed script, skill, tool or case that runs gdb, lldb, Linux perf, valgrind, rr or strace on a Jet program, outside a named allowlist of comparison harnesses (Tools/Perf/DebugLatency and the peer harnesses), each allowlist row naming the harness and why. Proof: the guard passes on dev, and a fixture adding `lldb prog` to a Tools script fails it naming the file and line.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T00:56:39.073Z"
+          "evidence": "dev 7693055e59 (p431 batch compiler; the guard landed in 7dddfafc1d with the Scaling profile moved to jet perf attach): `jet test Tests/Guards/debug_names_no_outside_debugger.jet --filter \"outside debugger\"` → \"no script, skill, tool or case runs an outside debugger or profiler: pass\", \"a planted outside debugger run fails, named by file and line: pass\" (the test plants `lldb prog` in Tools/Probe/run.sh and asserts the refusal names that file and line), 2 passed, 0 failed. Its sibling test fails a kept allowlist row whose harness no longer runs its tool and a gap row with no criterion. The census guards of p431 ran it clean.",
+          "at": "2026-11-21T21:35:42.950Z"
         },
         {
           "n": 2,
           "text": "The compile-speed profile that ranks the compile-speed epoch comes from `jet perf run` on the compiler compiling Compiler (CPU microseconds per phase and per hot function), with a recorded command, and no external profiler is used. Proof: the command and its .jettrace summary on the card, matching the ranked plan.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T00:56:41.627Z"
+          "evidence": "Moved to #5479 c39",
+          "at": "2026-11-21T22:42:17.355Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 5479,
+            "n": 39
+          }
         },
         {
           "n": 3,
@@ -72962,11 +73089,16 @@
         {
           "n": 14,
           "text": "jet perf counts the user-mode retired instructions and cycles of any jet command or built binary, not only of a `jet perf run x.jet` program, so Tools/Perf/CompileThroughput (--against and --batch) drops `perf stat`; the counting surface goes on a ballot first if no existing jet perf form fits. Proof: CompileThroughput runs with no external profiler and its counts match perf stat within 1% on one revision.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T12:07:12.318Z"
+          "evidence": "Moved to #5479 c40",
+          "at": "2026-11-21T22:42:18.294Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 5479,
+            "n": 40
+          }
         },
         {
           "n": 15,
@@ -73135,11 +73267,11 @@
         {
           "n": 31,
           "text": "`bt N` prints at most N frames. Found by Main on dev b66642b8bc doing c5: `--do \"bt 3\"` at a stop in the compiler printed all 19 frames. Proof: a Debug case where `bt 2` at a stop three calls deep prints frames #0 and #1 and a line saying how many more there are.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T20:28:41.188Z"
+          "evidence": "dev 7693055e59, the p431 batch compiler (census build of that tip), its full cases suite (2026-11-21): Tests/Cases/Debug/backtrace_count_shows_the_first_frames.case PASS (commit aba25a8ca1: bt 2 three calls deep prints #0 inner and #1 middle, then \"(2 more frames; `bt` shows them all)\").",
+          "at": "2026-11-21T21:35:04.009Z"
         }
       ],
       "refs": [],
@@ -73147,7 +73279,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T20:28:41.188Z",
+      "updated": "2026-11-21T22:42:18.294Z",
       "updatedBy": "Main",
       "criteriaLastN": 31
     },
@@ -133006,6 +133138,237 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T22:42:18.294Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c031o59x",
+      "note": "40 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:18.294Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#40 moved from #6995 c14"
+    },
+    {
+      "at": "2026-11-21T22:42:18.294Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c00ni11n",
+      "note": "#14 → #5479 c40: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:17.355Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c031o59x",
+      "note": "39 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:17.355Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#39 moved from #6995 c2"
+    },
+    {
+      "at": "2026-11-21T22:42:17.355Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c00ni11n",
+      "note": "#2 → #5479 c39: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:16.304Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gwtnue",
+      "note": "10 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:16.304Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gwtnue",
+      "note": "#10 moved from #6839 c46"
+    },
+    {
+      "at": "2026-11-21T22:42:16.304Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c0oe96sn",
+      "note": "#46 → #6962 c10: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:15.219Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0lt36hf",
+      "note": "38 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:15.219Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lt36hf",
+      "note": "#38 moved from #6906 c6"
+    },
+    {
+      "at": "2026-11-21T22:42:15.219Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c0wowe4m",
+      "note": "#6 → #6953 c38: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:14.059Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0phknv8",
+      "note": "10 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:14.058Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0phknv8",
+      "note": "#10 moved from #6903 c3"
+    },
+    {
+      "at": "2026-11-21T22:42:14.058Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c0mbiq9g",
+      "note": "#3 → #6960 c10: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:13.048Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0phknv8",
+      "note": "9 criteria, soft limit 6: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:42:13.048Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0phknv8",
+      "note": "#9 moved from #5050 c6"
+    },
+    {
+      "at": "2026-11-21T22:42:13.048Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c07bi8ml",
+      "note": "#6 → #6960 c9: Owner order 2026-11-21: speed and size work belongs to G11 (E24), not E20."
+    },
+    {
+      "at": "2026-11-21T22:33:55.363Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "14 criteria, soft limit 6: a load failure found in the p435 suite belongs on the load card"
+    },
+    {
+      "at": "2026-11-21T22:33:55.363Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#14 Examples/Systems/Process/ProcessRunAllParentDeath holds unde"
+    },
+    {
+      "at": "2026-11-21T22:32:12.040Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gy2j07",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T22:32:05.685Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-21T21:42:53.304Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qyk2os",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T21:42:52.276Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qyk2os",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-21T21:42:51.168Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qyk2os",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-21T21:42:50.007Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qyk2os",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-21T21:35:42.950Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T21:35:04.009Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-21T21:35:03.112Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#113"
+    },
+    {
+      "at": "2026-11-21T21:35:02.183Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#88"
+    },
+    {
+      "at": "2026-11-21T21:35:01.151Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-21T21:35:00.034Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-21T21:05:59.575Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T21:03:27.170Z",
       "by": "Main",
