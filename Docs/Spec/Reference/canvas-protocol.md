@@ -316,7 +316,11 @@ A running response projects one bounded runtime snapshot:
 {"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet.run@1-20","active_node_id":"fn:main.jet.run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":[],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
 ```
 
-The first request creates a source- and revision-bound session. `runtime_state:
+The first request creates a source- and revision-bound session. On the
+`native` and `native-recorded` tiers it builds the entry first (`jet build
+-O0`, as `jet debug` does), so its answer comes once that build and the run
+to the first stop are done, however long a loaded host takes; the protocol
+sets no deadline on it. `runtime_state:
 "live"` means values, stack, active node, and wire path came from the current
 paused runtime snapshot. Finished values are historical and do not pulse the
 graph. A program killed out from under the debugger (`SIGKILL`) ends its

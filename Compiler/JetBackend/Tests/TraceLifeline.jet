@@ -1,0 +1,30 @@
+// A trace's helper (Image/Loader.jet loader_trace_hold) lives as long as
+// the process that started the trace holds its lifeline, whichever thread
+// forked it: a trace started on a scheduler carrier outlives the carrier,
+// and closing the lifeline ends the helper at once.
+use {
+    jet_backend.[X64Trace, loader_close, x64_trace_close, x64_trace_registers, x64_trace_spawn]
+    lifeline_tasks: core.tasks
+}
+
+// The test binary itself, stopped before its first instruction.
+lifeline_trace: fn() -> X64Trace {
+    x64_trace_spawn("/proc/self/exe", [String]{"trace-lifeline"}, "/dev/null", "/dev/null", None)
+}
+
+#Test("a trace started on a carrier outlives the carrier, and ends when its lifeline closes") {
+    trace := X64Trace{pid: -1, scratch: 0, failure: ""}
+    task.group lifeline_start {
+        started: task lifeline_trace()
+        trace = started.join() ?? panic("the trace's task failed: {err}")
+    }
+    assert_eq(trace.failure, "")
+    // Joining the scheduler's carriers ends the thread that forked the
+    // helper; the helper still answers.
+    assert(lifeline_tasks.quiesce())
+    assert(x64_trace_registers(trace) != None)
+    loader_close(trace.lifeline)
+    trace.lifeline = -1
+    assert(x64_trace_registers(trace) == None)
+    x64_trace_close(trace)
+}

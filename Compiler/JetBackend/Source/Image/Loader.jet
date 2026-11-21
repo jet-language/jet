@@ -2159,8 +2159,8 @@ X64_TRACE_EVENT_EXIT: 6
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
 
-// The one signal a trace's helper takes (it blocks every other): its
-// parent-death signal (loader_trace_hold).
+// The one signal that reaches a trace's helper (it blocks every other): the
+// one its lifeline sends it (loader_trace_hold).
 LOADER_SIGKILL: 9
 
 // wait4 option: wait for every kind of child, threads included.
@@ -2258,14 +2258,26 @@ LOADER_SOCKET_STREAM_CLOEXEC: 0x80001
 // than raising SIGPIPE.
 LOADER_MSG_NOSIGNAL: 0x4000
 
-// fcntl F_DUPFD_CLOEXEC, and dup3's O_CLOEXEC.
+// fcntl F_DUPFD_CLOEXEC, and dup3's and pipe2's O_CLOEXEC.
 LOADER_F_DUPFD_CLOEXEC: 1030
 
 LOADER_O_CLOEXEC: 0x80000
 
-// The helper's end of the channel, after it moves there; every descriptor
-// above it closes in the helper.
+// fcntl F_SETFL, F_SETOWN and F_SETSIG, and the O_ASYNC that F_SETFL sets:
+// the signal a descriptor sends once its pipe hangs up, and to whom.
+LOADER_F_SETFL: 4
+
+LOADER_F_SETOWN: 8
+
+LOADER_F_SETSIG: 10
+
+LOADER_O_ASYNC: 0x2000
+
+// The helper's end of the channel, after it moves there, and its lifeline's
+// read end just above it; every descriptor above that closes in the helper.
 LOADER_TRACE_FD: 3
+
+LOADER_TRACE_LIFELINE_FD: 4
 
 // The error of a call to a helper that has ended.
 LOADER_ESRCH: 3
@@ -2274,9 +2286,10 @@ LOADER_ESRCH: 3
 // per-thread calls act on (its registers, its debug registers, how it goes
 // on, and its view of memory; the program's first thread, whose id is the
 // pid, until the caller picks another), the scratch page this process
-// shares with the trace's helper, the helper's pid and this end of the
-// channel to it (-1 before they exist); `failure` says why the program
-// didn't start. x64_trace_close ends them all.
+// shares with the trace's helper, the helper's pid, this end of the
+// channel to it and the write end of its lifeline (loader_trace_hold; -1
+// before they exist); `failure` says why the program didn't start.
+// x64_trace_close ends them all.
 X64Trace: struct {
     pid: Int,
     scratch: Int,
@@ -2284,6 +2297,7 @@ X64Trace: struct {
     thread: Int{-1},
     helper: Int{-1},
     channel: Int{-1},
+    lifeline: Int{-1},
 }
 
 // One wait for the traced program: the thread that stopped or ended and
@@ -2298,7 +2312,7 @@ X64TraceStop: struct {
 // the trace's helper and stopped before its first instruction. Its standard
 // input reads the file `input` (`/dev/null` for none, `/dev/stdin` for this
 // process's own); its output and errors append to the existing file
-// `output`. The helper ends when the thread that started it does
+// `output`. The helper ends when this process does or the trace closes
 // (loader_trace_hold), and the kernel kills the program when the helper
 // ends (LOADER_PTRACE_O_EXITKILL, which each thread the program starts
 // inherits). Every thread the program starts is traced too
@@ -2320,23 +2334,17 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
         trace.failure = exec.failure
         return trace
     }
-    pair := 0
-    theirs := -1
-    #Unsafe("socketpair writes its two int descriptors to the trace's scratch word") {
-        pair = os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, scratch + LOADER_TRACE_WORD, 0, 0)
-        if !os_failed(pair) {
-            ends: Int{os_load_i64(I64{scratch + LOADER_TRACE_WORD})}
-            trace.channel = ends & 0xffffffff
-            theirs = (ends >> 32) & 0xffffffff
-        }
-    }
+    ends: loader_trace_ends(trace)
+    theirs: ends.channel
+    life: ends.lifeline
     out: loader_open_as(output, OS_O_APPEND_CLOEXEC)
     source: loader_open(input)
     helper := -1
-    if !os_failed(pair) && !os_failed(out) && !os_failed(source) {
+    if !os_failed(theirs) && !os_failed(life) && !os_failed(out) && !os_failed(source) {
         // The words the helper and the program use, made before the fork.
         call: I64{scratch + LOADER_TRACE_CALL}
         channel: I64{theirs}
+        lifeline: I64{life}
         input_fd: I64{source}
         output_fd: I64{out}
         program_path: I64{exec.path}
@@ -2344,25 +2352,11 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
         program_envp: I64{exec.envp}
         program_mask: I64{exec.block}
         #Unsafe("fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block") {
-            starter: I64{os_syscall(OS_SYS_GETPID, 0, 0, 0, 0, 0, 0)}
             helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
             if helper == 0 {
-                loader_trace_hold(starter)
-                // The helper: its channel end moves to LOADER_TRACE_FD, the
-                // program's input and output to 0, 1 and 2, and every
-                // descriptor above LOADER_TRACE_FD closes, so it holds none
-                // of this process's files open. No signal but a kill
-                // reaches it.
-                moved: os_syscall_i64(I64{OS_SYS_FCNTL}, channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input_fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, output_fd, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, output_fd, I64{2}, I64{0}, I64{0}, I64{0}, I64{0})
-                if moved != (I64{LOADER_TRACE_FD}) {
-                    _ := os_syscall_i64(I64{OS_SYS_DUP3}, moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC}, I64{0}, I64{0}, I64{0})
-                }
-                _ := os_syscall_i64(I64{OS_SYS_CLOSE_RANGE}, I64{LOADER_TRACE_FD + 1}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0})
-                os_store_i64(call + I64{LOADER_TRACE_MASK}, I64{-1})
-                _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8}, I64{0}, I64{0})
+                // The helper: the program's input and output move to 0, 1
+                // and 2.
+                loader_trace_hold(lifeline, channel, input_fd, output_fd, output_fd, call)
                 program: os_syscall_i64(I64{OS_SYS_FORK}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                 if program == 0 {
                     _ := os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_TRACEME}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -2378,12 +2372,17 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
             }
         }
     }
-    if theirs >= 0 -> loader_close(theirs)
+    if !os_failed(theirs) -> loader_close(theirs)
+    if !os_failed(life) -> loader_close(life)
     if !os_failed(out) -> loader_close(out)
     if !os_failed(source) -> loader_close(source)
     _ := os_unmap(exec.block, exec.size)
-    if os_failed(pair) {
-        trace.failure = "making the tracer's channel failed (errno {-pair})"
+    if os_failed(theirs) {
+        trace.failure = "making the tracer's channel failed (errno {-theirs})"
+        return trace
+    }
+    if os_failed(life) {
+        trace.failure = "making the tracer's lifeline failed (errno {-life})"
         return trace
     }
     if os_failed(out) {
@@ -2438,20 +2437,79 @@ loader_trace_serve: fn(call: I64, program: I64) {
     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
-// A trace's helper, just forked by a thread of the process `starter`: it
-// gets LOADER_SIGKILL, the one signal it takes, when that thread ends
-// (PR_SET_PDEATHSIG), and ends at once when that process ended before the
-// prctl, its parent no longer `starter`. A helper waiting on the program
-// never reads its channel, so the channel closing can't end it: a session
-// killed however it ends leaves no helper, and the kernel kills the program
-// its helper spawned (LOADER_PTRACE_O_EXITKILL). The thread that starts a
-// trace is the session's own, which lives as long as the session.
-#Unsafe("prctl, getppid and exit_group of the helper itself, each on words alone")
-loader_trace_hold: fn(starter: I64) {
-    _ := os_syscall_i64(I64{OS_SYS_PRCTL}, I64{OS_PR_SET_PDEATHSIG}, I64{LOADER_SIGKILL}, I64{0}, I64{0}, I64{0}, I64{0})
-    if os_syscall_i64(I64{OS_SYS_GETPPID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) != starter {
+// The helper's ends of a trace's channel and lifeline: each its descriptor,
+// or the failed call's result.
+LoaderTraceEnds: struct {
+    channel: Int,
+    lifeline: Int,
+}
+
+// Makes a trace's channel to its helper, a socket pair, and its lifeline, a
+// pipe whose read end the helper takes (loader_trace_hold). This process
+// keeps one end of each (X64Trace.channel, and the lifeline's write end as
+// X64Trace.lifeline).
+loader_trace_ends: fn(trace: &X64Trace) -> LoaderTraceEnds {
+    ends := LoaderTraceEnds{channel: 0, lifeline: 0}
+    #Unsafe("socketpair and pipe2 each write their two int descriptors to the trace's scratch word, which is read before the next call") {
+        pair: os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, trace.scratch + LOADER_TRACE_WORD, 0, 0)
+        ends.channel = if os_failed(pair) -> pair else -> Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}
+        made: os_syscall(OS_SYS_PIPE2, trace.scratch + LOADER_TRACE_WORD, LOADER_O_CLOEXEC, 0, 0, 0, 0)
+        ends.lifeline = if os_failed(made) -> made else -> Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}
+    }
+    if !os_failed(ends.channel) {
+        trace.channel = ends.channel & 0xffffffff
+        ends.channel = (ends.channel >> 32) & 0xffffffff
+    }
+    if !os_failed(ends.lifeline) {
+        trace.lifeline = (ends.lifeline >> 32) & 0xffffffff
+        ends.lifeline = ends.lifeline & 0xffffffff
+    }
+    ends
+}
+
+// A trace's helper, just forked, ties its life to this process's and takes
+// its files. Its lifeline's read end `lifeline` (loader_trace_ends)
+// moves above LOADER_TRACE_LIFELINE_FD and sends the helper LOADER_SIGKILL
+// once the pipe's last write end closes (F_SETOWN, F_SETSIG and O_ASYNC,
+// as x64_comptime_tie does with SIGIO). The helper's channel end `channel`
+// then moves to LOADER_TRACE_FD, the lifeline to LOADER_TRACE_LIFELINE_FD,
+// `input` to 0, `output` to 1 and `errors` to 2; every descriptor above
+// closes, so it holds none of this process's files open, and it blocks
+// every signal (the mask word of the `call` words). The write end it
+// inherited closes only after the tie, so a process that ended before the
+// tie ends the helper then. This process holds the only write end left;
+// the kernel closes it when this process ends, however it ends, and
+// x64_trace_close closes it. A helper waiting on the program never reads
+// its channel, so the channel closing can't end it; the lifeline does, and
+// the kernel kills the program the helper spawned
+// (LOADER_PTRACE_O_EXITKILL). PR_SET_PDEATHSIG can't tie them: it follows
+// the thread that forked the helper, and a session's requests may run on
+// any carrier of the scheduler, which retires while the session lives once
+// more carriers run than it needs (a Canvas session runs each request on
+// the dev loop's task). A helper that can't tie itself ends.
+#Unsafe("fcntl, dup2, dup3, close_range, rt_sigprocmask and exit_group of the helper's own descriptors and itself; `call` is the call words of the trace's scratch page")
+loader_trace_hold: fn(lifeline: I64, channel: I64, input: I64, output: I64, errors: I64, call: I64) {
+    held: os_syscall_i64(I64{OS_SYS_FCNTL}, lifeline, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_LIFELINE_FD + 1}, I64{0}, I64{0}, I64{0})
+    helper: os_syscall_i64(I64{OS_SYS_GETPID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    owned: os_syscall_i64(I64{OS_SYS_FCNTL}, held, I64{LOADER_F_SETOWN}, helper, I64{0}, I64{0}, I64{0})
+    killing: os_syscall_i64(I64{OS_SYS_FCNTL}, held, I64{LOADER_F_SETSIG}, I64{LOADER_SIGKILL}, I64{0}, I64{0}, I64{0})
+    flagged: os_syscall_i64(I64{OS_SYS_FCNTL}, held, I64{LOADER_F_SETFL}, I64{LOADER_O_ASYNC}, I64{0}, I64{0}, I64{0})
+    if held <= (I64{LOADER_TRACE_LIFELINE_FD}) || owned != (I64{0}) || killing != (I64{0}) || flagged != (I64{0}) {
         _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
+    moved: os_syscall_i64(I64{OS_SYS_FCNTL}, channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_DUP2}, output, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+    _ := os_syscall_i64(I64{OS_SYS_DUP2}, errors, I64{2}, I64{0}, I64{0}, I64{0}, I64{0})
+    if moved != (I64{LOADER_TRACE_FD}) {
+        _ := os_syscall_i64(I64{OS_SYS_DUP3}, moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC}, I64{0}, I64{0}, I64{0})
+    }
+    if os_syscall_i64(I64{OS_SYS_DUP3}, held, I64{LOADER_TRACE_LIFELINE_FD}, I64{LOADER_O_CLOEXEC}, I64{0}, I64{0}, I64{0}) != (I64{LOADER_TRACE_LIFELINE_FD}) {
+        _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    _ := os_syscall_i64(I64{OS_SYS_CLOSE_RANGE}, I64{LOADER_TRACE_LIFELINE_FD + 1}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0})
+    os_store_i64(call + I64{LOADER_TRACE_MASK}, I64{-1})
+    _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8}, I64{0}, I64{0})
 }
 
 // A trace of the program `pid`, already running, by a new helper that
@@ -2467,49 +2525,35 @@ x64_trace_attach: fn(pid: Int) -> X64Trace {
         return trace
     }
     trace.scratch = scratch
-    pair := 0
-    theirs := -1
-    #Unsafe("socketpair writes its two int descriptors to the trace's scratch word") {
-        pair = os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, scratch + LOADER_TRACE_WORD, 0, 0)
-        if !os_failed(pair) {
-            ends: Int{os_load_i64(I64{scratch + LOADER_TRACE_WORD})}
-            trace.channel = ends & 0xffffffff
-            theirs = (ends >> 32) & 0xffffffff
-        }
-    }
+    ends: loader_trace_ends(trace)
+    theirs: ends.channel
+    life: ends.lifeline
     null: loader_open("/dev/null")
     helper := -1
-    if !os_failed(pair) && !os_failed(null) {
+    if !os_failed(theirs) && !os_failed(life) && !os_failed(null) {
         call: I64{scratch + LOADER_TRACE_CALL}
         channel: I64{theirs}
+        lifeline: I64{life}
         input: I64{null}
         program: I64{pid}
         #Unsafe("fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it") {
-            starter: I64{os_syscall(OS_SYS_GETPID, 0, 0, 0, 0, 0, 0)}
             helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
             if helper == 0 {
-                loader_trace_hold(starter)
-                // The helper holds none of this process's files: its
-                // channel end moves to LOADER_TRACE_FD, its standard files
-                // read and write /dev/null, and the rest close.
-                moved: os_syscall_i64(I64{OS_SYS_FCNTL}, channel, I64{LOADER_F_DUPFD_CLOEXEC}, I64{LOADER_TRACE_FD}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-                _ := os_syscall_i64(I64{OS_SYS_DUP2}, input, I64{2}, I64{0}, I64{0}, I64{0}, I64{0})
-                if moved != (I64{LOADER_TRACE_FD}) {
-                    _ := os_syscall_i64(I64{OS_SYS_DUP3}, moved, I64{LOADER_TRACE_FD}, I64{LOADER_O_CLOEXEC}, I64{0}, I64{0}, I64{0})
-                }
-                _ := os_syscall_i64(I64{OS_SYS_CLOSE_RANGE}, I64{LOADER_TRACE_FD + 1}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0})
-                os_store_i64(call + I64{LOADER_TRACE_MASK}, I64{-1})
-                _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, call + I64{LOADER_TRACE_MASK}, I64{0}, I64{8}, I64{0}, I64{0})
+                // The helper's standard files read and write /dev/null.
+                loader_trace_hold(lifeline, channel, input, input, input, call)
                 loader_trace_serve(call, program)
             }
         }
     }
-    if theirs >= 0 -> loader_close(theirs)
+    if !os_failed(theirs) -> loader_close(theirs)
+    if !os_failed(life) -> loader_close(life)
     if !os_failed(null) -> loader_close(null)
-    if os_failed(pair) {
-        trace.failure = "making the tracer's channel failed (errno {-pair})"
+    if os_failed(theirs) {
+        trace.failure = "making the tracer's channel failed (errno {-theirs})"
+        return trace
+    }
+    if os_failed(life) {
+        trace.failure = "making the tracer's lifeline failed (errno {-life})"
         return trace
     }
     if os_failed(null) {
@@ -2828,7 +2872,7 @@ x64_trace_set_debug_register: fn(trace: X64Trace, index: Int, value: Int) -> Boo
 // x64_trace_close works on it; x64_trace_wait_for waits for it, and
 // x64_trace_signal ends it.
 x64_trace_of: fn(trace: X64Trace, pid: Int) -> X64Trace {
-    X64Trace{pid: pid, scratch: trace.scratch, failure: "", thread: pid, helper: trace.helper, channel: trace.channel}
+    X64Trace{pid: pid, scratch: trace.scratch, failure: "", thread: pid, helper: trace.helper, channel: trace.channel, lifeline: trace.lifeline}
 }
 
 // The message of the trace's thread's last ptrace event: at a clone event,
@@ -2924,10 +2968,14 @@ x64_trace_close: fn(trace: &X64Trace) {
         trace.pid = -1
         trace.thread = -1
     }
-    // The helper ends once its channel closes; reap it.
+    // The helper ends once its channel or its lifeline closes; reap it.
     if trace.channel >= 0 {
         loader_close(trace.channel)
         trace.channel = -1
+    }
+    if trace.lifeline >= 0 {
+        loader_close(trace.lifeline)
+        trace.lifeline = -1
     }
     if trace.helper > 0 {
         reaped := -OS_EINTR
