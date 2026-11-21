@@ -169,11 +169,7 @@ failure_contract_shown_type: fn(contract: FailureContract) -> Type Never! {
 // signature's `-> Int` leaves the implicit default `Err` unwritten, but its
 // contract is `Int Err!`, as a unit one's is `Err!`.
 failure_contract_shown_name: fn(contract: FailureContract) -> String Never! {
-    shown: failure_contract_shown_type(contract)
-    if shown == .Result(ok, err) && err == (Type.Named{name: "Err"}) && ok != (Type.Named{name: "Unit"}) {
-        return "{type_marked_name(ok)} Err!"
-    }
-    type_name(shown)
+    type_failure_name(failure_contract_shown_type(contract))
 }
 
 // The return a signature line shows: the shown failure route, or nothing for

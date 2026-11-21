@@ -44,6 +44,11 @@ ir_map_row: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? N
         key_row: ir_value_type_in(m, p, key, laying) ?? return None
         if ir_map_key_kind(m, key_row) == "" -> return None
         interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        // The entry tuple's row, for the Map's DWARF type, as a List keeps
+        // its element's (ir_value_type_in).
+        if laying.len() == 0 && m.list_elements.get(interned) == None && ir_map_entry_type(ty) == .Val(entry) {
+            m.list_elements[interned] = ir_value_type_in(m, p, entry, laying) ?? -1
+        }
         return Val(ir_mark_counted(m, interned))
     }
     None

@@ -47,7 +47,7 @@ use {
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_answer, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
+    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_failure_name, type_name, type_unqualified_nominals]
     jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_held_set, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -333,7 +333,8 @@ jet_cli_debug_eval_params: fn(text: String, binders: [NativeEvalBinder]) -> [Nat
 // another package's. None when a local's type is another, when the
 // expression names more than its locals without `functions`, when a name
 // reached is the entry's `run`, an item other than a function (a type, a
-// constant), or declared by two sources, so the program's compile builds
+// constant), declared by two sources, or a function the sources may use as
+// a value (JetCLIDebugEvalDeclared.valued), so the program's compile builds
 // it, or when the entry's package carrier starts no item.
 jet_cli_debug_eval_alone: fn(text: String, params: [NativeEvalBinder], declared: JetCLIDebugEvalDeclared, functions: Bool{false}) -> [String]? Never! {
     if declared.sources.len() == 0 || !jet_cli_debug_eval_alone_types(params) -> return None
@@ -362,7 +363,7 @@ jet_cli_debug_eval_alone: fn(text: String, params: [NativeEvalBinder], declared:
         if slot < 0 || kept.has_key(slot) -> next
         owner: declared.owners[slot]
         item: declared.files[owner][declared.rows[slot]]
-        if !item.function || item.name == "run" -> return None
+        if !item.function || item.name == "run" || declared.valued.has_key(item.name) -> return None
         kept[slot] = true
         loop name in jet_cli_debug_eval_item_names(jet_cli_debug_eval_item_code(declared.sources[owner], declared.files[owner], declared.rows[slot])) {
             if !locals.contains(name) && !wanted.contains(name) -> wanted.push(name)
@@ -422,9 +423,10 @@ jet_cli_debug_eval_alone_types: fn(params: [NativeEvalBinder]) -> Bool Never! {
 // (jet_cli_debug_eval_items), and where each name they declare is, by its
 // slot in `index`: its source in `owners` and its item in `rows`, the slot
 // -1 for a name two sources declare; `imports` holds each source's `use`
-// blocks by row. A session keeps the last ones a cut compile read
-// (JetCLIDebugEvalHeldSlot.declared), which the next takes while the
-// sources read the same.
+// blocks by row, and `valued` the declared names the sources may use as a
+// value (jet_cli_debug_eval_valued). A session keeps the last ones a cut
+// compile read (JetCLIDebugEvalHeldSlot.declared), which the next takes
+// while the sources read the same.
 JetCLIDebugEvalDeclared: struct {
     sources: [String],
     files: [[JetCLIDebugEvalItem]],
@@ -432,6 +434,7 @@ JetCLIDebugEvalDeclared: struct {
     owners: [Int],
     rows: [Int],
     imports: [[Int]],
+    valued: [String:Bool],
 }
 
 jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared Never! {
@@ -455,7 +458,57 @@ jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared 
             rows.push(at)
         }
     }
-    JetCLIDebugEvalDeclared{sources: sources.move(), files: files.move(), index: index.move(), owners: owners.move(), rows: rows.move(), imports: imports.move()}
+    valued: jet_cli_debug_eval_valued(sources, index)
+    JetCLIDebugEvalDeclared{sources: sources.move(), files: files.move(), index: index.move(), owners: owners.move(), rows: rows.move(), imports: imports.move(), valued: valued.move()}
+}
+
+// The names of `declared` that `sources` spell other than as a call or a
+// declaration, each bound to true: a name (native_eval_names) not after a
+// `.` whose next byte past spaces on its line is no `(` or `:`, comment
+// lines and a string's text (not its interpolations) left out. A function
+// used as a value keeps the failure carrier the failure solve would
+// otherwise take from it (JetSema sema_failure_solve), so a cut compile
+// that leaves the use out would build it, and bind its calls, otherwise
+// than the image does. A local of the name counts too, which only leaves
+// more to the program's compile.
+jet_cli_debug_eval_valued: fn(sources: [String], declared: [String:Int]) -> [String:Bool] Never! {
+    valued := [String:Bool]{}
+    loop source in sources {
+        loop line in source.split("\n") {
+            if line.trim().starts_with(COMMENT_PREFIX) -> next
+            bytes: line.bytes()
+            quoted := false
+            nested := 0
+            at := 0
+            loop at < bytes.len() {
+                byte: bytes[at]
+                if quoted && nested == 0 {
+                    doubled: byte == 123 && at + 1 < bytes.len() && bytes[at + 1] == 123
+                    if byte == 34 -> quoted = false
+                    if byte == 123 && !doubled -> nested = 1
+                    at += if byte == 92 || doubled -> 2 else -> 1
+                    next
+                }
+                if byte == 34 -> quoted = true
+                if quoted && byte == 123 -> nested += 1
+                if quoted && byte == 125 -> nested -= 1
+                start: at
+                loop at < bytes.len() && native_eval_name_byte(bytes[at]) -> at += 1
+                if at == start {
+                    at += 1
+                    next
+                }
+                if bytes[start] >= 48 && bytes[start] <= 57 -> next
+                if start > 0 && bytes[start - 1] == 46 -> next
+                after := at
+                loop after < bytes.len() && bytes[after] == 32 -> after += 1
+                if after < bytes.len() && (bytes[after] == 40 || bytes[after] == 58) -> next
+                name: String.from_bytes(bytes[start..<at]) ?? next
+                if declared.has_key(name) -> valued[name] = true
+            }
+        }
+    }
+    valued
 }
 
 // `text`, an expression of the locals `params` (jet_cli_debug_eval_params)
@@ -1401,8 +1454,9 @@ jet_cli_debug_eval_held_append: fn(held: &JetCLIDebugEvalHeld, running: [String:
 // names of each one's code declare. A name no item declares (a local, a
 // field, Core's) reaches nothing. None when a name reached is declared by
 // two sources, by an item other than a function of `file`, by its entry's
-// `run`, or by a `use` block of `file`, or when a function reaches itself
-// through another: the cut gains none of those.
+// `run`, or by a `use` block of `file`, when the sources may use a function
+// reached as a value (JetCLIDebugEvalDeclared.valued), or when a function
+// reaches itself through another: the cut gains none of those.
 jet_cli_debug_eval_held_reach: fn(declared: JetCLIDebugEvalDeclared, file: Int, wanted: [String]) -> [Int]? Never! {
     imported := [String]{}
     loop at in declared.imports[file] {
@@ -1432,7 +1486,7 @@ jet_cli_debug_eval_held_visit: fn(declared: JetCLIDebugEvalDeclared, file: Int, 
     if declared.owners[slot] != file -> return false
     row: declared.rows[slot]
     item: declared.files[file][row]
-    if !item.function || item.name == "run" -> return false
+    if !item.function || item.name == "run" || declared.valued.has_key(name) -> return false
     placed[slot] = false
     // Its own name, its header's, is no call: a call of itself doesn't check
     // (JetSema sema_script_probe_append).
@@ -1747,12 +1801,13 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
     if result_row < 0 || program.types[result_row].kind == IRTypeKind.Unit {
         return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
     }
-    // A function the failure solve found can fail returns its
-    // carrier, which names the result: `Int ParseError!`.
+    // A function the failure solve found can fail returns its carrier,
+    // which names the result with its error spelled, `Int ParseError!` or
+    // `Int Err!`: as `Int` it would read the carrier's box as the Int.
     carried: ir_untag(program.types[result_row].ty)
     shown: if carried == .Result(_, _) -> carried else -> value
     kind: program.types[result_row].kind
-    part: NativeEvalPart{name: type_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: kind == IRTypeKind.Aggregate, ty: result_row, word: jet_cli_debug_eval_word(kind)}
+    part: NativeEvalPart{name: type_failure_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: kind == IRTypeKind.Aggregate, ty: result_row, word: jet_cli_debug_eval_word(kind)}
     pointer: ir_pointer_row(program)
     wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true, table: params.len() > NATIVE_EVAL_CAPTURES)
     added: jet_eval_native_add(program, wrapper)
@@ -1948,4 +2003,15 @@ debug_eval_path_plain: fn(path: String) -> String Never! {
     twin: jet_cli_debug_eval_declared([String]{entry, lib, "priv f_1: fn(n: Int) -> Int {{\n    n\n}}\n"})
     assert_eq(twin.index.get("f_1"), Val(-1))
     assert_eq(jet_cli_debug_eval_alone("f_1(total)", [NativeEvalBinder]{total}, twin, functions: true), None)
+}
+
+#Test("an expression that reaches a function the sources use as a value leaves it to the program's compile") {
+    total: NativeEvalBinder{name: "total", type_name: "Int", live: true}
+    entry: "run: fn() {{\n    print(apply(grow, 1) + grow(2))\n    print(\"near {{label(1)}} \\\"near\\\"\")\n}}\n\n// Not near, nor label\napply: fn(f: fn(Int) -> Int, n: Int) -> Int {{\n    f(n)\n}}\n\ngrow: fn(n: Int) -> Int {{\n    n + 1\n}}\n\nnear: fn(n: Int) -> Int {{\n    grow(n)\n}}\n\nlabel: fn(n: Int) -> Int {{\n    n.label(near: 2)\n}}\n\n#Test(\"label\") {{\n    assert_eq(label(1), 1)\n}}\n"
+    declared: jet_cli_debug_eval_declared([String]{entry})
+    assert_eq(declared.valued.len(), 1)
+    assert(declared.valued.has_key("grow"))
+    assert_eq(jet_cli_debug_eval_alone("grow(total)", [NativeEvalBinder]{total}, declared, functions: true), None)
+    assert_eq(jet_cli_debug_eval_alone("near(total)", [NativeEvalBinder]{total}, declared, functions: true), None)
+    assert_eq(jet_cli_debug_eval_held_reach(declared, 0, [String]{"near"}), None)
 }

@@ -7737,7 +7737,7 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
         found.tag == NATIVE_TAG_STRUCT && found.group >= 0 -> {
             group: found.group
             if found.name.starts_with("[") && found.name.ends_with("]") {
-                return native_debug_list(image, memory, image.members[group], bytes, at, depth)
+                return native_debug_list(image, memory, image.members[group], bytes, at, depth, map: native_debug_map_name(native_jet_spelling(found.name)))
             }
             fields: native_debug_fields(image, memory, image.members[group], bytes, at, depth) ?? return None
             // A record or tuple type is spelled by its fields, `{n: Int}` or
@@ -7828,7 +7828,11 @@ native_variant_spelling: fn(name: String) -> String Never! {
 
 // A List whose inline header [len, cap, data] starts at `at` in `bytes`: its
 // first NATIVE_DEBUG_SHOWN_ITEMS elements, each as its element type shows it.
-native_debug_list: fn(image: NativeImage, memory: NativeMemory, members: [NativeMember], bytes: [U8], at: Int, depth: Int) -> String? Never! {
+// A Map's header (`map`) is a List's of its (key, value) entries (JetIR
+// BuildMaps.jet), each shown as `key: value` in key order: a Map with a hash
+// index keeps the keys it gained since its last ordered write after the
+// rest, and those shown are put in key order among themselves.
+native_debug_list: fn(image: NativeImage, memory: NativeMemory, members: [NativeMember], bytes: [U8], at: Int, depth: Int, map: Bool{false}) -> String? Never! {
     length := -1
     data := 0
     element := -1
@@ -7849,12 +7853,93 @@ native_debug_list: fn(image: NativeImage, memory: NativeMemory, members: [Native
     if data == 0 || size <= 0 -> return None
     shown: if length > NATIVE_DEBUG_SHOWN_ITEMS -> NATIVE_DEBUG_SHOWN_ITEMS else -> length
     stored: native_debug_bytes(memory, data, size * shown) ?? return if native_debug_cut(memory, data, size * shown) -> Val(NATIVE_DEBUG_CUT_OFF) else -> None
-    items := [String]{}
-    loop k in 0..<shown {
-        items.push(native_render(image, memory, element, stored, k * size, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE)
+    items := if {
+        map -> native_debug_entries(image, memory, element, stored, shown, size, depth) ?? return None
+        else -> loop k in 0..<shown -> native_render(image, memory, element, stored, k * size, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE
     }
     if length > shown -> items.push("… {length - shown} more")
     Val("[{items.join(", ")}]")
+}
+
+// One Map entry as native_debug_entries shows it, with its key's order: a
+// String's text in `text`, else an exact Int's or a word's value in `number`
+// (the entry's place for any other key).
+NativeDebugEntry: struct {
+    number: Int,
+    text: String,
+    shown: String,
+}
+
+// The first `count` entries of a Map, whose entry tuple's type is `entry`,
+// laid out `size` bytes apart in `stored`, each as `key: value`, in key
+// order; None when `entry` is no (key, value) tuple.
+native_debug_entries: fn(image: NativeImage, memory: NativeMemory, entry: Int, stored: [U8], count: Int, size: Int, depth: Int) -> [String]? Never! {
+    found: image.types.get(entry) ?? return None
+    if found.group < 0 -> return None
+    key := NativeMember?{None}
+    value := NativeMember?{None}
+    loop member in image.members[found.group] {
+        if member.name == "key" -> key = Val(member)
+        if member.name == "value" -> value = Val(member)
+    }
+    keyed: key ?? return None
+    valued: value ?? return None
+    entries := [NativeDebugEntry]{}
+    loop k in 0..<count {
+        base: k * size
+        shown_key: native_render(image, memory, keyed.ty, stored, base + keyed.offset, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE
+        shown_value: native_render(image, memory, valued.ty, stored, base + valued.offset, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE
+        ordered := NativeDebugEntry{number: k, text: "", shown: "{shown_key}: {shown_value}"}
+        native_debug_key_order(image, memory, keyed.ty, stored, base + keyed.offset, ordered)
+        entries.push(ordered)
+    }
+    entries.sort_by(fn(left: NativeDebugEntry, right: NativeDebugEntry) { (left.text <=> right.text).then(left.number <=> right.number) })
+    Val(loop ordered in entries -> ordered.shown)
+}
+
+// Sets `entry`'s order to that of the Map key of type `ty` at `at` in
+// `bytes` when the key hashes (JetIR BuildMaps.jet ir_map_hashed): an exact
+// Int, a word or a String. A key of any other type is in key order where
+// the Map keeps it, so `entry` keeps its place.
+native_debug_key_order: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8], at: Int, entry: &NativeDebugEntry) Never! {
+    found: image.types.get(ty) ?? return
+    if found.tag == NATIVE_TAG_BASE {
+        if found.encoding == X64DebugEncoding.Float || at + found.size > bytes.len() {
+            return
+        }
+        signed: found.encoding == X64DebugEncoding.Signed
+        entry.number = native_number(bytes, at, found.size, if signed -> X64DebugEncoding.Signed else -> X64DebugEncoding.Unsigned)
+        return
+    }
+    if found.tag != NATIVE_TAG_TYPEDEF || at + 8 > bytes.len() {
+        return
+    }
+    word: native_number(bytes, at, 8, X64DebugEncoding.Signed)
+    named: foundation_named_type(found.name)
+    if named == .Int -> entry.number = native_debug_int(word, memory) ?? entry.number
+    if named == .String -> entry.text = native_debug_text(word, memory) ?? ""
+}
+
+// Whether the type Jet spells `name` is a Map, `[K:V]`: a `:` inside its
+// brackets and outside any others.
+native_debug_map_name: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() < 2 || bytes[0] != 91 || bytes[bytes.len() - 1] != 93 -> return false
+    depth := 0
+    loop byte in bytes[1..<bytes.len() - 1] {
+        if byte == 40 || byte == 91 || byte == 123 -> depth += 1
+        if byte == 41 || byte == 93 || byte == 125 -> depth -= 1
+        if byte == 58 && depth == 0 -> return true
+    }
+    false
+}
+
+#Test("a Map's type is spelled with a `:` outside any other brackets") {
+    assert(native_debug_map_name("[String:Int]"))
+    assert(native_debug_map_name("[(a: Int):[Int]]"))
+    assert(!native_debug_map_name("[(a: Int)]"))
+    assert(!native_debug_map_name("[{{n: Int}}]"))
+    assert(!native_debug_map_name("[Int]"))
 }
 
 // The Char with code point `code`, quoted.
