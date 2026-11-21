@@ -3014,26 +3014,31 @@ x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
 // through its trace's thread's `/proc` mem file (as x64_trace_read), which
 // writes through page protections as PTRACE_POKEDATA does: a few system
 // calls of this process for the whole run, not one helper round trip per
-// word. False when the file can't be opened or a write falls short.
+// word. The file's path is written to the trace's scratch page, which the
+// writes go through too, so a write maps no page of its own. False when the
+// file can't be opened or a write falls short.
 x64_trace_write: fn(trace: X64Trace, address: Int, bytes: [U8]) -> Bool {
     if trace.thread <= 0 || trace.scratch == 0 -> return false
-    fd: loader_open_as("/proc/{trace.thread}/mem", OS_O_RDWR_CLOEXEC)
-    if os_failed(fd) -> return false
+    path: "/proc/{trace.thread}/mem".bytes()
     chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
+    fd := -1
     done := 0
-    loop done < bytes.len() {
-        want: if bytes.len() - done < chunk -> bytes.len() - done else -> chunk
-        wrote := 0
-        #Unsafe("the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there") {
+    #Unsafe("the mem file's NUL-terminated path, then each piece of `bytes`, at most `chunk` long, are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and openat and pwrite64 read them there") {
+        loop (k, byte) in path { os_store_byte(trace.scratch + LOADER_TRACE_BYTES + k, Int{byte}) }
+        os_store_byte(trace.scratch + LOADER_TRACE_BYTES + path.len(), 0)
+        fd = os_syscall(OS_SYS_OPENAT, OS_AT_FDCWD, trace.scratch + LOADER_TRACE_BYTES, OS_O_RDWR_CLOEXEC, 0, 0, 0)
+        loop !os_failed(fd) && done < bytes.len() {
+            want: if bytes.len() - done < chunk -> bytes.len() - done else -> chunk
             loop k in 0..<want {
                 os_store_byte(trace.scratch + LOADER_TRACE_BYTES + k, Int{bytes[done + k]})
             }
-            wrote = os_syscall(OS_SYS_PWRITE64, fd, trace.scratch + LOADER_TRACE_BYTES, want, address + done, 0, 0)
+            wrote: os_syscall(OS_SYS_PWRITE64, fd, trace.scratch + LOADER_TRACE_BYTES, want, address + done, 0, 0)
+            if wrote == -OS_EINTR -> next
+            if wrote <= 0 -> break
+            done += wrote
         }
-        if wrote == -OS_EINTR -> next
-        if wrote <= 0 -> break
-        done += wrote
     }
+    if os_failed(fd) -> return false
     loader_close(fd)
     done == bytes.len()
 }
