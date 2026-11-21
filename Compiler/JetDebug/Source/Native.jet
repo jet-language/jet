@@ -529,6 +529,10 @@ NativeSession: struct {
     // ("" for none): `jet debug` says there how to give the program input
     // when the console's own carries its commands.
     unknown_note: String{""},
+    // Whether the console's commands come from a script (`jet debug
+    // --do`), which asked for every byte: `sections --bytes` then shows
+    // each section whole, not NATIVE_IMAGE_BYTES_SHOWN of it.
+    scripted: Bool{false},
     // Whether the program has been launched or attached to; while it runs,
     // its trace has a pid, and the trace's thread is the one the last stop
     // is in. An `attached` program ran before the session and goes on
@@ -2775,6 +2779,13 @@ NativeSession: struct {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)
             }
             "symbols" | "segments" -> text = native_image_listing(self.binary, word) ?? return Err(err)
+            "sections" -> {
+                answer: native_image_sections_answer(self.binary, operand, whole: self.scripted) ?? return Err(err)
+                if answer.refused {
+                    return Ok(NativeDebugStep{text: answer.text, stop: stop, refused: true})
+                }
+                text = answer.text
+            }
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
@@ -6546,7 +6557,7 @@ native_eval_image_of: fn(elf: [U8], runtime: &&[U8]) -> Shared<NativeEvalImage> 
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, sections [NAME...] [--bytes], tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay

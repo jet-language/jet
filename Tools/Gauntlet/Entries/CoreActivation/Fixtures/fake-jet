@@ -4,9 +4,10 @@
 # writes .jet/build/STEM and STEM.rs: bin/small for the control and import
 # arms, bin/big for the use arm, bin/failing for time's use arm, a shell
 # script for the data battery (it allocates through libc), no build at all
-# for http's use arm, and no Rust for regex. `debug IMAGE --do symbols`
-# prints the rows jet debug lists for the stand-in IMAGE is a copy of, and
-# refuses the shell script as jet debug does.
+# for http's use arm, and no Rust for regex. `debug IMAGE --do symbols` and
+# `debug IMAGE --do sections` print the rows jet debug lists for the
+# stand-in IMAGE is a copy of (bin/failing's headers are bin/small's), and
+# refuse the shell script as jet debug does.
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 case $1 in
@@ -16,6 +17,28 @@ case $1 in
   debug)
     for bin in small big failing; do
       if cmp -s "$2" "$here/bin/$bin"; then
+        if [[ $4 == sections ]]; then
+          if [[ $bin == big ]]; then
+            echo ".text               PROGBITS    offset 0x1000      address 0x401000            size 104        flags AX   align 16"
+            echo ".rodata             PROGBITS    offset 0x2000      address 0x402000            size 4          flags AMS  align 1"
+            echo ".eh_frame           PROGBITS    offset 0x2008      address 0x402008            size 116        flags A    align 8"
+            echo ".note.gnu.property  NOTE        offset 0x2080      address 0x402080            size 48         flags A    align 8"
+            echo ".comment            PROGBITS    offset 0x20b0      address 0x0                 size 18         flags MS   align 1"
+            echo ".symtab             SYMTAB      offset 0x20c8      address 0x0                 size 216        flags      align 8"
+            echo ".strtab             STRTAB      offset 0x21a0      address 0x0                 size 71         flags      align 1"
+            echo ".shstrtab           STRTAB      offset 0x21e7      address 0x0                 size 79         flags      align 1"
+          else
+            echo ".text               PROGBITS    offset 0x1000      address 0x401000            size 36         flags AX   align 16"
+            echo ".rodata             PROGBITS    offset 0x2000      address 0x402000            size 4          flags AMS  align 1"
+            echo ".eh_frame           PROGBITS    offset 0x2008      address 0x402008            size 44         flags A    align 8"
+            echo ".note.gnu.property  NOTE        offset 0x2038      address 0x402038            size 48         flags A    align 8"
+            echo ".comment            PROGBITS    offset 0x2068      address 0x0                 size 18         flags MS   align 1"
+            echo ".symtab             SYMTAB      offset 0x2080      address 0x0                 size 144        flags      align 8"
+            echo ".strtab             STRTAB      offset 0x2110      address 0x0                 size 31         flags      align 1"
+            echo ".shstrtab           STRTAB      offset 0x212f      address 0x0                 size 79         flags      align 1"
+          fi
+          exit 0
+        fi
         if [[ $bin == big ]]; then
           echo "0x401000            1         function  battery_open"
           echo "0x401010            1         function  battery_call"

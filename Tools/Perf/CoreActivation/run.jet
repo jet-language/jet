@@ -5,7 +5,7 @@
 //   control: no import;  import: `use` only;  use: one call.
 // Each arm reports, separately:
 //   compile: `jet check` wall and `jet build --release` wall (unavoidable compile cost);
-//   linked:  binary bytes, `size -A` sections, defined-symbol count (`jet debug IMAGE --do symbols` rows);
+//   linked:  binary bytes, section sizes (`jet debug IMAGE --do sections` rows), defined-symbol count (`jet debug IMAGE --do symbols` rows);
 //   reach:   Core modules present in the generated Rust (reachable-dependency proxy);
 //   startup: process wall median over --samples runs of the AOT binary;
 //   alloc:   allocation count and peak live bytes of one AOT run (LD_PRELOAD counter);
@@ -280,13 +280,15 @@ program: fn(battery: Battery, arm: String) -> String Never! {
     "{battery.use_line}\n\nrun: fn() {{\n    print({battery.call})\n}}\n"
 }
 
-// Each section's size in `size -A` order, or "unavailable".
-sections: fn(binary: String) -> Dyn {
-    ran: timed(process.cmd([String]{"size", "-A", binary}))
+// Each section's size, in file order, as `jet debug IMAGE --do sections`
+// lists them (run in the arm's directory `dir`, as `jet` is named from
+// there), or "unavailable" when it refuses the image.
+sections: fn(jet: String, dir: String, stem: String) -> Dyn {
+    ran: timed(process.cmd([jet, "debug", ".jet/build/{stem}", "--do", "sections"]).cwd(dir))
     if ran.status != Val(0) -> return "unavailable".encode()
     out := [{key: String, value: Dyn}]{}
     loop line in ran.stdout.split("\n") {
-        found: regex.match(Regex{"^(\.\S+)\s+(\d+)\s+\d+"}, line) ?? next
+        found: regex.match(Regex{"^(\S+)\s+\S+\s+offset \S+\s+address \S+\s+size (\d+)"}, line) ?? next
         out.push({key: found.groups[0].copy(), value: (Int.parse(found.groups[1]) ?? 0).encode()})  // copy: the match keeps its groups
     }
     Dyn.Object(out)
@@ -379,7 +381,7 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
         return Ok(row)
     }
     bytes: files.read_bytes(binary)
-    row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(binary), defined_symbols: symbol_count(jet, dir, stem)})
+    row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(jet, dir, stem), defined_symbols: symbol_count(jet, dir, stem)})
     row.reach = Val(reachable_core_modules("{binary}.rs"))
     walls := [Int]{}
     stdout := ""
