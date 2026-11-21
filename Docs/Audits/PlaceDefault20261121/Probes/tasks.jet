@@ -1,0 +1,60 @@
+// What a waiting task costs. Starts N tasks that each wait on a channel, then
+// reads the process's address space (VmSize) and resident size (VmRSS) while
+// all of them wait. `none` tasks make nothing; `heap` tasks keep a small list
+// across the wait; `scratch` tasks build that list in their scratch arena
+// first, as a task-owned stack would on a task's first stacked value.
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+status: fn(key: String) -> String {
+    text: files.read("/proc/self/status") ?? return "?"
+    loop line in text.lines() {
+        if line.starts_with(key) -> return line.after(":").trim().copy()
+    }
+    "?"
+}
+
+waiter: fn(mode: String, input: Receiver<Int>) -> Int {
+    if mode == "scratch" {
+        kept := 0
+        #Context(allocator: context.scratch) {
+            values := [Int]{}
+            loop i in 0..<16 -> values.push(i)
+            n: input.receive() ?? 0
+            kept = values.len() + n
+        }
+        return kept
+    }
+    if mode == "heap" {
+        values := [Int]{}
+        loop i in 0..<16 -> values.push(i)
+        n: input.receive() ?? 0
+        return values.len() + n
+    }
+    input.receive() ?? 0
+}
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "none"
+    count: Int.parse(args.get(1) ?? "1000") ?? 1000
+    size_before: status("VmSize")
+    rss_before: status("VmRSS")
+    senders := [Sender<Int>]{}
+    handles := [Task<Int>]{}
+    loop _ in 0..<count {
+        {sender, receiver}: channel<Int>(1)
+        senders.push(sender)
+        handles.push(task waiter(mode, receiver))
+    }
+    time.sleep(100ms)
+    size_waiting: status("VmSize")
+    rss_waiting: status("VmRSS")
+    loop s in senders -> s.send(1)
+    total := 0
+    loop h in handles -> total += h.join() ?? 0
+    print("{mode} {count} tasks: VmSize {size_before} -> {size_waiting}, VmRSS {rss_before} -> {rss_waiting}, total {total}")
+}

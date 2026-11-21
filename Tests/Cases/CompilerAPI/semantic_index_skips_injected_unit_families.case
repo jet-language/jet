@@ -1,0 +1,10 @@
+# A program that mentions a unit gets the standard families it names (Length, Time and what they need) injected from the units prelude. Those copies have their spans in the prelude text, not the program's, so the semantic index derives no record for them and stays complete: the struct and `run` still have one record apiece.
+fixture: SemanticIndexSkipsInjectedUnitFamilies.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 2 # the struct and run, no injected family
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Trip"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.run"] #= 1
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Length"] #= 0 # an injected catalog family has no text here

@@ -3488,6 +3488,7 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     lines := [Int]{}
     fixed := [Bool]{}
     sites := [Int]{}
+    formals := [Bool]{}
     loop slot in 0..<count {
         if dropped[slot] -> next
         types.push(f.slot_type[slot])
@@ -3496,6 +3497,7 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
         lines.push(f.slot_line[slot])
         fixed.push(f.slot_fixed[slot])
         sites.push(f.slot_site[slot])
+        formals.push(f.slot_formal[slot])
     }
     f.slot_type = types.move()
     f.slot_kind = kinds.move()
@@ -3503,6 +3505,7 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     f.slot_line = lines.move()
     f.slot_fixed = fixed.move()
     f.slot_site = sites.move()
+    f.slot_formal = formals.move()
 }
 
 // Clears the drop of the slot a field of `role` holds.

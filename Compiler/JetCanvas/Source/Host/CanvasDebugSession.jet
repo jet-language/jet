@@ -446,7 +446,7 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
     stop: native_dump_jet_frame(frames, 0) ?? 0
     _ := live.select_frame(stop) ?? return Err(canvas_debug_unavailable(err))
     shown: native_dump_frame(live, frames, stop, jet_file, jet_lines) ?? return Err(canvas_debug_unavailable(err))
-    events: native_dump_events(live.image, opened.ring)
+    events: native_dump_events(live.image, opened.ring, opened.routines)
     transcript: "Dump of process {opened.pid}, {events.len()} flight events\n{shown}"
     Ok(
         CanvasDebugSession{

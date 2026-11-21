@@ -32,6 +32,10 @@
 // (main.jet ROUND_PARTS, before and after) beside where it went under the
 // lens (the trace's `causal_tasks`: each task's timing), in the lens's
 // baselines and in its experiments on the narrow line and the wide one.
+//
+// `check.jet -- counts TIER TRACE` sets out the lens's part alone and
+// checks nothing, so a run too short to rank shows the experiments it kept,
+// the count `jet perf view`'s refusal names.
 use {
     files: core.files
     process: core.process
@@ -191,6 +195,13 @@ report_rounds: fn(tier: String, trace: String) {
             say("causal rounds {tier} hand {file} {name}: wall {micros(hand[at])} span {micros(hand[at + 1])} narrow at {micros(hand[at + 2])} for {micros(hand[at + 3])} wide at {micros(hand[at + 4])} for {micros(hand[at + 5])} (µs, medians)")
         }
     }
+    report_lens(tier, trace)
+}
+
+// Where a round's time went under the lens, by the trace's causal_tasks
+// record: its tasks, rounds and experiments, the baselines among them,
+// then each kind of experiment's medians.
+report_lens: fn(tier: String, trace: String) {
     sections: trace.split("\"name\":\"causal_tasks\"").to_list()
     if sections.len() < 2 {
         say("causal rounds {tier} lens: the trace has no causal_tasks section")
@@ -241,7 +252,11 @@ report_rounds: fn(tier: String, trace: String) {
     }
     seen: number_after(section, "\"seen\":") ?? -1
     most: number_after(section, "\"kept_most\":") ?? -1
-    say("causal rounds {tier} lens: tasks seen {seen}, kept {rows.len()} of at most {most}; rounds {groups}, kept whole within one experiment {kept}; experiments {kinds.len()}")
+    baselines := 0
+    loop kind in kinds {
+        if kind == 0 -> baselines += 1
+    }
+    say("causal rounds {tier} lens: tasks seen {seen}, kept {rows.len()} of at most {most}; rounds {groups}, kept whole within one experiment {kept}; experiments {kinds.len()}, {baselines} of them baselines")
     loop (kind, name) in ([String]{"baseline", "narrow line", "wide line"}) {
         at: kind * LENS_PARTS
         m: loop part in 0..<LENS_PARTS -> median(parts[at + part])
@@ -370,9 +385,16 @@ check_clocked: fn(trace: String) -> Bool {
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 -> panic("usage: check.jet -- TIER TRACE")
+    if args.len() < 2 -> panic("usage: check.jet -- [counts] TIER TRACE")
     tier: args[args.len() - 2]
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
+    // `counts` reports the lens's record of TRACE alone, the experiments
+    // `jet perf view` reads, and checks nothing: a run too short to rank has
+    // no gain to hold to the hand measurement.
+    if args.len() >= 3 && args[args.len() - 3] == "counts" {
+        report_lens(tier, trace)
+        return
+    }
     report_rounds(tier, trace)
     if check_contended(trace) {
         wait: number_after(trace, "\"cpu_wait_ms\":") ?? 0

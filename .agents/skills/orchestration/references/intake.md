@@ -77,6 +77,12 @@ patch that lowers a count carries the gate's `--update` of
 `Tools/Perf/CodegenCeiling/golden.tsv` and `listing.tsv`, and its `msg` gives
 the before and after counts.
 
+`Tools/Perf/CodegenCeiling.jet --check` refuses a stale `listing.tsv` (STALE).
+A recording in AT&T syntax is stale. So is a row whose counts equal golden
+but whose instructions differ from what was recorded. So a patch that keeps
+the counts but changes a recorded function's instructions also carries the
+gate's `--update`.
+
 A patch that adds Prelude or registry rows (a dispatcher row, a fixed
 signature, a new reserved member, a runtime export) and also uses them from
 Core cannot pass the census, because the census checks Core with the admitted

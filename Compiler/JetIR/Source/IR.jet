@@ -420,6 +420,11 @@ IRFunction: struct {
     // variable is a local of that inline site's frame (X64Select.jet
     // ir_x64_variables). ir_slot adds every slot to site 0.
     slot_site: [Int]{[Int]{}},
+    // Per slot, whether it stands for a parameter of a function inlined
+    // here (OptInline.jet ir_opt_splice): its variable is a parameter of its
+    // inline site's frame (X64Select.jet ir_x64_variables). ir_slot adds
+    // every slot unmarked.
+    slot_formal: [Bool]{[Bool]{}},
     // The named slots a pass folded into another slot, two words each: the
     // named slot, which is no longer written, and the slot holding its value
     // (OptSimplify.jet ir_opt_propagate; an inlined parameter's argument,
@@ -864,6 +869,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
     f.slot_line.push(line)
     f.slot_fixed.push(false)
     f.slot_site.push(0)
+    f.slot_formal.push(false)
     if kind == .Param -> f.param_count += 1
     id
 }

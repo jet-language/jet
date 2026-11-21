@@ -1194,7 +1194,9 @@ main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
 oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
 `wake`, `clock`, `wait` and `io`. A CPU-time sample also names its task
 (`sample  task 1  at check main.jet:9`, or `outside every task`), and one
-whose stack holds no Jet frame is `in the runtime`. `disassemble` (`disas`)
+whose stack holds no Jet frame is `in the runtime`, at the function its
+address is in as `jet perf view` names it from the image's symbol table
+(`in the runtime at unit_os_syscall_i64__asm`). `disassemble` (`disas`)
 lists code as the live console's does (below), its bytes read from the
 image, the selected frame's pc's row ending `<- here`. A run-control command
 answers that a dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case
@@ -1370,20 +1372,27 @@ D-DBG-VERBS1=A names the commands:
   instruction it is at, a caller's call. The program's entry and the
   routines below the innermost Jet frame aren't shown. `up` moves toward
   the callers and `down` back. `locals` and `print <expr>` (`p`) read the
-  selected frame until the program moves.
+  selected frame until the program moves. An inlined frame's `locals`
+  lists its function's parameters at -O1 and -O2 too: each with the value
+  passed where the code still holds it, else `<Unavailable>` with why,
+  never a stale value.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by
   its Jet name or its symbol (`disas main.run__entry` lists `entry`), or a
   runtime routine by its symbol; `disas LINE`,
   `disas FILE:LINE` and `disas FILE:A-B` list only the rows of those lines.
+  A function inlined elsewhere is listed per copy, headed by its caller and
+  the call's line, then the function holding the code when that is another
+  (`square, inlined into sum_squares on line 8 in run`).
   `--bytes` adds each instruction's encoding. The heading names the
   function, its lines, the build's level, its address and size
   (`fib  fib.jet:1-3  -O0  0x404110, 732 bytes`), then where the selected
   frame's locals live at the pc (`  at the pc: n in rbx`). A
   `fib.jet:3   fib(n - 1) + fib(n - 2)` header starts each run of a line's
   rows, and `  inlined NAME, called on line N` / `  back in NAME` frame the
-  rows of inlined code. A row is
+  rows of inlined code; a call in another file than the listed function's
+  names that file (`called on line 172 of Process.jet`). A row is
   `b2  0x404158 <+72>   mov    rax,rbx        <- here`: `b<N>` marks a
   breakpoint and `<+N>` its offset in the function, and the pc's row ends
   `<- here`, as the stop's source line does. A call names its target

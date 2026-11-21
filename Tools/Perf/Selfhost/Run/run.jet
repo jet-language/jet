@@ -170,19 +170,26 @@ Span: struct {
     end: Int,
 }
 
-// The fields of a reported diagnostic that a case's expected one is held to.
+// The fields of a reported diagnostic (jet.report/v4) that a case's expected
+// one is held to. Its file is its span's.
 SeenDiagnostic: struct {
     code: String?,
-    file: String?,
     line: Int?,
     col: Int?,
-    span: Span?,
+    span: SeenSpan?,
     fix_edits: [FixEdit]?,
+}
+
+// A reported span: the file it is in and its bytes.
+SeenSpan: struct {
+    file: String?,
+    start: Int,
+    end: Int,
 }
 
 FixEdit: struct {
     new_text: String?,
-    span: Span?,
+    span: SeenSpan?,
 }
 
 #Error
@@ -541,8 +548,17 @@ parse_diagnostic: fn(text: String) -> Dyn? {
     None
 }
 
-same_span: fn(seen: Span?, want: Span) -> Bool {
-    seen == Val(Span{start: want.start, end: want.end})
+same_span: fn(seen: SeenSpan?, want: Span) -> Bool {
+    if seen == .Val(placed) -> return placed.start == want.start && placed.end == want.end
+    false
+}
+
+// Whether `seen`'s span is in the file named `want`, by base name.
+same_file: fn(seen: SeenSpan?, want: String) -> Bool {
+    if seen == .Val(placed) {
+        if placed.file == .Val(file) -> return files.basename(file) == want
+    }
+    false
 }
 
 diagnostic_matches: fn(actual: Dyn?, want: ExpectedDiagnostic) -> Bool {
@@ -552,7 +568,7 @@ diagnostic_matches: fn(actual: Dyn?, want: ExpectedDiagnostic) -> Bool {
     loop edit in edits {
         fixed = fixed || (edit.new_text == Val(want.fix_text) && same_span(edit.span, want.span))
     }
-    seen.code == Val(want.code) && seen.file.map(fn(file) { files.basename(file) }) == Val(want.file) && seen.line == Val(want.line) && seen.col == Val(want.col) && same_span(seen.span, want.span) && fixed
+    seen.code == Val(want.code) && same_file(seen.span, want.file) && seen.line == Val(want.line) && seen.col == Val(want.col) && same_span(seen.span, want.span) && fixed
 }
 
 // Whether `got` is `want` exactly; null when the case states no `want` or

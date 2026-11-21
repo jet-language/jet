@@ -1355,6 +1355,75 @@ ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
     Val(IR_NATIVE_PROVIDER_HANDLES[position].copy())
 }
 
+// The handle row of the one Jet spelling of the runtime type that `name`
+// names the runtime handle of (ir_runtime_handle), None when no handle table
+// row has `name`. Every spelling of one runtime type gets the same row, so a
+// handle's IR row is named the same whichever spelling reached it first
+// (BuildTypes.jet ir_handle_row_laid).
+ir_runtime_handle_spelled: fn(name: String) -> IRRuntimeHandle? {
+    at: ir_runtime_handle_spelling_at(name) ?? return None
+    first: IR_RUNTIME_HANDLE_SPELLING_ROWS[at]
+    runtime_count: IR_RUNTIME_HANDLES.len()
+    if first < runtime_count -> return ir_runtime_handle(IR_RUNTIME_HANDLES[first].jet_name)
+    ir_runtime_handle(IR_NATIVE_PROVIDER_HANDLES[first - runtime_count].jet_name)
+}
+
+// The spelling row (IR_RUNTIME_HANDLE_SPELLING_ROWS) of the handle table row
+// that has `name`, as ir_runtime_handle finds it.
+ir_runtime_handle_spelling_at: fn(name: String) -> Int? Never! {
+    if ir_runtime_handle_row(name) == .Val(position) -> return Val(position)
+    position: ir_key_row(IR_NATIVE_PROVIDER_HANDLE_KEYS, IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS, name) ?? return None
+    Val(IR_RUNTIME_HANDLES.len() + position)
+}
+
+// Per row of IR_RUNTIME_HANDLES then of IR_NATIVE_PROVIDER_HANDLES (a spelling
+// row: IR_RUNTIME_HANDLES row `n` is `n`, IR_NATIVE_PROVIDER_HANDLES row `n`
+// is the runtime table's length plus `n`), the spelling row of either table
+// whose spelling comes first (ir_handle_spelling_before) among the rows that
+// name its runtime type. Rows, not spellings, so the tables' strings stay
+// where they are.
+IR_RUNTIME_HANDLE_SPELLING_ROWS: #run ir_runtime_handle_spelling_rows(IR_RUNTIME_HANDLES, IR_NATIVE_PROVIDER_HANDLES)
+
+ir_runtime_handle_spelling_rows: fn(runtime_rows: [IRRuntimeHandle], native_rows: [IRRuntimeHandle]) -> [Int] Never! {
+    rows := [Int]{}
+    loop own in 0..<(runtime_rows.len() + native_rows.len()) {
+        first := own
+        loop (other, row) in runtime_rows {
+            if ir_handle_spelling_row_before(runtime_rows, native_rows, own, first, row) {
+                first = other
+            }
+        }
+        loop (other, row) in native_rows {
+            if ir_handle_spelling_row_before(runtime_rows, native_rows, own, first, row) {
+                first = runtime_rows.len() + other
+            }
+        }
+        rows.push(first)
+    }
+    rows
+}
+
+// Whether handle `row` names the runtime type of spelling row `own`
+// (IR_RUNTIME_HANDLE_SPELLING_ROWS) with a spelling before spelling row
+// `first`'s. The rows are read in place: nothing is copied out of the tables.
+ir_handle_spelling_row_before: fn(runtime_rows: [IRRuntimeHandle], native_rows: [IRRuntimeHandle], own: Int, first: Int, row: IRRuntimeHandle) -> Bool Never! {
+    count: runtime_rows.len()
+    same: if own < count -> runtime_rows[own].runtime == row.runtime else -> native_rows[own - count].runtime == row.runtime
+    if !same -> return false
+    if first < count -> return ir_handle_spelling_before(row.jet_name, runtime_rows[first].jet_name)
+    ir_handle_spelling_before(row.jet_name, native_rows[first - count].jet_name)
+}
+
+// Whether handle spelling `a` comes before `b`: a Core declaration's key
+// (`<corelib>/core.files.FileReader`) before a bare name (`FileReader`), as
+// a declared struct's row is spelled by its key (BuildTypes.jet
+// ir_struct_row_laid); else the lesser bytes.
+ir_handle_spelling_before: fn(a: String, b: String) -> Bool Never! {
+    keyed: a.contains("/")
+    if keyed != b.contains("/") -> return keyed
+    a < b
+}
+
 // Core records the runtime's generated record exports carry (Records.jet),
 // keyed by runtime type: a struct's fields in constructor order or an enum's
 // variants in index order, each `name=kind` when it carries a member (Text,

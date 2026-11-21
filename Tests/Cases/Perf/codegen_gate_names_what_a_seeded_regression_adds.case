@@ -1,0 +1,43 @@
+# Claim: a codegen gate regression names what grew. The gate records the
+# catalog's listing from `jet debug IMAGE --do 'disas NAME'`, with no
+# external disassembler. A line seeded into the kernel's loop then fails
+# the gate. Each instruction the golden listing lacks prints with its
+# function and the source line it lowers from. A recording in objdump's
+# AT&T syntax is refused as stale, so it cannot read the whole function
+# as grown.
+# golden.tsv starts above any build, so `--update` records this
+# compiler's counts and listing as the golden ones.
+fixture: CodegenGateNamesWhatASeededRegressionAdds.fixture
+copy: {root}/Tools/Perf/CodegenCeiling.jet Tools/Perf/CodegenCeiling.jet
+mkdir: tmp
+step: jet Tools/Perf/CodegenCeiling.jet --update --jet {jet}
+env: TMPDIR={work}/tmp
+exit: 0
+stdout: ~ "codegen gate: Tools/Perf/CodegenCeiling/golden.tsv and Tools/Perf/CodegenCeiling/listing.tsv updated\n" # the unseeded build is the golden one
+file: Tools/Perf/CodegenCeiling/listing.tsv ~ "main.list_sum\tmain.list_sum__value\tmain.jet:11\t" # rows name their source line
+file: Tools/Perf/CodegenCeiling/listing.tsv !~ "%" # jet's own listing, never objdump's AT&T syntax
+step: jet Tools/Perf/CodegenCeiling.jet --check --jet {jet}
+env: TMPDIR={work}/tmp
+exit: 0
+stdout: ~ "codegen gate: pass functions=1\n" # its own recording passes
+stderr: !~ "STALE" # and is not stale
+copy: Tools/Perf/CodegenCeiling/listing.tsv recorded.tsv
+copy: att-listing.tsv Tools/Perf/CodegenCeiling/listing.tsv
+step: jet Tools/Perf/CodegenCeiling.jet --check --jet {jet}
+env: TMPDIR={work}/tmp
+exit: 1
+stderr: ~ "STALE main.list_sum: Tools/Perf/CodegenCeiling/listing.tsv records `push %rbp`, AT&T syntax" # the old objdump form is refused
+stderr: ~ "codegen gate: 1 stale row(s) in Tools/Perf/CodegenCeiling/listing.tsv; `--update` " # and the verdict names the fix
+stderr: !~ "REGRESSION" # with no regression
+copy: recorded.tsv Tools/Perf/CodegenCeiling/listing.tsv
+copy: seeded.jet Tools/Perf/CodegenCeiling/Catalog/main.jet
+step: jet Tools/Perf/CodegenCeiling.jet --check --jet {jet}
+env: TMPDIR={work}/tmp
+exit: 1
+stderr: ~ "REGRESSION main.list_sum: " # a count rose
+stderr: ~ "GREW main.list_sum: " # and the gate says what grew
+stderr: ~ "  main.list_sum__value main.jet:12: cmp " # the seeded line's compare
+stderr: ~ ",0x63\n" # against 99, which only the seeded line holds
+stderr: !~ "holds no listing of it" # the update recorded one
+stderr: !~ "STALE" # its recording is current
+stderr: ~ "codegen gate: " # the closing count of regressions

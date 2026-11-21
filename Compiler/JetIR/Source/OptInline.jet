@@ -154,6 +154,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     loop slot in 0..<caller.slot_type.len() {
         _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
         out.slot_site[slot] = caller.slot_site[slot]
+        out.slot_formal[slot] = caller.slot_formal[slot]
     }
     out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
@@ -446,7 +447,9 @@ ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
 // value with a drop (one the call hands over). One it never writes reads its
 // argument; a named slot of its own, never written, is bound to that
 // argument (IRFunction.binds), which holds its value over the body. The
-// callee's slots belong to the new inline site (IRFunction.slot_site).
+// callee's slots belong to the new inline site (IRFunction.slot_site), and
+// the slots standing for its parameters stay parameters of that site
+// (IRFunction.slot_formal). Only debug information reads either.
 ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
     site_line: caller.code_line[at]
     f.frame_bound = ir_frame_bound_add(f.frame_bound, callee.frame_bound)
@@ -471,8 +474,11 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
     }
     map := [Int]{}
     loop slot in 0..<callee.slot_type.len() {
-        name: if same_file -> callee.slot_name[slot] else -> -1
-        line: if same_file -> callee.slot_line[slot] else -> 0
+        // A body from another file has the call's lines, which a local's
+        // own line would be read against: only its parameters keep names.
+        kept: same_file || slot < callee.param_count || callee.slot_formal[slot]
+        name: if kept -> callee.slot_name[slot] else -> -1
+        line: if kept -> callee.slot_line[slot] else -> 0
         if slot < callee.param_count {
             argument: caller.args[caller.b[at] + slot]
             if !written[slot] {
@@ -480,6 +486,7 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
                 if name < 0 -> next
                 named: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, name, line)
                 f.slot_site[named] = sites[0]
+                f.slot_formal[named] = true
                 f.binds.push(named)
                 f.binds.push(argument)
                 next
@@ -487,6 +494,7 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
             own: ir_slot(f, callee.slot_type[slot], IRSlotKind.Local, name, line)
             f.slot_fixed[own] = callee.slot_fixed[slot]
             f.slot_site[own] = sites[0]
+            f.slot_formal[own] = true
             transfer: if m.types[callee.slot_type[slot]].drop == "" -> IROp.Copy else -> IROp.Move
             _ := ir_emit(f, transfer, own, argument, -1, -1, site_line)
             map.push(own)
@@ -495,6 +503,7 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
         added: ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line)
         f.slot_fixed[added] = callee.slot_fixed[slot]
         f.slot_site[added] = sites[callee.slot_site[slot]]
+        f.slot_formal[added] = callee.slot_formal[slot]
         map.push(added)
     }
     loop pair in 0..<(callee.binds.len() /% 2) {
@@ -967,5 +976,84 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
             }
             assert(located == (site == 1 || row == 0), "O{level}: {names[row]} of site {site}")
         }
+    }
+}
+
+// square(i) = i * i, inlined into sum(n), which passes its loop variable `i`
+// and writes it again each pass: at O1 and O2 square's `i` is a parameter
+// of the inline site, bound to sum's `i`, and located only over the site's
+// code, where sum's `i` still holds the value passed. Sum's own `i` stays a
+// local of sum.
+#Test("An inlined parameter bound to a variable written again is located only in its site") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        g := ir_function_new("square", "test:sum.jet.square", "", "sum.jet", 1)
+        i: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
+        g.result = word
+        product: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Mul, product, i, i, IR_OVERFLOW_WRAP, 1)
+        _ := ir_emit(g, IROp.Return, -1, product, -1, -1, 1)
+        f := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 3)
+        n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 3)
+        f.result = word
+        total: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "total"), 4)
+        counter: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 5)
+        done: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+        got: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, total, 0, -1, -1, 4)
+        _ := ir_emit(f, IROp.Const, counter, 0, -1, -1, 5)
+        _ := ir_emit(f, IROp.Block, -1, 12, -1, -1, 5)
+        _ := ir_emit(f, IROp.Loop, -1, 11, -1, -1, 5)
+        _ := ir_emit(f, IROp.Ge, done, counter, n, -1, 5)
+        _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 5)
+        passed: ir_args(f, [Int]{counter})
+        _ := ir_emit(f, IROp.Call, got, 0, passed, 1, 6)
+        _ := ir_emit(f, IROp.Add, total, total, got, IR_OVERFLOW_WRAP, 7)
+        _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 5)
+        _ := ir_emit(f, IROp.Add, counter, counter, one, IR_OVERFLOW_WRAP, 5)
+        _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
+        _ := ir_emit(f, IROp.End, -1, 3, -1, -1, 5)
+        _ := ir_emit(f, IROp.End, -1, 2, -1, -1, 5)
+        _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 9)
+        m.entry = 1
+        name_rows_set(m.function_rows, g.key, 0)
+        name_rows_set(m.function_rows, f.key, 1)
+        m.functions.push(g)
+        m.functions.push(f)
+        options := ir_opt_options(level)
+        options.verify = true
+        report: ir_optimize_module(m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        assert_eq(report.inlined_calls, 1)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), 1)
+        assert(compiled.errors.is_empty())
+        formal := false
+        local := false
+        loop variable in compiled.variables {
+            if variable.name != "i" -> next
+            if variable.site == 1 -> formal = variable.parameter
+            if variable.site == 0 -> local = !variable.parameter
+        }
+        assert(formal, "O{level}: square's i is a parameter of its site")
+        assert(local, "O{level}: sum's i is a local")
+        low := -1
+        high := -1
+        loop run in compiled.debug.inlines {
+            if run.site != 1 -> next
+            if low < 0 || run.start < low -> low = run.start
+            if run.end > high -> high = run.end
+        }
+        assert(low >= 0, "O{level}: the inline site has code")
+        located := false
+        loop range in compiled.debug.ranges {
+            variable: compiled.variables[range.variable]
+            if variable.name != "i" || variable.site != 1 -> next
+            located = true
+            assert(range.start >= low && range.end <= high, "O{level}: square's i at [{range.start}, {range.end}) outside its site's code [{low}, {high})")
+        }
+        assert(located, "O{level}: square's i is located in its site")
     }
 }

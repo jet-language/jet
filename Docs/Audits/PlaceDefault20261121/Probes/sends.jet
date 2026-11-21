@@ -1,0 +1,47 @@
+// Values that cross tasks. A list of `size` Int is built and sent to a task
+// that sums it, `count` times. `heap` builds it on the program heap, so the
+// send moves it. `scratch` builds it in the task's scratch arena, so the send
+// first moves it out into the heap: the copy a stacked value would need if it
+// were sent after all.
+use {
+    process: core.process
+    time: core.time
+}
+
+summer: fn(count: Int, input: Receiver<[Int]>) -> Int {
+    total := 0
+    loop _ in 0..<count {
+        values: input.receive() ?? [Int]{}
+        loop v in values -> total += v
+    }
+    total
+}
+
+make: fn(size: Int, seed: Int) -> [Int] {
+    values := [Int]{}
+    loop i in 0..<size -> values.push(i + seed)
+    values
+}
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "heap"
+    size: Int.parse(args.get(1) ?? "1000") ?? 1000
+    count: Int.parse(args.get(2) ?? "10000") ?? 10000
+    {sender, receiver}: channel<[Int]>(64)
+    sum: task summer(count, receiver)
+    started: time.start()
+    if mode == "scratch" {
+        loop i in 0..<count {
+            #Context(allocator: context.scratch) {
+                values := make(size, i)
+                sender.send(values)
+            }
+        }
+    } else {
+        loop i in 0..<count -> sender.send(make(size, i))
+    }
+    total: sum.join() ?? 0
+    took: time.elapsed(started).ns
+    print("{mode} size {size}: {count} sends, {took / count} ns a send, total {total}")
+}

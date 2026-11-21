@@ -30,6 +30,7 @@ use jet_foundation.[
     ForKind,
     Func,
     Item,
+    NamedSpan,
     LValue,
     DerivationDisposition,
     DerivationMethod,
@@ -1592,11 +1593,27 @@ sema_compiler_index_walk_derive_body: fn(state: &SemaCompilerIndexWalkState, bod
     }
 }
 
+// A standard family the units prelude injected (owner `core.units`) is a
+// catalog copy whose spans index the prelude text, not this module's source:
+// it declares nothing written here.
+sema_compiler_index_catalog_item: fn(item: Item) -> Bool Never! {
+    if item == .UnitFamily(family) -> return family.resolved_owner == Val("core.units")
+    false
+}
+
+// Whether `candidate` is the symbol a catalog family in `catalog` (its name
+// and name span) registered.
+sema_compiler_index_catalog_symbol: fn(catalog: [NamedSpan], candidate: Symbol) -> Bool Never! {
+    loop named in catalog {
+        if named.span.start == candidate.span.start && named.span.end == candidate.span.end && named.name == candidate.name {
+            return true
+        }
+    }
+    false
+}
+
 sema_compiler_index_walk_item: fn(state: &SemaCompilerIndexWalkState, item: Item, module_path: String) {
-    // A standard family the units prelude injected (owner `core.units`) is a
-    // catalog copy whose span is in the prelude text, not a definition of
-    // this module's source.
-    if item == .UnitFamily(family) && family.resolved_owner == (Val("core.units")) {
+    if sema_compiler_index_catalog_item(item) {
         return
     }
     id: sema_compiler_index_walk_node(state, "item", sema_compiler_index_item_shape(item), module_path, sema_compiler_index_item_span(item)) ?? return
@@ -1967,7 +1984,9 @@ sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, reg
 // and read from that declaration's own text: each top-level item but an impl,
 // each impl, and each method of a nominal or an impl. A compiler-made impl
 // (the serde codecs; a derive's or a template's, whose span is its type's
-// name) or method has no text of its own: its owner's record covers it.
+// name) or method has no text of its own: its owner's record covers it. Nor
+// has a catalog family the units prelude injected: its spans index the
+// prelude text, so neither it nor the symbol it registered is credited here.
 sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerIndexDerivationFacts Never! {
     records := [DerivationRecord]{}
     credited := [U32:Bool]{}
@@ -1981,8 +2000,14 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_
             }
             next
         }
+        catalog := [NamedSpan]{}
         loop item in registered_module.program.items {
-            if item == .Impl(_) -> next
+            if item == .UnitFamily(family) && sema_compiler_index_catalog_item(item) {
+                catalog.push(NamedSpan{name: family.family, span: family.family_span})
+            }
+        }
+        loop item in registered_module.program.items {
+            if item == .Impl(_) || sema_compiler_index_catalog_item(item) -> next
             span := sema_compiler_index_item_span(item)
             item_kind := sema_compiler_index_derivation_item_kind(item)
             symbol := Symbol?{None}
@@ -1990,6 +2015,9 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_
                 if !sema_compiler_index_derivation_definition_eligible(candidate) -> next
                 if item_kind == .Val(kind) && candidate.kind != kind -> next
                 if candidate.span.start < span.start || candidate.span.end > span.end -> next
+                if catalog.len() > 0 && sema_compiler_index_catalog_symbol(catalog, candidate) {
+                    next
+                }
                 if {
                     symbol == None -> { symbol = Val(candidate) }
                     else -> {

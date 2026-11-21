@@ -1,0 +1,21 @@
+// The codegen gate's catalog cut to one kernel. seeded.jet is this file
+// with one line added to the kernel's loop (line 12).
+#CLI
+Args: struct {
+    n: Int,
+}
+
+list_sum: fn(xs: [Int]) -> Int {
+    total := 0
+    loop i := 0, i < xs.len() {
+        total += xs[i]
+        i += 1
+    }
+    total
+}
+
+run: fn(args: Args) {
+    xs: [Int]{3, 1, 4, 1, 5, 9, 2, 6}.cycle(args.n).to_list()
+    kernels: [fn([Int]) -> Int]{list_sum}
+    print("list_sum {kernels[0](xs)}")
+}
