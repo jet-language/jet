@@ -25,6 +25,8 @@ use {
         JetCLIPerfLineTotal,
         JetCLIPerfLineTotals,
         JetCLIPerfObservation,
+        JetCLIPerfOutsideRow,
+        JetCLIPerfOutsideTree,
         JetCLIPerfPlotTotal,
         JetCLIPerfProfileRow,
         JetCLIPerfRetained,
@@ -59,6 +61,10 @@ use {
         jet_cli_perf_line_table,
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
+        jet_cli_perf_outside_flame,
+        jet_cli_perf_outside_folded,
+        jet_cli_perf_outside_lines,
+        jet_cli_perf_outside_tree_add,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
         jet_cli_perf_pprof_profile,
@@ -924,6 +930,46 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(capture.io[0].operation, "write")
     assert_eq(capture.io[0].bytes, U64{4})
     assert_eq(capture.io[0].task_id, Val(U64{2}))
+}
+
+// An outside attach's `functions` section, as `jet perf view` prints it:
+// each function with its declaration, how far its stacks unwound, its
+// samples by package as a run's profile prints them, and the flame graph of
+// its folded stacks.
+#Test("an outside attach's view names each function's declaration, its stacks' quality, its packages as a run's profile does, and a flame graph") {
+    section: `{"broken":4,"cut":0,"functions":[{"file":"Compiler/JetSema/Source/Statements.jet","line":212,"name":"Statements.sema_stmt_check","self":60,"total":90},{"name":"main","self":0,"total":100}],"lost":0,"packages":[{"package":"Compiler/JetSema","samples":70},{"package":"","samples":20},{"package":"Compiler/JetIR","samples":10}],"period_ns":1000000,"processes":2,"samples":100,"stacks":[{"samples":30,"stack":"main"},{"samples":70,"stack":"main;Statements.sema_stmt_check"}],"threads":3,"unnamed":5,"unwound":96,"window_ms":1000}`
+    value: canonical_json_parse("{section}\n".bytes()) ?? panic(err.message)
+    assert_eq(
+        jet_cli_perf_outside_lines(value),
+        [String]{
+            "functions samples=100 processes=2 threads=3 window_ms=1000 lost=0 unnamed=5",
+            "stacks unwound=96 cut=0 broken=4",
+            "  60.0% self  90.0% total · Statements.sema_stmt_check at Compiler/JetSema/Source/Statements.jet:212",
+            "  0.0% self  100.0% total · main",
+            "cpu by package",
+            "  Compiler/JetSema samples=70 cpu_us=70000 share=70%",
+            "  (none) samples=20 cpu_us=20000 share=20%",
+            "  Compiler/JetIR samples=10 cpu_us=10000 share=10%",
+        },
+    )
+    assert_eq(jet_cli_perf_outside_flame(value), [String]{"0 main 100.0% {"#".repeat(40)}", "1 Statements.sema_stmt_check 70.0% {"#".repeat(28)}"})
+}
+
+// A folded stack holds at least one sample in 100; a rarer one's samples
+// count in the stack it was called from.
+#Test("an outside attach folds each sample's stack, a rare one into its caller's") {
+    names: [String]{"main", "work", "rare"}
+    rows: loop name in names -> JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: false}
+    tree := JetCLIPerfOutsideTree{rows: [Int]{}, parents: [Int]{}, totals: [Int]{}, children: [Int:Int]{}}
+    loop _ in 0..<150 -> jet_cli_perf_outside_tree_add(tree, [Int]{1, 0})
+    loop _ in 0..<49 -> jet_cli_perf_outside_tree_add(tree, [Int]{0})
+    jet_cli_perf_outside_tree_add(tree, [Int]{2, 1, 0})
+    stacks: jet_cli_perf_outside_folded(tree, rows, 200)
+    assert_eq(stacks.len(), 2)
+    assert_eq(stacks[0].stack, "main")
+    assert_eq(stacks[0].samples, 49)
+    assert_eq(stacks[1].stack, "main;work")
+    assert_eq(stacks[1].samples, 151)
 }
 
 // Past the task row limit, the tasks with the fewest CPU-time samples have

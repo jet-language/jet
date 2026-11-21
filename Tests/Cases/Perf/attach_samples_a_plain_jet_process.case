@@ -4,8 +4,9 @@
 # threads and of the process it runs that work in, and names the frames by
 # the functions of the images of their executable, the jet's own and the
 # runtime image that process runs. The attach prints the functions its CPU
-# was in, the hot one first, and the trace holds them as the `functions`
-# receipt section, which `jet perf view` shows.
+# was in, the hot one first, and how far its samples' stacks unwound, and
+# the trace holds them, with the samples' folded stacks, as the `functions`
+# receipt section, which `jet perf view` shows with their flame graph.
 requires: os-name:linux
 fixture: AttachSamplesAPlainJetProcess.fixture
 env: NO_COLOR=1
@@ -17,13 +18,16 @@ step: jet perf attach {pid:busy} --out busy.jettrace
 exit: 0
 stderr: ~ "functions samples=" # the samples the kernel took of it
 stderr: ~ " processes=2 " # the jet check and the process its compile-time work runs in
-stderr: ~ "% total · unit.rt_text_append_owner\n" # the hot function, by its name: the runtime's text append the work spins in
+stderr: ~ "% total · unit.rt_text_append_owner" # the hot function, by its name: the runtime's text append the work spins in
+stderr: ~ "stacks unwound=" # how many stacks unwound whole, were cut at the kernel's limit, or broke
 stderr: ~ "Trace: " # and the trace
 json: file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 250 # a second of a busy thread's CPU, a sample a millisecond
+json: file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.stacks #>= 1 # the samples' folded stacks
 step: jet perf view busy.jettrace
 exit: 0
 stdout: ~ "functions samples=" # the view shows the section's lines
-stdout: ~ "% total · unit.rt_text_append_owner\n" # with the hot function
+stdout: ~ "% total · unit.rt_text_append_owner" # with the hot function
+stdout: ~ "flamegraph\n0 " # and the flame graph of the folded stacks, from their outermost frame
 signal busy: KILL
 wait: busy
 exit: any # the case's KILL ends the jet check, and its compile-time process with it

@@ -191,9 +191,10 @@ allocations (`line 7 samples=12 cpu_us=1500 inclusive=40 allocations=300`;
 `cpu_us` only for a line with samples of its own). When the rows span more
 than one package (the directory that holds a source's `Source/`, else the
 source's own), `cpu by package` follows: each package's samples, CPU time and
-share, heaviest first, at most 12, so a profile of `jet build Compiler` gives
-the compiler's time by phase (`Compiler/JetIR samples=652042
-cpu_us=81505250 share=57%`). A run whose
+share, heaviest first, at most 12, the samples of no package as `(none)`, so
+a profile of `jet build Compiler` gives the compiler's time by phase
+(`Compiler/JetIR samples=652042 cpu_us=81505250 share=57%`); an outside
+`jet perf attach` prints its samples by package the same way. A run whose
 samples never reach its sources (a short program, `jet perf test`, `jet
 perf attach`) keeps the observation rows, which attribute to the parsed `run:
 fn` declaration (`fn` through its closing brace) and do not separate the
@@ -924,12 +925,27 @@ each one it holds as a part, as a jet holds the runtime image its
 compile-time process runs. Code that no image holds (a compile-time
 process's compiled functions) is counted as `unnamed`. It prints the
 `functions` lines before the trace's path (`functions samples=N
-processes=2 threads=35 window_ms=1000 lost=0 unnamed=N`, then a line a
-function, its share of the samples whose innermost frame it is, `self`,
-and with it anywhere on the stack, `total`: `41.6% self  68.2% total ·
-unit.rt_text_append_owner`), and the trace holds them as the
-`functions` receipt section (type `JetPerfFunctions`), which `jet perf
-view` shows. A hung `jet check` or `jet debug` started plainly is profiled
+processes=2 threads=35 window_ms=1000 lost=0 unnamed=N`), then how far each
+sample's stack was unwound (`stacks unwound=990 cut=9 broken=4`: to `main`
+or a thread's or a task's first function, cut at the kernel's frame limit
+`/proc/sys/kernel/perf_event_max_stack`, or broken where a frame pointer
+was lost), then a line a function, its share of the samples whose
+innermost frame it is, `self`, and with it anywhere on the stack, `total`,
+and its declaration's file and line when its image's `.debug_jetline` names
+them: `41.6% self  68.2% total · Statements.sema_stmt_check at
+Compiler/JetSema/Source/Statements.jet:212`. When the samples worked for
+more than one package (each sample's innermost frame in a package of the
+program; Core's frames work for their caller's), `cpu by package` follows,
+in the form a run's profile prints it, so an attach to a running compiler
+splits its time by phase (`Compiler/JetSema samples=612 cpu_us=612000
+share=61%`, the samples of no package as `(none)`). The trace holds all of
+it as the `functions` receipt section (type `JetPerfFunctions`), with the
+samples' folded stacks (`stacks`: each stack's functions from the
+outermost, `;` between them, and its samples, a stack under one sample in
+100 folded into its caller's), which `jet perf view` shows, the stacks as
+the flame graph's call tree (`0 main 100.0% ####…`, a line a function,
+depth first and the heaviest call first). A hung `jet check` or `jet debug`
+started plainly is profiled
 this way. When the kernel won't sample it (another user's process, or
 `perf_event_paranoid` above 2), the attach is E2124 with the flag to start
 it with.

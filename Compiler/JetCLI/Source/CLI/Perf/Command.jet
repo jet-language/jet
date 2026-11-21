@@ -1783,7 +1783,8 @@ jet_cli_perf_bar: fn(count: Int) -> String Never! {
     "#".repeat(width)
 }
 
-// `ascii_flame`.
+// `ascii_flame`: a run's first sample and profile rows, an outside
+// attach's call tree (jet_cli_perf_outside_flame) and a browser's samples.
 jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
     rows := [String]{}
     if jet_cli_perf_first_sample(trace) == .Val(sample) {
@@ -1797,6 +1798,9 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
         loop line in jet_cli_perf_flame_profile(profile, jet_cli_perf_sample_us(trace)) {
             rows.push(line)
         }
+    }
+    if jet_cli_perf_outside_section(trace) == .Val(section) {
+        loop line in jet_cli_perf_outside_flame(section) -> rows.push(line)
     }
     if jet_cli_perf_browser_summary(trace) == .Val(browser) {
         rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
@@ -1887,9 +1891,8 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow], interval_us: Int?
             out.push("  line {row.line} samples={row.weight}{jet_cli_perf_cpu_us(cpu, row.weight)}{inclusive}{allocations}{row.events}")
         }
     }
-    // The CPU-time samples by their rows' packages, when the rows span more
-    // than one: the program's parts, as a compiler's phases are its
-    // packages. Heaviest first, at most 12.
+    // The CPU-time samples by their rows' packages: the program's parts, as
+    // a compiler's phases are its packages.
     parts := [{dir: String, weight: Int}]{}
     total := 0
     loop function in functions {
@@ -1905,13 +1908,28 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow], interval_us: Int?
             parts.push({dir: dir, weight: function.weight})
         }
     }
-    if parts.len() > 1 && total > 0 {
-        parts.sort_by(fn(left: {dir: String, weight: Int}, right: {dir: String, weight: Int}) { (right.weight <=> left.weight).then(left.dir <=> right.dir) })
-        out.push("cpu by package")
-        listed: if parts.len() > 12 -> 12 else -> parts.len()
-        loop part in parts[0..<listed] {
-            out.push("  {part.dir} samples={part.weight}{jet_cli_perf_cpu_us(interval_us, part.weight)} share={part.weight * 100 /% total}%")
-        }
+    loop line in jet_cli_perf_package_lines(parts, total, interval_us) -> out.push(line)
+    out
+}
+
+// `cpu by package` and a line for each of `parts` (a package's directory,
+// "" for the samples working for no package, and its CPU-time samples) of
+// the `total` samples, when they span more than one: heaviest first, at
+// most 12, `  Compiler/JetSema samples=612 cpu_us=612000 share=61%`, the
+// samples of no package as `(none)`. A sample stands for `interval_us` of
+// CPU time. Both `jet perf view` profiles print it: a run's rows
+// (jet_cli_perf_flame_profile) and an outside attach's `functions`
+// section (Outside.jet jet_cli_perf_outside_lines).
+jet_cli_perf_package_lines: fn(parts: [{dir: String, weight: Int}], total: Int, interval_us: Int?) -> [String] Never! {
+    out := [String]{}
+    if parts.len() < 2 || total <= 0 -> return out
+    order := parts
+    order.sort_by(fn(left: {dir: String, weight: Int}, right: {dir: String, weight: Int}) { (right.weight <=> left.weight).then(left.dir <=> right.dir) })
+    out.push("cpu by package")
+    listed: if order.len() > 12 -> 12 else -> order.len()
+    loop part in order[0..<listed] {
+        name: if part.dir == "" -> "(none)" else -> part.dir
+        out.push("  {name} samples={part.weight}{jet_cli_perf_cpu_us(interval_us, part.weight)} share={part.weight * 100 /% total}%")
     }
     out
 }
