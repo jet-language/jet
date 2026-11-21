@@ -381,11 +381,19 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             // In fib with no stack.
             4112 | one,
             // The clock record: 4 ms of CPU sampled, 6 microseconds in the
-            // handlers, 1 microsecond for each signal's delivery.
-            (13 << 59) | four,
+            // handlers, 1 microsecond for each signal's delivery, and no
+            // allocations, lost records or rings.
+            (13 << 59) | (11 << 48),
             4000000,
             6000,
             1000,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         },
     )
     sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
@@ -423,7 +431,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
     functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
     four: 4 << 48
-    ten: 10 << 48
+    eleven: 11 << 48
     ended: (13 << 59) | (3 << 48) | 2
     first: 1 << 48
     words: jet_cli_perf_test_words(
@@ -458,8 +466,9 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             // handlers and drains, 1 microsecond for each signal's
             // delivery, no allocations or lost records, then the three
             // samples the drains took from the rings, the kernel's 1.5
-            // microseconds to write them and one stack the kernel cut.
-            (13 << 59) | ten,
+            // microseconds to write them, one stack the kernel cut and no
+            // sample it dropped.
+            (13 << 59) | eleven,
             4000000,
             6000,
             1000,
@@ -469,6 +478,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             3,
             1500,
             1,
+            0,
         },
     )
     sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
@@ -486,7 +496,136 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     // should have kept: sampler 1's 8 periods and sampler 2's 2. Of their
     // 10 ends, sampler 1's 2nd, its 5th to 8th after its last sample and
     // both of sampler 2's fell in kernel mode.
-    assert(profile.reason.contains("; it kept 3 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 7 of their periods ended in kernel mode, where the task clock takes no sample"), profile.reason)
+    assert(profile.reason.contains("; it kept 3 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 7 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 0 were lost in the rings, drained but not kept, and 0 dropped by the kernel, which found no room in a ring"), profile.reason)
+}
+
+// Under load a sampler's timer drifts off the multiples of its period, as
+// each switch back in restarts it with what was left of its period, so two
+// of its samples can round to one multiple, and one timer can run ahead of
+// its count. The ends come from the gaps between consecutive samples, so
+// the samples kept and the ends in kernel mode still make up every end.
+#Test("perf counts a task clock's period ends from the gaps between its samples, so a drifted timer's add up") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    four: 4 << 48
+    eleven: 11 << 48
+    ended: (13 << 59) | (3 << 48) | 2
+    first: 1 << 48
+    second: 2 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Sampler 1's samples, a period apart but 115 microseconds
+            // between its 3rd and 4th, which both round to the 3rd period
+            // end, then three periods to its 5th: two ends with no sample.
+            4112 | four,
+            1000,
+            0,
+            first | 69000,
+            4112 | four,
+            2000,
+            0,
+            first | 189000,
+            4112 | four,
+            3000,
+            0,
+            first | 314000,
+            4112 | four,
+            4000,
+            0,
+            first | 429000,
+            4112 | four,
+            5000,
+            0,
+            first | 804000,
+            // Sampler 2's, whose timer ran ahead of its count: three ends
+            // where its count at its end gives two.
+            4116 | four,
+            1500,
+            0,
+            second | 120000,
+            4116 | four,
+            2500,
+            0,
+            second | 236000,
+            4116 | four,
+            3500,
+            0,
+            second | 352000,
+            // Sampler 1 ends at its 8th period end, with one more in
+            // kernel mode after its last sample; sampler 2 just short of
+            // its 3rd.
+            ended,
+            1,
+            1000000,
+            ended,
+            2,
+            370000,
+            (13 << 59) | eleven,
+            1370000,
+            6000,
+            1000,
+            0,
+            0,
+            0,
+            8,
+            1500,
+            0,
+            0,
+        },
+    )
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
+    assert_eq(sampled.total, U64{8})
+    text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
+    // Sampler 1 reached 8 ends: its 5 samples and 3 in kernel mode, 2
+    // before its last sample and 1 after. Sampler 2 reached 3, each with a
+    // sample.
+    assert(profile.reason.contains("; it kept 8 of the 11 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 3 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 0 were lost"), profile.reason)
+}
+
+// A period end whose sample the file lacks took none, as one in kernel mode
+// did, so the clock record's tallies tell them apart: the samples the
+// drains took from the rings less those kept were lost in the rings, and
+// those the kernel found no room for it dropped.
+#Test("perf counts the samples lost in the rings and those the kernel dropped apart from the period ends in kernel mode") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    four: 4 << 48
+    first: 1 << 48
+    values := [Int]{}
+    // Samples at the 1st, 2nd, 4th, 5th, 7th and 8th of sampler 1's period
+    // ends: the 3rd's was drained and lost, the 6th's the kernel dropped.
+    counts: [Int]{125000, 250000, 500000, 625000, 875000, 1000000}
+    loop index in 0..<counts.len() {
+        values.push(4112 | four)
+        values.push(1000 * (index + 1))
+        values.push(0)
+        values.push(first | counts[index])
+    }
+    // Its end at its 10th, the 9th and 10th in kernel mode; then the clock
+    // record, its rings' 7 samples and the 1 the kernel dropped.
+    values.push((13 << 59) | (3 << 48) | 2)
+    values.push(1)
+    values.push(1250000)
+    values.push((13 << 59) | (11 << 48))
+    values.push(1250000)
+    values.push(6000)
+    values.push(1000)
+    values.push(0)
+    values.push(0)
+    values.push(1)
+    values.push(7)
+    values.push(1500)
+    values.push(0)
+    values.push(1)
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
+    sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
+    assert_eq(sampled.total, U64{6})
+    text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
+    // 10 ends: 6 samples kept, 2 in kernel mode, 1 lost and 1 dropped.
+    assert(profile.reason.contains("; it kept 6 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 2 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 1 were lost in the rings, drained but not kept, and 1 dropped by the kernel, which found no room in a ring"), profile.reason)
 }
 
 // A sample in a generated entry's own code counts outside the source, by
@@ -544,7 +683,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(flight.records_lost, U64{9})
     assert_eq(flight.total, U64{0})
     assert(flight.cost == None)
-    file: jet_cli_perf_test_words([Int]{clock | (7 << 48), 4000000, 6000, 1000, 0, 0, 3})
+    file: jet_cli_perf_test_words([Int]{clock | (11 << 48), 4000000, 6000, 1000, 0, 0, 3, 0, 0, 0, 0})
     run: jet_cli_perf_samples_count(X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, file, 0)
     assert_eq(run.records_lost, U64{3})
     assert(run.cost != None)

@@ -293,11 +293,19 @@ replay_spawned: fn(control: I64) {
 }
 
 // A replay's turn for the running task's next event, `kind`'s family on
-// `object`: waits until the log's next turn names the task, then checks the
-// recorded event and answers its kind, the ticket replay_give takes. -1
-// outside a replay or a task with a replay id: nothing to give back.
-replay_take: fn(kind: I64, object: I64) -> I64 {
+// `object` (replay_take_turn): the ticket replay_give takes, -1 outside a
+// replay. The record and replay hooks a print, a lock or a channel calls
+// are each inlined on every tier, so a run that neither records nor replays
+// pays one flag test per hook and no call.
+#Inline(Always) replay_take: fn(kind: I64, object: I64) -> I64 {
     if (replay_mode != REPLAY_REPLAY) { return I64{-1} }
+    replay_take_turn(kind, object)
+}
+
+// replay_take under a replay: waits until the log's next turn names the
+// task, then checks the recorded event and answers its kind. -1 for a task
+// with no replay id: nothing to give back.
+replay_take_turn: fn(kind: I64, object: I64) -> I64 {
     id: replay_task(scheduler_control_current())
     if (id == I64{0}) { return I64{-1} }
     count: replay_count()
@@ -349,7 +357,7 @@ replay_recorded: fn(at: I64) -> I64 {
 }
 
 // Passes the turn a replay_take ticket holds on.
-replay_give: fn(ticket: I64) {
+#Inline(Always) replay_give: fn(ticket: I64) {
     if (ticket < I64{0}) {
         return
     }
@@ -358,11 +366,16 @@ replay_give: fn(ticket: I64) {
 }
 
 // A recording's event of the running task, `kind` on `object`, logged where
-// the operation completes, inside the lock that orders it.
-replay_log: fn(kind: I64, object: I64) {
+// the operation completes, inside the lock that orders it
+// (replay_log_event).
+#Inline(Always) replay_log: fn(kind: I64, object: I64) {
     if (replay_mode != REPLAY_RECORD) {
         return
     }
+    replay_log_event(kind, object)
+}
+
+replay_log_event: fn(kind: I64, object: I64) {
     id: replay_task(scheduler_control_current())
     if (id != I64{0}) { replay_append(id, kind, object, I64{0}) }
 }
@@ -381,11 +394,16 @@ replay_output_hash: fn(bytes: I64, length: I64, line: Bool) -> I64 {
 }
 
 // A recording's print or eprint (`kind`) of `length` bytes at `bytes` and
-// an LF when `line`: its hash and length, logged where the write completes.
-replay_output_log: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
+// an LF when `line`: its hash and length, logged where the write completes
+// (replay_output_record).
+#Inline(Always) replay_output_log: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
     if (replay_mode != REPLAY_RECORD) {
         return
     }
+    replay_output_record(kind, bytes, length, line)
+}
+
+replay_output_record: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
     id: replay_task(scheduler_control_current())
     if (id != I64{0}) {
         replay_append(id, kind, replay_output_hash(bytes, length, line), if line -> wrapping(length + I64{1}) else -> length)
@@ -394,11 +412,15 @@ replay_output_log: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
 
 // A replay's print or eprint, holding the turn `ticket` before it writes:
 // text other than the recorded text is the first divergence, so it stops the
-// run before it is written.
-replay_output_check: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
+// run before it is written (replay_output_verify).
+#Inline(Always) replay_output_check: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
     if (ticket < I64{0}) {
         return
     }
+    replay_output_verify(ticket, kind, bytes, length, line)
+}
+
+replay_output_verify: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
     written: if line -> wrapping(length + I64{1}) else -> length
     if (replay_recorded(I64{24}) == written && replay_recorded(I64{16}) == replay_output_hash(bytes, length, line)) {
         return

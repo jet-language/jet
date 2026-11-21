@@ -362,18 +362,21 @@ perf_samples_buffer := I64{0}
 // The rings' tallies, words of the record buffer after the lost records'
 // (perf_samples_tally): the samples the drains took from the rings
 // (perf_samples_ring_sample), the picoseconds the kernel took to write
-// them (perf_precise_cost) and how many of them the kernel's callchain cut
-// at perf_precise_depth entries.
+// them (perf_precise_cost), how many of them the kernel's callchain cut
+// at perf_precise_depth entries, and the samples the kernel dropped,
+// finding no room in a ring (PERF_RECORD_LOST).
 PERF_SAMPLES_RING_COUNT: I64{3}
 
 PERF_SAMPLES_RING_PS: I64{4}
 
 PERF_SAMPLES_RING_CUT: I64{5}
 
+PERF_SAMPLES_RING_DROPPED: I64{6}
+
 // The words of the record buffer past its PERF_SAMPLES_DEPTH + 1 and its
 // counters' slots: the handlers' nanoseconds, the blocked lock waits, the
-// lost records and the rings' three tallies.
-PERF_SAMPLES_TALLIES: I64{6}
+// lost records and the rings' four tallies.
+PERF_SAMPLES_TALLIES: I64{7}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
 // start could not map them; the process's CPU time in nanoseconds when
@@ -1902,8 +1905,9 @@ perf_samples_put: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64, period
 // runs (perf_samples_task_of), 0 for none; the samples the kernel found no
 // room for (PERF_RECORD_LOST, type 2, its count after its id) count as
 // lost records. The rings' tallies (PERF_SAMPLES_RING_COUNT) add the
-// drained samples, the kernel's time for them and those the kernel's
-// callchain cut. Each tail store frees what the drain read for the kernel.
+// drained samples, the kernel's time for them, those the kernel's
+// callchain cut and those it dropped. Each tail store frees what the drain
+// read for the kernel.
 perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
     fd: perf_samples_fd
     lock: wrapping(ring + PERF_PRECISE_LOCK)
@@ -1917,6 +1921,7 @@ perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
     samples := I64{0}
     entries := I64{0}
     cut := I64{0}
+    dropped := I64{0}
     tail := rt_text_word(wrapping(ring + I64{1032}))
     filled := sync_load(wrapping(ring + I64{1024}))
     loop tail != filled {
@@ -1935,10 +1940,10 @@ perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
                 entries = wrapping(entries + chain)
                 if (wrapping(chain - I64{1}) >= perf_precise_depth) { cut = wrapping(cut + I64{1}) }
             } else if (kind == I64{2}) {
+                count: perf_samples_ring_word(data, wrapping(tail + I64{16}))
+                dropped = wrapping(dropped + count)
                 lost: perf_samples_lost_word()
-                if (lost != I64{0}) {
-                    _ := sync_add(lost, perf_samples_ring_word(data, wrapping(tail + I64{16})))
-                }
+                if (lost != I64{0}) { _ := sync_add(lost, count) }
             }
             tail = wrapping(tail + size)
         }
@@ -1953,6 +1958,9 @@ perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
         cost: wrapping(wrapping(samples * sync_load(wrapping(rings + PERF_PRECISE_COST_PS))) + wrapping(entries * sync_load(wrapping(rings + PERF_PRECISE_FRAME_PS))))
         _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS), cost)
         if (cut != I64{0}) { _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT), cut) }
+    }
+    if (buffer != I64{0} && dropped != I64{0}) {
+        _ := sync_add(perf_samples_tally(buffer, PERF_SAMPLES_RING_DROPPED), dropped)
     }
 }
 
@@ -2512,9 +2520,10 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // (perf_samples_alloc_write), then the records the program made and could
 // not write (perf_samples_lost), then the samples the drains took from the
 // kernel's rings, the kernel's nanoseconds for them as the start timed it
-// (perf_precise_cost) and those whose callchain the kernel cut at
-// perf_precise_depth entries (PERF_SAMPLES_RING_COUNT), all 0 under the
-// timer. A second exit writes a later one. Under the alloc lens the heap
+// (perf_precise_cost), those whose callchain the kernel cut at
+// perf_precise_depth entries and those the kernel dropped, finding no room
+// in a ring (PERF_SAMPLES_RING_COUNT), all 0 under the timer: eleven
+// words. A second exit writes a later one. Under the alloc lens the heap
 // snapshot named `exit` comes first (perf_samples_heap), then the
 // allocations' records. An attach's zones window still open closes first
 // (perf_flight_window_end), so the clock record goes to the record socket.
@@ -2539,10 +2548,10 @@ perf_samples_exit: fn() {
     perf_system_exit()
     perf_samples_heap(rt_static_text("exit"))
     buffer: perf_samples_buffer
-    record: jet_rt_alloc(I64{80}, I64{8})
-    thread_zero(record, I64{80})
+    record: jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(record, I64{88})
     perf_samples_alloc_write(fd, wrapping(record + I64{32}))
-    rt_text_store(record, (I64{10} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(record, (I64{11} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
     rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
     rt_text_store(wrapping(record + I64{48}), perf_samples_lost())
@@ -2551,9 +2560,10 @@ perf_samples_exit: fn() {
         rt_text_store(wrapping(record + I64{56}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_COUNT)))
         rt_text_store(wrapping(record + I64{64}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_PS)) / I64{1000})
         rt_text_store(wrapping(record + I64{72}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_CUT)))
+        rt_text_store(wrapping(record + I64{80}), sync_load(perf_samples_tally(buffer, PERF_SAMPLES_RING_DROPPED)))
     }
-    perf_samples_send(fd, record, I64{80})
-    jet_rt_free(record, I64{80}, I64{8})
+    perf_samples_send(fd, record, I64{88})
+    jet_rt_free(record, I64{88}, I64{8})
     perf_topdown_exit()
 }
 

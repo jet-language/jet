@@ -202,12 +202,23 @@ Under the task clock that count is the task clocks' own, from each
 sampler's count at its end: the CPU time each thread ran while sampled,
 over the period, so the runtime's start and exit outside the samplers give
 none. A period end that falls in kernel mode takes no sample, and the
-samples' own counts find each one: an end that no sample's count rounds
-to, before a thread's first sample, between two of its samples or after its
-last (`it kept 392 of the 400 samples that 50 ms of CPU time on the threads'
-task clocks while sampled gives; 8 of their periods ended in kernel mode,
-where the task clock takes no sample`). Under another sampler it is the
-process's CPU time over the sampling interval.
+samples' own counts find each one. The kernel forwards a thread's timer by
+whole periods from the end it last reached, so two consecutive samples'
+counts lie whole periods apart and the ends between them took none, as did
+those before a thread's first sample and after its last. A count is no
+fixed multiple of the period: each switch back in restarts the timer with
+what was left of its period, so the ends are counted gap by gap, and a
+thread whose timer ran ahead of its count adds the ends it reached. An end
+whose sample was lost took none either, and the exit's clock record tells
+those apart: the samples the drains took from the threads' rings, less those
+the session kept, were lost in the rings, and those the kernel found no room
+for in a ring (`PERF_RECORD_LOST`) it dropped. The ends in kernel mode are
+the rest (`it kept 392 of the 400 samples that 50 ms of CPU time on the
+threads' task clocks while sampled gives; 8 of their periods ended in kernel
+mode, where the task clock takes no sample; of their samples, 0 were lost in
+the rings, drained but not kept, and 0 dropped by the kernel, which found no
+room in a ring`). Under another sampler it is the process's CPU time over
+the sampling interval.
 The
 profile's overhead is `measured`: `overhead_ns` is the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
@@ -1040,10 +1051,15 @@ machine has a CPU free for it; under load the same window holds fewer
 samples and as much less CPU.
 
 No record is lost silently. The runtime counts each record a write refused,
+and each sample the kernel dropped for want of room in a thread's ring,
 and whenever the count grew the writer keeps a tally record in the ring (a
 clock record, kind 13, with 1 for its address: the count, then 1 once the
-run ended); the clock record a `jet perf run` exit writes carries the count
-as its seventh word. `jet perf attach` prints `Records lost: <n>; <why>`
+run ended). The clock record a `jet perf run` exit writes is eleven words:
+its head, the CPU time sampled, the handlers' and drains' time, one
+signal's delivery, the alloc lens's allocations and their time, the count,
+then the samples the drains took from the rings, the kernel's time to
+write them, the stacks the kernel cut and the samples it dropped.
+`jet perf attach` prints `Records lost: <n>; <why>`
 before the trace's path, and the trace of an attach or a run that lost
 records holds the `records` receipt section (type `JetPerfRecords`): `lost`
 and `reason`. Tests/Cases/Perf/flight_ring_counts_lost_records.case is the
