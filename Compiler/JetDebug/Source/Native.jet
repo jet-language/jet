@@ -515,11 +515,16 @@ NativeSession: struct {
     trace: X64Trace,
     output_path: String,
     output_read: Int,
-    // The file the program reads as its standard input, from the start of
-    // each run: `/dev/stdin` keeps the debugger's own (a terminal both
-    // share, the program reading while it runs and the console while it
-    // stops).
+    // The file the program reads as its standard input, opened again at
+    // the start of each run: the file `jet debug --stdin` or an editor's
+    // launch `stdin` names, or `/dev/stdin`, the debugger's own (a terminal
+    // both share, the program reading while it runs and the console while
+    // it stops).
     input_path: String{"/dev/null"},
+    // A line the console's answer to a command it doesn't know ends with
+    // ("" for none): `jet debug` says there how to give the program input
+    // when the console's own carries its commands.
+    unknown_note: String{""},
     // Whether the program has been launched or attached to; while it runs,
     // its trace has a pid, and the trace's thread is the one the last stop
     // is in. An `attached` program ran before the session and goes on
@@ -2598,7 +2603,7 @@ NativeSession: struct {
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n"
+            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}"
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }

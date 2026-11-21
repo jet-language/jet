@@ -4,7 +4,8 @@
 // stdin; each response and event is one on stdout. The adapter drives the
 // NativeSession the `(Jet)` console drives, loaded before the first request,
 // so `setBreakpoints` is verified against the image's line table at once.
-// `launch` takes `stopOnEntry` and `args`; the program runs from
+// `launch` takes `stopOnEntry`, `args` and `stdin`, the file the program
+// reads as its standard input (JetCLIDap.stdin_of); the program runs from
 // `configurationDone`. `attach` takes `processId`, and `program` when the
 // editor names the image that process must run: the session seizes that
 // running program, built at O0, where it is, and `configurationDone`
@@ -25,7 +26,7 @@
 // the next stop;
 // any other request is answered with the program stopped, which then runs
 // on. `restart` takes the launch
-// configuration's `stopOnEntry` and `args` again; an attached program does
+// configuration's `stopOnEntry`, `args` and `stdin` again; an attached program does
 // not restart. Each task of the program is a thread, by its task id as the
 // console's `tasks` lists it, named by its label, its id and its state; the
 // `stopped` event names the task the stop is in, which a step steps and
@@ -89,7 +90,7 @@ use {
     dap_json: core.encoding.json
     dap_term: core.term
     jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeListedRow, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_listing_bytes, native_listing_window, native_lookup]
-    jet_foundation.[DeepChecks, Diagnostic, MODULE_CORE_PREFIX, foundation_json_integer, foundation_json_quote]
+    jet_foundation.[DeepChecks, Diagnostic, MODULE_CORE_PREFIX, diagnostic_from_registry, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -190,6 +191,7 @@ JetCLIDap: struct {
                 self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true,\"supportsDisassembleRequest\":true{back}}}")
             }
             "launch" -> {
+                session.input_path = self.stdin_of(request, request.arguments) ?? return
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
                 self.args = jet_cli_dap_texts_of(request.arguments.move(), "args")
                 request.arguments = [{key: String, value: Dyn}]{}
@@ -234,6 +236,7 @@ JetCLIDap: struct {
                 config := jet_cli_dap_object_of(request.arguments.move(), "arguments")
                 request.arguments = [{key: String, value: Dyn}]{}
                 if config.len() > 0 {
+                    session.input_path = self.stdin_of(request, config) ?? return
                     self.stop_on_entry = jet_cli_dap_bool(config, "stopOnEntry")
                     self.args = jet_cli_dap_texts_of(config.move(), "args")
                 }
@@ -921,6 +924,34 @@ JetCLIDap: struct {
     fail: fn(&self, request: JetCLIDapRequest, message: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":{foundation_json_quote(message)}}}")
+    }
+
+    // The file the launch configuration `members` names in `stdin`, which
+    // the program reads as its standard input from the start of each run,
+    // as `jet debug --stdin=FILE` gives it; `/dev/null` without one, so the
+    // program's reads end at once. None once `request` is refused: a
+    // `stdin` that is no path is E2236, a file that can't be read E2105,
+    // and the adapter's own stdin, which carries the protocol, E2102.
+    stdin_of: fn(&self, request: JetCLIDapRequest, members: [{key: String, value: Dyn}]) -[FS, IO, Time.Wait]> String? {
+        loop member in members {
+            if member.key != "stdin" -> next
+            path := ""
+            if member.value == .Text(text) -> path = text
+            if path == "" {
+                self.refuse(request, NATIVE_ATTACH_INVALID, "field stdin must be the path of the file the program reads")
+                return None
+            }
+            if !dap_files.can_read(path) {
+                self.refuse_with(request, diagnostic_from_registry("E2105", None, "couldn't open `{path}`, the program's standard input", jet_cli_why("E2105"), "name a readable file in the launch configuration's `stdin`, or drop it"))
+                return None
+            }
+            if dap_files.samefile(path, "/dev/stdin") ?? false {
+                self.refuse_with(request, diagnostic_from_registry("E2102", None, "`stdin` names the adapter's own stdin, which carries the protocol", jet_cli_why("E2102"), "name another file in the launch configuration's `stdin`"))
+                return None
+            }
+            return Val(path)
+        }
+        Val("/dev/null")
     }
 
     // `request`, refused with the registered diagnostic `code` and its
