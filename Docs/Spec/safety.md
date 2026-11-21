@@ -4402,21 +4402,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 158,
+      "line": 176,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 193,
+      "line": 211,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 237,
+      "line": 255,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
@@ -4871,70 +4871,70 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 201,
+      "line": 207,
       "column": 5,
       "reason": "base points into the kernel's vDSO image, mapped readable for the process lifetime"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 225,
+      "line": 231,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same resolved address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 231,
+      "line": 237,
       "column": 9,
       "reason": "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 239,
+      "line": 245,
       "column": 9,
       "reason": "clock_gettime writes the caller's two timespec words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 247,
+      "line": 253,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 256,
+      "line": 262,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 300,
+      "line": 306,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 344,
+      "line": 350,
       "column": 5,
       "reason": "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 361,
+      "line": 367,
       "column": 5,
       "reason": "an elided section: only this thread has written the lock word and the count since sync_sole_enter"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Sync.jet",
-      "line": 375,
+      "line": 381,
       "column": 5,
       "reason": "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0"
     },
@@ -12342,9 +12342,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 81:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 245:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 158:5 | "the observation start runs on the main thread before any task" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 193:5 | "the observation start runs on the main thread before any task" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 237:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 176:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 211:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 255:5 | "the observation start runs on the main thread before any task" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 99:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 369:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 36:5 | "runtime-init runs before any other thread exists" |
@@ -12409,16 +12409,16 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 65:5 | "futex wake borrows a live aligned word and retains no pointer" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 88:5 | "futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 104:5 | "futex borrows a live aligned word and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 201:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 225:9 | "an idempotent install: every writer stores the same resolved address" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 231:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 239:9 | "clock_gettime writes the caller's two timespec words" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 247:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 256:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 300:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 344:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 361:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
-| Compiler | Compiler/JetRuntime/Source/Sync.jet | 375:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 207:5 | "base points into the kernel's vDSO image, mapped readable for the process lifetime" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 231:9 | "an idempotent install: every writer stores the same resolved address" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 237:9 | "the vDSO's clock_gettime(clockid_t, struct timespec *) writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 245:9 | "clock_gettime writes the caller's two timespec words" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 253:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 262:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 306:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 350:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 367:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
+| Compiler | Compiler/JetRuntime/Source/Sync.jet | 381:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
 | Compiler | Compiler/JetRuntime/Source/Task.jet | 774:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 26:5 | "runtime-init runs before any other thread exists" |
