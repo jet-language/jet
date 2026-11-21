@@ -225,6 +225,26 @@ scheduler_test_idle_claims: fn(sleeper: I64) {
         at += I64{1}
     }
     scheduler_test_require(sync_load(log) == I64{10000} && sync_load(log + I64{8}) == I64{10000})
+    // A group's join returns once its task published its outcome, which may
+    // be before the task's carrier, back on its own stack, counts it off the
+    // running work. A quiesce right after waits that carrier out: it joins
+    // the threads every round and never refuses.
+    quiesce_log: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(quiesce_log, I64{24})
+    round := I64{0}
+    loop round < (I64{1000}) {
+        group: jet_rt_native_task_group_new()
+        label: scheduler_text_new(I64{0})
+        child: jet_rt_native_group_spawn(group, I64{1}, label, scheduler_test_env(quiesce_log, I64{0}, round), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+        jet_rt_string_drop(label)
+        scheduler_test_require(jet_rt_native_task_join(child, I64{0}, out) == I64{1})
+        scheduler_test_require(sync_load(out) == round)
+        jet_rt_handle_drop_jet_task_group(group)
+        scheduler_test_require(jet_rt_scheduler_shutdown() >= I64{0})
+        round += I64{1}
+    }
+    scheduler_test_require(sync_load(quiesce_log) == I64{1000} && sync_load(quiesce_log + I64{8}) == I64{1000})
+    jet_rt_free(quiesce_log, I64{24}, I64{8})
     // An ordinary cancel is a request; neither poll nor propagate delivers it.
     scheduler_control_cancel(root)
     scheduler_test_require(jet_scheduler_native_poll() == I64{0} && jet_rt_session_propagate() == I64{0})

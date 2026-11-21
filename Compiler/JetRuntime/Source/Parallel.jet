@@ -74,6 +74,7 @@ parallel_worker_run: fn(worker: I64) {
 parallel_job_run: fn(worker: I64) {
     parallel_worker_run(worker)
     join: sync_load(wrapping(worker + I64{72}))
+    scheduler_job_settled()
     if (sync_add(join, I64{-1}) == I64{1}) { sync_wake(join, I64{1}) }
 }
 

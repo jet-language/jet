@@ -1253,12 +1253,12 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler280: lock0 FIFOhead8/tail16 idleHead24 watch32 live40 parked48
+// Scheduler288: lock0 FIFOhead8/tail16 idleHead24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
 // blocked208 monitorArmed216 monitor224 sizedPools232 liveLock240
-// liveTasks248 queued256 waitLock264 spare272.
+// liveTasks248 queued256 waitLock264 spare272 settled280.
 // waitLock is the mutex under which tasks arm and disarm waits and deliver
 // deadlocks (WaitCycle.jet).
 // liveTasks heads the list of every task state not yet freed, under its own
@@ -1274,6 +1274,12 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // pooled (pool, linked through Fiber next@48, and the sizedPools lists of
 // larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
+// settled counts the live jobs that have run to their end: a task that
+// published its outcome (Task.jet task_run), so its join may have returned,
+// or a parallel worker that counted itself off its walk. The job adds itself
+// atomically, without the lock; the carrier takes it off settled and live
+// together, under the lock, once it is back on its own stack, so settled
+// never exceeds live under the lock.
 // carriers is a word list (scheduler_words) of Carrier96 records {argument0
 // handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56 fiber64 index72
 // wake80 next88}, changed only under the lock; fiber64 is the fiber the
@@ -1323,7 +1329,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
 
-SCHEDULER_ROOT_BYTES: I64{280}
+SCHEDULER_ROOT_BYTES: I64{288}
 
 SCHEDULER_CONTROL_BYTES: I64{232}
 
@@ -2113,6 +2119,7 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
                 sync_store(runs, wrapping(sync_load(runs) + I64{1}))
                 sync_thread_lock(root)
                 sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+                _ := sync_add(wrapping(root + I64{280}), I64{-1})
                 sync_thread_unlock(root)
                 next
             }
@@ -2153,6 +2160,11 @@ scheduler_carrier_retire: fn(root: I64, record: I64) {
 scheduler_run_job: fn(job: I64) {
     if (sync_load(job) == PARALLEL_JOB) { parallel_job_run(job) } else { task_run(job) }
 }
+
+// The running job has run to its end (settled280): called by the job itself,
+// before anything a waiter on it can see, so a waiter that returns finds it
+// settled. Its carrier takes it off settled and live together.
+scheduler_job_settled: fn() { _ := sync_add(wrapping(scheduler_root + I64{280}), I64{1}) }
 
 // The stack size a job's fiber takes (Fiber.jet fiber_stack_class): a
 // parallel worker's stack136, a task state's stack96.
@@ -2360,7 +2372,12 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
 // every scheduler thread this process started (the carriers, the timer and
 // monitor threads), so the caller is the process's only scheduler thread. 0
 // when none was ever started; otherwise the joined thread count. -1, with
-// nothing stopped, while a task is queued or running or a timer is pending.
+// nothing stopped, while a task is queued or still running its body, or a
+// timer is pending. A job that has run to its end (settled280) is waited
+// for, not refused: its join may return before its carrier, back on its own
+// stack, counts it off live, and that last step needs only the lock this
+// wait releases between its checks. So a quiesce right after a group joined
+// its tasks succeeds, under any load.
 // The caller guarantees no other thread submits work concurrently. The pool,
 // the timer and the monitor restart lazily on the next use; pooled fibers
 // stay for it.
@@ -2371,9 +2388,16 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
         _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
     }
     sync_thread_lock(root)
-    if (sync_load(wrapping(root + I64{256})) != I64{0} || sync_load(wrapping(root + I64{40})) != I64{0}) {
+    loop {
+        live: sync_load(wrapping(root + I64{40}))
+        if (sync_load(wrapping(root + I64{256})) != I64{0} || live != sync_load(wrapping(root + I64{280}))) {
+            sync_thread_unlock(root)
+            return I64{-1}
+        }
+        if (live == I64{0}) { break }
         sync_thread_unlock(root)
-        return I64{-1}
+        fiber_spin_yield()
+        sync_thread_lock(root)
     }
     timer: scheduler_timer_shutdown(root)
     if (timer < I64{0}) {
