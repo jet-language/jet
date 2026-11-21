@@ -182,10 +182,10 @@ static void physical_owner(void) {
     assert(*(W *)jet_rt_shared_guard_root_ptr(guard) == 37);
     jet_rt_shared_guard_drop(guard);
     assert(atomic_load(&drops) == 1);
-    assert(jet_rt_program_allocator_fact(2) == base + 96);
+    assert(jet_rt_program_allocator_fact(2) == base + 104);
     assert(!jet_rt_native_shared_weak_upgrade(weak, (W)&untouched) && untouched == 123);
     jet_rt_shared_pin_drop(pin);
-    assert(jet_rt_program_allocator_fact(2) == base + 96);
+    assert(jet_rt_program_allocator_fact(2) == base + 104);
     jet_rt_native_shared_weak_drop(weak);
     assert(jet_rt_program_allocator_fact(2) == base);
     jet_rt_program_allocator_restore(0, 0);
