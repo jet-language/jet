@@ -124,6 +124,24 @@ REPLAY_SELECT_CLOSED: I64{-2}
 // takes none from a replay.
 replay_mode := I64{0}
 
+// A replay's turn (jet_rt_replay_take_turn) and output check
+// (jet_rt_replay_output_verify) as code words, which replay_replay_start
+// installs before it sets the mode. 0 in a run that never replays, and a
+// program with no observation start links neither: a plain owned main's
+// print allocates nothing (JetIR EntryOwned.jet).
+replay_turn_code := I64{0}
+
+replay_verify_code := I64{0}
+
+// RuntimeLower resolves these checked function-address entries, never the bodies.
+rt_replay_take_turn_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+rt_replay_output_verify_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // State64: turn0, events8, eventCount16 (a replay's), data24, dataUsed32 (a
 // recording's cursor, a replay's length), path40 (a recording's text),
 // stopped48 (the first divergence's claim), exited56.
@@ -235,6 +253,8 @@ replay_replay_start: fn(path: I64) {
     sync_store(wrapping(root + I64{32}), bytes)
     jet_rt_string_drop(path)
     #Unsafe("the observation start runs on the main thread before any task") {
+        replay_turn_code = rt_replay_take_turn_address()
+        replay_verify_code = rt_replay_output_verify_address()
         replay_root = root
         replay_mode = REPLAY_REPLAY
     }
@@ -293,19 +313,19 @@ replay_spawned: fn(control: I64) {
 }
 
 // A replay's turn for the running task's next event, `kind`'s family on
-// `object` (replay_take_turn): the ticket replay_give takes, -1 outside a
-// replay. The record and replay hooks a print, a lock or a channel calls
-// are each inlined on every tier, so a run that neither records nor replays
-// pays one flag test per hook and no call.
+// `object` (jet_rt_replay_take_turn): the ticket replay_give takes, -1
+// outside a replay. The record and replay hooks a print, a lock or a
+// channel calls are each inlined on every tier, so a run that neither
+// records nor replays pays one flag test per hook and no call.
 #Inline(Always) replay_take: fn(kind: I64, object: I64) -> I64 {
     if (replay_mode != REPLAY_REPLAY) { return I64{-1} }
-    replay_take_turn(kind, object)
+    coll_call2(replay_turn_code, kind, object)
 }
 
 // replay_take under a replay: waits until the log's next turn names the
 // task, then checks the recorded event and answers its kind. -1 for a task
 // with no replay id: nothing to give back.
-replay_take_turn: fn(kind: I64, object: I64) -> I64 {
+#Export(c) priv jet_rt_replay_take_turn: fn(kind: I64, object: I64) -> I64 {
     id: replay_task(scheduler_control_current())
     if (id == I64{0}) { return I64{-1} }
     count: replay_count()
@@ -412,22 +432,22 @@ replay_output_record: fn(kind: I64, bytes: I64, length: I64, line: Bool) {
 
 // A replay's print or eprint, holding the turn `ticket` before it writes:
 // text other than the recorded text is the first divergence, so it stops the
-// run before it is written (replay_output_verify).
+// run before it is written (jet_rt_replay_output_verify).
 #Inline(Always) replay_output_check: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
     if (ticket < I64{0}) {
         return
     }
-    replay_output_verify(ticket, kind, bytes, length, line)
+    _ := coll_call5(replay_verify_code, ticket, kind, bytes, length, if line -> I64{1} else -> I64{0})
 }
 
-replay_output_verify: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: Bool) {
-    written: if line -> wrapping(length + I64{1}) else -> length
-    if (replay_recorded(I64{24}) == written && replay_recorded(I64{16}) == replay_output_hash(bytes, length, line)) {
-        return
+// `line` is 1 when the text ends in print's LF; the answer is always 0.
+#Export(c) priv jet_rt_replay_output_verify: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: I64) -> I64 {
+    ended: line != I64{0}
+    written: if ended -> wrapping(length + I64{1}) else -> length
+    if (replay_recorded(I64{24}) == written && replay_recorded(I64{16}) == replay_output_hash(bytes, length, ended)) {
+        return I64{0}
     }
-    if !replay_claim() {
-        return
-    }
+    if !replay_claim() -> return I64{0}
     message: replay_head(sync_load(replay_root))
     replay_push(message, rt_static_text(", got "))
     replay_push_event(message, kind, I64{0})
@@ -436,6 +456,7 @@ replay_output_verify: fn(ticket: I64, kind: I64, bytes: I64, length: I64, line: 
     replay_push(message, rt_static_text(" other bytes by "))
     replay_push_task(message, replay_task(scheduler_control_current()))
     replay_finish(message)
+    I64{0}
 }
 
 replay_append: fn(task: I64, kind: I64, object: I64, extra: I64) {

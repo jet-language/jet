@@ -1,12 +1,12 @@
-// Prints 3000 lines of 1024 bytes, the LF included, so the 8192-byte stdout
-// buffer writes out whole after every eighth: each write is this print's,
+// Prints 3072 lines of 1024 bytes, the LF included, so the 65536-byte stdout
+// buffer writes out whole after every 64th: each write is this print's,
 // and none is pending after the last. Then prints how many writes the
 // process has made, /proc/self/io's syscw, which the exit writes out.
 use files: core.files
 
 run: fn() {
     line: "x".repeat(1023)
-    loop _ in 0..<3000 -> print(line)
+    loop _ in 0..<3072 -> print(line)
     io: files.read("/proc/self/io") ?? panic("/proc/self/io: {err}")
     writes: io.split("syscw: ").to_list()[1].split("\n").to_list()[0]
     print("syscw {writes}")

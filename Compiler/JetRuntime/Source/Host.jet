@@ -3,8 +3,17 @@
 // All state is protected by the same lock, including the cached TTY fact.
 // The runtime object's init/fini arrays own startup and normal-exit draining.
 // Layout: lock @0, stdout length @8, TTY @16, ioctl scratch @32,
-// 8192 stdout bytes @128. The mapping is process-lifetime runtime metadata.
+// HOST_STDOUT_BYTES stdout bytes @128. The mapping is process-lifetime
+// runtime metadata.
 host_root := I64{0}
+
+// The stdout buffer's bytes: a file or pipe is written 64 KiB at a time, a
+// terminal at each LF (host_stdout_write).
+HOST_STDOUT_BYTES: I64{65536}
+
+// The host root's mapping: its words, then the buffer at 128, in whole
+// pages.
+HOST_ROOT_BYTES: I64{69632}
 
 // runtime-init: 1 when host_root
 #Export(c) jet_rt_host_init: fn() {
@@ -13,7 +22,7 @@ host_root := I64{0}
     }
     // Runtime startup owns a fresh anonymous mapping before any program thread
     // exists.
-    root: alloc_map(I64{12288}, I64{12288})
+    root: alloc_map(HOST_ROOT_BYTES, HOST_ROOT_BYTES)
     // TCGETS identifies the stream once; any failure means non-terminal.
     tty := I64{0}
     #Unsafe("TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer") {
@@ -140,11 +149,11 @@ host_stdout_flush_locked: fn() -> I64 {
 }
 
 // Bytes are borrowed, never copied into an intermediate String/line
-// allocation. They go into the 8192-byte buffer a run at a time (a word copy):
-// a full buffer is written out, and on a terminal so is each run that ends in
-// an LF (line buffering). The output lock is elided while one thread runs
-// (Sync.jet sync_sole_enter). Each write is a sync event of a recording or
-// replay (RecordReplay.jet), logged under the lock.
+// allocation. They go into the HOST_STDOUT_BYTES buffer a run at a time (a
+// word copy): a full buffer is written out, and on a terminal so is each run
+// that ends in an LF (line buffering). The output lock is elided while one
+// thread runs (Sync.jet sync_sole_enter). Each write is a sync event of a
+// recording or replay (RecordReplay.jet), logged under the lock.
 host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     if (host_stdout_direct != I64{0}) {
         if (line) { return host_write_line(I64{1}, bytes, length) }
@@ -160,7 +169,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     pending := rt_text_word(wrapping(host_root + I64{8}))
     tty: rt_text_word(wrapping(host_root + I64{16})) != I64{0}
     loop index < length {
-        room: wrapping(I64{8192} - pending)
+        room: wrapping(HOST_STDOUT_BYTES - pending)
         left: wrapping(length - index)
         run := if (left < room) -> left else -> room
         ends_line := false
@@ -172,7 +181,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
         rt_text_bytes_copy(wrapping(host_root + I64{128} + pending), wrapping(bytes + index), run)
         pending = wrapping(pending + run)
         index = wrapping(index + run)
-        if (pending == I64{8192} || ends_line) {
+        if (pending == HOST_STDOUT_BYTES || ends_line) {
             rt_text_store(wrapping(host_root + I64{8}), pending)
             failure = host_stdout_flush_locked()
             if (failure != I64{0}) { break }
@@ -182,7 +191,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     // print's LF joins the same pass: a full buffer is written out
     // first, and the LF flushes on a terminal or when it fills the buffer.
     if (failure == I64{0} && line) {
-        if (pending == I64{8192}) {
+        if (pending == HOST_STDOUT_BYTES) {
             rt_text_store(wrapping(host_root + I64{8}), pending)
             failure = host_stdout_flush_locked()
             pending = rt_text_word(wrapping(host_root + I64{8}))
@@ -190,7 +199,7 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
         if (failure == I64{0}) {
             rt_text_put(wrapping(host_root + I64{128} + pending), I64{10})
             pending = wrapping(pending + I64{1})
-            if (pending == I64{8192} || tty) {
+            if (pending == HOST_STDOUT_BYTES || tty) {
                 rt_text_store(wrapping(host_root + I64{8}), pending)
                 failure = host_stdout_flush_locked()
                 pending = rt_text_word(wrapping(host_root + I64{8}))

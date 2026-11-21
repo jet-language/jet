@@ -468,7 +468,7 @@ perf_syscalls_fd := I64{-1}
 // over its call that the runtime patches while zones are on
 // (perf_zone_tables_turn); a site of code no table lists tests this word
 // through the runtime's data symbol jet_rt_perf_zones. Either calls
-// jet_perf_zone_open, _open_named and _close only then.
+// jet_perf_zone_open_named and _close only then.
 perf_zones_on := I64{0}
 
 // The rows not yet written to the spans file (perf_zone_row), 0 until the
@@ -3003,13 +3003,8 @@ perf_zones_refused: fn() {
 // 0 otherwise: the time-stamp counter, or the timeline where the counter
 // does not serve (perf_zone_calibrate). A native zone site calls it only
 // while zones are on, so a zone no profiler records costs its site's skip.
-#Export(c) jet_perf_zone_open: fn() -> I64 {
-    jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> perf_zone_edge())
-}
-
-// jet_perf_zone_open for a zone named by the borrowed text `name`. With no
-// process root, the thread also keeps the zone as open
-// (perf_zone_open_push), so the observation's exit step can end it.
+// With no process root, the thread keeps the zone, named by the borrowed
+// text `name`, as open (perf_zone_open_push).
 #Export(c) jet_perf_zone_open_named: fn(name: I64) -> I64 {
     if (perf_zones_on == I64{0}) { return jet_int_owned_from_i64(I64{0}) }
     start: perf_zone_edge()
@@ -3140,10 +3135,10 @@ perf_zone_task: fn() -> I64 {
 }
 
 // The close of the zone named by the borrowed text `name` that opened at
-// `start` (jet_perf_zone_open or _open_named): its record, from `start` to
-// now, in this thread's zone ring (perf_zone_ring_put). A close publishes
-// no stop, so its call is no stop point, and a zone that closes on a stop
-// edge still records. The zone is no longer open (perf_zone_open_drop),
+// `start` (jet_perf_zone_open_named): its record, from `start` to now, in
+// this thread's zone ring (perf_zone_ring_put). A close publishes no stop,
+// so its call is no stop point, and a zone that closes on a stop edge
+// still records. The zone is no longer open (perf_zone_open_drop),
 // recorded or not.
 #Export(c) jet_perf_zone_close: fn(name: I64, start: I64) {
     began: host_native_int(start)
