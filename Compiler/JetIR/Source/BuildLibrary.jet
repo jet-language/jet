@@ -607,12 +607,19 @@ IR_ADDRESS_CALL_PREFIX: "os_call"
 
 // Where a code word comes from, as ir_code_sources traces a slot back: a
 // function's address, the word at offset 0 of module storage (a rail
-// cell, by its data row), a parameter of the function, or anything else.
+// cell), a parameter of the function, or anything else.
 IRCodeSource: enum {
-    Function(id: Int),
-    Cell(data: Int),
-    Param(index: Int),
+    Function,
+    Cell,
+    Param,
     Unknown,
+}
+
+// A code word's origin: its source, and at `at` the function's id, the rail
+// cell's data row or the parameter's index (-1 for Unknown).
+IRCodeOrigin: struct {
+    kind: IRCodeSource,
+    at: Int,
 }
 
 // An IRCodeFlow's role: the code word is called. Any other role is the data
@@ -622,7 +629,7 @@ IR_CODE_CALLED: -1
 // A code word function `function` calls or stores (`role`), from `source`.
 IRCodeFlow: struct {
     function: Int,
-    source: IRCodeSource,
+    source: IRCodeOrigin,
     role: Int,
 }
 
@@ -669,7 +676,8 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
         loop id in 0..<count -> ir_code_flows(m, id, writes[id], uses, name_callees, flows)
         grown := false
         loop flow in flows {
-            if flow.source == .Param(index) {
+            if flow.source.kind == IRCodeSource.Param {
+                index: flow.source.at
                 if !uses[flow.function][index].contains(flow.role) {
                     uses[flow.function][index].push(flow.role)
                     grown = true
@@ -708,20 +716,21 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     called_by := [Int]{}
     called_cells := [Int]{}
     loop flow in flows {
-        if flow.source == {
-            .Function(id) -> {
-                if id < 0 || id >= count -> next
-                if flow.role == IR_CODE_CALLED -> callers[id].push(flow.function) else {
-                    installs[flow.role].push(id)
+        at: flow.source.at
+        if flow.source.kind == {
+            .Function -> {
+                if at < 0 || at >= count -> next
+                if flow.role == IR_CODE_CALLED -> callers[at].push(flow.function) else {
+                    installs[flow.role].push(at)
                 }
             }
-            .Cell(data) -> {
+            .Cell -> {
                 if flow.role == IR_CODE_CALLED {
                     called_by.push(flow.function)
-                    called_cells.push(data)
+                    called_cells.push(at)
                 } else { tainted[flow.role] = true }
             }
-            .Param(_) -> {}
+            .Param -> {}
             .Unknown -> {
                 if flow.role == IR_CODE_CALLED -> roots[flow.function] = true else {
                     tainted[flow.role] = true
@@ -806,26 +815,28 @@ ir_code_cell: fn(f: IRFunction, writes: [[Int]], slot: Int) -> Int Never! {
 // Where the code word slot `slot` of `f` holds can come from, traced back
 // through copies and numeric conversions to each write of it; a parameter
 // is its own source. A constant 0 is no code.
-ir_code_sources: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [IRCodeSource] Never! {
-    found := [IRCodeSource]{}
+ir_code_sources: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [IRCodeOrigin] Never! {
+    found := [IRCodeOrigin]{}
     seen := [Int]{}
     work := [Int]{slot}
     loop {
         at := work.pop() ?? break
         if at < 0 || at >= writes.len() {
-            found.push(IRCodeSource.Unknown)
+            found.push(IRCodeOrigin{kind: IRCodeSource.Unknown, at: -1})
             next
         }
         if seen.contains(at) -> next
         seen.push(at)
-        if at < f.param_count -> found.push(IRCodeSource.Param{index: at})
+        if at < f.param_count -> found.push(IRCodeOrigin{kind: IRCodeSource.Param, at: at})
         loop index in writes[at] {
             op: f.op[index]
             if op == .Copy || op == .Move || op == .Convert -> work.push(f.a[index]) else if op == .FunctionAddress {
-                found.push(IRCodeSource.Function{id: f.a[index]})
+                found.push(IRCodeOrigin{kind: IRCodeSource.Function, at: f.a[index]})
             } else if op == .Load && f.b[index] == 0 && ir_code_cell(f, writes, f.a[index]) >= 0 {
-                found.push(IRCodeSource.Cell{data: ir_code_cell(f, writes, f.a[index])})
-            } else if op != .Const || f.a[index] != 0 { found.push(IRCodeSource.Unknown) }
+                found.push(IRCodeOrigin{kind: IRCodeSource.Cell, at: ir_code_cell(f, writes, f.a[index])})
+            } else if op != .Const || f.a[index] != 0 {
+                found.push(IRCodeOrigin{kind: IRCodeSource.Unknown, at: -1})
+            }
         }
     }
     found
