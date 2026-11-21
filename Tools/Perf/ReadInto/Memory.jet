@@ -191,8 +191,11 @@ counted_run: fn(jet: String, binary: String) -> Counted {
     Counted{allocations: allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
 }
 
+// The program's environment strings sit in its first stack pages, so a
+// larger environment raises its peak. Each run starts the program under
+// `env -i`, with no environment at all, so both twins measure the same.
 peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
-    lines: run_program([String]{"python3", files.join(repo, TIMER), "--", binary}).output.trim().split("\n").to_list()
+    lines: run_program([String]{"python3", files.join(repo, TIMER), "--", "env", "-i", binary}).output.trim().split("\n").to_list()
     sample: json.decode<Sample>(lines[lines.len() - 1]) ?? fail("{binary}: the timer printed no sample: {err}")
     if sample.exit_code != 0 -> fail("{binary} exited {sample.exit_code}")
     printed: run_program([String]{binary}).output
