@@ -18,8 +18,11 @@ use {
 // The CPU time of one thread between two of its samples: a millisecond.
 JET_CLI_PERF_OUTSIDE_PERIOD_NS: 1000000
 
-// How long an outside attach samples.
+// How long an outside attach samples without `--for=`.
 JET_CLI_PERF_OUTSIDE_WINDOW_MS: 1000
+
+// The longest `--for=` window: 10 minutes.
+JET_CLI_PERF_OUTSIDE_LONGEST_MS: 600000
 
 // The functions the `functions` section keeps, the most samples first.
 JET_CLI_PERF_OUTSIDE_ROWS: 32
@@ -160,7 +163,8 @@ JetCLIPerfOutsideTaken: struct {
 // say where their CPU went, as the trace's `functions` receipt section
 // (type `JetPerfFunctions`): the `samples` taken of the `threads` of its
 // `processes`, one each `period_ns` of a thread's CPU time over
-// `window_ms`; the samples the kernel `lost`; those whose innermost frame
+// `window_ms`, or until `pid` exits, `exited_ms` into the window; the
+// samples the kernel `lost`; those whose innermost frame
 // no function of its process's executable holds (`unnamed`); the functions
 // the samples were in, by name, the most samples whose innermost frame is
 // in it (`self`) first, then the most with it anywhere on their stack
@@ -194,32 +198,10 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
     if threads.len() == 0 {
         return Err(jet_cli_read_error("its threads can't be listed under /proc/{pid}/task"))
     }
-    sampler := x64_sampler_open(threads, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
-    sampled: sampler.threads.len()
-    if sampled == 0 {
-        why: if sampler.failure != "" -> "the kernel won't sample it: {sampler.failure}" else -> "it has no thread left to sample"
-        x64_sampler_close(sampler)
-        return Err(jet_cli_read_error(why))
-    }
-    taken := X64Samples{words: [Int]{}, samples: 0, lost: 0}
-    // The window opens once the samplers are open and closes before they
-    // are closed, so the CPU the sampled threads ran in it is the CPU the
-    // samples stand for. Its last drain follows its close, so no sample
-    // taken in it is left in a ring.
-    before: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
-    started: perf_time.instant()
-    // The rings are drained every 20 ms, well before one fills.
-    loop _ in 0..<(window_ms + 19) /% 20 {
-        perf_time.sleep(20ms)
-        x64_sampler_drain(sampler, taken)
-    }
-    after: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
-    window: jet_cli_perf_attach_closed(U64{started.elapsed().ns}, before, after)
-    x64_sampler_drain(sampler, taken)
-    x64_sampler_close(sampler)
     images := [JetCLIPerfOutsideImage]{}
     // Where each process's code is mapped, none when its executable can't
-    // be read.
+    // be read. It is read before the window opens, so a process that exits
+    // in it still names its frames.
     processes := [[JetCLIPerfOutsideRange]]{}
     failure := ""
     loop each in family {
@@ -231,6 +213,34 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         processes.push(mapped)
     }
     if images.len() == 0 -> return Err(jet_cli_read_error(failure))
+    sampler := x64_sampler_open(threads, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
+    sampled: sampler.threads.len()
+    if sampled == 0 {
+        why: if sampler.failure != "" -> "the kernel won't sample it: {sampler.failure}" else -> "it has no thread left to sample"
+        x64_sampler_close(sampler)
+        return Err(jet_cli_read_error(why))
+    }
+    taken := X64Samples{words: [Int]{}, samples: 0, lost: 0}
+    // The window opens once the samplers are open and closes before they
+    // are closed, so the CPU the sampled threads ran in it is the CPU the
+    // samples stand for. Its last drain follows its close, so no sample
+    // taken in it is left in a ring. It closes early when `pid` exits.
+    before: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
+    started: perf_time.instant()
+    exited_ms := Int?{None}
+    // The rings are drained every 20 ms, well before one fills.
+    loop _ in 0..<(window_ms + 19) /% 20 {
+        perf_time.sleep(20ms)
+        x64_sampler_drain(sampler, taken)
+        if jet_cli_perf_outside_exited(pid) {
+            exited_ms = Val(started.elapsed().ns /% 1000000)
+            break
+        }
+    }
+    after: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
+    window: jet_cli_perf_attach_closed(U64{started.elapsed().ns}, before, after)
+    x64_sampler_drain(sampler, taken)
+    x64_sampler_close(sampler)
     rows := [JetCLIPerfOutsideRow]{}
     // Each row's index by its function's name.
     named_rows := [String:Int]{}
@@ -313,6 +323,7 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         [CanonicalJSONField]{
             {key: "broken", value: CanonicalJSON.Integer("{broken}")},
             {key: "cut", value: CanonicalJSON.Integer("{cut}")},
+            {key: "exited_ms", value: if exited_ms == .Val(ms) -> CanonicalJSON.Integer("{ms}") else -> CanonicalJSON.Null},
             {key: "functions", value: CanonicalJSON.Array(functions)},
             {key: "lost", value: CanonicalJSON.Integer("{taken.lost}")},
             {
@@ -348,6 +359,17 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
     )
     section: TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value}
     Ok(JetCLIPerfOutsideTaken{section: section, window: window})
+}
+
+// Whether process `pid` has exited: its /proc entry is gone, or it is a
+// zombie its parent has not reaped yet (state Z or X in /proc/<pid>/stat,
+// the first field after the command's closing parenthesis).
+jet_cli_perf_outside_exited: fn(pid: Int) -[FS.Read]> Bool Never! {
+    stat: perf_files.read("/proc/{pid}/stat") ?? return true
+    close: stat.rfind(")")
+    if close < 0 || close + 3 > stat.len() -> return true
+    state: stat.slice((close + 2)..<(close + 3))
+    state == "Z" || state == "X"
 }
 
 // The CPU the threads `sampled` have run, each of process
@@ -679,7 +701,8 @@ jet_cli_perf_outside_range: fn(ranges: [JetCLIPerfOutsideRange], pc: Int) -> Int
 
 // The `functions` section's lines (jet_cli_perf_outside_sample):
 // `functions samples=1003 processes=2 threads=35 window_ms=1000 lost=0
-// unnamed=241`; how far the stacks were unwound, `stacks unwound=990
+// unnamed=241`; when the process exited in the window, `exited 420 ms
+// into the 3000 ms window`; how far the stacks were unwound, `stacks unwound=990
 // cut=9 broken=4`; then each function it keeps, each share of the
 // samples, and where it is declared when that is known: `  41.6% self
 // 68.2% total · Statements.sema_stmt_check at
@@ -695,6 +718,9 @@ jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
     lost: jet_cli_perf_field_integer(fields, "lost") ?? "0"
     unnamed: jet_cli_perf_field_integer(fields, "unnamed") ?? "0"
     lines.push("functions samples={samples} processes={processes} threads={threads} window_ms={window} lost={lost} unnamed={unnamed}")
+    if jet_cli_perf_field_integer(fields, "exited_ms") == .Val(exited) {
+        lines.push("exited {exited} ms into the {window} ms window")
+    }
     unwound: jet_cli_perf_field_integer(fields, "unwound") ?? "0"
     cut: jet_cli_perf_field_integer(fields, "cut") ?? "0"
     broken: jet_cli_perf_field_integer(fields, "broken") ?? "0"

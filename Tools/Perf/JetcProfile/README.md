@@ -2,24 +2,25 @@
 
 Attach to a running jet; it is never started or restarted:
 ```sh
-jet Tools/Perf/JetcProfile/Live/run.jet -- <pid>
+jet Tools/Perf/JetcProfile/Live/run.jet -- <pid> [<window>]
 ```
-`Live.sh <pid>` is its shell original. `jet perf attach` samples the process,
-and the processes it started (a `jet check`'s compile-time work runs in one),
-from outside it for one second: one sample per millisecond of each thread's
-CPU time, each frame named by the symbol table of its process's executable.
-No `perf`, no `--observe` and no source map is needed.
+`Live.sh <pid> [<window>]` is its shell original. `jet perf attach
+--for=<window>` samples the process, and the processes it started (a `jet
+check`'s compile-time work runs in one), from outside it for the window,
+`500ms` or `20s`, 20 seconds when none is given, or until the process exits:
+one sample per millisecond of each thread's CPU time, each frame named by the
+symbol table of its process's executable. No `perf`, no `--observe` and no
+source map is needed.
 `JET` names the jet that attaches (else the one on PATH), and
 `JET_PROFILE_OUT=/path` overrides the timestamped scratch output directory.
 
 Outputs: `attach.jettrace` and `view.txt`, its `jet perf view`: the samples,
-processes, threads and lost samples, then at most 32 functions, the most
-samples whose innermost frame is in each first (`self`), then the most with it
-anywhere on the stack (`total`), each as a share of the samples.
-
-The attach does not yet give what the perf-based profile did: a window longer
-than one second, each function's declaration file and line, the compiler phase
-of each sample, and folded stacks for a flame graph.
+processes, threads and lost samples; how far the stacks unwound (`stacks
+unwound= cut= broken=`); then at most 32 functions, the most samples whose
+innermost frame is in each first (`self`), then the most with it anywhere on
+the stack (`total`), each as a share of the samples, with its declaration's
+file and line; the samples by package, the compiler's phases (`cpu by
+package`); and the flame graph of the folded stacks.
 
 ## Wall time is not an off-CPU trace
 

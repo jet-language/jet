@@ -968,6 +968,8 @@ program started without `--observe` does, is sampled from outside: `jet perf
 attach <pid>` with no `--source` asks the kernel to sample the CPU time of
 each thread of it and of the processes it started, and theirs (a `jet
 check` runs its compile-time work in one), every millisecond for a second,
+or for the window `--for=<duration>` gives (`--for=20s`; whole `ms` or `s`,
+at most 10 minutes, D-PERF-ATTACH-WINDOW1),
 each sample its frame-pointer call chain, and names the frames by the
 functions of the ELF images of each process's executable: its own, and
 each one it holds as a part, as a jet holds the runtime image its
@@ -997,9 +999,15 @@ depth first and the heaviest call first). A hung `jet check` or `jet debug`
 started plainly is profiled
 this way. When the kernel won't sample it (another user's process, or
 `perf_event_paranoid` above 2), the attach is E2124 with the flag to start
-it with.
+it with. The window ends early when the process exits: the section's
+`exited_ms` says how far into it, and the view prints `exited 420 ms into
+the 3000 ms window` after the `functions` line. `--for=` reads nothing a
+program publishes, so with `--source`, or on a devserver browser session,
+it is refused (`Jet.UnknownFlag`, exit 2); `--zones=` is that path's
+window.
 Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
-example.
+example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
+attaches to a busy `jet check` for 3 seconds.
 
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the

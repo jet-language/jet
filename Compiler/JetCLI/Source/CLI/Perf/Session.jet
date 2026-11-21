@@ -362,6 +362,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     source := String?{None}
     allowlist := [String]{}
     zones_ms := 0
+    // How long an outside attach samples, 0 for JET_CLI_PERF_OUTSIDE_WINDOW_MS.
+    for_ms := 0
     alloc := false
     held_ns := Int?{None}
     lost := U64{0}
@@ -390,6 +392,14 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         }
         if arg.starts_with("--zones=") {
             zones_ms = jet_cli_perf_attach_window(arg.slice(8..<arg.len())) ?? return jet_cli_perf_error("`{arg}` isn't a window jet understands", "write how long to record zones, as `--zones=500ms` or `--zones=2s`", color)
+            next
+        }
+        if arg.starts_with("--for=") {
+            window: jet_cli_perf_attach_window(arg.slice(6..<arg.len())) ?? 0
+            if window <= 0 || window > JET_CLI_PERF_OUTSIDE_LONGEST_MS {
+                return jet_cli_perf_error("`{arg}` isn't a window jet understands", "write how long to sample from outside, at most 10 minutes, as `--for=500ms` or `--for=20s`", color)
+            }
+            for_ms = window
             next
         }
         if arg.starts_with("--out=") {
@@ -446,6 +456,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     if alloc && source == None {
         return jet_cli_perf_error("`--lens=alloc` names each live block by its line in `--source`, which is missing", "run `jet perf attach {target_pid} --lens=alloc --source <file.jet>`", color)
     }
+    if for_ms > 0 && source != None {
+        return jet_cli_perf_error("`--for=` sets how long jet samples a process from outside, and `--source` reads what the program publishes instead", "attach with `--zones=<duration>` for a window on what it publishes, or drop `--source` to sample it from outside", color)
+    }
     if !perf_files.is_dir("/proc/{target_pid}") {
         return jet_cli_perf_attach_unobserved(target_pid, "it isn't running, or this user can't see it", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
     }
@@ -475,6 +488,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     if browser == .Val(relayed) {
         if alloc {
             return jet_cli_perf_error("process {target_pid} is a devserver browser session, whose heap jet does not track", "attach to a program started with `jet run --observe --checked-alloc <file.jet>`", color)
+        }
+        if for_ms > 0 {
+            return jet_cli_perf_error("process {target_pid} is a devserver browser session, which its relay's rows describe, so jet doesn't sample it from outside for `--for=`", "attach without `--for=`", color)
         }
         if source == .Val(path) {
             matched := false
@@ -570,11 +586,12 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     } else {
         // A process that publishes nothing about itself: the kernel samples
         // its threads' CPU from outside it.
-        taken: jet_cli_perf_outside_sample(target_pid, JET_CLI_PERF_OUTSIDE_WINDOW_MS) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
+        window_ms: if for_ms > 0 -> for_ms else -> JET_CLI_PERF_OUTSIDE_WINDOW_MS
+        taken: jet_cli_perf_outside_sample(target_pid, window_ms) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
         loop line in jet_cli_perf_outside_lines(taken.section.value) -> hot = "{hot}{line}\n"
         capture.receipts.push(taken.section)
         sampled = Val(taken.window)
-        read = [String]{"the CPU of its threads and its children's, sampled from outside for {JET_CLI_PERF_OUTSIDE_WINDOW_MS} ms"}
+        read = [String]{"the CPU of its threads and its children's, sampled from outside for {window_ms} ms"}
         observed = true
     }
     // A trace of a program the attach observed, through a browser relay, its
@@ -594,6 +611,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         argv.push(allowlist.join(","))
     }
     if zones_ms > 0 -> argv.push("--zones={zones_ms}ms")
+    if for_ms > 0 -> argv.push("--for={for_ms}ms")
     if alloc -> argv.push("--lens=alloc")
     // The interval the trace's CPU-time samples stand for, which its view
     // charges them at.

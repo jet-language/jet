@@ -1295,7 +1295,7 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 // samples by package as a run's profile prints them, and the flame graph of
 // its folded stacks.
 #Test("an outside attach's view names each function's declaration, its stacks' quality, its packages as a run's profile does, and a flame graph") {
-    section: `{"broken":4,"cut":0,"functions":[{"file":"Compiler/JetSema/Source/Statements.jet","line":212,"name":"Statements.sema_stmt_check","self":60,"total":90},{"name":"main","self":0,"total":100}],"lost":0,"packages":[{"package":"Compiler/JetSema","samples":70},{"package":"","samples":20},{"package":"Compiler/JetIR","samples":10}],"period_ns":1000000,"processes":2,"samples":100,"stacks":[{"samples":30,"stack":"main"},{"samples":70,"stack":"main;Statements.sema_stmt_check"}],"threads":3,"unnamed":5,"unwound":96,"window_ms":1000}`
+    section: `{"broken":4,"cut":0,"exited_ms":null,"functions":[{"file":"Compiler/JetSema/Source/Statements.jet","line":212,"name":"Statements.sema_stmt_check","self":60,"total":90},{"name":"main","self":0,"total":100}],"lost":0,"packages":[{"package":"Compiler/JetSema","samples":70},{"package":"","samples":20},{"package":"Compiler/JetIR","samples":10}],"period_ns":1000000,"processes":2,"samples":100,"stacks":[{"samples":30,"stack":"main"},{"samples":70,"stack":"main;Statements.sema_stmt_check"}],"threads":3,"unnamed":5,"unwound":96,"window_ms":1000}`
     value: canonical_json_parse("{section}\n".bytes()) ?? panic(err.message)
     assert_eq(
         jet_cli_perf_outside_lines(value),
@@ -1311,6 +1311,22 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
         },
     )
     assert_eq(jet_cli_perf_outside_flame(value), [String]{"0 main 100.0% {"#".repeat(40)}", "1 Statements.sema_stmt_check 70.0% {"#".repeat(28)}"})
+}
+
+// A `--for=` window the process exited in says so after its `functions`
+// line, with the window it asked for.
+#Test("an outside attach's view says when the process exited in its window") {
+    section: `{"broken":0,"cut":0,"exited_ms":420,"functions":[{"name":"main","self":10,"total":10}],"lost":0,"packages":[],"period_ns":1000000,"processes":1,"samples":10,"stacks":[{"samples":10,"stack":"main"}],"threads":1,"unnamed":0,"unwound":10,"window_ms":3000}`
+    value: canonical_json_parse("{section}\n".bytes()) ?? panic(err.message)
+    assert_eq(
+        jet_cli_perf_outside_lines(value),
+        [String]{
+            "functions samples=10 processes=1 threads=1 window_ms=3000 lost=0 unnamed=0",
+            "exited 420 ms into the 3000 ms window",
+            "stacks unwound=10 cut=0 broken=0",
+            "  100.0% self  100.0% total · main",
+        },
+    )
 }
 
 // A function's object in the `functions` section is A-canonical, with its
