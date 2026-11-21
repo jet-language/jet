@@ -12,7 +12,16 @@
 # forked: until it spins it may still be starting (its exec, its image's
 # page faults) or waiting, using no user CPU, which is all the task clock
 # samples, and a window that falls there keeps none (p389: samples=0).
+# The samples are held to the CPU the sampled threads ran in the window,
+# which the trace's run window records, not to a fixed count: a second of
+# wall time is a second of the spin's CPU only on an idle machine, and in
+# a loaded suite the spin got 186 ms of it (p391: samples=186 against a
+# bar of 250 the case set then). A sample each millisecond of user CPU, the
+# samples are at least half that CPU less 20 ms: the kernel's share of the
+# spin, which the task clock doesn't sample, and the other threads' few
+# milliseconds each, under a period, which give none.
 requires: os-name:linux
+requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' schedstat run time
 fixture: AttachSamplesAPlainJetProcess.fixture
 env: NO_COLOR=1
 spawn busy: jet check spin.jet
@@ -26,7 +35,10 @@ stderr: ~ " processes=2 " # the jet check and the process its compile-time work 
 stderr: ~ "% total · unit.rt_text_append_owner" # the hot function, by its name: the runtime's text append the work spins in
 stderr: ~ "stacks unwound=" # how many stacks unwound whole, were cut at the kernel's limit, or broke
 stderr: ~ "Trace: " # and the trace
-json: file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 250 # a second of a busy thread's CPU, a sample a millisecond
+json: file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # the kernel sampled its CPU
+json: file busy.jettrace doc $.content.profile.window_cpu_ns > 0 # the sampled threads ran in the window
+capture: samples file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples
+json: file busy.jettrace doc $.content.profile.window_cpu_ns <= 2000000*{cap:samples}+20000000 # a sample a millisecond of the CPU they ran, at least half of it less 20 ms
 json: file busy.jettrace doc $.content.receipt_sections[?name="functions"][0].value.stacks #>= 1 # the samples' folded stacks
 step: jet perf view busy.jettrace
 exit: 0
