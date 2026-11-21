@@ -1,0 +1,23 @@
+// Checked growth on the web. Grows a list of 12,000 Int 2,000 times, once
+// from empty and once after reserving its capacity, and prints the time of
+// each: the difference is what growth costs, capacity checks and moves.
+use time: core.time
+
+grow: fn(n: Int, reserve: Bool) -> Int {
+    values := [Int]{}
+    if reserve -> values.try_reserve(n) ?? panic("reserve")
+    loop i in 0..<n -> values.push(i % 256)
+    values.len()
+}
+
+run: fn() {
+    total := 0
+    loop _ in 0..<50 -> total += grow(12000, false)
+    started: time.start()
+    loop _ in 0..<2000 -> total += grow(12000, false)
+    grown: time.elapsed(started).ns
+    begun: time.start()
+    loop _ in 0..<2000 -> total += grow(12000, true)
+    reserved: time.elapsed(begun).ns
+    print("grown {grown / 2000} ns a round, reserved {reserved / 2000} ns a round, total {total}")
+}

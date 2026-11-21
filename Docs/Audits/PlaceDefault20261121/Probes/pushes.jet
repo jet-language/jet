@@ -1,0 +1,35 @@
+// How many heap blocks a short list takes: each line grows lists of one
+// length, 1000 times. Run under `jet perf run --lens=alloc` and read the
+// allocations per line.
+one: fn() -> Int {
+    xs := [Int]{}
+    xs.push(1)
+    xs.len()
+}
+
+two: fn() -> Int {
+    xs := [Int]{}
+    xs.push(1)
+    xs.push(2)
+    xs.len()
+}
+
+four: fn() -> Int {
+    xs := [Int]{}
+    loop i in 0..<4 -> xs.push(i)
+    xs.len()
+}
+
+literal: fn() -> Int {
+    xs := [1, 2]
+    xs.len()
+}
+
+run: fn() {
+    total := 0
+    loop _ in 0..<1000 -> total += one()
+    loop _ in 0..<1000 -> total += two()
+    loop _ in 0..<1000 -> total += four()
+    loop _ in 0..<1000 -> total += literal()
+    print("total {total}")
+}

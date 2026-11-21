@@ -1,0 +1,107 @@
+// Allocation cost, 12,000 items a round. Kernels:
+// - `words`: Noor's count_words, which splits 1,000 lines into a list of
+//   words, counts it and drops it.
+// - `count`: the same split without keeping the words.
+// - `ints`: grows one list of 12,000 Int from empty; `reserved` reserves
+//   its capacity first, so the difference is what growth costs.
+// - `small`: makes and drops 12,000 two-element lists; `reuse` refills one
+//   list instead, so the difference is the heap's allocate and free.
+// Modes: `heap` is today's default. `scratch` and `arena` run the same call
+// inside `#Context(allocator: ...)`, whose arena hands out the next bytes and
+// rewinds at the block's end, the explicit route a program can take today.
+// Run: alloc <kernel> <heap|scratch|arena> <rounds>
+use {
+    mem: core.mem
+    process: core.process
+    time: core.time
+}
+
+count_words: fn(lines: [String]) -> Int {
+    words := [String]{}
+    loop line in lines {
+        loop word in line.trim().split(" ") -> words.push(word)
+    }
+    words.len()
+}
+
+grow_ints: fn(n: Int) -> Int {
+    values := [Int]{}
+    loop i in 0..<n -> values.push(i % 256)
+    values.len()
+}
+
+reserved_ints: fn(n: Int) -> Int {
+    values := [Int]{}
+    values.try_reserve(n) ?? panic("reserve")
+    loop i in 0..<n -> values.push(i % 256)
+    values.len()
+}
+
+small_lists: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        pair := [Int]{}
+        pair.push(i)
+        pair.push(i + 1)
+        total += pair.len()
+    }
+    total - n
+}
+
+reused_lists: fn(n: Int) -> Int {
+    total := 0
+    pair := [Int]{}
+    loop i in 0..<n {
+        pair.clear()
+        pair.push(i)
+        pair.push(i + 1)
+        total += pair.len()
+    }
+    total - n
+}
+
+count_only: fn(lines: [String]) -> Int {
+    n := 0
+    loop line in lines {
+        loop _ in line.trim().split(" ") -> n += 1
+    }
+    n
+}
+
+work: fn(kernel: String, lines: [String]) -> Int {
+    if kernel == "ints" -> return grow_ints(12000)
+    if kernel == "reserved" -> return reserved_ints(12000)
+    if kernel == "small" -> return small_lists(12000)
+    if kernel == "reuse" -> return reused_lists(12000)
+    if kernel == "count" -> return count_only(lines)
+    count_words(lines)
+}
+
+run: fn() {
+    args: process.args()
+    kernel: args.get(0) ?? "words"
+    mode: args.get(1) ?? "heap"
+    rounds: Int.parse(args.get(2) ?? "2000") ?? 2000
+    lines := [String]{}
+    loop i in 0..<1000 {
+        lines.push("  alpha beta gamma delta {i} epsilon zeta eta theta iota kappa lambda  ")
+    }
+    arena: mem.Arena.new()
+    total := 0
+    loop _ in 0..<50 -> total += work(kernel, lines)
+    started: time.start()
+    if mode == "scratch" {
+        loop _ in 0..<rounds {
+            #Context(allocator: context.scratch) { total += work(kernel, lines) }
+        }
+    } else if mode == "arena" {
+        loop _ in 0..<rounds {
+            #Context(allocator: arena) { total += work(kernel, lines) }
+        }
+    } else {
+        loop _ in 0..<rounds -> total += work(kernel, lines)
+    }
+    took: time.elapsed(started).ns
+    print("{kernel} {mode}: {rounds} rounds of 12000 items, {took / rounds} ns a round, total {total}")
+    close(arena)
+}

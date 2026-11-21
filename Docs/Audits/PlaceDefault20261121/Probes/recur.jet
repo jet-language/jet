@@ -1,0 +1,35 @@
+// Recursion with growing locals: `walk` builds a list at each node of a
+// binary tree of the given depth, appends its children's lists and returns
+// it. `heap` is today's default, and the rule for a recursive function's
+// growing locals; `scratch` runs the whole walk in the task's scratch arena,
+// the explicit route a program can take today.
+use {
+    process: core.process
+    time: core.time
+}
+
+walk: fn(depth: Int, seed: Int) -> [Int] {
+    items := [Int]{}
+    loop i in 0..<4 -> items.push(seed + i)
+    if depth > 0 {
+        loop v in walk(depth - 1, seed * 2) -> items.push(v)
+        loop v in walk(depth - 1, seed * 2 + 1) -> items.push(v)
+    }
+    items
+}
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "heap"
+    depth: Int.parse(args.get(1) ?? "14") ?? 14
+    rounds: Int.parse(args.get(2) ?? "20") ?? 20
+    total := 0
+    started: time.start()
+    loop _ in 0..<rounds {
+        if mode == "scratch" {
+            #Context(allocator: context.scratch) { total += walk(depth, 1).len() }
+        } else { total += walk(depth, 1).len() }
+    }
+    took: time.elapsed(started).ns
+    print("{mode} depth {depth}: {rounds} rounds, {took / rounds} ns a round, total {total}")
+}

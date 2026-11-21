@@ -1,0 +1,49 @@
+// Peak memory on a long scope. Each round builds a list of 100,000 Int
+// (800 KB) and drops it after its last use. `heap` frees each list at its
+// last use. `scope` runs every round inside one arena block, which frees
+// only at the block's end: the scope-end free a shared stack gives. `round`
+// opens the block per round. Prints the peak resident size (VmHWM).
+use {
+    files: core.files
+    mem: core.mem
+    process: core.process
+    time: core.time
+}
+
+status: fn(key: String) -> String {
+    text: files.read("/proc/self/status") ?? return "?"
+    loop line in text.lines() {
+        if line.starts_with(key) -> return line.after(":").trim().copy()
+    }
+    "?"
+}
+
+build: fn(round: Int) -> Int {
+    values := [Int]{}
+    loop i in 0..<100000 -> values.push(i + round)
+    values[99999]
+}
+
+run: fn() {
+    args: process.args()
+    mode: args.get(0) ?? "heap"
+    rounds: Int.parse(args.get(1) ?? "200") ?? 200
+    before: status("VmHWM")
+    arena: mem.Arena.new()
+    total := 0
+    started: time.start()
+    if mode == "scope" {
+        #Context(allocator: arena) {
+            loop r in 0..<rounds -> total += build(r)
+        }
+    } else if mode == "round" {
+        loop r in 0..<rounds {
+            #Context(allocator: arena) { total += build(r) }
+        }
+    } else {
+        loop r in 0..<rounds -> total += build(r)
+    }
+    took: time.elapsed(started).ns
+    print("{mode} {rounds} rounds: peak {before} before, {status("VmHWM")} after, size {status("VmSize")}, {took / rounds} ns a round, total {total}")
+    close(arena)
+}
