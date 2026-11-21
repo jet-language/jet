@@ -7589,6 +7589,47 @@ reads those rows: `#build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
 [`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
+A dependency's settings are its options, given a value in the package that
+uses it (D-DEP-FEATURES1, ratified). Each package reads only its own settings:
+`#build.settings.loud` in `tool` is tool's `loud`, and a root setting of the
+same name does not change it. The beginner path keeps tool's defaults, which
+takes nothing, or gives a value in tool's entry in `package.jet`:
+`tool: { path: ../tool, settings: { loud: true } }`. An entry may give only
+the settings the dependency declares, each a value of its declared type.
+Anything else is E0302 at the entry's line, listing the settings the
+dependency declares. The expert path writes the same setting by its qualified
+name, `tool.loud`, wherever the root writes its own: a build profile
+(`settings: { tool.loud: false }`), `b.contribute("tool.loud", false)` in
+`build: fn`, and `--set tool.loud=false`. A qualified name the dependency does
+not declare is E0302, which lists what it declares.
+
+A setting has one value for the whole build, chosen on six rungs, lowest
+first: the dependency's declared default, the entries other dependencies
+write for it, the root's own entry, the root's selected profile, its
+`build: fn`, and `--set`. The most explicit rung that writes the setting
+decides. Two dependency entries that disagree are E3521, naming both lines,
+unless a higher rung decides; with no value from the root, every build fails
+until the root writes one. Two values on any other rung, such as a profile
+that writes one setting twice, are E3521 whatever rung is above them. Code
+behind an off value is still fetched and checked, so no combination of
+settings ships unchecked, and the image carries none of it. A library that
+needs several variants in one program offers a generic module with a value
+parameter instead.
+
+`jet explain "#build.settings.tool.loud"` lists every writer and marks the
+deciding one effective and each other shadowed. A `jet build` receipt
+(`.jet/build/receipt.json`) records each package's settings under `settings`:
+the value and every writer, with its layer, source, value and state. A value
+other than the default is an input of the check node of each source in its
+package (`setting:tool.loud=true`), so the compile and link keys follow the
+value. A build that keeps every default keeps its keys. Under a `build: fn`,
+the project lock also lists each dependency entry another entry overrides, as
+a `[[build.contribution]]` row at the `dependency entry` layer. Examples:
+[`Tests/Cases/PackageOutputs/dependency_setting_on_its_entry.case`](../../Tests/Cases/PackageOutputs/dependency_setting_on_its_entry.case),
+[`Tests/Cases/PackageOutputs/dependency_setting_typo_names_the_entry.case`](../../Tests/Cases/PackageOutputs/dependency_setting_typo_names_the_entry.case),
+[`Tests/Cases/PackageOutputs/dependency_setting_from_profile_and_build.case`](../../Tests/Cases/PackageOutputs/dependency_setting_from_profile_and_build.case),
+[`Tests/Cases/CompilerAPI/provenance_a_dependency_setting_keys_the_build.case`](../../Tests/Cases/CompilerAPI/provenance_a_dependency_setting_keys_the_build.case).
+
 Generation is additive with one owner per managed path.
 `b.generate(name) { items }` makes one module at
 `.jet/generated/<package>/<name>.jet`; a name keeps
