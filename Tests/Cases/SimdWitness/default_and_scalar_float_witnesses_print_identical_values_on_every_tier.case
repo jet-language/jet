@@ -18,16 +18,16 @@ step native: built
 exit: 0 # tests/simd_witness.rs:103
 stdout: = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
 when arch x86_64
-# The release build again with its debug information, which `jet debug`
-# reads to list `auto`'s code; the code is the release build's. No
-# disassembler is on PATH.
+# The release build again with its debug information, which `jet debug
+# --do` reads from the image file to list `auto`'s code, without starting
+# the program; the code is the release build's. No disassembler is on PATH.
 step: jet build --release --debug-info=true main.jet
 exit: 0
-step: jet debug .jet/build/main
+step: jet debug .jet/build/main --do 'disas auto'
 env: PATH={work}/no-tools
-stdin: default_and_scalar_float_witnesses_print_identical_values_on_every_tier.stdin
 exit: 0
-stdout: ~ "(Jet) disas auto\nauto" # `auto`'s code, as release inlines it
+stdout: ^= "auto, inlined into run" # `auto`'s code, as release inlines it
+stdout: !~ "Breakpoint hit" # read from the file; the program never ran
 stdout: ~any mulpd vmulpd addpd vaddpd # tests/simd_witness.rs:134 packed arithmetic stays in the release binary
 end when
 step: jet build --target web main.jet

@@ -12,13 +12,13 @@ exit: 0
 stdout: = "6\n"
 when arch x86_64
 # A release build inlines `run` into its generated entry, main.run__entry,
-# which `jet debug` lists by its symbol at the first stop. No disassembler
-# is on PATH.
-step: jet debug .jet/build/main
+# which `jet debug --do` lists by its symbol from the image file, without
+# starting the program. No disassembler is on PATH.
+step: jet debug .jet/build/main --do 'disas main.run__entry'
 env: PATH={work}/no-tools
-stdin: disas_entry.stdin
 exit: 0
-stdout: ~ "(Jet) disas main.run__entry\nmain.run__entry  main.jet:" # the entry, by its symbol
+stdout: ^= "main.run__entry  main.jet:" # the entry, by its symbol
+stdout: !~ "Breakpoint hit" # read from the file; the program never ran
 stdout: ~ "inc    QWORD PTR" # the entry body retains its strings and lists inline
 stdout: !~ "lock " # no second thread can observe the counts, so no update is lock-prefixed
 end when
