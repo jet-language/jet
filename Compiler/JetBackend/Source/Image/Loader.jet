@@ -44,7 +44,9 @@ use {
 // absent when X64Launch.executable is "".
 LOADER_AT_EXECUTABLE: 0x4a455401
 
-// The read-only mapping of the whole ELF file (symbols for alloc-check).
+// The read-only mapping of the whole ELF file, whose symbol tables name the
+// image's functions and the program's (alloc-check, the fault report;
+// loader_view).
 LOADER_AT_IMAGE: 0x4a455402
 
 // Its size in bytes.
@@ -703,8 +705,49 @@ loader_patch: fn(exe: X64Executable, delta: Int, from: Int, to: Int) {
 
 // The read-only view of the whole file of `exe` (LOADER_AT_IMAGE) into
 // image.file: the image part from the file `file` (from exe.image_at on),
-// patched, zeros up to the program part, which comes from `memfd`.
+// patched, zeros up to the program part, which comes from `memfd`. A
+// program part that leaves the image's symbols out (image_symbols_left)
+// names the program's only, so the view goes on with the image's own
+// `.symtab` and `.strtab`, mapped from `file` past the program part
+// (loader_image_symbols), and a section header table past them, the
+// program part's headers and theirs, which the view's ELF header names:
+// whoever reads the view's symbols (the fault report, report.S `symbol`;
+// Alloc.jet alloc_check_symbol) reads both tables, and nothing is copied
+// but the headers.
 loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
+    header := x64_executable_header(exe)
+    count: loader_u16(header, 60)
+    sections: loader_u64(header, 40) - exe.tail_at
+    symbols_from := 0
+    symbols_size := 0
+    symbols_at := 0
+    table_at := 0
+    table := [U8]{}
+    if loader_image_symbols(exe, file) == .Val(own) && count > 0 && count + 2 < 0xff00 && sections >= 0 && sections + 64 * count <= exe.tail.len() {
+        symbols_from = own.from
+        symbols_size = own.to - own.from
+        symbols_at = os_page_round(image.file_size)
+        table_at = symbols_at + os_page_round(symbols_size)
+        table = exe.tail[sections..<sections + 64 * count]
+        // The image's tables take the names of the program's.
+        names := [Int]{0, 0}
+        loop k in 0..<count {
+            if loader_u32(table, 64 * k + 4) != 2 -> next
+            names[0] = loader_u32(table, 64 * k)
+            link: loader_u32(table, 64 * k + 40)
+            if link < count -> names[1] = loader_u32(table, 64 * link)
+        }
+        loop k in 0..<2 {
+            at: table.len()
+            table.extend(own.headers[64 * k..<64 * k + 64])
+            link_put32(table, at, names[k])
+            link_put64(table, at + 24, symbols_at + loader_u64(own.headers, 64 * k + 24) - own.from)
+        }
+        link_put32(table, 64 * count + 40, count + 1)
+        link_put64(header, 40, table_at)
+        link_put16(header, 60, count + 2)
+        image.file_size = table_at + table.len()
+    }
     view: os_map(image.file_size, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(view) -> return "mapping the image file view failed (errno {-view})"
     image.file = view
@@ -726,9 +769,63 @@ loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: In
         }
         if os_failed(mapped) -> return "mapping the image file view failed (errno {-mapped})"
     }
+    if table.len() > 0 {
+        #Unsafe("MAP_FIXED replaces only the view's own fresh pages past the program part; the table goes to more of them, the ELF header to the view's first page, mapped private and writable above") {
+            mapped = os_map_with(view + symbols_at, symbols_size, OS_PROT_READ, OS_MAP_PRIVATE + OS_MAP_FIXED, file, exe.image_at + symbols_from)
+            if !os_failed(mapped) {
+                mem.list_copy<U8>(mem.Ptr<U8>.from_addr(view + table_at), table, 0, table.len())
+                mem.list_copy<U8>(mem.Ptr<U8>.from_addr(view), header, 0, 64)
+            }
+        }
+        if os_failed(mapped) {
+            return "mapping the runtime image's symbols failed (errno {-mapped})"
+        }
+        sealed: os_protect(view + table_at, os_page_round(table.len()), OS_PROT_READ)
+        if os_failed(sealed) -> return "protecting the image file view failed (errno {-sealed})"
+    }
     result: os_protect(view, exe.tail_at, OS_PROT_READ)
     if os_failed(result) -> return "protecting the image file view failed (errno {-result})"
     ""
+}
+
+// The image's own symbol table, which a view adds to a program part that
+// leaves it out (loader_view): the image file's bytes [from, to), `from`
+// a page boundary, that hold its `.symtab` and the `.strtab` it links, and
+// those two section headers. The section headers are read from `file`,
+// which holds the image from exe.image_at on; None when the program part
+// names the image's symbols itself, or the image has no such tables.
+LoaderImageSymbols: struct {
+    from: Int,
+    to: Int,
+    headers: [U8],
+}
+
+loader_image_symbols: fn(exe: X64Executable, file: Int) -> LoaderImageSymbols? {
+    if !exe.image_symbols_left || exe.image.len() < 64 || loader_u16(exe.image, 58) != 64 {
+        return None
+    }
+    offset: loader_u64(exe.image, 40)
+    count: loader_u16(exe.image, 60)
+    size: exe.image.len() + exe.image_gap
+    if count == 0 || offset < 64 || offset + 64 * count > size -> return None
+    table: loader_files.read_at("/proc/self/fd/{file}", exe.image_at + offset, 64 * count) ?? return None
+    if table.len() != 64 * count -> return None
+    loop k in 1..<count {
+        if loader_u32(table, 64 * k + 4) != 2 -> next
+        link: loader_u32(table, 64 * k + 40)
+        if link == 0 || link >= count -> return None
+        symbols: loader_u64(table, 64 * k + 24)
+        names: loader_u64(table, 64 * link + 24)
+        symbols_end: symbols + loader_u64(table, 64 * k + 32)
+        names_end: names + loader_u64(table, 64 * link + 32)
+        low: if symbols < names -> symbols else -> names
+        high: if symbols_end > names_end -> symbols_end else -> names_end
+        if low < 64 || high > size -> return None
+        headers := table[64 * k..<64 * k + 64]
+        headers.extend(table[64 * link..<64 * link + 64])
+        return Val(LoaderImageSymbols{from: low - low % OS_PAGE_SIZE, to: high, headers: headers})
+    }
+    None
 }
 
 // A runtime image as read: its bytes, the file offset `at` it lies at in

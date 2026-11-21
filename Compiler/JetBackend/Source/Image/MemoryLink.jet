@@ -585,7 +585,8 @@ x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
 // symbols as well as the program's, as a full link's does, but its program
 // part leaves them out (`image_symbols_left`, link_bind_sections): a
 // program run from memory runs the image's own pages, and the image's
-// symbols, megabytes, would be a copy of what the image's file holds.
+// symbols, megabytes, would be a copy of what the image's file holds (its
+// file view maps them from there: Image/Loader.jet loader_view).
 // Whoever writes the file (x64_executable_bytes, Image/Loader.jet
 // x64_executable_write) puts them in: the program part `exe.tail` with a
 // new `.symtab` (the image's locals, the program's, the image's globals,

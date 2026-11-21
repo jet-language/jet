@@ -1100,6 +1100,11 @@ kit_steps_failure: fn(step: KitStep, result: KitRun) -> KitVerdict? {
     if result.code == KIT_EXIT_ICE && (Int.parse(step.exit) ?? -1) == KIT_EXIT_ICE && result.error == "" && !result.timed_out && result.signal == None {
         return None
     }
+    // A step whose own `exit:` is 128 + N expects the death by signal N, as a
+    // shell reports it (kit_steps_status); any other signal death is an ERROR.
+    if result.signal == .Val(signal) && (Int.parse(step.exit) ?? -1) == 128 + signal && result.error == "" && !result.timed_out && result.limit_hit == "" {
+        return None
+    }
     failure: kit_exec_process_failure(result) ?? return None
     if failure.status != "TIMEOUT" -> return Val(failure)
     Val(kit_expect_verdict("TIMEOUT", "{failure.detail}; step {kit_steps_timeout_name(step)}"))
@@ -1220,7 +1225,7 @@ kit_steps_check: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sou
         }
     }
     if process || step.exit_explicit {
-        verdict: kit_steps_exit_status(step.exit, result.code)
+        verdict: kit_steps_exit_status(step.exit, kit_steps_status(result))
         if verdict.status != "PASS" {
             return kit_steps_streams_verdict(verdict, context, step, result)
         }
@@ -1232,6 +1237,13 @@ kit_steps_check: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sou
         }
     }
     kit_expect_verdict("PASS", "")
+}
+
+// A run's status as a shell reports it: its exit code, or 128 + N for a
+// death by signal N.
+kit_steps_status: fn(result: KitRun) -> Int {
+    if result.signal == .Val(signal) -> return 128 + signal
+    result.code
 }
 
 // One `exit:` status (`nonzero`, `any`, `!= N` or an integer) judged against a

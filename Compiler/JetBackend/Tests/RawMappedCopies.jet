@@ -5,13 +5,17 @@
 // an image in a test build never stops on a copy into one.
 use {
     jet_backend.[
+        X64ImageFunction,
         link_synth,
         link_synth_code,
         link_synth_function,
         link_synth_object,
         x64_bind_runtime_image,
+        x64_executable_bytes,
+        x64_executable_complete,
         x64_executable_load,
         x64_image_file_read,
+        x64_image_functions,
         x64_image_load,
         x64_image_unload,
     ]
@@ -52,4 +56,40 @@ raw_object: fn(name: String) -> [U8] Never! {
     image: x64_executable_load(entry.executable)
     assert(image.failure == "", "the bound program loads: {image.failure}")
     x64_image_unload(image)
+}
+
+// A bound program part leaves the image's symbols out; the file view a
+// fault report names its frames from (LOADER_AT_IMAGE) maps them in from
+// the image file, so it names every function the written file names, a
+// runtime routine's among them.
+#Test("a bound program's file view names the functions its written file names") {
+    path: raw_image_path()
+    whole: raw_files.read_bytes(path) ?? panic("the compiler under test has no runtime image")
+    own: x64_image_functions(whole)
+    assert(own.failure == "" && own.functions.len() > 0, "the image names its functions: {own.failure}")
+    read: x64_image_file_read(path)
+    assert(read.failure == "", "the image file is read: {read.failure}")
+    entry := x64_bind_runtime_image("entry", raw_object("main"), read.bytes.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, false)
+    assert(entry.errors.len() == 0, "the entry program binds: {entry.errors.join("; ")}")
+    assert(entry.executable.image_symbols_left, "the program part leaves the image's symbols out")
+    image: x64_executable_load(entry.executable)
+    assert(image.failure == "", "the bound program loads: {image.failure}")
+    view: raw_files.read_at("/proc/self/mem", image.file, image.file_size) ?? panic("the view reads: {err}")
+    named: x64_image_functions(view)
+    x64_image_unload(image)
+    assert(named.failure == "", "the view's symbol tables read: {named.failure}")
+    filled: x64_executable_complete(entry.executable)
+    assert(filled == "", "the image part's loaded segments are read in: {filled}")
+    written: x64_image_functions(x64_executable_bytes(entry.executable))
+    assert(written.failure == "" && written.functions.len() >= own.functions.len(), "the written file names the image's functions: {written.failure}")
+    assert_eq(raw_function_rows(named.functions), raw_function_rows(written.functions))
+}
+
+// One "start size name" row per function, sorted: functions at one start
+// come in either table's order.
+raw_function_rows: fn(functions: [X64ImageFunction]) -> [String] Never! {
+    rows := [String]{}
+    loop function in functions -> rows.push("{function.start} {function.size} {function.name}")
+    rows.sort()
+    rows
 }
