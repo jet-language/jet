@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, module_none, name_count, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -14,14 +14,22 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, F
 // whatever order it met the types in, and no implementer shares its key.
 ir_trait_key: fn(p: IRProgram, ty: Type) -> Int Never! {
     identity: ir_trait_identity(p, ty)
-    p.trait_keys.keys.get(identity) ?? ir_trait_key_free(p.trait_keys, identity, ir_trait_key_hash(identity, 0))
+    ir_trait_keys_get(p.trait_keys, identity) ?? ir_trait_key_free(p.trait_keys, identity, ir_trait_key_hash(identity, 0))
 }
 
 // The payload keys of the types a program declares trait implementations
-// for (ir_trait_key_table): each identity's key, and the keys they hold.
+// for (ir_trait_key_table): a table of their identities, each identity's key
+// by its id there, and the keys they hold.
 IRTraitKeys: struct {
-    keys: [String:Int],
-    held: [Int:Bool],
+    identities: NameTable{name_table_sized(2)},
+    keys: [Int]{[Int]{-1}},
+    held: [Int:Bool]{[Int:Bool]{}},
+}
+
+// The key `table` gives `identity`, if it is an implementer's.
+ir_trait_keys_get: fn(table: IRTraitKeys, identity: String) -> Int? Never! {
+    id: name_find(table.identities, identity) ?? return None
+    Val(table.keys[name_index(id)])
 }
 
 // Candidate `salt` of the payload key of `identity`: 56 bits of the SHA-256
@@ -38,9 +46,10 @@ ir_trait_key_hash: fn(identity: String, salt: Int) -> Int Never! {
 // candidates, ir_trait_key_hash): the first that no other identity of
 // `table` holds.
 ir_trait_key_free: fn(table: IRTraitKeys, identity: String, first: Int) -> Int Never! {
+    own: ir_trait_keys_get(table, identity)
     key := first
     salt := 0
-    loop table.held.get(key) != None && table.keys.get(identity) != .Val(key) {
+    loop table.held.get(key) != None && own != .Val(key) {
         salt += 1
         key = ir_trait_key_hash(identity, salt)
     }
@@ -55,12 +64,13 @@ ir_trait_key_free: fn(table: IRTraitKeys, identity: String, first: Int) -> Int N
 ir_trait_key_table: fn(identities: &&[{identity: String, first: Int}]) -> IRTraitKeys Never! {
     order := identities.move()
     order.sort_by(fn(left: {identity: String, first: Int}, right: {identity: String, first: Int}) { left.identity <=> right.identity })
-    table := IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}
+    table := IRTraitKeys{identities: name_table_sized(order.len() + 1)}
     loop entry in order.move() {
-        if table.keys.get(entry.identity) != None -> next
+        if name_find(table.identities, entry.identity) != None -> next
         key: ir_trait_key_free(table, entry.identity, entry.first)
         table.held[key] = true
-        table.keys[entry.identity] = key
+        _ := name_intern(table.identities, entry.identity)
+        table.keys.push(key)
     }
     table
 }
@@ -90,7 +100,7 @@ ir_trait_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == i
 // owners.
 ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
     short: ir_short_name(bound)
-    seen := [String:Bool]{}
+    seen := name_table_sized(8)
     owners := [Type]{}
     loop function in p.functions {
         if function.generic_params.len() > 0 -> next
@@ -114,26 +124,41 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
         }
         concrete: owner ?? next
         if ir_owner_generic(p, concrete) -> next
-        identity: ir_trait_identity(p, concrete)
-        if seen.get(identity) != None -> next
-        seen[identity] = true
+        if !ir_trait_first(seen, ir_trait_identity(p, concrete)) -> next
         owners.push(concrete)
     }
     loop declared in p.empty_impls {
         if declared.trait_short != short || ir_owner_generic(p, declared.owner) -> next
-        identity: ir_trait_identity(p, declared.owner)
-        if seen.get(identity) != None -> next
-        seen[identity] = true
+        if !ir_trait_first(seen, ir_trait_identity(p, declared.owner)) -> next
         owners.push(declared.owner.copy())
     }
-    instances: p.trait_boxed.get(short) ?? [Type]{}
+    instances: ir_trait_boxed_of(p.trait_boxed, short)
     loop instance in instances.move() {
-        identity: ir_trait_identity(p, instance)
-        if seen.get(identity) != None -> next
-        seen[identity] = true
+        if !ir_trait_first(seen, ir_trait_identity(p, instance)) -> next
         owners.push(instance)
     }
     owners
+}
+
+// Whether `text` is new to `seen`, which holds it from then on.
+ir_trait_first: fn(seen: &NameTable, text: String) -> Bool Never! {
+    before: name_count(seen)
+    _ := name_intern(seen, text)
+    name_count(seen) > before
+}
+
+// The generic instances the bound functions box as values of each trait
+// (ir_trait_boxed): a table of the traits' short names, and each one's
+// instances by its id there.
+IRTraitBoxed: struct {
+    traits: NameTable{name_table_sized(2)},
+    instances: [[Type]]{[[Type]]{[Type]{}}},
+}
+
+// The instances `boxed` holds of the trait of short name `short`.
+ir_trait_boxed_of: fn(boxed: IRTraitBoxed, short: String) -> [Type] Never! {
+    id: name_find(boxed.traits, short) ?? return [Type]{}
+    boxed.instances[name_index(id)]
 }
 
 // IRProgram.trait_boxed of `p`'s functions: each generic instance a body
@@ -141,9 +166,9 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
 // coercion, a call argument's), once per identity, by the trait's short
 // name. Sema checked that each one implements the trait. A generic body's
 // boxed types name its parameters, so only non-generic bodies are read.
-ir_trait_boxed: fn(p: IRProgram) -> [String:[Type]] Never! {
-    boxed := [String:[Type]]{}
-    seen := [String:Bool]{}
+ir_trait_boxed: fn(p: IRProgram) -> IRTraitBoxed Never! {
+    boxed := IRTraitBoxed{}
+    seen := name_table_sized(8)
     loop function in p.functions {
         if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> next
         loop node in function.tree.nodes {
@@ -170,7 +195,7 @@ ir_trait_boxed: fn(p: IRProgram) -> [String:[Type]] Never! {
 
 // The call arguments of `args` boxed as trait values (box_as_trait), into
 // ir_trait_boxed's `boxed`.
-ir_trait_boxed_args: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Bool], tree: BodyTree, args: [BodyCallArg]) Never! {
+ir_trait_boxed_args: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop arg in args {
         if arg.box_as_trait == .Val(target) {
             ir_trait_boxed_put(p, boxed, seen, body_type(tree, arg.value), target)
@@ -180,7 +205,7 @@ ir_trait_boxed_args: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Bo
 
 // `concrete` boxed as a value of `target`, into ir_trait_boxed's `boxed`
 // when it is a generic instance and `target` a single trait.
-ir_trait_boxed_put: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Bool], concrete: &&Type, target: Type) Never! {
+ir_trait_boxed_put: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, concrete: &&Type, target: Type) Never! {
     if ir_type_args(concrete).len() == 0 {
         return
     }
@@ -191,13 +216,12 @@ ir_trait_boxed_put: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Boo
         return
     }
     short: ir_short_name(bounds[0])
-    key: "{short}|{ir_trait_identity(p, concrete)}"
-    if seen.get(key) != None {
+    if !ir_trait_first(seen, "{short}|{ir_trait_identity(p, concrete)}") {
         return
     }
-    seen[key] = true
-    if !boxed.has_key(short) -> boxed[short] = [Type]{}
-    boxed[short].push(concrete)
+    row: name_index(name_intern(boxed.traits, short))
+    if row == boxed.instances.len() -> boxed.instances.push([Type]{})
+    boxed.instances[row].push(concrete)
 }
 
 // Whether a value of trait `bound` may hold `concrete`
@@ -553,7 +577,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     owner: method.trait_owner ?? return ir_fail_slot(b, span, "trait call has no trait owner")
     targets := [IRTraitTarget]{}
     returned := Type.Named{name: "Unit"}
-    seen := [String:Bool]{}
+    seen := name_table_sized(8)
     // Whether an implementation returns a view (`-> T from self`), whose
     // result the call marks lent.
     lent := false
@@ -577,7 +601,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     loop index in generic {
         implementer: ir_trait_implementer(p, index, owner) ?? next
         head: ir_trait_head_identity(p, implementer) ?? next
-        instances: p.trait_boxed.get(short) ?? [Type]{}
+        instances: ir_trait_boxed_of(p.trait_boxed, short)
         loop instance in instances.move() {
             instance_head: ir_trait_head_identity(p, instance) ?? next
             if instance_head != head -> next
@@ -587,9 +611,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     }
     loop pick in picks.move() {
         // One implementation per concrete type: its payload key selects it.
-        identity: ir_trait_identity(p, pick.concrete)
-        if seen.get(identity) != None -> next
-        seen[identity] = true
+        if !ir_trait_first(seen, ir_trait_identity(p, pick.concrete)) -> next
         if targets.len() == 0 {
             declared: ir_executable_return(p.functions[pick.row]) ?? Type.Named{name: "Unit"}
             returned = ir_callee_fact(p, b, pick.row, pick.args, declared, span)
@@ -765,12 +787,12 @@ ir_trait_arm_instance: fn(p: IRProgram, ty: Type) -> String Never! {
     backward := [{identity: String, first: Int}]{{identity: "main.Line", first: 7}, {identity: "main.Point", first: 7}}
     tables := [IRTraitKeys]{ir_trait_key_table(forward), ir_trait_key_table(backward)}
     loop table in tables {
-        line: table.keys.get("main.Line") ?? -1
-        point: table.keys.get("main.Point") ?? -1
+        line: ir_trait_keys_get(table, "main.Line") ?? -1
+        point: ir_trait_keys_get(table, "main.Point") ?? -1
         assert_eq(line, 7)
         assert_eq(point, ir_trait_key_hash("main.Point", 1))
         assert(point != line, "the colliding types hold distinct keys")
-        assert_eq(table.keys.len(), 2)
+        assert_eq(name_count(table.identities), 3)
         // An implementer's key is its own from any candidate on.
         assert_eq(ir_trait_key_free(table, "main.Point", 7), point)
         // A type no implementation is declared for passes the keys the
