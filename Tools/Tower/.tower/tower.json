@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112816,
+    "rev": 112825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55536,7 +55536,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T06:38:04.578Z",
+      "updated": "2026-11-21T06:41:12.028Z",
       "updatedBy": "Main",
       "criteriaLastN": 105
     },
@@ -72197,6 +72197,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "D-PERF-TARGET1 posted to the owner after three non-drafter reviews by Rivet against code at 97d2a287ab: 9 findings, then 2, then PASS, every one repaired (only run samples at 8,000/s; the command form reads relay or outside samples, never live records without --source; Yama scope 2; wall_ns for wall time and exit status; exact memory/topdown unavailable lines). The text was first fitted to Tower's post limits offline. c1, c2, c5, c11 and c14-c17 wait on its ratification."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "D-PERF-TARGET1 (blocks c1, c2, c5, c11, c14-c17): IfHole-6-1-4 reviewed it against code on f768b6597e and rejected it with six false claims and two census gaps (recorded on the decision). Main repaired every point the same hour on 97d2a287ab: E2124 vs unavailable made consistent; the case for A rests on run/test building source vs attach watching what it did not build (attach has three ways today, chosen by what the target publishes); no cpu lens; --for shown as ratified and built under c22, not as existing; AccessTrace/JobRunner strace and the outside batch harness time -v named as their own work; syscalls decodes the whole file class; fake-perf fixtures added. Back to draft for a fresh non-drafter review before posting."
         },
         {
@@ -72535,7 +72540,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T06:38:02.665Z",
+      "updated": "2026-11-21T06:41:20.152Z",
       "updatedBy": "Main",
       "criteriaLastN": 27
     },
@@ -125484,19 +125489,19 @@
       "explainer": "Beginner path: write the program, run `jet debug prog.jet`, type `break count_up` and `c`. Under A it stops in count_up with n = 1000000, as the code reads. Under B the break is refused, naming the line that was computed and the fix. Under C the break is set with a note, and the program finishes without stopping.\n\nExpert path: an expert who wants the exact release program builds it with `jet build -O2`. They open the image with `jet debug <image>` or `--attach`. That image computed the call ahead and dropped count_up, so today `break count_up` answers \"No function `count_up`\". Under A and B the break is refused with E2239 (Jet.DebugNeverCalled), naming the computed line and the fix.\n\nThat needs the image's debug info. Built with `--debug-info=false`, or with its side `.debug` file gone, it answers \"No function\" as today. Putting `#Runtime(.NoEager)` on a function keeps its calls in every build, today and under every option.",
       "story": "Sam is learning Jet and writes count_up with a test call, `first: count_up(1000000)`. He wants to watch the loop, so he runs `jet debug prog.jet` and types `break count_up`. Today the debugger answers \"Breakpoint set\", and the program prints its total and ends. Sam decides the debugger is broken.",
       "inWild": "fn countUp(n: u64) u64 {\n    var total: u64 = 0;\n    var i: u64 = 0;\n    while (i < n) : (i += 1) total += i % 7;\n    return total;\n}\n// A plain call runs when the program runs; a debugger stops in it.\nconst first = countUp(1000000);        // inside main: run time\nconst ahead = comptime countUp(1000);  // only when asked for\n# Zig evaluates a call while compiling only when the code says comptime: https://ziglang.org/documentation/master/#comptime",
-      "detail": "Code read on dev 3e8d443247 and checked with the gate-p310 jet. JetSema computes an immutable local `name: value` whose initializer calls only pure code while compiling, and the program holds the value (Compiler/JetSema/Source/Sema/Comptime/LocalValues.jet). The language promises this never changes what a program prints (Docs/Spec/Reference/metaprogramming.md). It is a checked fact, so -O0, -O1 and -O2 compute the same locals. `#Runtime(.NoEager)` on a function, method or block turns it off there.\n\n`jet debug prog.jet` builds with `jet build -O0 --dead-code=keep` (JetDebug Native.jet native_debug_build_argv). So count_up stays in the image with no caller. With the program above, on gate-p310: `break count_up` and `break prog.jet:5` answer \"Breakpoint set\" and never stop. `log prog.jet:5 \"s{step}\"` says it runs in the program and logs nothing. A break after line 11 shows `first = 2999997`, and `watch first` works. The same program with `#Runtime(.NoEager)` on run stops in count_up with n = 1000000.\n\nThe placed-logpoint case met this: its loop never ran until its count came from the program's arguments.\n\nImages built elsewhere, re-checked on the gate-p392 jet (dev f768b6597e). `jet build -O0 prog.jet` (and `-O2`) drops count_up, because nothing calls it at run time. `jet debug .jet/build/prog` then answers \"No function `count_up`\" to `break count_up`. It answers \"No code on prog.jet:5\" to `break prog.jet:5`.\n\nA breakpoint that is set and never stops arises only where dead code is kept. That is jet debug's own `-O0 --dead-code=keep` build (Native.jet native_debug_build_argv). `jet debug --replay=NAME prog.jet` builds through that same build (jet_cli_debug_launch). So a replay is a jet debug build, not an image built elsewhere.",
+      "detail": "Code read on dev 3e8d443247 and checked with the gate-p310 jet. JetSema computes an immutable local `name: value` whose initializer calls only pure code while compiling, and the program holds the value (Compiler/JetSema/Source/Sema/Comptime/LocalValues.jet). The language promises this never changes what a program prints (Docs/Spec/Reference/metaprogramming.md). It is a checked fact, so -O0, -O1 and -O2 compute the same locals. `#Runtime(.NoEager)` on a function, method or block turns it off there.\n\n`jet debug prog.jet` builds with `jet build -O0 --dead-code=keep` (JetDebug Native.jet native_debug_build_argv). So count_up stays in the image with no caller. With the program above, on gate-p310: `break count_up` and `break prog.jet:5` answer \"Breakpoint set\" and never stop. `log prog.jet:5 \"s{step}\"` says it runs in the program and logs nothing. A break after line 11 shows `first = 2999997`, and `watch first` works. The same program with `#Runtime(.NoEager)` on run stops in count_up with n = 1000000.\n\nThe placed-logpoint case met this: its loop never ran until its count came from the program's arguments.\n\nImages built elsewhere, re-checked on the gate-p392 jet (dev f768b6597e). `jet build -O0 prog.jet` (and `-O2`) drops count_up, because nothing calls it at run time. `jet debug .jet/build/prog` then answers \"No function `count_up`\" to `break count_up`. It answers \"No code on prog.jet:5\" to `break prog.jet:5`.\n\nA breakpoint that is set and never stops arises only where dead code is kept. That is jet debug's own `-O0 --dead-code=keep` build (Native.jet native_debug_build_argv). `jet debug --replay=NAME prog.jet` builds through that same build (jet_cli_debug_launch). A replay of a .jet file is a jet debug build. A replayed image is treated like any built image.",
       "options": [
         {
           "key": "A",
           "name": "Debug builds keep the calls",
-          "detail": "The program `jet debug` builds computes no local while compiling in the workspace's own packages. It is as if every function there carried `#Runtime(.NoEager)`. So every call in a local the user wrote runs, and its breakpoints, logpoints and watches work. A function called only from a constant, `#run` or `@` still never runs; its breakpoint is refused with E2239. Constants, `#run`, `@` and Core keep computing while compiling. `jet run` and `jet build` are unchanged.\n\nAn image `jet debug` did not build (`jet debug <image>` or `--attach`) still computed the call. Unless it kept dead code, it dropped the function. So today `break count_up` answers \"No function `count_up`\". Under A it is refused with B's E2239 instead, naming the computed line and the fix. A replay is built by jet debug itself, so it runs the calls.",
+          "detail": "The program `jet debug` builds computes no local while compiling in the workspace's own packages. It is as if every function there carried `#Runtime(.NoEager)`. So every call in a local the user wrote runs, and its breakpoints, logpoints and watches work.\n\nA function called only from a constant, `#run` or `@` still never runs; its breakpoint is refused with E2239. There E2239 says that code always runs while compiling, and its fix moves the call into a local. For an image built elsewhere, the fix also adds `#Runtime(.NoEager)`. Constants, `#run`, `@` and Core keep computing while compiling. `jet run` and `jet build` are unchanged.\n\nAn image `jet debug` did not build (`jet debug <image>` or `--attach`) still computed the call. Unless it kept dead code, it dropped the function. So today `break count_up` answers \"No function `count_up`\". Under A it is refused with B's E2239 instead, naming the computed line and the fix. A replay of a .jet file is a jet debug build, so it runs the calls. A replayed image is treated like any built image.",
           "technical": "`jet debug` builds in a separate `jet build` child (native_debug_build_argv). The policy reaches it as one new build-option row, `eager`. Its values are `on`, the default, and `off`: the workspace's own packages compute no local while compiling, the policy `#Runtime(.NoEager)` sets. Jet debug passes `--eager=off` beside the `--dead-code=keep` it already passes.\n\nThe row in the build-option table (Compiler/JetFoundation/Source/Registry/BuildOptions.jet) is a Choice. Its `stock_build` and `stock_run` are both `on`. It has `shapes_image: true`, which names the value in the options' cache key and compile identity (build_options_key).\n\nBy the table's one naming rule the row brings four spellings. They are the profile field `eager: off`, the flag `--eager=off`, the method `b.eager(.Off)` and the pin `b.pin(.eager, .Off)`. It adds no syntax. An expert can also use it for a built image that runs every call.\n\nThe image's debug info records each workspace function the build computed ahead and never calls at run time. It covers functions kept with dead code and functions dropped. Each record holds the name, the declaration line and the line that computed it. The record costs debug-info bytes only, which a release build keeps in its side debug file.\n\nThe debugger reads that record for E2239, and DAP returns the breakpoint unverified with the same message. An image with no record answers \"No function `count_up`\" as today. That is an image built with `--debug-info=false`, or a split image whose side `.debug` file is gone.\n\nThe image's debug info records its `eager` value, as it records its level. `print` and `why` read it there, and native_debug_build_argv takes it as an argument. So `why` recovery builds of a built image keep that image's policy, and recovered frames match it. JetCanvas's debug session builds through the same function and gets `--eager=off` too.\n\nThe `print EXPR` evaluation compile builds with its own arguments (jet_cli_debug_eval_argv in Compiler/JetCLI/Source/CLI/DebugCompile.jet). It passes the image's `eager` value too. So an expression computes ahead exactly what the image computes ahead. Output is unchanged on every tier, so I9 holds; only when the work runs differs.",
           "code": "// jet debug prog.jet builds with the call kept:\n(Jet) break count_up\nBreakpoint set  count_up\n(Jet) c\nBreakpoint hit  prog.jet:2  in count_up()\nLocals:  n = 1000000\n// jet run and jet build still compute it ahead."
         },
         {
           "key": "B",
           "name": "Refuse, and say why",
-          "detail": "Builds stay as they are. A breakpoint, line breakpoint or logpoint in a function the image never runs is refused with a new error, E2239, Jet.DebugNeverCalled. It names the computed line and gives the fix: put `#Runtime(.NoEager)` on the calling function and start the debugger again.\n\nIn a default build the function is already dropped, so this replaces today's \"No function\" answer with the reason. In jet debug's own build, which keeps dead code, it replaces a breakpoint that never stops. A function that is also called at run time somewhere is accepted as today. A watch on the computed local works, as it does today.",
+          "detail": "Builds stay as they are. A breakpoint, line breakpoint or logpoint in a function the image never runs is refused with a new error, E2239, Jet.DebugNeverCalled. It names the computed line and gives the fix: put `#Runtime(.NoEager)` on the calling function and start the debugger again. When the only call is in a constant, `#run` or `@`, E2239 says that code always runs while compiling. Its fix moves the call into a local and puts `#Runtime(.NoEager)` on that local's function.\n\nIn a default build the function is already dropped, so this replaces today's \"No function\" answer with the reason. In jet debug's own build, which keeps dead code, it replaces a breakpoint that never stops. A function that is also called at run time somewhere is accepted as today. A watch on the computed local works, as it does today.",
           "technical": "The compiler records in the image's debug info each workspace function with no run-time call, no taken address and no export. It records kept and dropped functions, each with its name, its declaration line and the line that computed it. The console refuses; DAP returns the breakpoint unverified with the message. The same holds for -O1 and -O2 images. An image with no record answers \"No function `count_up`\" as today: one built with `--debug-info=false`, or a split image whose side `.debug` file is gone.",
           "code": "(Jet) break count_up\nError: Jet.DebugNeverCalled: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
         },
@@ -125662,7 +125667,7 @@
           "result": "Every breakpoint either stops or says at once why it cannot."
         },
         {
-          "loss": "Debug builds start slower when they compute big values at run time.",
+          "loss": "A debugged function runs slower when it computes a big value at run time.",
           "attempts": [
             "Limit the change to the workspace's own packages: kept.",
             "Keep constants, #run and @ computing ahead: kept.",
@@ -126819,7 +126824,7 @@
           "key": "A",
           "name": "`jet perf attach` can start the command",
           "detail": "Attach is the verb for a process jet perf did not build. Today it takes a running pid and chooses how to watch it by what it offers. That is a browser relay, the runtime's live records, or, when the process publishes nothing, the outside sampler.\n\nUnder A it also takes a command after `--`. It starts the command and watches it for its whole life. A launched process is read through its browser relay or sampled from outside. Live records, zones and `alloc` need `--source`, which only the pid form takes. With no `--lens`, attach keeps today's CPU view; no `cpu` lens word is added.\n\nTwo lenses join it, both read from outside whatever the process publishes. `counts` gives the whole command's user-mode instructions and cycles, CPU time and peak memory. `syscalls` lists every system call with its process, arguments and result.\n\nFollowing children is new work. Today jet_cli_perf_outside_family (Outside.jet:503) reads each thread's /proc `children` once, when sampling starts, at most 64 processes. A process started later is never sampled. `jet build` and `jet test` start their compile and link children later, so the command form must follow them as they start. The pid form keeps today's read: children started after the attach are missed, and this ballot leaves that.\n\nThe command's exit code is passed through. The pid form is unchanged. Its window is `--for=<duration>` (D-PERF-ATTACH-WINDOW1, ratified A, being built); until that lands it is a fixed second.\n\n`jet perf test` is unchanged. It profiles the tests' own code from inside. `jet perf attach --lens=counts -- jet test x.jet` measures the whole command: compile, test binary and helpers. Those are two jobs, so nothing is spelled twice.\n\nThe compiler compiling Compiler, the compile-speed profile, stays on `jet perf run Compiler/JetCLI/run.jet -- build Compiler`. That runs the compiler from source under the inside engine, with phases and tasks. Attach of `jet build Compiler` is the quick look at an installed jet, for the whole run. It samples 1,000 times a second with frame-pointer stacks. It names functions from the image's symbols and declaration lines. Compile-time code counts as `unnamed`, and phases come from the package split.",
-          "technical": "Session.jet jet_cli_perf_attach: words after `--` are the command. It is spawned stopped, the engines open on its pid before it runs, then it runs.\n\nNew child following, with its costs. The outside sampler today opens per-thread task-clock events (x64_sampler_open) on the threads of the family read at open. The command form opens one sampling event per CPU with `inherit` on the stopped command instead. Inherited sampling events cannot keep today's per-thread ring, so samples arrive through one ring per CPU, tagged by pid and tid.\n\n`counts` opens instructions:u and cycles:u with `inherit` before exec. Every thread and every child process then adds into one count, read once when the command ends. Counting needs no ring, so that inherit is cheap.\n\nIt gives the whole command's totals, not one row per process. With `inherit`, a child's count folds into its parent's at exit, and the counter reads only the sum. CPU time and peak memory come from the command's own reap (wait4). Its rusage folds in every descendant the command waited for. Its peak memory is the largest any one process reached, not a sum.\n\nPer-process counts would need one counting event and ring per CPU (inherit_stat, with read, fork and exit records). Or they would need ptrace to follow every fork. This ballot offers neither; a later one may add them.\n\nThe pid form refuses `counts` and `syscalls` with E2102 (Jet.UnknownFlag), whose fix is the `--` form: a count or call list missing the start would mislead. The command form refuses `--for=`, `--source` and `--zones=` the same way.\n\nReceipt delta. The `syscalls` section (JetPerfSyscalls) exists: `jet perf run` counts each host call by number and Jet stack (HostProcess.jet host_call). Its rows have no arguments, no pid and no result. Children and the compile are never seen. Runtime calls that bypass host_call are missed too. The command form fills the same section, adding `pid` to each row and a `calls` list: pid, tid, name, decoded arguments, result.\n\nThe bypass count. `git grep -c -E '^\\s*[^/ ].*os_syscall_i64\\(' f768b6597e -- Compiler/JetRuntime/Source` with HostProcess.jet and PerfSamples.jet excluded prints 153 lines in 30 files. It counts call lines only. Comment lines are excluded, and so are host_call itself and the perf hook. The definition is in Compiler/JetBackend/Source/OS/Linux.jet:390 (393 at f768b6597e), outside that path. The plain `git grep -c os_syscall_i64` there prints 180 lines in 33 files, comments included.\n\nThe `instructions` section (JetPerfInstructions) also exists. It keeps the sampled machine code, not run totals, so it is unchanged. One new section, `counts` (JetPerfCounts), holds the totals: `instructions_u`, `cycles_u`, `cpu_ns`, `wall_ns`, `peak_rss_bytes`, for the whole command.\n\nRefusals. No new diagnostic code is needed. A kernel without counters makes `counts` `unavailable`, with the errno and the perf_event_paranoid level. The memory and topdown lenses already report a counter they cannot open this way (Docs/Spec/observability.md, their `unavailable ... errno=` lines). Those lines print the errno and a reason. The paranoid level appears today in the sampler's JSON and its reason (SourceSampling.jet:622, :651). `counts` adds it to its line.\n\nA refused ptrace makes `syscalls` `unavailable`, with the errno and the Yama ptrace_scope. The command still runs. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone. A refusal instead would need a new code. E2127 is free, but a new code needs its registry row, UI snapshot and diagnostics.md entry.",
+          "technical": "Session.jet jet_cli_perf_attach: words after `--` are the command. It is spawned stopped, the engines open on its pid before it runs, then it runs.\n\nNew child following, with its costs. The outside sampler today opens per-thread task-clock events (x64_sampler_open) on the threads of the family read at open. The command form opens one sampling event per CPU with `inherit` on the stopped command instead. Inherited sampling events cannot keep today's per-thread ring, so samples arrive through one ring per CPU, tagged by pid and tid.\n\n`counts` opens instructions:u and cycles:u with `inherit` before exec. Every thread and every child process then adds into one count, read once when the command ends. Counting needs no ring, so that inherit is cheap.\n\nIt gives the whole command's totals, not one row per process. With `inherit`, a child's count folds into its parent's at exit, and the counter reads only the sum. CPU time and peak memory come from the command's own reap (wait4). Its rusage folds in every descendant the command waited for. Its peak memory is the largest any one process reached, not a sum.\n\nPer-process counts would need one counting event and ring per CPU (inherit_stat, with read, fork and exit records). Or they would need ptrace to follow every fork. This ballot offers neither; a later one may add them.\n\nThe pid form refuses `counts` and `syscalls` with E2102 (Jet.UnknownFlag), whose fix is the `--` form: a count or call list missing the start would mislead. The command form refuses `--for=`, `--source` and `--zones=` the same way.\n\nReceipt delta. The `syscalls` section (JetPerfSyscalls) exists: `jet perf run` counts each host call by number and Jet stack (HostProcess.jet host_call). Its rows have no arguments, no pid and no result. Children and the compile are never seen. Runtime calls that bypass host_call are missed too. The command form fills the same section, adding `pid` to each row and a `calls` list: pid, tid, name, decoded arguments, result.\n\nThe bypass count. `git grep -c -E '^\\s*[^/ ].*os_syscall_i64\\(' f768b6597e -- Compiler/JetRuntime/Source` with HostProcess.jet and PerfSamples.jet excluded prints 153 lines in 30 files. It counts call lines only. Comment lines are excluded, and so are host_call itself and the perf hook. The definition is in Compiler/JetBackend/Source/OS/Linux.jet:390 (393 at f768b6597e), outside that path. The plain `git grep -c os_syscall_i64` there prints 180 lines in 33 files, comments included.\n\nThe `instructions` section (JetPerfInstructions) also exists. It keeps the sampled machine code, not run totals, so it is unchanged. One new section, `counts` (JetPerfCounts), holds the totals: `instructions_u`, `cycles_u`, `cpu_ns`, `wall_ns`, `peak_rss_bytes`, for the whole command.\n\nRefusals. No new diagnostic code is needed. A kernel without counters makes `counts` `unavailable`, with the errno and the perf_event_paranoid level. The memory and topdown lenses already report a counter they cannot open this way. The memory lens prints `unavailable errno=N`; topdown prints `unavailable: <reason>` (Docs/Spec/observability.md:301, :576). The paranoid level appears today in the sampler's JSON and its reason (SourceSampling.jet:622, :651). `counts` adds it to its line.\n\nA refused ptrace makes `syscalls` `unavailable`, with the errno and the Yama ptrace_scope. The command still runs. E2124 (Jet.AttachTargetNotObserved) keeps its meaning for the pid form alone. A refusal instead would need a new code. E2127 is free, but a new code needs its registry row, UI snapshot and diagnostics.md entry.",
           "code": "$ jet perf attach --lens=counts -- jet build Compiler\ncounts instructions:u=81204417733 cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000\n$ jet perf attach --lens=syscalls -- jet run main.jet\nsyscalls calls=412 processes=2\n  4251 openat(AT_FDCWD, \"main.jet\", O_RDONLY|O_CLOEXEC) = 3\n$ jet perf test hash_test.jet        # unchanged: the tests' code\n$ jet perf run Compiler/JetCLI/run.jet -- build Compiler   # inside: the compiler's own phases"
         },
         {
@@ -127001,7 +127006,7 @@
           "loss": "Outside sampling of a launched jet command is coarser than the inside engine.",
           "attempts": [
             "Run the compiler from source under the inside engine for the compile-speed profile: kept, unchanged by this ballot.",
-            "Sample from outside at 8,000 a second: rejected, the per-CPU rings would take eight times the samples, and the jet CLI's comptime code has no names to gain [INFERENCE].",
+            "Sample from outside at 8,000 a second: rejected, the per-CPU rings would take eight times the samples, and compile-time code stays unnamed at any rate.",
             "Print the engine in the view's header, `engine=outside rate=1000`, and name `jet perf run` in the fix line for a .jet target: kept."
           ],
           "result": "Reduced: the coarser view is labeled, and the detailed route is one command away."
@@ -127017,8 +127022,8 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "Rivet",
+      "draft": false,
       "status": "open",
       "created": "2026-11-20T14:06:03.173Z"
     },
@@ -130573,6 +130578,69 @@
   ],
   "events": [
     {
+      "at": "2026-11-21T06:41:20.152Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T06:41:12.028Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-21T06:41:01.777Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "rejected: Third review, one finding: under B (and for a built image under A) automatic evaluation stays on, so moving the call into a local computes it ahead again (LocalValues.jet:1-16, :72-76); the fix must also put #Runtime(.NoEager) on that local's function. All other repairs confirmed."
+    },
+    {
+      "at": "2026-11-21T06:41:00.315Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-PERF-TARGET1",
+      "note": "reviewed by Rivet"
+    },
+    {
+      "at": "2026-11-21T06:40:58.983Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-PERF-TARGET1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T06:40:21.371Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-21T06:40:16.134Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PERF-TARGET1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-21T06:39:51.171Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "rejected: Re-review, three findings: (1) a replay is a jet debug build only for a .jet entry; jet_cli_debug_launch passes any other entry to the session unbuilt and --replay takes images (Debug.jet:243-257). (2) E2239's fix, #Runtime(.NoEager) on the caller, cannot work when the only call is in a constant, #run or @: .NoEager covers locals and #run still runs while building (metaprogramming.md:114-116). (3) designAway[1].loss still says debug builds start slower. Earlier repairs confirmed."
+    },
+    {
+      "at": "2026-11-21T06:39:49.436Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-PERF-TARGET1",
+      "note": "rejected: Re-review, two findings: (1) only the memory lens prints an errno (`counter ... unavailable errno=N`, observability.md:300-301); topdown prints `unavailable: <reason>` with no errno (:571-576). (2) designAway[1] ends with a reviewer tag, [INFERENCE], which is not owner text; option A already says compile-time code counts as unnamed. All nine earlier repairs confirmed against code."
+    },
+    {
       "at": "2026-11-21T06:38:04.578Z",
       "by": "Main",
       "action": "decision.update",
@@ -134047,713 +134115,6 @@
       "action": "card.update",
       "ref": "c0a8z3u0",
       "note": "phase"
-    },
-    {
-      "at": "2026-11-19T16:05:50.822Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-19T16:05:49.947Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0a8z3u0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-19T15:20:56.179Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06lmp17",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T15:20:52.095Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lmp17",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-19T15:18:27.222Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09hk13a",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-19T15:18:26.159Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09hk13a",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-19T15:18:24.838Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09hk13a",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-19T15:18:23.957Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09hk13a",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-19T15:18:23.090Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09hk13a",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-19T15:13:47.336Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-19T15:13:46.113Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-19T15:12:55.493Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T14:46:19.431Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T14:36:22.888Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T13:53:50.847Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-19T13:53:49.399Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-19T13:48:26.291Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T13:29:46.561Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T13:25:55.202Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T12:56:49.461Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-19T12:34:36.134Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T12:15:03.255Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T11:48:27.151Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "68 criteria, soft limit 6: a c39 audit gap: the owner's order puts every #6841 debugger and profiler criterion on this card"
-    },
-    {
-      "at": "2026-11-19T11:48:27.151Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#68 c39 P1 rate parity with Superluminal (8 kHz, full stacks): L"
-    },
-    {
-      "at": "2026-11-19T11:46:32.770Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T11:22:17.432Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T11:21:59.010Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0nwrfck",
-      "note": "#52: c39 fresh review (IfHole, p313): jet perf run --lens=alloc alloc.jet snapshot of 20 live blocks leaves 17 (68,048 of 68,960 bytes) as 'elsewhere' with no type or line"
-    },
-    {
-      "at": "2026-11-19T11:21:58.125Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0nwrfck",
-      "note": "#51: c39 fresh review (IfHole, p313): the dump of a 3-task deadlock lists one task and its locals show as untyped Pointer (c51: every task's stack); a plain jet run of the deadlock writes no dump, only --observe does"
-    },
-    {
-      "at": "2026-11-19T11:21:56.965Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0nwrfck",
-      "note": "#46: c39 fresh review (IfHole, p313): two of fib4's three join waits print 'woken by task ?'; every wait must name the task whose action ended it"
-    },
-    {
-      "at": "2026-11-19T11:21:56.107Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0nwrfck",
-      "note": "#44: c39 fresh review (IfHole, p313): on fib4.jet -- 32 (four tasks, -O2) the per-thread sampler keeps 19-31% of nominal samples over 3 runs (-- 34: 52-80%, -- 36: 88-90%); the 90% bar holds only on the 2 s case every_thread_keeps_whole_stacks. Receipt reason sentence is also cut off"
-    },
-    {
-      "at": "2026-11-19T11:21:55.254Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0nwrfck",
-      "note": "#43: c39 fresh review (IfHole, p313): jet run --record=r7 fib.jet -- 5 prints fib=5, but jet debug --replay=r7 fib.jet replays with the default argument and prints fib=832040; a replay does not reproduce the recorded run's arguments"
-    },
-    {
-      "at": "2026-11-19T11:21:04.300Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T10:50:31.036Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T10:25:07.117Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T09:50:52.491Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T09:50:51.207Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#58"
-    },
-    {
-      "at": "2026-11-19T09:50:49.771Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-19T09:40:55.097Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T09:40:52.962Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DEBUG-FOLD1",
-      "note": "What the debugger does with calls the compiler works out ahead (draft)"
-    },
-    {
-      "at": "2026-11-19T09:40:44.101Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T09:02:09.548Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T09:02:08.656Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-19T09:02:07.681Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-19T09:02:06.268Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-19T08:34:54.661Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T08:28:01.095Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-19T08:22:30.277Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T08:22:25.099Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-19T08:22:24.050Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-19T07:54:48.526Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-19T07:30:20.437Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#61"
-    },
-    {
-      "at": "2026-11-19T07:30:18.299Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-19T07:30:15.951Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-19T07:30:11.716Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-19T07:10:08.852Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T07:08:42.629Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T07:02:59.381Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T06:51:12.026Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T06:49:44.634Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T06:43:12.677Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T06:22:37.331Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#67"
-    },
-    {
-      "at": "2026-11-19T06:18:00.471Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-19T06:17:59.595Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#54"
-    },
-    {
-      "at": "2026-11-19T06:17:58.710Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-19T06:01:04.184Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T05:54:46.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-19T05:46:25.765Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-19T04:56:28.333Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-19T04:49:42.545Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T04:04:35.759Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "67 criteria, soft limit 6: c39 review gaps belong on #6841"
-    },
-    {
-      "at": "2026-11-19T04:04:35.759Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#67 c39 G16, a stable overhead receipt: `Perf/receipt_reports_me"
-    },
-    {
-      "at": "2026-11-19T04:04:34.808Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "66 criteria, soft limit 6: c39 review gaps belong on #6841"
-    },
-    {
-      "at": "2026-11-19T04:04:34.808Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#66 c39 G5, second-evaluation latency: a second `print` of a new"
-    },
-    {
-      "at": "2026-11-19T04:04:21.860Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "65 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:21.860Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#65 c39 G17, precise PC: under `--lens=cpu` with PEBS or IBS ava"
-    },
-    {
-      "at": "2026-11-19T04:04:18.976Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "64 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:18.976Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#64 c39 G14, DAP attach, pause and restart: the four #6730 known"
-    },
-    {
-      "at": "2026-11-19T04:04:17.956Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "63 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:17.956Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#63 c39 G10, placed logpoints: a logpoint whose message R7 scan "
-    },
-    {
-      "at": "2026-11-19T04:04:16.894Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "62 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:16.894Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#62 c39 G8, a watch follows reallocation: `watch xs[3]` keeps st"
-    },
-    {
-      "at": "2026-11-19T04:04:15.838Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "61 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:15.838Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#61 c39 G6, evaluation in an inlined frame: `print n + 1` in an "
-    },
-    {
-      "at": "2026-11-19T04:04:12.875Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "60 criteria, soft limit 6: c39 review gaps belong on #6841 (its c39 terms)"
-    },
-    {
-      "at": "2026-11-19T04:04:12.875Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#60 c39 G4, a fallible call shows Ok or Err: in jet debug, `prin"
-    },
-    {
-      "at": "2026-11-19T04:02:15.652Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#56"
-    },
-    {
-      "at": "2026-11-19T04:02:02.551Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-19T03:13:57.969Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c031o59x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-19T01:00:55.387Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-18T23:24:33.440Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-18T23:19:19.251Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-18T23:18:55.077Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-18T23:18:54.120Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-18T23:18:53.139Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-18T23:18:43.934Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-18T23:18:41.687Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-18T23:18:18.461Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0nwrfck",
-      "note": "59 criteria, soft limit 6: the debugger and profiler epoch card; a gap found by its own measurement belongs on it (owner order 2026-11-14)"
-    },
-    {
-      "at": "2026-11-18T23:18:18.461Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nwrfck",
-      "note": "#59 Stepping costs what the step does, not what the image holds:"
-    },
-    {
-      "at": "2026-11-18T23:17:37.487Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-18T23:15:06.670Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-18T23:12:41.516Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nwrfck",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
