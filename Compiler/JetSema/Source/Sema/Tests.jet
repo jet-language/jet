@@ -85,6 +85,8 @@ SemaTestFunctionCheckResult: struct {
     comptime_body_sources: [SemaComptimeBodySource],
     // Why an incomplete result has no diagnostic.
     incomplete_reasons: [String],
+    // The answers of the debugger's probes inside the test (EvalProbe.jet).
+    eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
 }
 
 sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
@@ -152,6 +154,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
         complete: checked.complete,
         comptime_body_sources: checked.comptime_body_sources.copy(),
         incomplete_reasons: checked.incomplete_reasons.move(),
+        eval_answers: checked.eval_answers.move(),
     }
 }
 

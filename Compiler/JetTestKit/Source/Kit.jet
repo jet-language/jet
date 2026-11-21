@@ -925,6 +925,25 @@ kit_case_blocks: fn(status: String) -> Bool {
     kit_expect_named(["FAIL", "UNEXPECTED-PASS", "REFUSED", "ERROR", "TIMEOUT"], status)
 }
 
+KitLimits: struct {
+    cpu: Duration,
+    wall: Duration,
+}
+
+// The run policy: the limits each child of a run with a `--timeout` of
+// `seconds` gets. `seconds` of wall time on an idle host hold at most that
+// much CPU on every core, so the CPU limit admits every step the wall limit
+// did, a parallel build included, and the host's other load moves neither;
+// the wall-clock limit is only the hang guard, KIT_WALL_GUARD times `seconds`.
+kit_run_limits: fn(seconds: Int) -> KitLimits Err! {
+    // A representable `seconds` is at most about 9e9, so the two products
+    // below cannot overflow.
+    _: Duration.seconds(seconds) ?? return Err("{err}")
+    cpu: Duration.seconds(seconds * sys.cpu_count()) ?? return Err("{err}")
+    wall: Duration.seconds(seconds * KIT_WALL_GUARD) ?? return Err("{err}")
+    Ok(KitLimits{cpu: cpu, wall: wall})
+}
+
 // Runs `selected_suites` in one pool. `reports` None writes one report of every row to
 // options.results; Val(paths) finishes each suite on its own, its rows and summary to
 // paths[suite] ("" prints the summary only), as each gate test reports its suite.
@@ -932,15 +951,8 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     if selected_suites.len() == 0 || selected_suites.any(fn(suite) { !kit_expect_named(kit_suites(), suite) }) {
         return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
     }
-    // A representable `--timeout` is at most about 9e9 seconds, so the two
-    // products below cannot overflow.
-    _: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
-    // `--timeout` seconds of wall time on an idle host hold at most that much
-    // CPU on every core, so the CPU limit admits every step the wall limit
-    // did, a parallel build included, and the host's other load moves neither.
-    limit: Duration.seconds(options.timeout * sys.cpu_count()) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
-    timeout: Duration.seconds(options.timeout * KIT_WALL_GUARD) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
-    discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0}
+    limits: kit_run_limits(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
+    discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: limits.wall, cpu_limit: Val(limits.cpu), memory_limit: 0}
     discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String:String]{}}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
@@ -984,7 +996,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     // disk cache ahead of the rows could not spare those rows.
     scratch_memory: kit_exec_memory_backed(canonical)
     ffi_cache: if scratch_memory -> "" else -> files.join(state, "ffi")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: limits.wall, cpu_limit: Val(limits.cpu), memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
     // Golden and cases C rows build on every tier, each with a fresh Hangar:
     // the run takes the pack once, so no tier unpacks a copy of its own, and
     // the musl libraries are built once beside that pack, which each row's

@@ -24,7 +24,8 @@ kit_test_golden_scratch: fn(label: String) -> String {
 }
 
 kit_test_golden_env: fn(root: String) -> KitEnv {
-    KitEnv{root: root, scratch: root, jet: kit_test_golden_fixture("compiler.jet"), jetpack: "", timeout: 5s, memory_limit: 0}
+    limits: kit_test_run_limits()
+    KitEnv{root: root, scratch: root, jet: kit_test_golden_fixture("compiler.jet"), jetpack: "", timeout: limits.wall, cpu_limit: Val(limits.cpu), memory_limit: 0}
 }
 
 #Test("golden exact streams pin stdout, error status, and successful stderr") {

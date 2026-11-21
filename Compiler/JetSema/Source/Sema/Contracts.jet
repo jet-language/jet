@@ -646,6 +646,7 @@ sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_re
         valid = false
     }
     sema_contract_merge_context_delta(checked_context, call_start, view_start, name_start, comptime_start, copy_start, context)
+    sema_eval_walk_take_back(context, checked_context)
     // The condition's flat nodes are rows of its arena, which continues this one.
     sema_arena_take_back(context, checked_context.arena.move())
     if !valid -> return None

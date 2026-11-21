@@ -13,7 +13,8 @@ kit_ui_test_scratch: fn(label: String) -> String {
 kit_ui_test_context: fn(root: String, label: String) -> KitCtx {
     options := kit_test_checkout_options(root)
     options.tiers = ["o0", "o1"]
-    env: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Compiler/JetTestKit/Tests/Fixtures/UI/compiler.jet"), jetpack: "", timeout: 5s, memory_limit: 0}
+    limits: kit_test_run_limits()
+    env: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Compiler/JetTestKit/Tests/Fixtures/UI/compiler.jet"), jetpack: "", timeout: limits.wall, cpu_limit: Val(limits.cpu), memory_limit: 0}
     KitCtx{env: env, root: root, scratch: files.join(root, label), bless: options.bless, known: kit_known_load(options.ledger), options: options}
 }
 

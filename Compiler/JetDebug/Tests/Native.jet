@@ -6,7 +6,7 @@ use {
     native_test_files: core.files
     native_test_hex: core.encoding.hex
     jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses]
-    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64TraceResume, X64_TRACE_RIP, X64_TRACE_RSP, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks, compiler_threads_single]
 }
 
@@ -476,6 +476,81 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     assert_eq(session.take_output(), "count 2\n")
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// Tail calls under a plain recursion: `down` and `hop` end in tail jumps,
+// `walk` in a call and a `ret`. The count comes from the program's
+// arguments, so nothing folds away.
+NATIVE_TEST_TAIL: "use process: core.process\n\ndown: fn(n: Int) -> Int {{\n    if n <= 0 -> return 7\n    hop(n - 1)\n}}\n\nhop: fn(n: Int) -> Int {{\n    if n == 5 -> return 9\n    down(n)\n}}\n\nwalk: fn(n: Int) -> Int {{\n    if n <= 0 -> return down(3)\n    walk(n - 1) + 1\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"2\") ?? 2\n    print(\"{{walk(n)}}\")\n}}\n"
+
+// The most instructions the tail test single-steps.
+NATIVE_TEST_MOST_STEPS: 1000000
+
+// What ends the frame at `pc`: "ret" at a return, "tail" at a jump to a
+// function's start, "" elsewhere.
+native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
+    bytes: session.code(pc, 5)
+    if bytes.len() < 2 -> return ""
+    if bytes[0] == (U8{0xc3}) -> return "ret"
+    offset := 0
+    size := 0
+    if bytes[0] == (U8{0xe9}) && bytes.len() == 5 {
+        loop k in 0..<4 -> offset = offset | (Int{bytes[1 + k]} << (8 * k))
+        if offset >= 1 << 31 -> offset -= 1 << 32
+        size = 5
+    }
+    if bytes[0] == (U8{0xeb}) {
+        offset = Int{bytes[1]}
+        if offset >= 128 -> offset -= 256
+        size = 2
+    }
+    if size == 0 -> return ""
+    target: pc + size + offset
+    callee: x64_jetline_find(session.image.lines, target)
+    if callee >= 0 && session.image.lines.functions[callee].low == target -> "tail" else -> ""
+}
+
+// A frame paused at its `ret`, or at the tail jump that ends it, has
+// already given back its frame pointer: its call frame rules unwind it to
+// the same callers as one instruction before, the whole stack down to run.
+#Test("a_pause_at_a_ret_or_a_tail_jump_unwinds_the_whole_stack") {
+    lines: NATIVE_TEST_TAIL.split("\n").to_list()
+    loop level in ([String]{"-O0", "-O1", "-O2"}) {
+        scratch: native_test_files.temp_dir("jet-debug-tail") ?? panic("scratch: {err}")
+        root: scratch.path
+        session := native_test_session(root, NATIVE_TEST_TAIL, [String]{level})
+        first: session.run_to([NativeBreak]{{file: "prog.jet", line: 14}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+        assert(native_debug_hit_breakpoint(first.stop) != None, "{level}: {first.text}")
+        session.clear_breakpoints() ?? panic("clear: {err.detail}")
+        // The frame the steps run until it returns.
+        out: (session.unwind() ?? panic("unwind: {err.detail}"))[0].cfa
+        before := session.registers() ?? panic("registers: {err.detail}")
+        rets := 0
+        tails := 0
+        loop _ in 0..<NATIVE_TEST_MOST_STEPS {
+            event: session.go(X64TraceResume.Step) ?? panic("step: {err.detail}")
+            if event.ends_run() -> break
+            registers: session.registers() ?? panic("registers: {err.detail}")
+            if registers[X64_TRACE_RSP] >= out -> break
+            pc: registers[X64_TRACE_RIP]
+            function: x64_jetline_find(session.image.lines, pc)
+            end: native_test_frame_end(session, pc)
+            if function >= 0 && end != "" && function == x64_jetline_find(session.image.lines, before[X64_TRACE_RIP]) {
+                at: session.backtrace() ?? panic("backtrace: {err.detail}")
+                was: session.backtrace_from(before) ?? panic("backtrace: {err.detail}")
+                shown: native_debug_backtrace(at)
+                assert(at.len() > 1 && at[0].function == was[0].function, "{level}: {end}:\n{shown}")
+                assert_eq(native_debug_backtrace(at[1..<at.len()]), native_debug_backtrace(was[1..<was.len()]))
+                assert(shown.contains("  run()  "), "{level}: {end} in {at[0].function}:\n{shown}")
+                if end == "ret" -> rets += 1 else -> tails += 1
+            }
+            before = registers
+        }
+        assert(rets > 0, "{level}: a pause at a ret")
+        assert(tails > 0, "{level}: a pause at a tail jump")
+        session.close()
+        native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    }
 }
 
 #Test("an_o2_session_shows_inlined_frames_and_their_locals") {
