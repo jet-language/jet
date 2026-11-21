@@ -6,7 +6,10 @@
 # pointer walk alone goes from there to run's line and loses spin's loop
 # line, so that line's inclusive time falls short of run's line by each such
 # sample. With the call frame information every sample under run's line
-# holds the loop line too, but for a few at spin's entry and return.
+# holds the loop line too, but for a few at spin's entry and return. Each
+# sample in `pick` keeps its caller, the loop line, which its return address
+# in the sample's copy of the stack names: the loop line's inclusive samples
+# hold its own and all of pick's.
 requires: os-name:linux
 fixture: UnwindsWithoutFramePointers.fixture
 env: NO_COLOR=1
@@ -20,3 +23,6 @@ stdout: ~ "  line 16 samples=" # spin's loop line
 stdout: ~ "  line 23 samples=" # run's line that calls spin
 capture: loop = text stdout.split("  line 16 samples=", 1).split("inclusive=", 1).split("\n", 0).trim
 json: stdout.split("  line 23 samples=", 1).split("inclusive=", 1).split("\n", 0).trim doc $ <= {cap:loop}+3 # each sample under run's call holds the loop line
+capture: spin_line = text stdout.split("  line 16 samples=", 1).split(" ", 0).trim
+capture: pick = text stdout.split("spin.jet#pick profile:cpu samples=", 1).split(" ", 0).trim
+json: stdout.split("  line 16 samples=", 1).split("inclusive=", 1).split("\n", 0).trim doc $ >= {cap:pick}+{cap:spin_line} # every sample in the frameless pick holds its caller's line

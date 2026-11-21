@@ -1,0 +1,16 @@
+use {
+    "helper"
+    compiler: core.compiler
+}
+
+// The text of main.jet, handed to the query as a value: it was read from no file.
+HANDED: #run { compiler.check(compiler.parse("use \"helper\"\n\nrun: fn() {{ print(helper.value() + missing_local) }}\n") ?? panic("parse")) ?? panic("check") }
+
+DIAGNOSTIC_FILES: #run (loop d in HANDED.diagnostics() -> (if d.span == .Val(s) -> "{d.code} [{s.file}]" else -> "{d.code} unplaced")).join("\n")
+
+FUNCTION_FILES: #run (loop f in HANDED.functions() -> "{f.name} [{f.span.file}]").join("\n")
+
+run: fn() {
+    print(DIAGNOSTIC_FILES)
+    print(FUNCTION_FILES)
+}

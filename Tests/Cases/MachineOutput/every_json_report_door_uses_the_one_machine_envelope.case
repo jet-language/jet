@@ -266,7 +266,10 @@ json: stdout doc $ : object # original parse(&text) requires one JSON object
 json: stdout doc $.action = "cli"
 json: stdout doc $.reports[0].code = "E2101"
 stderr.trim: empty # original assert_machine_door: other stream is all whitespace
-copy: {root}/.jet/perf/1794037195-1f8d6433.jettrace fixture.jettrace
+# The perf doors read a trace this case makes, not one left in the tree's
+# own .jet/perf, which no checkout holds.
+step perf-run: jet perf run run.jet --out {work}/fixture.jettrace
+exit: 0
 step perf-view: jet perf view {work}/fixture.jettrace --json
 exit: 0
 stdout: nonempty # original assert_machine_stream: stream is not all whitespace

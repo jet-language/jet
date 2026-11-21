@@ -454,7 +454,7 @@ task_run_joined: fn(child: I64) -> Bool {
         sync_thread_lock(root)
         taker: if (action == FIBER_YIELD) -> fiber_ready_taker(root) else -> fiber_carrier_first(root)
         sync_thread_unlock(root)
-        fiber_ready_take(root, taker)
+        scheduler_take(root, taker)
     }
     jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
     true
