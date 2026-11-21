@@ -1747,7 +1747,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    jet_cli_native_optimize(built.program, level, options, threads, census, trace_sink)
+    jet_cli_native_optimize(built.program, jet_cli_opt_options(level, options), threads, census, trace_sink)
     // The census of the marked calls this tier's passes left (JetIR
     // OptInline.jet ir_opt_marked_calls): Compiler/test.jet's `inline_census`
     // suite holds every build of Examples, Core and the compiler to 0.
@@ -1787,12 +1787,13 @@ jet_cli_native_checks: fn(result: JetDriverCompileResult, checked: JetDriverLowe
     checks
 }
 
-// The built `program`'s IR passes at optimization `level` (O0's
-// jet_cli_native_o0, else the optimizer and one IR Lint over its result),
-// each finding an ICE row of `census` that traps its function.
-jet_cli_native_optimize: fn(program: &IRModule, level: Int, options: BuildOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Env, Time, Exec.Args]> Never! {
+// The built `program`'s IR passes with the optimizer's options `opt`
+// (jet_cli_opt_options) at its level (O0's jet_cli_native_o0, else the
+// optimizer and one IR Lint over its result), each finding an ICE row of
+// `census` that traps its function.
+jet_cli_native_optimize: fn(program: &IRModule, opt: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Env, Time, Exec.Args]> Never! {
     function_count: program.functions.len()
-    opt: jet_cli_opt_options(level, options)
+    level: opt.level
     if level <= 0 {
         jet_cli_native_o0(program, opt, threads, census, trace_sink)
         return

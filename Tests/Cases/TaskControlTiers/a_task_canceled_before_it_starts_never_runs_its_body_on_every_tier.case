@@ -1,0 +1,15 @@
+# A task canceled before it starts never runs its body, on every tier.
+# `late` waits for its group's one slot when the cancel reaches it, so
+# neither its print nor anything after its spawn runs, and the canceled
+# spawner's join reports `Canceled`.
+fixture: ATaskCanceledBeforeItStartsNeverRunsItsBodyOnEveryTier.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "spawner: Canceled\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "spawner: Canceled\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "spawner: Canceled\n"

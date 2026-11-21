@@ -242,8 +242,9 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     seconds: native_dump_word(bytes, 24)
     records: bytes.len() - memory
     // The image's code facts, which name the symbols `disassemble` lists by:
-    // a dump session's `binary` is the dump, not the image.
-    facts: native_eval_image_of(elf)
+    // a dump session's `binary` is the dump, not the image. A dump evaluates
+    // nothing, so it reads no runtime pack.
+    facts: native_eval_image_of(elf, [U8]{})
     routines: x64_image_functions(elf).functions
     backing := bytes.move()
     backing.extend(elf.move())

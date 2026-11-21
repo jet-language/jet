@@ -1,9 +1,12 @@
 // D-SHIELDNAME1=A / R12: AOT and dev both defer race cancellation until the
-// shielded commit finishes. Code after the block never runs.
+// shielded commit finishes. Code after the block never runs. The winner waits
+// until the loser is inside its shield: a task canceled before it starts
+// never runs its body.
 use time: core.time
 
-shielded_commit: fn() -> Int {
+shielded_commit: fn(entered: Sender<Int>) -> Int {
     #Shield {
+        entered.send(1)
         time.sleep(20ms)
         print("committed")
     }
@@ -11,11 +14,15 @@ shielded_commit: fn() -> Int {
     return 1
 }
 
-fast_seven: fn() -> Int { 7 }
+fast_seven: fn(entered: Receiver<Int>) -> Int {
+    entered.receive() ?? 0
+    7
+}
 
 run: fn() {
+    { sender: entered_tx, receiver: entered }: channel<Int>(capacity: 1)
     task.group g {
-        winner: task.race {shielded_commit(), fast_seven()} ?? panic("race failed")
+        winner: task.race {shielded_commit(entered_tx), fast_seven(entered)} ?? panic("race failed")
         print(winner)
     }
 }

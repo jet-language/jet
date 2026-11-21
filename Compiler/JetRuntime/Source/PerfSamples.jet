@@ -507,9 +507,10 @@ perf_precise_rings := I64{0}
 
 PERF_PRECISE_FDS: I64{65536}
 
-// The table's word after its descriptors: 1 once the exit drains every ring
-// (perf_precise_rings_drain), after which an ending thread's ring stays
-// mapped (perf_precise_end).
+// The table's word after its descriptors: 1 once the exit writes every
+// sampler's end (perf_precise_ends), after which an ending thread's ring
+// stays mapped (perf_precise_end) for the exit's drain
+// (perf_precise_rings_drain).
 PERF_PRECISE_EXITING: I64{524288}
 
 // The table's words after the exit's: the kernel's time to take one sample
@@ -1472,9 +1473,10 @@ perf_precise_ring_bytes: fn() -> I64 {
 // writes each live sampler's end record under its lock too
 // (perf_precise_ends), so a sampler that ends meanwhile writes two, the
 // later the larger count. The ring is unmapped
-// then; once the exit drains every ring (perf_precise_rings_drain), which
-// may have read it from the table before it was cleared, it stays mapped
-// for the process's last moments, its lock released.
+// then; once the exit has set its exit word (perf_precise_ends), its drain
+// (perf_precise_rings_drain) may read the ring from the table before it was
+// cleared, so it stays mapped for the process's last moments, its lock
+// released.
 perf_precise_end: fn(fd: I64) {
     rings: perf_precise_rings
     slot: wrapping(rings + wrapping(fd * I64{8}))
@@ -1517,15 +1519,21 @@ perf_precise_count: fn(fd: I64, ring: I64) -> I64 {
 
 // Write sampler `fd`'s end record, its ring `ring`'s lock held: a clock
 // record with PERF_SAMPLES_ENDED for its address, the sampler's serial and
-// its event's count now (perf_precise_count), from which the session
-// counts the periods its thread's samplers ran and, by each sample's count
-// word (PERF_SAMPLES_TIMED), those that ended in the kernel. Nothing for a
+// its event's count (perf_precise_count), from which the session counts
+// the periods its thread's samplers ran and, by each sample's count word
+// (PERF_SAMPLES_TIMED), those that ended in the kernel. The sampler is
+// disabled first (PERF_EVENT_IOC_DISABLE), so the count is final and the
+// kernel takes no sample past it for a later drain to write. Nothing for a
 // sampler whose count is 0, which took no sample, or without a samples
 // file.
 perf_precise_ended: fn(fd: I64, ring: I64) {
     out: perf_samples_fd
+    if (out < I64{0}) {
+        return
+    }
+    _ := observe_syscall(I64{16}, fd, I64{9217}, I64{0}, I64{0})
     count: perf_precise_count(fd, ring)
-    if (out < I64{0} || count == I64{0}) {
+    if (count == I64{0}) {
         return
     }
     record: wrapping(ring + PERF_PRECISE_END)
@@ -1537,14 +1545,18 @@ perf_precise_ended: fn(fd: I64, ring: I64) {
 
 // At exit, each live sampler's end record (perf_precise_ended), written
 // under its ring's lock while its slot still holds the ring, so that none
-// closes meanwhile (perf_precise_end). The exit writes them once every
-// ring is drained (perf_precise_rings_drain), so no ring it reads is
-// unmapped. Nothing under the timer.
+// closes meanwhile (perf_precise_end). The exit word, set first, keeps the
+// ring of a thread that ends meanwhile mapped (perf_precise_end), so no
+// ring this or the exit's drain after it (perf_precise_rings_drain) reads
+// is unmapped. Each sampler is disabled as its end is written, so that
+// drain takes every sample up to each end and none past it. Nothing under
+// the timer.
 perf_precise_ends: fn() {
     rings: perf_precise_rings
     if (rings == I64{0}) {
         return
     }
+    _ := sync_cas(wrapping(rings + PERF_PRECISE_EXITING), I64{0}, I64{1})
     index := I64{0}
     loop index < PERF_PRECISE_FDS {
         slot: wrapping(rings + wrapping(index * I64{8}))
@@ -2154,17 +2166,17 @@ perf_samples_turn: fn(tcb: I64) {
     perf_samples_charge(perf_samples_buffer, began, false)
 }
 
-// At exit, drain every sampler's ring (perf_samples_ring_drain): this
-// thread's charged to its task, every other thread's to none, 0, since
-// another thread's task is not read while it runs. The exit word, set
-// first, keeps the ring of a thread that ends meanwhile mapped
+// At exit, once every live sampler's end is written (perf_precise_ends),
+// drain every sampler's ring (perf_samples_ring_drain): this thread's
+// charged to its task, every other thread's to none, 0, since another
+// thread's task is not read while it runs. The exit word perf_precise_ends
+// set keeps the ring of a thread that ends meanwhile mapped
 // (perf_precise_end).
 perf_precise_rings_drain: fn() {
     rings: perf_precise_rings
     if (rings == I64{0}) {
         return
     }
-    _ := sync_cas(wrapping(rings + PERF_PRECISE_EXITING), I64{0}, I64{1})
     began: perf_samples_now(false, I64{3})
     tcb: thread_base()
     own: sync_load(wrapping(tcb + PERF_SAMPLES_TCB_RING))
@@ -2527,8 +2539,9 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // snapshot named `exit` comes first (perf_samples_heap), then the
 // allocations' records. An attach's zones window still open closes first
 // (perf_flight_window_end), so the clock record goes to the record socket.
-// Every ring's samples are drained first (perf_precise_rings_drain) and
-// each live sampler's end record written (perf_precise_ends), then
+// Each live sampler's end record is written first, the sampler disabled
+// (perf_precise_ends), and every ring's samples then drained
+// (perf_precise_rings_drain), then
 // the spans buffer's rows and the records the handlers keep
 // (perf_samples_flush) are written out, then the causal lens's idle table
 // (perf_causal_idle_write) and tasks' timings (perf_causal_rows_write), and
@@ -2540,8 +2553,8 @@ perf_samples_exit: fn() {
     if (fd < I64{0}) {
         return
     }
-    perf_precise_rings_drain()
     perf_precise_ends()
+    perf_precise_rings_drain()
     perf_samples_flush(fd)
     perf_causal_idle_write(fd)
     perf_causal_rows_write(fd)

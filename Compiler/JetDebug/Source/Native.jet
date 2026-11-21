@@ -593,8 +593,9 @@ NativeSession: struct {
     // What compiles the expressions `print`, `watch`, conditions and
     // logpoints evaluate (NativeEval.jet); None evaluates nothing. Each
     // compiled expression is kept by its source line and text, and the
-    // image's code facts placing them are read once, from the session's
-    // `evaluate_with` on, on a task of their own (`eval_read`).
+    // image's code facts placing them, with the runtime pack, are read
+    // once, from the session's `evaluate_with` on, on a task of their own
+    // (`eval_read`).
     evaluator: NativeEvaluator?{None},
     evals: [String:Shared<NativeEval>]{[String:Shared<NativeEval>]{}},
     eval_image: Shared<NativeEvalImage>?{None},
@@ -615,11 +616,6 @@ NativeSession: struct {
     eval_room: Int{0},
     eval_code: Int{0},
     eval_runs: Int{0},
-    // The runtime pack an evaluation places the runtime functions the image
-    // lacks from (NativeFixPack.jet), read from the evaluator at the first
-    // plan that needs one (`pack_read`); None when it can't be read.
-    pack: NativeFixPack?{None},
-    pack_read: Bool{false},
     // The conditions and logpoints placed in the program (NativePlace.jet),
     // latest last, and whether the last stop was a condition of them that
     // held.
@@ -963,18 +959,28 @@ NativeSession: struct {
         self.read_facts()
     }
 
-    // Starts reading the code facts of the session's image on a task of
-    // their own (native_eval_facts_read), in place of any it has, while the
-    // program runs to its first stop, so the first evaluation doesn't read
-    // them (eval_facts).
+    // Starts reading the code facts of the session's image, and the runtime
+    // pack evaluations place the runtime functions it lacks from, on a task
+    // of their own (native_eval_facts_read), in place of any it has, while
+    // the program runs to its first stop, so the first evaluation reads
+    // neither (eval_facts).
     read_facts: fn(&self) Never! {
         cell: Shared{NativeEvalFacts{}}
         done: Condition.new()
         self.eval_image = None
         self.eval_read = Val(NativeEvalRead{cell: cell, done: done})
         binary: "{self.binary}"
-        reading: task native_eval_facts_read(cell, done, binary)
+        runtime: self.runtime_bytes()
+        reading: task native_eval_facts_read(cell, done, binary, runtime)
         reading.detach()
+    }
+
+    // The runtime pack's bytes (NativeEvaluator.runtime), which the
+    // evaluator lends rather than copies; empty without an evaluator, or
+    // when they can't be read.
+    runtime_bytes: fn(self) -> [U8] Never! {
+        evaluator: self.evaluator ?? return [U8]{}
+        evaluator.runtime() ?? [U8]{}
     }
 
     // The rule of breakpoint `number`, listed by `breaks` as `shown`:
@@ -1187,18 +1193,6 @@ NativeSession: struct {
         None
     }
 
-    // Reads the runtime pack from the session's evaluator
-    // (NativeEvaluator.runtime) into `pack`, once a session.
-    read_pack: fn(&self) Never! {
-        if self.pack_read {
-            return
-        }
-        self.pack_read = true
-        evaluator: self.evaluator ?? return
-        bytes: evaluator.runtime() ?? return
-        self.pack = native_fix_pack(bytes)
-    }
-
     // Drops the code kept for expressions (`evals`) once the program's
     // sources read other than when it was compiled
     // (NativeEvaluator.unchanged): it may not be what the source says now,
@@ -1361,11 +1355,8 @@ NativeSession: struct {
         if permit.value.plan == None || permit.value.planned != self.fixed.len() {
             diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
             plan := native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry, also: permit.value.drop) ?? return Err(native_eval_refused(err.detail))
-            if plan.absent.len() > 0 {
-                self.read_pack()
-                if self.pack == .Val(pack) {
-                    native_fix_pack_load(plan, pack, facts.value.symbols, facts.value.code)
-                }
+            if plan.absent.len() > 0 && facts.value.pack == .Val(pack) {
+                native_fix_pack_load(plan, pack, facts.value.symbols, facts.value.code)
             }
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
@@ -1479,7 +1470,7 @@ NativeSession: struct {
             }
         }
         elf: native_files.read_bytes(self.binary) ?? return Err(native_eval_refused("couldn't read the program `{self.binary}`: {err}"))
-        cell: native_eval_image_of(elf)
+        cell: native_eval_image_of(elf, self.runtime_bytes())
         self.eval_image = Val(cell)
         Ok(cell)
     }
@@ -1682,8 +1673,7 @@ NativeSession: struct {
                 }
             }
             if packed.len() > 0 {
-                self.read_pack()
-                if self.pack == .Val(pack) {
+                if facts.value.pack == .Val(pack) {
                     native_fix_pack_fresh(plan, pack, facts.value.symbols, facts.value.code, packed)
                 }
                 if plan.loaded.len() > 0 -> allocates = true
@@ -6513,12 +6503,12 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
     native_files.join(out_dir, native_files.basename(entry).before(".jet"))
 }
 
-// The code facts of the image `binary` (NativeEvalImage), read on a task of
-// their own into `cell` (native_eval_image_fill), which `done` then wakes
-// its waiters for (native_eval_facts_wait). A read that stops still ends
-// the reading.
-native_eval_facts_read: fn(cell: Shared<NativeEvalFacts>, done: Condition, binary: String) Never! {
-    reading: task native_eval_image_fill(cell, binary)
+// The code facts of the image `binary` and the runtime pack `runtime`
+// (NativeEvalImage), read on a task of their own into `cell`
+// (native_eval_image_fill), which `done` then wakes its waiters for
+// (native_eval_facts_wait). A read that stops still ends the reading.
+native_eval_facts_read: fn(cell: Shared<NativeEvalFacts>, done: Condition, binary: String, runtime: &&[U8]) Never! {
+    reading: task native_eval_image_fill(cell, binary, runtime)
     _ := reading.join() ?? false
     permit := cell.guard_edit()
     permit.value.reading = false
@@ -6533,22 +6523,23 @@ native_eval_facts_wait: fn(read: NativeEvalRead) -> Shared<NativeEvalImage>? Nev
     permit.value.image
 }
 
-// Reads the code facts of the image `binary` into `cell`; false when it
-// can't be read.
-native_eval_image_fill: fn(cell: Shared<NativeEvalFacts>, binary: String) -> Bool {
+// Reads the code facts of the image `binary`, with the runtime pack
+// `runtime`, into `cell`; false when the image can't be read.
+native_eval_image_fill: fn(cell: Shared<NativeEvalFacts>, binary: String, runtime: &&[U8]) -> Bool {
     elf: native_files.read_bytes(binary) ?? return false
-    image: native_eval_image_of(elf)
+    image: native_eval_image_of(elf, runtime)
     permit := cell.guard_edit()
     permit.value.image = Val(image)
     true
 }
 
-// The code facts of the ELF image `elf`.
-native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
+// The code facts of the ELF image `elf`, with the runtime pack whose file
+// is `runtime` (none when it isn't one: native_fix_pack).
+native_eval_image_of: fn(elf: [U8], runtime: &&[U8]) -> Shared<NativeEvalImage> Never! {
     symbols: native_fix_symbols(elf)
     code: native_elf_code(elf)
     owned: native_eval_owned(symbols, code)
-    Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned}}
+    Shared{NativeEvalImage{symbols: symbols, code: code, owned: owned, pack: native_fix_pack(runtime)}}
 }
 
 // The `(Jet)` console over a session: `jet debug` and the Canvas native tier

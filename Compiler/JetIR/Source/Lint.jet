@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, name_rows, name_rows_set, name_rows_value, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_rows_value, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -72,10 +72,10 @@ IRLintFinding: struct {
 // module function its drop names (-1: a runtime routine, or no drop), per
 // data row what a ConstText reads there and per name row what a
 // ConstBigInt reads there (IR_LINT_ROW_*; unchecked for a row none read
-// when the context was made), and per route row what a CallRuntime of it
-// passes (ir_lint_route_rows). `modes` (ir_lint_modes) and `typings` are
+// when the context was made). `modes` (ir_lint_modes) and `typings` are
 // IR_LINT_OPS's per-opcode field roles in one Int and typing rules: the
-// per-instruction checks read them in place of the rows.
+// per-instruction checks read them in place of the rows. What a CallRuntime
+// of each route row passes is the same for every module (IR_LINT_ROUTES).
 IRLintContext: struct {
     param_start: [Int],
     params: [Int],
@@ -90,11 +90,6 @@ IRLintContext: struct {
     name_decimals: [Int],
     modes: [Int],
     typings: [IRLintTyping],
-    route_words: [Int],
-    route_flags: [Int],
-    route_param_start: [Int],
-    route_positions: [Int],
-    route_kinds: [Int],
     // Per module function, whether a Call of it is a marked call left
     // (IR_LINT_CALL_MARKED); empty before the marked calls are inlined.
     marked: [Bool]{[Bool]{}},
@@ -525,10 +520,10 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
         if m.marked_inlined -> marked.push(f.inline_always)
     }
     param_start.push(params.len())
-    exports := name_rows()
-    loop (row, route) in IR_RUNTIME_ROUTES -> name_rows_set(exports, route.export, row)
     name_routes := [Int]{}
-    loop name in m.names -> name_routes.push(name_rows_value(exports, name) ?? -1)
+    loop name in m.names {
+        name_routes.push(ir_key_row(IR_LINT_EXPORT_KEYS, IR_LINT_EXPORT_ROWS, name) ?? -1)
+    }
     kind_bits := [Int]{}
     drop_functions := [Int]{}
     loop ty in m.types {
@@ -540,14 +535,12 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
     name_decimals := [Int]{}
     loop _ in 0..<m.names.len() -> name_decimals.push(IR_LINT_ROW_UNCHECKED)
     ir_lint_static_rows(m, data_texts, name_decimals)
-    context := IRLintContext{param_start: param_start.move(), params: params.move(), results: results.move(), function_names: function_names.move(), names: m.names.len(), data: m.data.len(), name_routes: name_routes.move(), kind_bits: kind_bits.move(), drop_functions: drop_functions.move(), data_texts: data_texts.move(), name_decimals: name_decimals.move(), modes: ir_lint_modes(), typings: ir_lint_typings(), route_words: [Int]{}, route_flags: [Int]{}, route_param_start: [Int]{}, route_positions: [Int]{}, route_kinds: [Int]{}, marked: marked.move()}
-    ir_lint_route_rows(context)
-    context
+    IRLintContext{param_start: param_start.move(), params: params.move(), results: results.move(), function_names: function_names.move(), names: m.names.len(), data: m.data.len(), name_routes: name_routes.move(), kind_bits: kind_bits.move(), drop_functions: drop_functions.move(), data_texts: data_texts.move(), name_decimals: name_decimals.move(), modes: ir_lint_modes(), typings: ir_lint_typings(), marked: marked.move()}
 }
 
 // The empty context: a module with no functions, names, data or types.
 ir_lint_context_none: fn() -> IRLintContext Never! {
-    IRLintContext{param_start: [Int]{0}, params: [Int]{}, results: [Int]{}, function_names: [String]{}, names: 0, data: 0, name_routes: [Int]{}, kind_bits: [Int]{}, drop_functions: [Int]{}, data_texts: [Int]{}, name_decimals: [Int]{}, modes: [Int]{}, typings: [IRLintTyping]{}, route_words: [Int]{}, route_flags: [Int]{}, route_param_start: [Int]{}, route_positions: [Int]{}, route_kinds: [Int]{}}
+    IRLintContext{param_start: [Int]{0}, params: [Int]{}, results: [Int]{}, function_names: [String]{}, names: 0, data: 0, name_routes: [Int]{}, kind_bits: [Int]{}, drop_functions: [Int]{}, data_texts: [Int]{}, name_decimals: [Int]{}, modes: [Int]{}, typings: [IRLintTyping]{}}
 }
 
 // What each data row a ConstText of `m` reads and each name row a
@@ -1545,44 +1538,71 @@ ir_lint_carrier_kinds: fn(carrier: IRRouteCarrier) -> Int Never! {
     }
 }
 
-// Per IR_RUNTIME_ROUTES row (IRLintContext): the words a CallRuntime of it
-// passes (`route_words`), its result flags (`route_flags`: 1 it answers a
-// value, 2 that value is Plain), and per parameter word with a kind check
-// its position and kinds (`route_positions`/`route_kinds` from
-// `route_param_start[row]` to `route_param_start[row + 1]`).
-ir_lint_route_rows: fn(context: &IRLintContext) Never! {
+// Per IR_RUNTIME_ROUTES row: the words a CallRuntime of it passes
+// (`words`), its result flags (`flags`: 1 it answers a value, 2 that value
+// is Plain), and per parameter word with a kind check its position and
+// kinds (`positions`/`kinds` from `param_start[row]` to
+// `param_start[row + 1]`).
+IRLintRoutes: struct {
+    words: [Int],
+    flags: [Int],
+    param_start: [Int],
+    positions: [Int],
+    kinds: [Int],
+}
+
+// The route rows every lint reads, made at build time: each lint context
+// would otherwise make them again, and a debugger's evaluation makes one
+// per expression.
+IR_LINT_ROUTES: #run ir_lint_route_rows()
+
+// The IR_RUNTIME_ROUTES row of each export, indexed for halving search
+// (ir_key_row), which IRLintContext.name_routes reads. Two rows that share
+// an export pass the same words (the native bit set's routes), so the
+// first one stands for both.
+IR_LINT_EXPORT_ROWS: #run ir_key_index(ir_lint_route_exports())
+
+IR_LINT_EXPORT_KEYS: #run ir_key_index_keys(ir_lint_route_exports(), IR_LINT_EXPORT_ROWS)
+
+ir_lint_route_exports: fn() -> [String] Never! {
+    loop route in IR_RUNTIME_ROUTES -> "{route.export}"
+}
+
+ir_lint_route_rows: fn() -> IRLintRoutes Never! {
+    rows := IRLintRoutes{words: [Int]{}, flags: [Int]{}, param_start: [Int]{}, positions: [Int]{}, kinds: [Int]{}}
     loop route in IR_RUNTIME_ROUTES {
-        context.route_param_start.push(context.route_kinds.len())
+        rows.param_start.push(rows.kinds.len())
         position := 0
         loop param in route.params {
             kinds: ir_lint_carrier_kinds(param)
             if kinds != 0 {
-                context.route_positions.push(position)
-                context.route_kinds.push(kinds)
+                rows.positions.push(position)
+                rows.kinds.push(kinds)
             }
             position += ir_lint_param_words(param)
         }
         result: ir_lint_result_words(route.result)
-        context.route_words.push(position + result.words)
+        rows.words.push(position + result.words)
         plain: if route.result == .Plain(_) -> 2 else -> 0
-        context.route_flags.push((if result.value -> 1 else -> 0) + plain)
+        rows.flags.push((if result.value -> 1 else -> 0) + plain)
     }
-    context.route_param_start.push(context.route_kinds.len())
+    rows.param_start.push(rows.kinds.len())
+    rows
 }
 
 // Whether a CallRuntime at `at` of route row `route` passes every check of
-// ir_lint_route, read from the context's route rows.
+// ir_lint_route, read from IR_LINT_ROUTES.
 ir_lint_route_sound: fn(context: IRLintContext, route: Int, f: IRFunction, at: Int) -> Bool Never! {
-    if f.c[at] != context.route_words[route] -> return false
+    if f.c[at] != IR_LINT_ROUTES.words[route] -> return false
     start: f.b[at]
-    loop k in context.route_param_start[route]..<context.route_param_start[route + 1] {
-        if context.route_kinds[k] & context.kind_bits[f.slot_type[f.args[start + context.route_positions[k]]]] == 0 {
+    loop k in IR_LINT_ROUTES.param_start[route]..<IR_LINT_ROUTES.param_start[route + 1] {
+        if IR_LINT_ROUTES.kinds[k] & context.kind_bits[f.slot_type[f.args[start + IR_LINT_ROUTES.positions[k]]]] == 0 {
             return false
         }
     }
     dst: f.dst[at]
     if dst < 0 -> return true
-    flags: context.route_flags[route]
+    flags: IR_LINT_ROUTES.flags[route]
     flags & 1 != 0 && (flags != 1 || context.kind_bits[f.slot_type[dst]] == IR_LINT_WORD)
 }
 

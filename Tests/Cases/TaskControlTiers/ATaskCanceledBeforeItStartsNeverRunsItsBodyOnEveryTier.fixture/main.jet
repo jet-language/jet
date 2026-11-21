@@ -1,0 +1,37 @@
+// A task canceled before it starts never runs its body. `spawner` fills its
+// group's one slot with `blocker`, says it is ready, and spawns `late`, which
+// waits for the slot. `run` cancels `spawner` there, and the cancel reaches
+// `late` before it starts: its body never prints, nor does `spawner` go on,
+// and `spawner`'s join reports the cancel. `gate` closes `wake` as `spawner`
+// unwinds, so `blocker` ends and the group joins.
+Gate: struct {
+    wake: Sender<Int>,
+
+    impl Close {
+        close: fn(&&self) { self.wake.close() }
+    }
+}
+
+run: fn() {
+    { sender: wake, receiver: hold }: channel<Int>()
+    { sender: ready, receiver: started }: channel<Int>()
+    spawner: task {
+        task.group limited(limit: 1) {
+            blocker: task {
+                _ := hold.receive() ?? 0
+            }
+            gate := Gate{wake: wake}
+            ready.send(1)
+            late: task {
+                print("late ran")
+            }
+            print("spawner went on")
+        }
+    }
+    _ := started.receive() ?? 0
+    spawner.cancel()
+    if spawner.join() == {
+        .Err(failure) -> { print("spawner: {failure}") }
+        .Ok(_) -> print("spawner finished")
+    }
+}

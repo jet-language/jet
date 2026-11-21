@@ -8,7 +8,10 @@
 // names, with the program's symbol table and checked types lent to each
 // check and given back. A function of the program's source the held check
 // lacks is appended to it (jet_driver_held_eval_append) when it is pure and
-// calls only functions it holds.
+// calls only functions it holds. An expression at a stop is answered by the
+// stopped function checked again with it asked there
+// (jet_driver_held_eval_answer): its locals of any type, as the frame
+// holds them there.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -18,12 +21,13 @@ use {
         JetDriverCoreSource,
         JetDriverHeldOpened,
         jet_driver_compile,
+        jet_driver_held_eval_answer,
         jet_driver_held_eval_append,
         jet_driver_held_eval_check,
         jet_driver_held_eval_open,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_sema.[SemaScriptProbeChecked, sema_eval_held_set]
+    jet_sema.[SemaEvalProbeAnswer, SemaScriptProbeChecked, sema_eval_held_set]
 }
 
 HELD_EVAL_PATH: "/held-fixture/main.jet"
@@ -61,6 +65,13 @@ held_eval_lib_source: fn() -> String {
         "priv thrice: fn(value: Int) -> Int {{ value * 3 }}",
         "",
     }.join("\n")
+}
+
+held_eval_answer: fn(opened: &JetDriverHeldOpened, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
+    done := jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.types.move())
+    opened.inputs.symbols = done.symbols.move()
+    opened.types = done.types.move()
+    done.answer.move()
 }
 
 held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
@@ -111,7 +122,7 @@ held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHe
     compiled := jet_driver_compile(request)
     assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
     held := compiled.held.move() ?? panic("a held check keeps its compile state")
-    jet_driver_held_eval_open(held) ?? panic("the held program opens at its entry module")
+    jet_driver_held_eval_open(held, compiled.compiler_threads) ?? panic("the held program opens at its entry module")
 }
 
 #Test("an expression's function checks against the held program's signatures, one after another on one probe") {
@@ -176,4 +187,47 @@ held_eval_opened: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverHe
     assert(held_eval_append(opened, HELD_EVAL_LIB_DISPLAY_PATH, "third: fn(value: Int) -> Int {{ value * 3 }}\n"), "another module gains its own function")
     third := held_eval_check(opened, HELD_EVAL_LIB_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    third(total)\n}}\n")
     assert(third.complete && third.diagnostics.len() == 0, "the other module's appended function checks there: {third.diagnostics.map(fn(row) { row.what })}")
+}
+
+// A source with a stop in a function of struct and list locals, one moved
+// before it, and a method.
+held_eval_stop_source: fn() -> String {
+    [String]{
+        "Point: struct {{",
+        "    x: Int,",
+        "    y: Int,",
+        "",
+        "    sum: fn(self) -> Int {{",
+        "        self.x + self.y",
+        "    }}",
+        "}}",
+        "consume: fn(label: &&String) -> Int {{ label.len() }}",
+        "run: fn() {{",
+        "    point: Point{{x: 1, y: 2}}",
+        "    xs: [Int]{{3, 4}}",
+        "    label := \"jet\"",
+        "    used: consume(label.move())",
+        "    print(point.x + xs[1] + used)",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("an expression at a stop checks against the stopped function's locals as its check holds them there") {
+    source: held_eval_stop_source()
+    opened := held_eval_opened(held_eval_snapshot(source, ""))
+    stop: source.find("print(point")
+    field := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.x + xs[1]") ?? panic("the stop answers")
+    assert(field.complete && field.refusals.len() == 0, "a field and an index of the frame's locals check: {field.refusals.map(fn(row) { row.what })}")
+    assert_eq(field.captures.map(fn(capture) { capture.source }), [String]{"point", "xs"})
+    called := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "point.sum() + used") ?? panic("the stop answers again")
+    assert(called.complete && called.refusals.len() == 0, "a method of a local checks on the same probe: {called.refusals.map(fn(row) { row.what })}")
+    moved := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, stop, "label.len()") ?? panic("the stop answers a moved local")
+    assert(moved.refusals.len() > 0, "a local the frame moved before the stop is refused")
+    inside: source.find("self.x + self.y")
+    method := held_eval_answer(opened, HELD_EVAL_DISPLAY_PATH, inside, "self.y") ?? panic("a stop in a method answers")
+    assert(method.complete && method.refusals.len() == 0, "the receiver reads in its method: {method.refusals.map(fn(row) { row.what })}")
+    assert(held_eval_answer(opened, "other.jet", stop, "point.x") == None, "a file no checked module has answers nothing")
+    sum := held_eval_check(opened, HELD_EVAL_DISPLAY_PATH, "jet_debug_expression: fn(total: Int) -> Int {{\n    consume(\"a\") + total\n}}\n")
+    assert(sum.complete && sum.diagnostics.len() == 0, "the probe checks a function after the answers: {sum.diagnostics.map(fn(row) { row.what })}")
 }
