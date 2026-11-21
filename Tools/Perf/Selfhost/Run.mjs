@@ -355,7 +355,8 @@ function parseDiagnostic(text) {
 function diagnosticMatches(actual, expected) {
   if (!actual) return false;
   if (actual.code !== expected.code) return false;
-  const file = actual.file ? normalizePath(actual.file).split("/").at(-1) : null;
+  // A jet.report/v4 diagnostic names its file in its span.
+  const file = actual.span?.file ? normalizePath(actual.span.file).split("/").at(-1) : null;
   if (file !== expected.file) return false;
   if (actual.line !== expected.line || actual.col !== expected.col) return false;
   if (!actual.span || actual.span.start !== expected.span.start || actual.span.end !== expected.span.end) return false;
