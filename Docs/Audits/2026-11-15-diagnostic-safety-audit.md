@@ -518,11 +518,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:963 | the program runs under `jet run --observe` |
 | E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:970 | one attach names one process id |
 | E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/CanvasProfile.jet:154 | the trace of a native `jet perf run` keeps the code its samples landed in |
-| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:26 | the program is a native -O0 image this machine can run traced |
+| E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:27 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:590 | let the program run to its end |
-| E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:50 | attach to a process of your user that the system lets you trace |
-| E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:48 | name the process and its program as they are |
-| E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:55 | ask where the session can answer |
+| E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:51 | attach to a process of your user that the system lets you trace |
+| E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:49 | name the process and its program as they are |
+| E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:56 | ask where the session can answer |
 | E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:126 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:335 | the string's owner lives as long as the view, or the string is copied |
