@@ -734,6 +734,15 @@ judge.
 **Gaps.** G39 (c55, met on p391, not shown on p399), and G43: the view's
 refusal reason agrees with the lens's record.
 
+**Correction (2026-11-21).** The 155 and the 2 came from two different
+traces. The check read `causal.jettrace`, the full run, whose view flagged
+its gains for the clock drop. The refusal quoted is the view of
+`short.jettrace`, the `-- 60` run, which the check never read. On one trace
+both say 2: on p400, `run.py … p6` prints "the view's reason says 2
+experiments, 2 baselines; the check counts 2 experiments, 2 baselines: they
+agree". G43's contradiction does not hold. G39, the gains withheld on a clock
+drop, stays open.
+
 ### P7. Static cost beside measured cost
 
 **Peer.** No tool ships the compiler's cost facts per line beside measured
@@ -870,6 +879,9 @@ criterion moved to #6958 c11. G40 and G41 to G45 are proposed criteria for
   experiments, where the lens's record has 155. Fix: the view reads the
   experiments the lens kept. Proof: `run.py … p6` shows the view's reason and
   the check's counts agreeing.
+  Correction (2026-11-21): the 155 and the 2 were two traces' counts. On one
+  trace the view and the check both say 2, and `run.py … p6` now prints the
+  two side by side (see P6).
 - **G44** (P2). `jet perf view` of a recorded `zones.jet` run counts 465,920
   zones for two million calls, and its receipt says nothing of the rest. Fix:
   the capture counts the zones it dropped, and the view prints that count with

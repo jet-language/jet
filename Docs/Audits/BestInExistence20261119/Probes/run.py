@@ -662,7 +662,16 @@ def p6():
     run([JET, "run", "-A", "check.jet", "--", "o2", "causal.jettrace"], work)
     run([JET, "perf", "view", "causal.jettrace"], work)
     run([JET, "perf", "run", "-A", "-O2", "main.jet", "--lens=causal", "--out", "short.jettrace", "--", "60"], work)
-    run([JET, "perf", "view", "short.jettrace"], work)
+    viewed = run([JET, "perf", "view", "short.jettrace"], work)
+    # The view's refusal beside the check's count of the same trace.
+    counted = run([JET, "run", "-A", "check.jet", "--", "counts", "o2", "short.jettrace"], work)
+    said = re.search(r"the run kept (\d+) experiments of \d+ ms, (\d+) of them baselines", viewed.out)
+    kept = re.search(r"; experiments (\d+), (\d+) of them baselines", counted.out)
+    said_text = "{} experiments, {} baselines".format(*said.groups()) if said else "no refusal"
+    kept_text = "{} experiments, {} baselines".format(*kept.groups()) if kept else "no count"
+    agree = said is not None and kept is not None and said.groups() == kept.groups()
+    print("short.jettrace: the view's reason says {}; the check counts {}: {}".format(said_text, kept_text, "they agree" if agree else "THEY DISAGREE"))
+    print()
 
 
 def p7():
