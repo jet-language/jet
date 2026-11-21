@@ -40,6 +40,10 @@ mkdir -p "$work/place"
 cp "$here/place.jet" "$work/place/main.jet"
 cd "$work/place" || exit 1
 {
+    # The checkout the probe ran from, and the identity of the compiler under
+    # test: the build's IDENTITY beside `jet`, or JET_COMPILER_IDENTITY.
+    step git -C "$here" rev-parse --short HEAD
+    printf '\n$ jet identity\n%s\n' "${JET_COMPILER_IDENTITY:-$(cat "$(dirname "$(command -v jet)")/IDENTITY" 2>&1)}"
     step jet --version
     step node --version
     step python3 --version
@@ -52,17 +56,17 @@ cd "$work/place" || exit 1
     # arm's size is build_arm's less build_to's.
     printf '\n$ jet debug O2/main --do symbols   (the builders)\n'
     jet debug O2/main --do symbols 2>&1 | awk '$4 ~ /^main\.build/'
-    # A destination passed as a parameter is a local the debugger lists:
-    # build_to's `dest` beside build's locals. A destination in a register
-    # is no parameter, so its builder's locals read as build's.
-    step jet debug main.jet --break main.jet:40 --do continue --do locals -- arg direct 2 1 0
-    step jet debug main.jet --break main.jet:33 --do continue --do locals -- plain direct 2 1 0
+    # A destination passed as a Jet parameter is a local the debugger lists:
+    # build_to's `dest` beside build's locals. The compiler's own hidden
+    # word would be marked artificial, which Locals skips.
+    step jet debug main.jet --break main.jet:44 --do continue --do locals -- arg direct 2 1 0
+    step jet debug main.jet --break main.jet:37 --do continue --do locals -- plain direct 2 1 0
     # The conventions alternate within each round, so a busy host's drift
     # lands on all of them alike.
     for level in O0 O1 O2; do
         for form in direct value closure; do
             for _ in 1 2 3 4 5; do
-                for conv in plain arg arm place arena; do
+                for conv in plain arg arm local place arena; do
                     step $pin "$level/main" "$conv" "$form" 2 2000 0
                 done
             done
@@ -72,7 +76,7 @@ cd "$work/place" || exit 1
         cd .jet/build || exit 1
         for form in direct value; do
             for _ in 1 2 3 4 5; do
-                for conv in plain arg arm place arena; do
+                for conv in plain arg arm local place arena; do
                     step $pin node app.js "$conv" "$form" 2 500 0
                 done
             done
