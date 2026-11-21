@@ -1165,41 +1165,49 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     // the chain stages do (Chain.jet build_stage). The check reads no build
     // output, so it runs beside it.
     files.remove_all("{snap}/Compiler/JetCLI/.jet/build") ?? ()
-    task.group phase_a(limit: 2 + GUARD_SHARDS + GUARD_PACKAGES.len()) {
+    task.group phase_a(limit: 2) {
         checking: task compile_pass("check", snap, out, CHECK_MEMORY, 0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCLI"}, identity, package_dirs, 21)
         building: task build_pass(passes, worktree, head, snap, out, seed_jet, identity, package_dirs, named)
-        shards: loop at in 0..<GUARD_SHARDS -> task guard_shard(snap, out, seed_jet, identity, at + 1)
-        packages: loop name in GUARD_PACKAGES -> task guard_package(snap, out, seed_jet, identity, name)
         runs.push(checking.join() ?? lost_pass("check"))
         runs.push(building.join() ?? lost_pass("build"))
-        shard_runs := [PassRun]{}
-        loop shard in shards -> shard_runs.push(shard.join() ?? lost_pass("guards"))
-        loop package in packages -> shard_runs.push(package.join() ?? lost_pass("guards"))
-        runs.push(guards_run(shard_runs))
     }
-    if !passes.build || !pass_clean(runs, "build") -> return census_finish(runs, out)
 
-    // The runtime pack beside the built jet; then phase B.
+    // The runtime pack beside the built jet. The guards judge the snapshot
+    // with the compiler under test: the jet built from it, once that jet and
+    // its runtime pack exist. A guard that runs the compiler (the machine
+    // doors) then sees the snapshot's output, never the seed's. With no
+    // build, or a build that failed or made no runtime pack, they run on the
+    // seed, so the census still lists every guard the snapshot breaks.
     self_jet: "{snap}/Compiler/JetCLI/.jet/build/jet"
-    native_key: (files.read("{snap}/Compiler/JetCLI/.jet/build/jet-runtime/native.key") ?? "").trim()
+    built: passes.build && pass_clean(runs, "build")
+    native_key: if built -> (files.read("{snap}/Compiler/JetCLI/.jet/build/jet-runtime/native.key") ?? "").trim() else -> ""
     if native_key == "" {
-        runs.push(PassRun{name: "runtime-pack", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=1 (the build made no runtime pack beside {self_jet})"}})
+        if built {
+            runs.push(PassRun{name: "runtime-pack", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=1 (the build made no runtime pack beside {self_jet})"}})
+        }
+        runs.push(guards_by(snap, out, seed_jet, identity))
         return census_finish(runs, out)
     }
     runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
-    runs.push(core_bodies_pass(out, self_jet, identity))
-    runs.push(codegen_pass(snap, out, self_jet, identity))
-    loop name in LANE_CHECKS -> runs.push(lane_check_pass(snap, out, self_jet, identity, name))
-    if !passes.selfcheck -> return census_finish(runs, out)
 
-    task.group phase_b(limit: 3) {
-        self_checking: task compile_pass("selfcheck", snap, out, CHECK_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCLI"}, identity, package_dirs, 11)
-        // Every Core body, called or not, whatever the self-check finds.
-        core_checking: task compile_pass("selfcheck-core", snap, out, CORE_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Core"}, identity, package_dirs, 11)
-        runs.extend(area_runs(snap, out, r14, self_jet, identity, named))
-        runs.push(self_checking.join() ?? lost_pass("selfcheck"))
-        runs.push(core_checking.join() ?? lost_pass("selfcheck-core"))
+    // Phase B. The guards start first, so the areas size their lanes with
+    // the guards' memory already in use.
+    task.group phase_b(limit: 4) {
+        guarding: task guards_by(snap, out, self_jet, identity)
+        runs.push(core_bodies_pass(out, self_jet, identity))
+        runs.push(codegen_pass(snap, out, self_jet, identity))
+        loop name in LANE_CHECKS -> runs.push(lane_check_pass(snap, out, self_jet, identity, name))
+        if passes.selfcheck {
+            self_checking: task compile_pass("selfcheck", snap, out, CHECK_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCLI"}, identity, package_dirs, 11)
+            // Every Core body, called or not, whatever the self-check finds.
+            core_checking: task compile_pass("selfcheck-core", snap, out, CORE_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Core"}, identity, package_dirs, 11)
+            runs.extend(area_runs(snap, out, r14, self_jet, identity, named))
+            runs.push(self_checking.join() ?? lost_pass("selfcheck"))
+            runs.push(core_checking.join() ?? lost_pass("selfcheck-core"))
+        }
+        runs.push(guarding.join() ?? lost_pass("guards"))
     }
+    if !passes.selfcheck -> return census_finish(runs, out)
     // Core's #Tests after the self-checks, so their scopes never stack on them.
     runs.push(core_tests_pass(snap, out, seed_jet, self_jet, identity, source_identity, named))
     code: census_finish(runs, out)
@@ -1395,24 +1403,40 @@ build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out
     run
 }
 
-// Shard `shard` of GUARD_SHARDS of Tests/Guards, run by the seed behind the
+// Every guard: GUARD_SHARDS shards of Tests/Guards and each GUARD_PACKAGES
+// package at once, run by `jet`, the compiler under test, as one pass.
+guards_by: fn(snap: String, out: String, jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    shard_runs := [PassRun]{}
+    task.group guarding(limit: GUARD_SHARDS + GUARD_PACKAGES.len()) {
+        shards: loop at in 0..<GUARD_SHARDS -> task guard_shard(snap, out, jet, identity, at + 1)
+        packages: loop name in GUARD_PACKAGES -> task guard_package(snap, out, jet, identity, name)
+        loop shard in shards -> shard_runs.push(shard.join() ?? lost_pass("guards"))
+        loop package in packages -> shard_runs.push(package.join() ?? lost_pass("guards"))
+    }
+    guards_run(shard_runs)
+}
+
+// Shard `shard` of GUARD_SHARDS of Tests/Guards, run by `jet` behind the
 // dev shell: its failing tests, and whether it finished.
-guard_shard: fn(snap: String, out: String, seed_jet: String, identity: String, shard: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
-    guard_test(snap, seed_jet, identity, "{out}/guards.{shard}", GUARD_MEMORY, [String]{"Tests/Guards", "--shard={shard}/{GUARD_SHARDS}"}, "shard {shard}/{GUARD_SHARDS}")
+guard_shard: fn(snap: String, out: String, jet: String, identity: String, shard: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    guard_test(snap, jet, identity, "{out}/guards.{shard}", GUARD_MEMORY, [String]{"Tests/Guards", "--shard={shard}/{GUARD_SHARDS}"}, "shard {shard}/{GUARD_SHARDS}")
 }
 
 // The GUARD_PACKAGES package `name`, run whole like a shard.
-guard_package: fn(snap: String, out: String, seed_jet: String, identity: String, name: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
-    guard_test(snap, seed_jet, identity, "{out}/guards.{name}", CORE_MEMORY, [String]{"Tests/Guards/{name}"}, "package {name}")
+guard_package: fn(snap: String, out: String, jet: String, identity: String, name: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    guard_test(snap, jet, identity, "{out}/guards.{name}", CORE_MEMORY, [String]{"Tests/Guards/{name}"}, "package {name}")
 }
 
-// `jet test` with `args`, run by the seed behind the dev shell under
-// `memory`, logged at `log`: its failing tests, and whether it finished.
-guard_test: fn(snap: String, seed_jet: String, identity: String, log: String, memory: String, args: &&[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+// `jet test` with `args`, run by `jet` behind the dev shell under `memory`,
+// logged at `log`: its failing tests, and whether it finished. A guard that
+// runs the compiler under test finds `jet` as $JET.
+guard_test: fn(snap: String, jet: String, identity: String, log: String, memory: String, args: &&[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
-    argv := [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", seed_jet, "test"}
+    argv := [String]{jet, "{snap}/Tools/Agent/JetEnv.jet", jet, "test"}
     argv.extend(args)
-    code: run_heavy(snap, 2400, memory, CENSUS_CPUS, argv, compile_env(identity, snap, ""), log)
+    env := compile_env(identity, snap, "")
+    env.push(Setting{name: "JET", value: jet.copy()})
+    code: run_heavy(snap, 2400, memory, CENSUS_CPUS, argv, env, log)
     text: "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}"
     lines: guard_failures(text)
     PassRun{name: "guards", rc: if code == 0 && lines.len() == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{note} rc={code}", lines: lines}
