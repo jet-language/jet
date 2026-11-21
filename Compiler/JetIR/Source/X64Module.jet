@@ -340,29 +340,27 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
             X64DebugType{name: "String", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.string}}
         }
         .Pointer -> {
-            precise: ir_short_name(ir_nominal_name(ir_untag(ty.ty)) ?? "")
-            if precise == {
-                "Decimal" -> {
-                    if shared.decimal < 0 {
-                        shared.decimal = ir_x64_debug_handle(tables, "Decimal", "coefficient", "scale", shared.int, shared.word)
-                    }
-                    return X64DebugType{name: "Decimal", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.decimal}}
+            // A precise number's or a Duration's handle, known by its row
+            // (the row's type is a table spelling, keyed or bare).
+            if ir_handle_row_is(m, row, "JetDecimal") {
+                if shared.decimal < 0 {
+                    shared.decimal = ir_x64_debug_handle(tables, "Decimal", "coefficient", "scale", shared.int, shared.word)
                 }
-                "Fraction" -> {
-                    if shared.fraction < 0 {
-                        shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
-                    }
-                    return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
+                return X64DebugType{name: "Decimal", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.decimal}}
+            }
+            if ir_handle_row_is(m, row, "JetFraction") {
+                if shared.fraction < 0 {
+                    shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
                 }
-                "Duration" -> {
-                    if shared.duration < 0 {
-                        members: [X64DebugMember]{X64DebugMember{name: "ns", offset: Int{TIME_DURATION_NS}, ty: shared.word}}
-                        record: ir_x64_debug_add(tables, X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Struct{members: members}})
-                        shared.duration = ir_x64_debug_pointer(tables, record)
-                    }
-                    return X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.duration}}
+                return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
+            }
+            if ir_handle_row_is(m, row, "Duration") {
+                if shared.duration < 0 {
+                    members: [X64DebugMember]{X64DebugMember{name: "ns", offset: Int{TIME_DURATION_NS}, ty: shared.word}}
+                    record: ir_x64_debug_add(tables, X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Struct{members: members}})
+                    shared.duration = ir_x64_debug_pointer(tables, record)
                 }
-                else -> {}
+                return X64DebugType{name: "Duration", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.duration}}
             }
             // A Shared handle: named as Jet spells it, a typedef of the
             // pointer to its runtime cell, which points at the value's bytes
@@ -1635,4 +1633,27 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
     assert(names[0].contains("Int | String"), "the union is named with its members in layout order")
     assert(infos[0].len() > 0, "the types are described")
     assert_eq(infos[0], infos[1])
+}
+
+// A Decimal's, Fraction's or Duration's row takes the table spelling that
+// reached it first, keyed or bare, so the debugger's handle types are found
+// by the row, never by its type's name.
+#Test("a precise number's or a Duration's row is described as its handle by either spelling") {
+    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    spellings: [Type]{Type.Named{name: "<corelib>/core.math.Fraction"}, Type.Named{name: "Fraction"}, Type.Named{name: "<corelib>/core.math.Decimal"}, Type.Named{name: "Decimal"}, Type.Named{name: "Duration"}}
+    shown: [String]{"Fraction", "Fraction", "Decimal", "Decimal", "Duration"}
+    runtimes: [String]{"JetFraction", "JetFraction", "JetDecimal", "JetDecimal", "Duration"}
+    m := ir_module_new()
+    rows: loop ty in spellings -> ir_value_type(m, p, ty) ?? panic("{ir_type_name(ty)} has no row")
+    assert_eq(rows[0], rows[1])
+    assert_eq(rows[2], rows[3])
+    tables := ir_x64_tables_start(m)
+    ir_x64_debug_types(m, tables)
+    loop (at, row) in rows {
+        assert(ir_handle_row_is(m, row, runtimes[at]), "{shown[at]} is its runtime's handle row")
+        described: tables.debug_types[row]
+        assert_eq(described.name, shown[at])
+        to_handle: if described.kind == .Typedef(target) -> target else -> -1
+        assert(to_handle >= 0, "{shown[at]} is a typedef of its handle's pointer")
+    }
 }

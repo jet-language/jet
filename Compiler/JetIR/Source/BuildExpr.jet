@@ -8995,13 +8995,13 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
             if ir_default_err(p, ty) {
                 return ir_comptime_default_err(m, p, b, ty, row, fields, span)
             }
-            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Fraction"}) {
+            if ir_handle_row_is(m, row, "JetFraction") {
                 return ir_comptime_fraction_handle(m, p, b, ty, fields, span)
             }
-            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Decimal"}) {
+            if ir_handle_row_is(m, row, "JetDecimal") {
                 return ir_comptime_decimal_handle(m, p, b, ty, fields, span)
             }
-            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Authority"}) && ir_type_def(p, "Authority") == None {
+            if ir_handle_row_is(m, row, "JetAuthority") {
                 return ir_comptime_authority_handle(m, p, b, ty, fields, span)
             }
             return ir_comptime_struct(m, p, b, ty, row, fields, span)

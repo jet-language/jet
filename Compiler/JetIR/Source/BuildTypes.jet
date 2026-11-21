@@ -1547,6 +1547,15 @@ ir_is_handle: fn(m: IRModule, row: Int) -> Bool Never! {
     m.types[row].kind == .Pointer && m.types[row].drop.starts_with("jet_rt_handle_drop_")
 }
 
+// Whether type row `row` is the handle of runtime type `runtime` (a
+// RuntimeHandles table row's runtime, such as JetFraction): the row
+// ir_handle_row_laid interns under that runtime's key. Its type is the
+// table's one spelling, keyed or bare, so its name never says which handle
+// it is, and a program's own type of the same name is never this row.
+ir_handle_row_is: fn(m: IRModule, row: Int, runtime: String) -> Bool Never! {
+    ir_is_handle(m, row) && m.type_keys[row].ends_with(":handle:{runtime}")
+}
+
 // A scalar record carried as its runtime handle whose one exact-Int field
 // crosses a Word route as itself (Duration's `ns`): its field name, record
 // getter and record constructor. None for any other type row.
@@ -2399,8 +2408,7 @@ ir_assign_overflow: fn(op: TBinaryOp) -> Bool Never! {
 }
 
 ir_slot_is_duration: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
-    if m.types[b.f.slot_type[slot]].ty == .Named(name) -> return name == "Duration"
-    false
+    ir_handle_row_is(m, b.f.slot_type[slot], "Duration")
 }
 
 // `left op right`: exact Int arithmetic, division, bit operators and
