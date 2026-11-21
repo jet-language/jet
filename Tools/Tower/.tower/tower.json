@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112876,
+    "rev": 112899,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23980,6 +23980,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c39 (p406, dev 113879859e): the JSON half holds. CompilerAPI/semantic_index_derives_each_declaration_once passes: one derivation per declaration (the struct, its three methods, run), each credited to its own text, 5 distinct subjects and 5 distinct sources, no codec records. c39 stays open on its typed half: the typed index record carries no derivations (typed_consumers_match_cli_json says so), so the typed result cannot be compared until D-SEMINDEX-TYPED1 is ratified, the same wait as c19."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "D-SEMINDEX-TYPED1 posted to the owner (2026-11-21): whether typed Jet code reads the state graphs, fact registry and derivations of a checked index (c19 typed half). Drafted by Lens; Rivet rejected it twice (5 findings, then 1), verifying every claim against dev 50b6fec6e7 and the p399 jet; passed on the third review. c19 stopped-check half filed as Lens-3202-c19-stopped-check-no-facts."
         },
         {
@@ -24126,11 +24131,11 @@
         {
           "n": 10,
           "text": "The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI and LSP report cut over together to one versioned shape, and the package-model schemas are unchanged. Proof: `jet test Compiler --profile cases --filter CompilerAPI/` and `--filter LSP/lsp_diagnostics_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T01:30:18.711Z",
+          "evidence": "Landed 68500f7ee3 (p401) with the consumer fix ebde5e842f (p406). On the p406 batch compiler (dev 113879859e, 2026-11-21): `jet test Compiler --profile cases --filter CompilerAPI/` gives 41 PASS, 1 KNOWN-FAILING (an_unselected_runtime_named_build_cannot_use_the_compiler_api, owned by #6843 for its sema build gate, unrelated to the diagnostic shape) and 0 FAIL, and LSP/lsp_diagnostics_follow_their_origin passes; habit_corpus_fix_edits, meta_report_rewrite_fix_applies and loose_statements_are_rejected_even_with_explicit_run, which the p401 shape change broke, pass again.",
+          "at": "2026-11-21T10:31:26.249Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_diagnostics_"
@@ -24432,7 +24437,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T09:08:27.743Z",
+      "updated": "2026-11-21T10:31:27.102Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 40
@@ -42169,6 +42174,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T12:59:52.790Z"
+        },
+        {
+          "n": 2,
+          "text": "A program that owns its main prints through the same stdout buffer as every other program: block-buffered when stdout is not a terminal, line-buffered on a terminal, flushed at exit and before a read from stdin, as this card states. Found by Rivet profiling the cat cell on the p403 jet (2026-11-21): an owned main prints with jet_term_write_stdout_line_direct, one writev per print with no buffer, so a 3M-print loop made 3M writev calls and ran 18x Rust with a BufWriter. Proof: strace -c on a 3M-print owned-main loop into a pipe shows at most one write per 64 KiB, its golden output is unchanged on O0, O1 and O2, and a same-run bench against Rust with a BufWriter reads Jet/Rust < 1.00.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:25:02.593Z"
         }
       ],
       "refs": [],
@@ -42176,8 +42190,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-21T09:38:35.948Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-21T10:25:02.593Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0y7zq8s",
@@ -55581,20 +55596,20 @@
         {
           "n": 106,
           "text": "jet debug labels inlined code truthfully at -O1 and -O2. (1) A nested inline names its immediate caller: `disas square` printed `square, inlined into run on line 8`, but line 8 is in sum_squares and run calls on line 16 (NativeListing.jet:95 pairs the outermost function with the innermost call line). (2) A call line outside the listed function file names its file: at -O2 `inlined args_from_argv, called on line 172` means Core/Process/Process.jet:172 and reads as prog.jet:172 (NativeListing.jet:214). Found proving c95 on the p399 jet, 2026-11-21. Proof: a Debug case asserting both labels at -O1 and -O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T07:31:15.143Z"
+          "evidence": "Landed 04181acf9c (p406). On the p406 batch compiler (dev 113879859e, 2026-11-21): Debug/disassemble_maps_inlined_code_at_every_tier passed (it asserts the nested inline names its immediate caller and the out-of-file call line names its file, at -O1 and -O2), with JetDebug Native.jet units an_inlined_run_names_its_own_caller_and_its_call_s_file, disas_names_a_nested_inlined_run_s_caller_and_a_call_s_file, an_o2_session_breaks_in_and_lists_an_inlined_function_by_name and an_o2_session_shows_inlined_frames_and_their_locals all passing; the full suite passed.",
+          "at": "2026-11-21T10:31:22.742Z"
         },
         {
           "n": 107,
           "text": "Stopped in an inlined function at -O1 and -O2, `locals` lists its parameters with their values, or `<Unavailable>` with why, never `(none)`. Found proving c95 on the p399 jet (2026-11-21): stopped in the inlined `square`, `Locals:` showed `(none)` for its parameter `i`, while the stop instruction `mov r8,r14` reads i from r14. An earlier fixture with square on its own line showed `i = <Unavailable>`. Proof: a Debug case stopping in an inlined function at -O1 and -O2 that shows its parameter value, plus a JetDebug unit test on the inlined parameter location.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T07:31:17.134Z"
+          "evidence": "Landed 113879859e (p406, r2 within the copy ceilings). On the p406 batch compiler (dev 113879859e, 2026-11-21): Debug/native_lists_an_inlined_function_s_parameters, native_shows_inlined_locals_in_their_frame, native_shows_o2_inlined_frames_and_their_locals, print_in_an_inlined_frame and dap_cli_debugs_an_o2_image_by_its_inlined_frames passed; JetDebug unit an_inlined_parameter_shows_its_value_where_located_and_why_not_elsewhere and JetIR units on inlined parameter locations passed; the full suite passed.",
+          "at": "2026-11-21T10:31:23.565Z"
         },
         {
           "n": 108,
@@ -55608,11 +55623,11 @@
         {
           "n": 109,
           "text": "G43: jet perf view's causal refusal reads the experiments the lens kept. On p399 it said the run kept 2 experiments where the lens record has 155. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axis P6 (P6 stays open: the lens also withheld its gains on a 5153 to 4540 MHz clock drop although its rows match the hand speedup within 0.4 points). Proof: run.py … p6 shows the view's reason and the check's counts agreeing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T08:11:53.863Z"
+          "evidence": "Landed fa1d7140cf (p406). Probe axis p6 on the p406 batch compiler (dev 113879859e, 2026-11-21) (run.py JET REPO p6): the run's last line reads \"short.jettrace: the view's reason says 2 experiments, 1 baselines; the check counts 2 experiments, 1 baselines: they agree\", so the view's causal refusal reads the experiments the lens kept, from the same trace the check reads. The audit's dated correction to P6/G43 landed with it.",
+          "at": "2026-11-21T10:31:24.407Z"
         },
         {
           "n": 110,
@@ -55626,11 +55641,11 @@
         {
           "n": 111,
           "text": "G45: a crash dump flight sample taken outside every task names the runtime function its program counter is in, found through the symbol table jet perf view uses; on p399 it reads only `in the runtime`. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axis D9. Proof: the review probe `run.py ... d9` shows each events row with a Jet place or a runtime function.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T08:11:39.163Z"
+          "evidence": "Landed 353fb4e2eb (p406). Probe axis d9 on the p406 batch compiler (dev 113879859e, 2026-11-21) (run.py JET REPO d9): `events --last 20` on the crash dump lists every row with a Jet place or a runtime function, including \"sample  outside every task  in the runtime at unit_os_syscall_i64__asm\" (on p399 it read only \"in the runtime\"); NativeDump unit tests pass.",
+          "at": "2026-11-21T10:31:25.282Z"
         },
         {
           "n": 112,
@@ -55640,6 +55655,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T08:26:17.433Z"
+        },
+        {
+          "n": 113,
+          "text": "core.tasks quiesce() succeeds once every task group has joined, whatever the machine load: jet_rt_scheduler_shutdown (Scheduler.jet) refuses with -1 while root+256 or root+40 is nonzero, so a joined task whose carrier has not yet released its count makes quiesce report false. In the p406 full suite (dev 113879859e, 2026-11-21) the JetBackend unit \"a trace started on a carrier outlives the carrier, and ends when its lifeline closes\" failed at TraceLifeline.jet:24 `assert(lifeline_tasks.quiesce())`; it passed run alone on the same compiler. Fix: quiesce waits for the joined tasks' carriers to release their counts (bounded by the carriers' exit, not a timer), or names what is still live. Proof: that unit passes under a parallel load (stress-ng or the cases suite running), 20 runs in a row, plus a runtime unit test that joins a group and quiesces at once.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:29:20.778Z"
         }
       ],
       "refs": [],
@@ -55647,9 +55671,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T09:47:36.999Z",
+      "updated": "2026-11-21T10:31:25.282Z",
       "updatedBy": "Main",
-      "criteriaLastN": 112
+      "criteriaLastN": 113
     },
     {
       "id": "c0in2dft",
@@ -66136,6 +66160,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:14:47.040Z"
+        },
+        {
+          "n": 9,
+          "text": "A #Shield body always runs to its end before the cancellation lands: Examples/Concurrency/ShieldCommit.jet (a task.race whose losing task sleeps 20ms inside #Shield, then prints \"committed\") lost its \"committed\" line in 1 of 6 runs at -O0 on both the p406 and p407 jets (dev 113879859e and 50aae50f71, 2026-11-21; it printed only \"7\"), and the p407 full suite failed its O0 golden on it. The shield either did not defer the cancellation, or the cancelled task's output was dropped. Proof: ShieldCommit run 200 times at each of O0, O1 and O2 (and under parallel load) always prints \"committed\" then \"7\", with a runtime unit test that cancels a task sleeping inside a shield and checks the body's effects.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T11:00:46.857Z"
         }
       ],
       "refs": [],
@@ -66146,9 +66179,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:59.765Z",
-      "updated": "2026-11-17T01:50:13.159Z",
+      "updated": "2026-11-21T11:00:46.857Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c05nw9a0",
@@ -71547,11 +71580,110 @@
         {
           "n": 1,
           "text": "A dated adversarial review in Docs/Audits attacks the ratified option of D-PLACE-DEFAULT1: it states Goose's, the ML Kit's, Cyclone's and Rust/Zig arena practice at their best case with sources, and tests every claimed gain with a runnable probe or measurement (allocation cost, peak memory on a long scope, web checked growth, task-crossing values, recursion). Every gap ends on a criterion here or a ballot; the build starts only on a passing verdict.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 3cbcaa71a0 (p406, dev 113879859e, 2026-11-21): Docs/Audits/2026-11-21-d-place-default1-review.md, by Lens, states Goose, the ML Kit, Cyclone and Rust/Zig arenas at their best case with sources and tests each claim with runnable probes (Docs/Audits/PlaceDefault20261121/Probes: alloc, peak, pushes, recur, sends, tasks, web; log run-p400.log). Verdict: FAILS, so the build does not start. Every gap ends here: G1-G3, G5-G7 and G9-G12 are criteria c2-c4 and c6-c12, G8 is folded into G3 (c4), and G4 is c5, the calling-convention ballot that must be ratified first. Its audit case audit_reports_list_findings_without_a_disposition passed in the p406 proofs.",
+          "at": "2026-11-21T10:32:09.062Z"
+        },
+        {
+          "n": 2,
+          "text": "G1: A scope-stack allocation path exists that beats the heap: a prototype that leaves the thread's cache rows in place runs the review probe alloc.jet's `small`, `count` and `words` at O0, O1 and O2 faster than `heap` by the margin the design states; the review measured a 12-13 ns ceiling per short-lived value with today's bump route 1.4-2.7 times slower than the heap. Proof: the run logged beside the review in Docs/Audits/PlaceDefault20261121/Probes. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:19:37.436Z"
+          "at": "2026-11-21T10:31:50.819Z"
+        },
+        {
+          "n": 3,
+          "text": "G2: The spec states what \"outlives\" means for list elements, map values, struct fields and boxed links, and cases show a word pushed into a stacked list, a field of a returned struct and a list of lists, each with the placement `jet inspect placement` reports. If the answer stacks elements, the element restriction (Goose) or a second mechanism goes to a ballot first. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:51.621Z"
+        },
+        {
+          "n": 4,
+          "text": "G3: A census of reach, which also covers recursion (G8): `jet perf run --lens=alloc` on a compiler package's `jet check`, a Core test and a web example splits allocations by the rule that places them (stacked, stored-in-older, sent, recursive, returned through an indirect call), and the stacked share is published with the census; the review found the list path is 12 of 14,012 allocations in its story program. The gain claims stand or fall on that share. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G3.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:52.538Z"
+        },
+        {
+          "n": 5,
+          "text": "G4: The calling convention for values returned to a caller's stack is ratified on a ballot before any build: a hidden argument on every function returning a growing value, specialization by destination, or the heap for any value returned through an indirect call (function values, trait objects, closures, plugin guests, C exports, hot patch, the debugger's evaluator), with each choice's cost at an indirect call measured. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G4.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:54.164Z"
+        },
+        {
+          "n": 6,
+          "text": "G5: The design states the most stacks a thread holds and each stack's reservation, and a 64-thread probe reports VmSize and RSS within it; today the first arena block a process opens costs 16 GiB of address space and each further arena 256 MiB, and the review measured scope-end free at 110 times the peak, so last-use free is required. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G5.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:56.679Z"
+        },
+        {
+          "n": 7,
+          "text": "G6: Chunked task stacks replace `context.scratch`'s 256 MiB per-task reservation as the one mechanism: the review probe tasks.jet with 10,000 tasks that each stack a value stays within twice the `none` row's VmSize and RSS. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G6.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:58.912Z"
+        },
+        {
+          "n": 8,
+          "text": "G7: A value sent on one branch only is placed on the heap on every path: a case shows it, with `jet inspect placement` naming \"sent\". Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G7.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:31:59.950Z"
+        },
+        {
+          "n": 9,
+          "text": "G9: Web growth holds: the review probe web.jet's grown-against-reserved share on V8 stays within one point of today's 12% once stacks are chunked. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G9.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:32:00.746Z"
+        },
+        {
+          "n": 10,
+          "text": "G10: Stacked values stay visible: the alloc lens and the heap view report stacked bytes by call site and by placement rule, `jet inspect placement` names stacked values as well as heap ones, and checked mode poisons a stacked value's bytes at its reset and reports a later read as a use after free with the value's line. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G10.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:32:01.552Z"
+        },
+        {
+          "n": 11,
+          "text": "G11: Placement is one meaning on every tier (I9): `jet inspect placement` prints the same placement for a fixed program at O0, O1, O2 and `--os=web`, and a case holds that output. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:32:02.369Z"
+        },
+        {
+          "n": 12,
+          "text": "G12: A stacked value's last use counts every view, borrow and iterator over it, and every exit (return, break, `?` propagation, a stop) resets its stack: cases cover a view kept past the owner's last plain use and an early return. Found by the D-PLACE-DEFAULT1 adversarial review (Docs/Audits/2026-11-21-d-place-default1-review.md, landed 3cbcaa71a0, verdict FAILS), gap G12.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:32:03.275Z"
         }
       ],
       "refs": [
@@ -71562,9 +71694,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-17T01:53:44.842Z",
+      "updated": "2026-11-21T10:32:09.062Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 12
     },
     {
       "id": "c0ozl5j4",
@@ -72433,11 +72565,11 @@
         {
           "n": 3,
           "text": "The codegen gate (Tools/Perf/CodegenCeiling.jet) prints, for each REGRESSION row, the jet perf or disassembly facts that name what grew (the function, its added instructions and the source lines they lower from), so a regression reaches its author with its cause. Proof: a seeded regression in a fixture prints the grown lines.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T00:56:43.857Z"
+          "evidence": "Landed b33b37cd08 (p406). On the p406 batch compiler (dev 113879859e, 2026-11-21): Tests/Cases/Perf/codegen_gate_names_what_a_seeded_regression_adds passed (the seeded regression fixture prints the grown function, its added instructions and their source lines from jet's own listing), `jet test Tools/Perf/CodegenCeiling.jet` rc 0 and `jet Tools/Perf/CodegenCeiling.jet --check` rc 0; the full suite passed the case too.",
+          "at": "2026-11-21T10:31:21.916Z"
         },
         {
           "n": 4,
@@ -72683,6 +72815,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T09:03:36.000Z"
+        },
+        {
+          "n": 29,
+          "text": "Jet tools report a built image's section sizes and dump a named section's bytes, so Tests/Cases CoreActivation (nm and size -A) and BuildEntry (readelf -x) drop the external binutils; the surface goes on a ballot first unless an existing jet inspect or jet debug --do form fits (D-DEBUG-LISTING1 lists symbols and segments, not section sizes or bytes). Found by Lens finishing c17 on p407 (2026-11-21). Proof: both cases run with no nm, size or readelf and check the same facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T10:53:05.750Z"
         }
       ],
       "refs": [],
@@ -72690,9 +72831,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T09:08:25.661Z",
+      "updated": "2026-11-21T10:53:05.750Z",
       "updatedBy": "Main",
-      "criteriaLastN": 28
+      "criteriaLastN": 29
     },
     {
       "id": "c0c3gh6u",
@@ -131195,6 +131336,230 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T11:00:46.857Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0sbl400",
+      "note": "9 criteria, soft limit 6: A loss of output under cancellation found by the p407 full suite, in this card's cancellation scope"
+    },
+    {
+      "at": "2026-11-21T11:00:46.857Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0sbl400",
+      "note": "#9 A #Shield body always runs to its end before the cancellatio"
+    },
+    {
+      "at": "2026-11-21T10:53:05.750Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "29 criteria, soft limit 6: A gap found finishing c17, in this card's replace-the-external-tools scope"
+    },
+    {
+      "at": "2026-11-21T10:53:05.750Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#29 Jet tools report a built image's section sizes and dump a na"
+    },
+    {
+      "at": "2026-11-21T10:32:09.062Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0py34oh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T10:32:03.275Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "12 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:32:03.275Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#12 G12: A stacked value's last use counts every view, borrow an"
+    },
+    {
+      "at": "2026-11-21T10:32:02.369Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "11 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:32:02.369Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#11 G11: Placement is one meaning on every tier (I9): `jet inspe"
+    },
+    {
+      "at": "2026-11-21T10:32:01.553Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "10 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:32:01.553Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#10 G10: Stacked values stay visible: the alloc lens and the hea"
+    },
+    {
+      "at": "2026-11-21T10:32:00.746Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "9 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:32:00.746Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#9 G9: Web growth holds: the review probe web.jet's grown-again"
+    },
+    {
+      "at": "2026-11-21T10:31:59.950Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "8 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:31:59.950Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#8 G7: A value sent on one branch only is placed on the heap on"
+    },
+    {
+      "at": "2026-11-21T10:31:58.912Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0py34oh",
+      "note": "7 criteria, soft limit 6: The D-PLACE-DEFAULT1 review requires every gap to end on a criterion of this card (c1)"
+    },
+    {
+      "at": "2026-11-21T10:31:58.912Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#7 G6: Chunked task stacks replace `context.scratch`'s 256 MiB "
+    },
+    {
+      "at": "2026-11-21T10:31:56.679Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#6 G5: The design states the most stacks a thread holds and eac"
+    },
+    {
+      "at": "2026-11-21T10:31:54.165Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#5 G4: The calling convention for values returned to a caller's"
+    },
+    {
+      "at": "2026-11-21T10:31:52.538Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#4 G3: A census of reach, which also covers recursion (G8): `je"
+    },
+    {
+      "at": "2026-11-21T10:31:51.621Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#3 G2: The spec states what \"outlives\" means for list elements,"
+    },
+    {
+      "at": "2026-11-21T10:31:50.819Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0py34oh",
+      "note": "#2 G1: A scope-stack allocation path exists that beats the heap"
+    },
+    {
+      "at": "2026-11-21T10:31:27.102Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T10:31:26.249Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-21T10:31:25.282Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#111"
+    },
+    {
+      "at": "2026-11-21T10:31:24.407Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#109"
+    },
+    {
+      "at": "2026-11-21T10:31:23.565Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#107"
+    },
+    {
+      "at": "2026-11-21T10:31:22.742Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#106"
+    },
+    {
+      "at": "2026-11-21T10:31:21.916Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-21T10:29:20.778Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "110 criteria, soft limit 6: A regression found by the p406 full suite in this card's trace-lifeline area"
+    },
+    {
+      "at": "2026-11-21T10:29:20.778Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#113 core.tasks quiesce() succeeds once every task group has join"
+    },
+    {
+      "at": "2026-11-21T10:25:02.593Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05p5u7s",
+      "note": "#2 A program that owns its main prints through the same stdout "
+    },
     {
       "at": "2026-11-21T09:47:36.999Z",
       "by": "Main",
