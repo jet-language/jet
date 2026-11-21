@@ -1,15 +1,17 @@
-# A host whose kernel refuses every counter: strace makes each
-# perf_event_open the program makes fail with ENOENT, as on a CPU or VM
-# that has none of the events. `jet perf run --lens=cpu,memory` still
-# profiles the CPU time. Each counter is reported unavailable with the
-# kernel's errno, and the profile's reason says why. No row holds a count
-# for any of them, zero or otherwise.
+# A host whose kernel refuses every counter: the NoCounters helper runs
+# `jet perf run` under a seccomp filter that makes each perf_event_open fail
+# with ENOENT, as on a CPU or VM that has none of the events.
+# `jet perf run --lens=cpu,memory` still profiles the CPU time. Each counter
+# is reported unavailable with the kernel's errno, and the profile's reason
+# says why. No row holds a count for any of them, zero or otherwise.
 requires: os-name:linux
 requires: arch:x86_64
-requires: tool:strace
 fixture: MemoryCountersPerLine.fixture
 env: NO_COLOR=1
-step: strace -f -qq -o /dev/null -e trace=perf_event_open -e inject=perf_event_open:error=ENOENT {jet} perf run --lens=cpu,memory walk.jet --out {work}/walk.jettrace
+copy: {root}/Tests/Cases/PerfRun/NoCounters.fixture/main.jet nocounters/main.jet
+step: jet build --allow=Exec nocounters/main.jet
+exit: 0
+step: {work}/nocounters/.jet/build/main {jet} perf run --lens=cpu,memory walk.jet --out {work}/walk.jettrace
 exit: 0
 stdout: = "lines=35184363700224 pages=35184363700224 hops=35183996698624\n"
 json: file walk.jettrace doc $.content.profile.method = "sampling"

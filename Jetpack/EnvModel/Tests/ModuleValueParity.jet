@@ -306,14 +306,10 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
     values_program: module_values_program(program.items, SCHEMA_VALUES, [String:CtValue]{}, "") ?? panic("the program builds: {err.diagnostic.what}")
     outcome: module_values_evaluate(values_program.text, dir) ?? panic("the compiler answers: {err.detail}")
     files.remove_all(dir) ?? panic("remove the directory")
+    if outcome.refused == .Val(diagnostic) -> panic("the values are refused: {diagnostic.what}")
+    assert_eq(outcome.unreadable, [String]{})
     computed := [String:CtValue]{}
-    if outcome == {
-        .Values(values, unreadable) -> {
-            assert_eq(unreadable, [String]{})
-            loop named in values -> computed[named.name] = named.value
-        }
-        .Refused(diagnostic) -> panic("the values are refused: {diagnostic.what}")
-    }
+    loop named in outcome.values -> computed[named.name] = named.value
     prompt: computed.get("PROMPT") ?? panic("PROMPT is computed")
     assert_eq(module_value_field_names(prompt), [String]{"label", "path"})
     assert(ast_comptime_value_show(prompt).contains("Short"), ast_comptime_value_show(prompt))

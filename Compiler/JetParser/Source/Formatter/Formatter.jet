@@ -1974,14 +1974,16 @@ jfmt_value_tail_func_rewrites: fn(f: JetFmt, function: Func, edits: &[TextEdit])
     // The default return an `else` arm takes in is part of that arm's edit.
     taken := -1
     loop tail in tails {
-        if tail == {
-            .ElseArm(table, returns, fallback, default) -> {
-                edit: parser_else_arm_edit(f.src_bytes, table, returns, fallback, default) ?? next
-                taken = fallback
+        if tail.kind == {
+            .ElseArm -> {
+                edit: parser_else_arm_edit(f.src_bytes, tail.table, tail.returns, tail.keyword, tail.default) ?? next
+                taken = tail.keyword
                 edits.push(edit)
             }
-            .FinalReturn(keyword, value, arm) -> {
-                if arm && keyword != taken -> edits.push(parser_final_return_edit(keyword, value))
+            .FinalReturn -> {
+                if tail.arm && tail.keyword != taken {
+                    edits.push(parser_final_return_edit(tail.keyword, tail.value))
+                }
             }
         }
     }

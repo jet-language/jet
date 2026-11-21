@@ -275,7 +275,9 @@ sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: 
     loop (id, spelled) in inherited.spelled {
         if name_index(spelled) == 0 -> next
         name: inherited.names.texts[id]
-        if !local.contains(name) -> sema_public_api_respell(units, name, name_text(inherited.texts, spelled))
+        if !local.contains(name) {
+            sema_public_api_respell(units, name, name_text(inherited.texts, spelled))
+        }
     }
     loop name in local {
         if modules.len() == 0 -> break

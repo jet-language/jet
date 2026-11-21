@@ -67,10 +67,11 @@
 //   JET=/path/to/jet jet Tools/Agent/LaneCheck.jet          the whole compiler
 //   JET=/path/to/jet jet Tools/Agent/LaneCheck.jet <path>   one file or project
 //   jet Tools/Agent/LaneCheck.jet --runtime-generators      runtime tables only
-//   jet Tools/Agent/LaneCheck.jet --check                   the checks every
-//     mode runs first, alone: the tree checks, no compiler check. The census
-//     runs it as its `lane-check` pass (Tools/Agent/Land.jet), so a check
-//     added here holds the landing path too
+//   jet Tools/Agent/LaneCheck.jet --check [CHECK]           the checks every
+//     mode runs first, alone: the tree checks, no compiler check; with
+//     CHECK, that one of TREE_CHECKS. The census runs each as a pass of its
+//     own (Tools/Agent/Land.jet), so a check added here holds the landing
+//     path too once the census names it
 //   jet Tools/Agent/LaneCheck.jet --personal-info [DIR]     the guard alone
 //   jet Tools/Agent/LaneCheck.jet --patterns                the guard's rules,
 //     one "path<TAB>regex" (case-sensitive) or "word<TAB>regex" (any case)
@@ -119,33 +120,57 @@ run: fn() {
         }
         return
     }
-    if personal_info_guard(repo) != 0 {
-        print("CHECK FAILED — personal or machine information in the checkout (see above)")
-        process.exit(1)
-    }
-    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    assembly: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
-    if assembly.code != 0 || assembly.signal != None {
-        return assembly_refused(process.combined_output(assembly).trim_end())
-    }
-    unsafe_ratchet(repo)
-    vocabulary_rows(repo)
-    body_tree_rows(repo)
-    core_enum_cases(repo)
-    diagnostic_census(repo)
-    compiler_data(repo)
-    script_pairing(repo)
     if args.len() > 0 && args[0] == "--check" {
-        if args.len() != 1 -> usage("jet Tools/Agent/LaneCheck.jet --check")
+        if args.len() > 2 -> usage("jet Tools/Agent/LaneCheck.jet --check [CHECK]")
+        named: if args.len() == 2 -> [String]{args[1].copy()} else -> TREE_CHECKS.copy()
+        loop name in named -> tree_check(name, repo)
         print("CHECK OK")
         return
     }
+    loop name in TREE_CHECKS -> tree_check(name, repo)
     if args.len() > 0 && args[0] == "--runtime-generators" {
         if args.len() != 1 -> usage("jet Tools/Agent/LaneCheck.jet --runtime-generators")
         process.exit(runtime_generators(repo))
     }
     if args.len() > 1 -> usage("JET=/path/to/jet jet Tools/Agent/LaneCheck.jet [path]")
     process.exit(compiler_check(repo, args))
+}
+
+// The tree checks every mode runs first, in this order: the names the
+// census gives their passes (Tools/Agent/Land.jet LANE_CHECKS).
+TREE_CHECKS: [String]{"personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing"}
+
+// Run the tree check `name`; one that refuses ends the run with exit 1.
+tree_check: fn(name: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
+    if {
+        name == "personal-info" -> personal_info(repo)
+        name == "assembly" -> assembly(repo)
+        name == "unsafe-ratchet" -> unsafe_ratchet(repo)
+        name == "vocabulary-rows" -> vocabulary_rows(repo)
+        name == "body-tree-rows" -> body_tree_rows(repo)
+        name == "core-enum-cases" -> core_enum_cases(repo)
+        name == "diagnostic-census" -> diagnostic_census(repo)
+        name == "compiler-data" -> compiler_data(repo)
+        name == "script-pairing" -> script_pairing(repo)
+        else -> usage("jet Tools/Agent/LaneCheck.jet --check [{TREE_CHECKS.join(" | ")}]")
+    }
+}
+
+// The personal-information guard of the checkout.
+personal_info: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
+    if personal_info_guard(repo) != 0 {
+        print("CHECK FAILED — personal or machine information in the checkout (see above)")
+        process.exit(1)
+    }
+}
+
+// The Jetpack assembly check with $JET, else the `jet` on PATH.
+assembly: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
+    assembled: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
+    if assembled.code != 0 || assembled.signal != None {
+        assembly_refused(process.combined_output(assembled).trim_end())
+    }
 }
 
 assembly_refused: fn(output: String) -[Exec, IO]> Never {

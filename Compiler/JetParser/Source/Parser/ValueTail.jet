@@ -20,14 +20,26 @@ ParserArmReturn: struct {
     value_end: Int,
 }
 
-ParserValueTail: enum {
+ParserValueTailKind: enum {
     // A value table (`table`) with no `else`, whose arms each only return a
     // value (`returns`, in source order), then the default `return` at
-    // `fallback` of the value at `default`.
-    ElseArm(table: Span, returns: [ParserArmReturn], fallback: Int, default: Span),
+    // `keyword` of the value at `default`.
+    ElseArm,
     // A last-line `return` at `keyword` of the value starting at `value`;
     // `arm` when it ends an arm of a last-line table, not the block itself.
-    FinalReturn(keyword: Int, value: Int, arm: Bool),
+    FinalReturn,
+}
+
+// One old shape, by its kind: `keyword` is where its last `return` starts.
+// The fields its kind does not name are empty.
+ParserValueTail: struct {
+    kind: ParserValueTailKind,
+    keyword: Int,
+    table: Span,
+    returns: [ParserArmReturn],
+    default: Span,
+    value: Int,
+    arm: Bool,
 }
 
 // Which last-line tables the reading enters. `jet check` reports in every
@@ -64,7 +76,8 @@ parser_value_tails_at: fn(statements: [Stmt], arms: Int, reach: ParserTailReach,
             // A generated value (a synthesized body's own `return`) has no
             // source to rewrite.
             if value == .Val(returned) && expr_node_id(returned) != AST_NODE_GENERATED {
-                tails.push(ParserValueTail.FinalReturn{keyword: span.start, value: expr_source_start(returned), arm: arms > 0})
+                empty: Span{start: 0, end: 0}
+                tails.push(ParserValueTail{kind: ParserValueTailKind.FinalReturn, keyword: span.start, table: empty, returns: [ParserArmReturn]{}, default: empty, value: expr_source_start(returned), arm: arms > 0})
             }
         }
         .Switch(subject, table_arms, else_body, span) -> {
@@ -149,7 +162,7 @@ parser_else_arm_tail: fn(table: Stmt, fallback: Stmt) -[]> ParserValueTail? Neve
                 }
                 return None
             }
-            return Val(ParserValueTail.ElseArm{table: span, returns: returns, fallback: fallback_span.start, default: expr_source_span(default)})
+            return Val(ParserValueTail{kind: ParserValueTailKind.ElseArm, keyword: fallback_span.start, table: span, returns: returns, default: expr_source_span(default), value: 0, arm: false})
         }
     }
     None

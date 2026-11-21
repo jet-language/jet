@@ -12463,8 +12463,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     trait_caps: sema_effect_trait_caps(final_graph)
     // The functions the build checked to run while compiling are prep code,
     // never a runtime entry (sema_effect_runtime_input_paths).
-    prep_functions := [String:Bool]{}
-    loop result in comptime_functions -> prep_functions[result.function_key.copy()] = true
+    prep_functions := name_table_sized(comptime_functions.len() + 1)
+    loop result in comptime_functions -> _ := name_intern(prep_functions, result.function_key)
     // An executable build (its entry module's `run`, or a function an Output
     // links) makes every function value it calls; a library's callers may
     // pass any.
@@ -12857,7 +12857,7 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
 // graph's rows: the root package's denials, its modules' caps and the
 // policies of `package_policies`. It borrows `symbols`, the run's symbol
 // table, and hands it back in its result.
-sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
+sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: NameTable, threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
     sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries, eval_probes: graph.eval_probes)
 }
 

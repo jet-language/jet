@@ -1,0 +1,100 @@
+// Runs the command its arguments name on a host whose kernel refuses every
+// performance counter: each perf_event_open(2) call fails with ENOENT, as on
+// a CPU or virtual machine that has none of the events. A seccomp filter on
+// every thread of this program says so, and the command and every process it
+// starts inherit it. Ends with the command's exit status. x86-64 Linux only.
+use {
+    core.mem
+    process: core.process
+}
+
+#Import(c) c_prctl: fn(option: Int, value: Int, second: Int, third: Int, fourth: Int) -> Int = "prctl"
+
+#[Import(c), Unsafe("`program` is the address of a live struct sock_fprog whose filter block outlives the call; the kernel copies the filter before it returns")]
+c_seccomp: fn(number: Int, operation: Int, flags: Int, program: Int) -> Int = "syscall"
+
+// struct sock_fprog: the filter's instruction count and its address.
+#Layout(c) Program: struct {
+    length: U16,
+    filter: Int,
+}
+
+// prctl(2)'s PR_SET_NO_NEW_PRIVS, and seccomp(2)'s number, its
+// SECCOMP_SET_MODE_FILTER and its SECCOMP_FILTER_FLAG_TSYNC (every thread).
+SET_NO_NEW_PRIVS: 38
+
+SECCOMP: 317
+
+SET_MODE_FILTER: 1
+
+FILTER_TSYNC: 1
+
+// The classic BPF codes of a word load from the call's data, a jump when
+// equal to a constant, and a return of a constant; seccomp_data's offsets of
+// the call's number and architecture.
+LOAD_WORD: 32
+
+JUMP_EQUAL: 21
+
+RETURN: 6
+
+NUMBER_AT: 0
+
+ARCH_AT: 4
+
+// AUDIT_ARCH_X86_64, perf_event_open's number, and the filter's two answers:
+// SECCOMP_RET_ERRNO with ENOENT, and SECCOMP_RET_ALLOW.
+ARCH_X86_64: 3221225534
+
+PERF_EVENT_OPEN: 298
+
+FAIL_ENOENT: 327682
+
+ALLOW: 2147418112
+
+// The filter, one instruction (struct sock_filter) a row: its code, its
+// jumps when true and when false, and its constant.
+FILTER: [[Int]]{
+    [Int]{LOAD_WORD, 0, 0, ARCH_AT},
+    [Int]{JUMP_EQUAL, 0, 3, ARCH_X86_64},  // another architecture's calls are allowed
+    [Int]{LOAD_WORD, 0, 0, NUMBER_AT},
+    [Int]{JUMP_EQUAL, 0, 1, PERF_EVENT_OPEN},
+    [Int]{RETURN, 0, 0, FAIL_ENOENT},
+    [Int]{RETURN, 0, 0, ALLOW},
+}
+
+// The `count` low bytes of `value`, least significant first, onto `bytes`.
+put: fn(bytes: &[U8], value: Int, count: Int) {
+    loop k in 0..<count -> bytes.push(U8{(value >> (8 * k)) & 255})
+}
+
+// The filter's instructions as the kernel lays struct sock_filter out: the
+// code in two bytes, each jump in one, the constant in four.
+filter_bytes: fn() -> [U8] {
+    bytes := [U8]{}
+    loop row in FILTER {
+        put(bytes, row[0], 2)
+        put(bytes, row[1], 1)
+        put(bytes, row[2], 1)
+        put(bytes, row[3], 4)
+    }
+    bytes
+}
+
+run: fn() -> Never {
+    command: process.args()
+    if command.len() == 0 -> panic("usage: main COMMAND [ARGUMENT...]")
+    if c_prctl(SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 -> panic("prctl refused PR_SET_NO_NEW_PRIVS")
+    bytes: filter_bytes()
+    installed := -1
+    #Unsafe("the block holds the filter while seccomp copies it into the kernel, and is released once, after the call") {
+        block: mem.alloc_raw(bytes.len(), 1) ?? panic("no memory for the filter")
+        mem.list_copy<U8>(block, bytes, 0, bytes.len())
+        program: Program{length: U16{FILTER.len()}, filter: mem.address_of(block.*)}
+        installed = c_seccomp(SECCOMP, SET_MODE_FILTER, FILTER_TSYNC, mem.address_of(program))
+        mem.free_raw(block)
+    }
+    if installed != 0 -> panic("the kernel refused the seccomp filter")
+    receipt: process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? panic("couldn't run `{command[0]}`: {err}")
+    process.exit(process.exit_status(receipt))
+}

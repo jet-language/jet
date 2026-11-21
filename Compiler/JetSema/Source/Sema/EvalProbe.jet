@@ -23,7 +23,6 @@ use {
         LambdaBody,
         LambdaParam,
         ModuleID,
-        NameRows,
         NameTable,
         NamedSpan,
         Span,
@@ -393,15 +392,15 @@ sema_eval_probe_lends: fn(value: Expr, scopes: SemaScopeTable, context: SemaChec
 // wait is refused where the debugger links the expression instead. A call
 // the solved graph holds no node for is left out, as for a callback's bound
 // (sema_effect_check_callback_bounds).
-sema_eval_probe_judge_effects: fn(probes: SemaEvalProbes, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]]) {
+sema_eval_probe_judge_effects: fn(probes: SemaEvalProbes, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]]) {
     table := probes.table.guard_edit()
     loop index in 0..<table.value.answers.len() {
-        refusals: sema_eval_probe_effect_refusals(table.value.answers[index], nodes, node_by_key, solved)
+        refusals: sema_eval_probe_effect_refusals(table.value.answers[index], nodes, calls, solved)
         loop refusal in refusals -> table.value.answers[index].refusals.push(refusal)
     }
 }
 
-sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]]) -> [Diagnostic] {
+sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEffectNode], calls: SemaEffectCallIndex, solved: [[String]]) -> [Diagnostic] {
     refusals := [Diagnostic]{}
     if !answer.complete -> return refusals
     own := [String]{}
@@ -411,7 +410,7 @@ sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEff
     seen := (loop _ in nodes -> false)
     loop edge in answer.effects.call_edges {
         if edge == "__jet_panic__" -> next
-        target: sema_effect_node_index(node_by_key, edge) ?? next
+        target: sema_effect_node_index(calls.node_by_key, edge) ?? next
         callee: "`{nodes[target].display_key}`"
         sema_eval_probe_row_refusals(solved[target], callee, answer.span, refusals)
         path: sema_effect_state_writer_path(nodes, target, seen)

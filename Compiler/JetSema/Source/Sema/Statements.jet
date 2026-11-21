@@ -945,8 +945,9 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
     tails := [ParserValueTail]{}
     parser_value_tails(statements, ParserTailReach.Tables, [U8]{}, tails)
     loop tail in tails {
-        if tail == {
-            .ElseArm(table, returns, fallback, default) -> {
+        if tail.kind == {
+            .ElseArm -> {
+                table: tail.table
                 tables.push(table.start)
                 // Rust check_redundant_arm_table_return: the lint is its
                 // rewrite, so a table whose source the rewrite cannot read
@@ -955,17 +956,18 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
                 if lint {
                     graph: program.registration_graph ?? next
                     caller: sema_scope_caller_index(environment, graph) ?? next
-                    edit: parser_else_arm_edit(graph.modules[caller].source.bytes(), table, returns, fallback, default) ?? next
+                    edit: parser_else_arm_edit(graph.modules[caller].source.bytes(), table, tail.returns, tail.keyword, tail.default) ?? next
                     lint_row: sema_lint("L0513", table, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm")
                     diagnostics.push(diagnostic_with_structured_edit(lint_row, edit))
                 }
             }
-            .FinalReturn(keyword, value, _) -> {
+            .FinalReturn -> {
+                keyword: tail.keyword
                 if lint {
                     // The fix deletes `return` and the blank run after it, so
                     // the value is left as the block tail.
                     tail_lint: sema_lint("L0530", Span{start: keyword, end: keyword + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail")
-                    diagnostics.push(diagnostic_with_edit_grade(tail_lint, parser_final_return_edit(keyword, value), DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
+                    diagnostics.push(diagnostic_with_edit_grade(tail_lint, parser_final_return_edit(keyword, tail.value), DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
                 }
             }
         }

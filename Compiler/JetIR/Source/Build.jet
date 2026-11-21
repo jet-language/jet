@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_find, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -450,7 +450,7 @@ IRChecks: struct {
     // symbol (ir_symbol_name), which no other function shares. A direct
     // call of one calls the image's code there and builds no body for it
     // (ir_held_bound). Empty builds every function it calls.
-    held: [String:Bool]{[String:Bool]{}},
+    held: NameTable{name_table_sized(2)},
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1798,14 +1798,14 @@ ir_build_root_jobs: fn(program: IRProgram, rows: [Int]) -> [IRWaveJob] Never! {
 }
 
 // A debugger's evaluations against a running program image (JetCLI
-// DebugCompile.jet): the program's checked functions declared and bound
-// once, as ir_program_new does, under `checks`, so each evaluation only puts
-// and builds its root (ir_build_held_root). Under `bind` (an O0 image, whose
-// every non-generic function the build kept), a direct call of a held
-// function the image holds calls the image's code (IRChecks.held,
+// DebugCompile.jet): `program`, the program's checked functions declared
+// and bound once (ir_program_new), held under `checks`, so each evaluation
+// only puts and builds its root (ir_build_held_root). Under `bind` (an O0
+// image, whose every non-generic function the build kept), a direct call of
+// a held function the image holds calls the image's code (IRChecks.held,
 // ir_held_symbols).
-ir_held_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], checks: IRChecks, bind: Bool{false}) -> IRProgram Never! {
-    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+ir_held_program: fn(program: &&IRProgram, decls: DeclTable, foreign: &&[SemaCheckedForeignFunction], checks: IRChecks, bind: Bool{false}) -> IRProgram Never! {
+    p := program.move()
     p.checks = checks
     p.sentries = ir_checks_sentries(p.checks)
     p.user_values = true
@@ -1818,18 +1818,33 @@ ir_held_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTa
 // The keys of the non-generic functions of `functions` whose symbol
 // (ir_symbol_name) no other function of them has: the image's symbol of
 // that name is theirs.
-ir_held_symbols: fn(functions: [FnBody]) -> [String:Bool] Never! {
+ir_held_symbols: fn(functions: [FnBody]) -> NameTable Never! {
     names: loop function in functions -> if function.generic_params.len() > 0 -> "" else -> ir_symbol_name(function)
-    counts := [String:Int]{}
+    // How many of the functions have each symbol, by its id in `symbols`.
+    symbols := name_table_sized(names.len() + 1)
+    counts := [Int]{0}
     loop name in names {
-        if name != "" -> counts[name] = (counts.get(name) ?? 0) + 1
+        if name == "" -> next
+        row: name_index(name_intern(symbols, name))
+        if row == counts.len() -> counts.push(1) else -> counts[row] = counts[row] + 1
     }
-    held := [String:Bool]{}
+    held := name_table_sized(names.len() + 1)
     loop (index, name) in names {
-        if name != "" && counts.get(name) == Val(1) -> held[functions[index].key] = true
+        if name == "" -> next
+        id: name_find(symbols, name) ?? next
+        if counts[name_index(id)] == 1 -> _ := name_intern(held, functions[index].key)
     }
     held
 }
+
+// Whether the image holds the function of key `key` under its own symbol
+// (IRChecks.held).
+ir_held_holds: fn(checks: IRChecks, key: String) -> Bool Never! {
+    name_find(checks.held, key) != None
+}
+
+// Whether a build binds the image's functions (IRChecks.held).
+ir_held_binds: fn(checks: IRChecks) -> Bool Never! { name_count(checks.held) > 1 }
 
 // The source path a held build's root reads its lines from
 // (ir_build_held_root).
@@ -1863,7 +1878,7 @@ ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threa
     // this thread, not on the threads the program's size admits
     // (ir_build_waves_kept).
     roots: ir_build_root_jobs(p, [Int]{row})
-    kept := if p.checks.held.len() > 0 -> ir_build_waves_parted(p, roots, false, 1, None) else -> ir_build_waves_kept(p, roots, false, threads, None)
+    kept := if ir_held_binds(p.checks) -> ir_build_waves_parted(p, roots, false, 1, None) else -> ir_build_waves_kept(p, roots, false, threads, None)
     if kept.program.checks.core == .Val(image) -> ir_core_cells_bind(kept.result.program, image)
     // The program's own cells are the running image's (a debuggable image
     // exports them, ir_debug_cell_exports), not copies placed beside the
@@ -1904,13 +1919,13 @@ ir_held_append: fn(program: &IRProgram, function: &&FnBody, decl: DeclID, text: 
     appended := owned.pop() ?? panic("the held append lost its function")
     appended.source_file = "{IR_HELD_ROOT_SOURCE}{appended.key}"
     ir_held_source_put(program, appended.source_file, text)
-    if program.checks.held.len() > 0 {
+    if ir_held_binds(program.checks) {
         symbol: ir_symbol_name(appended)
         alone := true
         loop other in program.functions {
             if ir_symbol_name(other) == symbol -> alone = false
         }
-        if alone -> program.checks.held[appended.key] = true
+        if alone -> _ := name_intern(program.checks.held, appended.key)
     }
     row: program.functions.len()
     name_rows_set(program.rows, appended.key, row)

@@ -1,15 +1,18 @@
-# A host whose kernel refuses every top-down event: strace makes each
-# perf_event_open the program makes fail with ENOENT, as on a CPU or VM
-# that has none of the events. `jet perf run --lens=cpu,topdown` still
-# profiles the CPU time. The trace's `topdown` section is unavailable, each
-# event keeps the kernel's errno, and the reason names the first event the
-# kernel refused; the view says so instead of a split.
+# A host whose kernel refuses every top-down event: the NoCounters helper
+# runs `jet perf run` under a seccomp filter that makes each perf_event_open
+# fail with ENOENT, as on a CPU or VM that has none of the events.
+# `jet perf run --lens=cpu,topdown` still profiles the CPU time. The trace's
+# `topdown` section is unavailable, each event keeps the kernel's errno, and
+# the reason names the first event the kernel refused; the view says so
+# instead of a split.
 requires: os-name:linux
 requires: arch:x86_64
-requires: tool:strace
 fixture: TopdownLevelsPerFunction.fixture
 env: NO_COLOR=1
-step: strace -f -qq -o /dev/null -e trace=perf_event_open -e inject=perf_event_open:error=ENOENT {jet} perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
+copy: {root}/Tests/Cases/PerfRun/NoCounters.fixture/main.jet nocounters/main.jet
+step: jet build --allow=Exec nocounters/main.jet
+exit: 0
+step: {work}/nocounters/.jet/build/main {jet} perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
 exit: 0
 stdout: ~ "guesses=" # the run still prints its topdown summary line
 json: file td.jettrace doc $.content.profile.rows #>= 1 # the CPU-time profile is still there

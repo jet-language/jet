@@ -649,10 +649,10 @@ sema_core_body_decode: fn(bytes: [U8], at: Int, graph: SemaRegistrationGraph, po
 // ms at best). With carriers running a spawn and join takes 11 to 18 µs.
 SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD: 262144
 
-// The most record bytes sema_core_bodies_ahead holds read and not yet
-// claimed by a compiler thread: its thread reads no further record while
-// the threads have this many bytes to claim, so a wave's records never sit
-// in memory together.
+// The most record bytes sema_core_bodies_ahead holds read and not yet taken
+// by a compiler thread, as the records of their mean size that hold this
+// many: its thread reads no further record while the threads have that many
+// to take, so a wave's records never sit in memory together.
 SEMA_CORE_BODIES_AHEAD_HELD_BYTES: 8388608
 
 // A record sema_core_bodies_ahead reads for a compiler thread to decode: its
@@ -675,19 +675,12 @@ SemaCoreBodyAhead: struct {
     size: Int,
 }
 
-// The records sema_core_bodies_ahead's thread reads for the compiler
-// threads that decode them (sema_core_bodies_ahead_decoder): those read and
-// not yet claimed, and their bytes; whether every record is read; whether a
-// decoding thread failed; and the decoded records, their bytes dropped,
-// with their packets in the same order: None where a key does not resolve
-// in this compile.
-SemaCoreBodiesAheadFeed: struct {
-    records: [SemaCoreBodyRecord],
-    held: Int,
-    read: Bool,
-    failed: Bool,
-    decoded: [SemaCoreBodyRecord],
-    packets: [SemaParallelBody?],
+// A record a compiler thread of sema_core_bodies_ahead decoded, its bytes
+// dropped, and its packet: None where a key does not resolve in this
+// compile.
+SemaCoreBodyDecoded: struct {
+    record: SemaCoreBodyRecord,
+    packet: SemaParallelBody?,
 }
 
 // A function whose packet a module pass may read ahead
@@ -768,12 +761,13 @@ sema_core_bodies_ahead_find: fn(hooks: SemaRegistrationHostHooks, graph: SemaReg
     records
 }
 
-// Reads the records `found` on this thread, in order, while the compiler
-// threads beside it decode them (sema_core_bodies_ahead_decoder), as many
-// as their bytes admit, then puts each packet that reads into `hooks`
-// (core_bodies_ahead). Records holding fewer bytes than one thread is worth
-// (SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD) are not read ahead: each loads
-// at its turn on the pass's thread, and no thread starts.
+// Reads the records `found` on this thread, in order, into a bounded
+// channel while the compiler threads beside it take and decode them
+// (sema_core_bodies_ahead_decoder), as many as their bytes admit; each
+// thread hands back what it decoded as it joins, and each packet that reads
+// goes into `hooks` (core_bodies_ahead). Records holding fewer bytes than
+// one thread is worth (SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD) are not read
+// ahead: each loads at its turn on the pass's thread, and no thread starts.
 sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: &SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], threads: CompilerThreads) {
     records: found.move()
     if records.len() == 0 {
@@ -785,62 +779,52 @@ sema_core_bodies_ahead_load: fn(graph: SemaRegistrationGraph, hooks: &SemaRegist
         return
     }
     decoders: compiler_threads_admit(compiler_threads_beside(threads, 1), records.len(), work, SEMA_CORE_BODIES_AHEAD_BYTES_PER_THREAD, 0, 0)
-    feed: Shared{SemaCoreBodiesAheadFeed{records: [SemaCoreBodyRecord]{}, held: 0, read: false, failed: false, decoded: [SemaCoreBodyRecord]{}, packets: [SemaParallelBody?]{}}}
-    fed: Condition.new()
-    room: Condition.new()
-    sema_core_bodies_ahead_stream(graph, hooks, records.move(), feed, fed, room, decoders)
-    held: feed.guard_edit()
-    loop held.value.decoded.len() > 0 {
-        record: held.value.decoded.pop() ?? break
-        popped: held.value.packets.pop() ?? panic("a Core bodies read-ahead lost a packet")
-        packet: popped.move() ?? next
-        hooks.core_bodies_ahead[record.owner.id] = Val(SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size})
+    held: SEMA_CORE_BODIES_AHEAD_HELD_BYTES * records.len() /% work
+    { sender: feed, receiver: taken }: channel<SemaCoreBodyRecord>(capacity: if held < 1 -> 1 else -> held)
+    decoded := [SemaCoreBodyDecoded]{}
+    sema_core_bodies_ahead_stream(graph, hooks, records.move(), feed.move(), taken.move(), decoders, decoded)
+    loop {
+        entry: decoded.pop() ?? break
+        packet: entry.packet.move() ?? next
+        hooks.core_bodies_ahead[entry.record.owner.id] = Val(SemaCoreBodyAhead{packet: packet.move(), position: entry.record.position, size: entry.record.size})
     }
 }
 
-// `decoders` compiler threads of sema_core_bodies_ahead_decoder, each
-// watched so that its failure stops this thread's reads at once
-// (sema_core_bodies_ahead_stop), and this thread's reads of `found`
-// (sema_core_bodies_ahead_feed).
-sema_core_bodies_ahead_stream: fn(graph: SemaRegistrationGraph, hooks: SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition, room: Condition, decoders: Int) {
-    if decoders <= 0 {
-        sema_core_bodies_ahead_feed(hooks, found.move(), feed, fed, room)
+// `decoders` compiler threads of sema_core_bodies_ahead_decoder, each with
+// a receiver of `taken` of its own (the last takes this thread's, so this
+// thread holds none and a send fails once every thread is gone), and this
+// thread's reads of `found` into `feed` (sema_core_bodies_ahead_feed). Each
+// thread's decoded records join `decoded` as it joins.
+sema_core_bodies_ahead_stream: fn(graph: SemaRegistrationGraph, hooks: SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], feed: &&Sender<SemaCoreBodyRecord>, taken: &&Receiver<SemaCoreBodyRecord>, decoders: Int, decoded: &[SemaCoreBodyDecoded]) {
+    if decoders <= 1 {
+        task.group sema_core_bodies_ahead_last {
+            last: task sema_core_bodies_ahead_decoder(graph, taken.move())
+            sema_core_bodies_ahead_feed(hooks, found.move(), feed.move())
+            thread: last.join() ?? panic(compiler_threads_failure_text(err))
+            loop entry in thread.move() -> decoded.push(entry)
+        }
         return
     }
     task.group sema_core_bodies_ahead_threads {
-        head: task {
-            task.group sema_core_bodies_ahead_watch {
-                thread: task sema_core_bodies_ahead_decoder(graph, feed, fed, room)
-                _ := thread.join() ?? {
-                    sema_core_bodies_ahead_stop(feed, fed, room)
-                    panic(compiler_threads_failure_text(err))
-                }
-            }
-        }
-        sema_core_bodies_ahead_stream(graph, hooks, found.move(), feed, fed, room, decoders - 1)
-        _ := head.join() ?? panic(compiler_threads_failure_text(err))
+        head: task sema_core_bodies_ahead_decoder(graph, taken.copy())
+        sema_core_bodies_ahead_stream(graph, hooks, found.move(), feed.move(), taken.move(), decoders - 1, decoded)
+        thread: head.join() ?? panic(compiler_threads_failure_text(err))
+        loop entry in thread.move() -> decoded.push(entry)
     }
 }
 
 // Reads the records `found`, in order, into `feed` for the decoding
-// threads, each once the records read and not yet claimed hold fewer than
-// SEMA_CORE_BODIES_AHEAD_HELD_BYTES; stops once a thread failed. Its end,
-// deferred so that a failure of this thread ends them too, marks every
-// record read, so the threads stop once they claimed the last.
-sema_core_bodies_ahead_feed: fn(hooks: SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition, room: Condition) {
-    defer sema_core_bodies_ahead_close(feed, fed)
+// threads; a send waits while the channel holds as many records as it
+// admits. Stops once every decoding thread is gone (a send fails). The
+// sender drops at the end, so the threads stop once they took the last.
+sema_core_bodies_ahead_feed: fn(hooks: SemaRegistrationHostHooks, found: &&[SemaCoreBodyRecord], feed: &&Sender<SemaCoreBodyRecord>) {
     pending := found.move()
     // Popped from the end, so read in key order.
     pending.reverse()
     loop {
         record := pending.pop() ?? break
         record.bytes = sema_core_bodies_ahead_bytes(hooks, record.position, record.at, record.size)
-        held: feed.guard_edit()
-        held.wait(room, fn(value) { value.held < SEMA_CORE_BODIES_AHEAD_HELD_BYTES || value.failed }) ?? panic("a Core bodies read-ahead could not wait for its threads")
-        if held.value.failed -> break
-        held.value.held += record.size
-        held.value.records.push(record.move())
-        fed.notify_one()
+        feed.send(record.move()) ?? break
     }
 }
 
@@ -855,50 +839,21 @@ sema_core_bodies_ahead_bytes: fn(hooks: SemaRegistrationHostHooks, position: Int
     [U8]{}
 }
 
-// Marks every record of `feed` read and wakes its threads.
-sema_core_bodies_ahead_close: fn(feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition) {
-    held: feed.guard_edit()
-    held.value.read = true
-    fed.notify_all()
-}
-
-// Stops `feed` once a decoding thread failed, waking the reading thread and
-// the other decoding threads, which stop.
-sema_core_bodies_ahead_stop: fn(feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition, room: Condition) {
-    held: feed.guard_edit()
-    held.value.failed = true
-    fed.notify_all()
-    room.notify_all()
-}
-
-// A compiler thread of sema_core_bodies_ahead: decodes the records it
-// claims from `feed` (sema_core_bodies_ahead_claim) with a reader of its
-// own, dropping each record's bytes once decoded.
-sema_core_bodies_ahead_decoder: fn(graph: SemaRegistrationGraph, feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition, room: Condition) {
+// A compiler thread of sema_core_bodies_ahead: decodes each record it takes
+// from `taken` with a reader of its own, dropping the record's bytes once
+// decoded, until the reading thread's sender is gone and the channel empty.
+// The decoded records go back to the reading thread with the thread's join.
+sema_core_bodies_ahead_decoder: fn(graph: SemaRegistrationGraph, taken: &&Receiver<SemaCoreBodyRecord>) -> [SemaCoreBodyDecoded] {
     reader := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
+    decoded := [SemaCoreBodyDecoded]{}
     loop {
-        record := sema_core_bodies_ahead_claim(feed, fed, room) ?? break
+        record := taken.receive() ?? break
         bytes: record.bytes.move()
         record.bytes = [U8]{}
         packet: sema_core_body_decode(bytes, 0, graph, record.position, reader)
-        held: feed.guard_edit()
-        held.value.decoded.push(record.move())
-        held.value.packets.push(packet.move())
+        decoded.push(SemaCoreBodyDecoded{record: record.move(), packet: packet.move()})
     }
-}
-
-// The next record of `feed` for a decoding thread, once one is read; None
-// once every record is read and claimed, or a thread failed. A claim that
-// makes room for the reading thread wakes it.
-sema_core_bodies_ahead_claim: fn(feed: Shared<SemaCoreBodiesAheadFeed>, fed: Condition, room: Condition) -> SemaCoreBodyRecord? {
-    held: feed.guard_edit()
-    held.wait(fed, fn(value) { value.records.len() > 0 || value.read || value.failed }) ?? panic("a Core bodies read-ahead thread could not wait for its records")
-    if held.value.failed -> return None
-    record: held.value.records.pop() ?? return None
-    full: held.value.held >= SEMA_CORE_BODIES_AHEAD_HELD_BYTES
-    held.value.held -= record.size
-    if full -> room.notify_one()
-    Val(record.move())
+    decoded
 }
 
 // The key in this compile of a captured symbol or declaration key that
@@ -985,10 +940,10 @@ sema_core_derive_decode: fn(bytes: &&[U8], table: ModuleTable, position: Int) ->
 // moved out of its row, keyed SEMA_CORE_DERIVE_KEY and the module's text.
 sema_core_derive_bodies: fn(graph: &SemaRegistrationGraph, bodies: &[SemaCoreBody]) {
     loop index in 0..<graph.modules.len() {
-        key: "{SEMA_CORE_DERIVE_KEY}{module_text(graph.module_table, graph.modules[index].module_identity)}"
         loop capture in compiler_take_rows<SemaDeriveCapture>(graph.modules[index].derive_captures) {
+            key: "{SEMA_CORE_DERIVE_KEY}{module_text(graph.module_table, graph.modules[index].module_identity)}"
             modules: loop id in capture.modules -> "{module_text(graph.module_table, id)}"
-            bodies.push(SemaCoreBody{key: key.copy(), bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
+            bodies.push(SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
         }
     }
 }

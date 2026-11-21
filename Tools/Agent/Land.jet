@@ -61,8 +61,9 @@
 // package. The compiler the build made then checks a hello world outside any
 // tree with no toolchain root, so with the Core built into it, and must load
 // Core function checks from its Core bodies file (`core-bodies`), and runs
-// Tools/Agent/LaneCheck.jet --check (`lane-check`: the tree checks every lane
-// check runs before its compiler check, under the compiler they judge; a
+// each of Tools/Agent/LaneCheck.jet's tree checks as a pass of its own
+// (LANE_CHECKS, each `--check NAME`: the checks every lane check runs before
+// its compiler check, under the compiler they judge; `compiler-data` is a
 // REPORTED_PASSES pass, so it prints its lines but neither fails the census
 // nor enters the receipt). Then, with the compiler the build made, at once
 // (phase B):
@@ -194,12 +195,16 @@ JOB_FILES: [String]{".patch", ".msg"}
 // trees an export needs for the source identity.
 RECEIPT_SCHEMA: "jet.preflight-receipt.v2"
 
-RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "selfcheck", "selfcheck-core", "areas"}
+RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "script-pairing", "selfcheck", "selfcheck-core", "areas"}
+
+// The lane check's tree checks, each a census pass of its own, in the order
+// Tools/Agent/LaneCheck.jet's TREE_CHECKS runs them.
+LANE_CHECKS: [String]{"personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing"}
 
 // Census passes that print their lines and their phases.tsv row but neither
-// fail the census nor enter the receipt: the lane check's tree checks, until
-// the unsafe-region baseline records the regions the tree has.
-REPORTED_PASSES: [String]{"lane-check"}
+// fail the census nor enter the receipt: the compiler-data ratchet, until
+// the tree's counts fall to the rows Tests/compiler_data.tsv records.
+REPORTED_PASSES: [String]{"compiler-data"}
 
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 
@@ -262,7 +267,7 @@ AREA_MARGIN: 268435456
 CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
 
 // The census passes in the order their lines print.
-PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "lane-check", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "core-bodies", "codegen", "personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing", "selfcheck", "selfcheck-core", "core-tests", "areas"}
 
 // The failing Core #Tests the core-tests pass tolerates: one "FILE: test
 // title" per line (# comments), each file run by the pass.
@@ -1184,7 +1189,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
     runs.push(core_bodies_pass(out, self_jet, identity))
     runs.push(codegen_pass(snap, out, self_jet, identity))
-    runs.push(lane_check_pass(snap, out, self_jet, identity))
+    loop name in LANE_CHECKS -> runs.push(lane_check_pass(snap, out, self_jet, identity, name))
     if !passes.selfcheck -> return census_finish(runs, out)
 
     task.group phase_b(limit: 3) {
@@ -1249,21 +1254,20 @@ lost_pass: fn(name: String) -> PassRun Never! {
     PassRun{name: name.copy(), rc: 1, seconds: 0, peak: 0, note: "lost", lines: [String]{"{name} rc=1 (its task ended without a result)"}}
 }
 
-// The lane check's tree checks (Tools/Agent/LaneCheck.jet --check) of the
-// snapshot, by the compiler the build made (several ask the compiler, and the
-// assembly check needs one that carries the snapshot's Core): the
-// unsafe-region ratchet, the generated rows, the diagnostic census, the
-// script pairing and every other check each lane check runs before its
-// compiler check. It stops at the first that refuses.
-lane_check_pass: fn(snap: String, out: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+// One of the lane check's tree checks (Tools/Agent/LaneCheck.jet --check
+// NAME) of the snapshot, by the compiler the build made (several ask the
+// compiler, and the assembly check needs one that carries the snapshot's
+// Core), as the pass `name`.
+lane_check_pass: fn(snap: String, out: String, self_jet: String, identity: String, name: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
     env: [Setting]{Setting{name: "JET", value: self_jet.copy()}, Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
-    code: run_heavy(snap, 900, CORE_MEMORY, CENSUS_CPUS, [String]{self_jet, "Tools/Agent/LaneCheck.jet", "--check"}, env, "{out}/lane-check")
-    lines := [String]{"lane-check rc={code}"}
+    log: "{out}/lane-{name}"
+    code: run_heavy(snap, 900, CORE_MEMORY, CENSUS_CPUS, [String]{self_jet, "Tools/Agent/LaneCheck.jet", "--check", name}, env, log)
+    lines := [String]{"{name} rc={code}"}
     if code != 0 {
-        lines.push(clip("{files.read("{out}/lane-check.out") ?? ""}{files.read("{out}/lane-check.err") ?? ""}".trim(), 600))
+        lines.push(clip("{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}".trim(), 600))
     }
-    PassRun{name: "lane-check", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "cap {CORE_MEMORY}", lines: lines}
+    PassRun{name: name.copy(), rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "cap {CORE_MEMORY}", lines: lines}
 }
 
 // The codegen gate (Tools/Perf/CodegenCeiling.jet --check) with the built
@@ -4434,10 +4438,19 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
 }
 
 #Test("a reported pass prints but neither fails the census nor enters the receipt") {
-    runs: [PassRun]{PassRun{name: "check", rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}}, PassRun{name: "lane-check", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{"lane-check rc=1"}}}
+    runs: [PassRun]{PassRun{name: "check", rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}}, PassRun{name: "compiler-data", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{"compiler-data rc=1"}}}
     assert_eq(census_rc(runs), 0)
     assert_eq(receipt_rows(runs).len(), 1)
     assert_eq(census_rc([PassRun]{PassRun{name: "check", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{}}}), 1)
+    // A lane check that refuses fails the census, unless it is reported.
+    assert_eq(census_rc([PassRun]{PassRun{name: "unsafe-ratchet", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{}}}), 1)
+}
+
+#Test("every lane check is a census pass that prints, and either the receipt holds it or it is reported") {
+    loop name in LANE_CHECKS {
+        assert(PASS_ORDER.contains(name))
+        assert(RECEIPT_PASSES.contains(name) != REPORTED_PASSES.contains(name))
+    }
 }
 
 #Test("a refusal names the census that would admit the launch") {
