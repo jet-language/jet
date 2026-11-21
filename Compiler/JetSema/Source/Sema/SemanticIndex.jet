@@ -1929,18 +1929,20 @@ sema_compiler_index_derivation_item_kind: fn(item: Item) -> SymbolKind? Never! {
 // Appends the record of `definition`, declared by the text at `span`, unless
 // a record already credits it; a text outside the source sets `missing`
 // when it is still "".
-sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, registered_module: SemaRegistrationModule, source: String, definition: Symbol, span: Span, records: &[DerivationRecord], credited: &[String:Bool], missing: &String) Never! {
-    definition_key := symbol_table_key(registration.symbols, definition.id)
-    if credited.get(definition_key) != None {
+sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, registered_module: SemaRegistrationModule, source: String, definition: Symbol, span: Span, records: &[DerivationRecord], credited: &[U32:Bool], missing: &String) Never! {
+    // Keyed by the symbol id: equal ids are equal keys, so no key text is
+    // resolved for a definition already credited.
+    if credited.get(definition.id.id) != None {
         return
     }
+    definition_key: symbol_table_key(registration.symbols, definition.id)
     definition_source: sema_compiler_index_source_fragment(source, span) ?? {
         if missing == "" {
             missing = "`{definition_key}` at {span.start}..{span.end} lies outside the {source.count_bytes()}-byte source of `{module_text(registration.module_table, registered_module.module_identity)}`"
         }
         return
     }
-    credited[definition_key] = true
+    credited[definition.id.id] = true
     kind := sema_compiler_index_definition_kind(definition, registration)
     structural_key := "{kind}|{definition_key}"
     stable_id := "def:{sha256_hex(structural_key).slice(0, 16)}"
@@ -1968,7 +1970,7 @@ sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, reg
 // name) or method has no text of its own: its owner's record covers it.
 sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerIndexDerivationFacts Never! {
     records := [DerivationRecord]{}
-    credited := [String:Bool]{}
+    credited := [U32:Bool]{}
     missing := ""
     loop module_index in 0..<registration.modules.len() {
         registered_module: registration.modules[module_index]

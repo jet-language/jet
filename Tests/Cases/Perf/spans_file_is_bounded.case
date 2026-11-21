@@ -1,8 +1,12 @@
 # Under `jet perf run` a program's closed log spans, zones, frame marks and
 # plots are rows of a spans file beside its samples, which holds at most
-# 16 MiB. A program that closes more keeps the rows that fit and a last row
+# 16 MiB. A program that closes more keeps the rows that fit and a row
 # saying the rest were dropped, which the trace's zones section and
-# `jet perf view` name. The session removes the file once it has read it.
+# `jet perf view` name, with how many of each kind it dropped. The rows
+# go out 64 KiB at a time, 682 of the fixture's 96-byte log spans each:
+# 256 such writes fit, so 25408 of its 200000 log spans are dropped, and
+# all 1000 zones it closes after them. The session removes the file once
+# it has read it.
 requires: os-name:linux
 fixture: SpansFileIsBounded.fixture
 env: NO_COLOR=1
@@ -15,9 +19,10 @@ stdout: = "closed\n"
 stderr: ~ "Trace:" # jet perf run names the trace it wrote
 file: spans.jettrace ~ "\"kind\":\"log_span\"" # the rows that fit are trace rows
 file: spans.jettrace ~ "\"cut\":\"the spans file reached its 16 MiB bound, so the rows after this were dropped\"" # the zones section names the cut
+file: spans.jettrace ~ "\"dropped\":{\"frames\":0,\"log_spans\":25408,\"plots\":0,\"zones\":1000}" # and counts what it dropped
 step: sh -c 'ls -A tmp | grep -c "^jet-perf-"'
 exit: 1 # grep counts no line
 stdout: = "0\n" # the session left no samples or spans file
 step: jet perf view spans.jettrace
 exit: 0
-stdout: ~ "spans cut: the spans file reached its 16 MiB bound, so the rows after this were dropped" # the view names the cut
+stdout: ~ "spans cut: the spans file reached its 16 MiB bound, so the rows after this were dropped: 1000 zones, 25408 log spans" # the view names the cut and what it dropped
