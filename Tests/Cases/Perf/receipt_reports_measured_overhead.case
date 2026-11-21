@@ -1,12 +1,13 @@
 # `jet perf run` measures what sampling cost and reports it as the profile's
-# overhead: the CPU time the sampler's handlers and ring drains took (on
-# their threads' CPU clocks, so a busy machine's preemptions count for
-# nothing) plus, for
-# each signal that carried a sample, the kernel's delivery and return, plus,
-# under a perf event, the kernel's time to write each sample to its thread's
-# ring, each of which the runtime times as sampling starts. Four tasks
-# calling fib at -O2 for two seconds of CPU time pay under 2% of it, 40 ms,
-# at the default 8 kHz.
+# overhead, in two parts that sum to it. The runtime's part is measured: the
+# CPU time the sampler's handlers and ring drains took (on their threads' CPU
+# clocks, so a busy machine's preemptions count for nothing), plus, for each
+# signal that carried a sample, the kernel's delivery and return. The
+# kernel's part is estimated: under a perf event, its time to write each
+# sample to its thread's ring, from the samples the runtime times as sampling
+# starts and again as it runs. Four tasks calling fib at -O2 for two seconds
+# of CPU time pay the runtime under 1% of it, 20 ms, at the default 8 kHz.
+# The kernel's part has no bar; the receipt states it.
 requires: os-name:linux
 fixture: EveryThreadKeepsWholeStacks.fixture
 env: NO_COLOR=1
@@ -14,6 +15,10 @@ step: jet perf run -O2 burn.jet --out {work}/burn.jettrace
 exit: 0
 stdout: = "burned=true\n"
 json: file burn.jettrace doc $.content.profile.overhead_status = "measured" # the overhead is measured, not assumed
-json: file burn.jettrace doc $.content.profile.overhead_ns >= 1 # the sampler's time is counted
-json: file burn.jettrace doc $.content.profile.overhead_ns <= 40000000 # and is under 2% of the two seconds sampled
+json: file burn.jettrace doc $.content.profile.overhead_runtime_ns >= 1 # the runtime's time is counted
+json: file burn.jettrace doc $.content.profile.overhead_runtime_ns <= 20000000 # and is under 1% of the two seconds sampled
+json: file burn.jettrace doc $.content.profile.overhead_kernel_ns >= 0 # the kernel's estimated part is stated
+capture: runtime file burn.jettrace doc $.content.profile.overhead_runtime_ns
+capture: kernel file burn.jettrace doc $.content.profile.overhead_kernel_ns
+json: file burn.jettrace doc $.content.profile.overhead_ns = {cap:runtime}+{cap:kernel} # the total is the two parts' sum
 json: file burn.jettrace doc $.content.profile.overhead_reason ~ " microseconds of CPU time sampled: " # the receipt gives its share

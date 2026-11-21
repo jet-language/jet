@@ -1,7 +1,16 @@
 # Port of tests/jet_perf_trace_parts/views.rs:1-164; all original command/stream/file assertions retained.
-# PENDING-GRAMMAR(batch-four): {pid} is the kit's live process PID (original std::process::id()).
+# The attach takes a sleeping process the case starts under the authorizer,
+# so jet may trace it, as an attach needs; the original took the test's own
+# process (std::process::id()), which is the attach's ancestor.
+requires: os-name:linux
+requires: tool:cc
 fixture: Fixtures/Views
-step: jet perf attach {pid} --out {work}/session.jettrace
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+spawn target: {work}/authorizer sleep 30
+poll asleep: sh -c 'test "$(readlink /proc/{pid:target}/exe)" = "$(readlink -f "$(command -v sleep)")"' until exit: 0 timeout 5s every 10ms # the authorizer has let jet trace it and run `sleep`
+step: jet perf attach {pid:target} --out {work}/session.jettrace
 exit: 0
 stderr: ~ "Trace:" # original predicate
 file: session.jettrace is-file
@@ -60,3 +69,6 @@ copy: corrupt.txt corrupt.jettrace
 step: jet perf view corrupt.jettrace
 exit: 2
 stderr: ~ "jettrace" # original predicate
+signal target: KILL
+wait: target
+exit: any # the case's KILL ends the sleep

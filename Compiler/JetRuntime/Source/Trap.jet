@@ -19,7 +19,7 @@ trap_put: fn(address: I64, value: I64) { rt_text_put(address, value) }
 
 trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     #Unsafe("audited runtime syscall: write borrows live text, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {
-        return os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
+        return host_syscall(number, a1, a2, a3, a4, a5, a6)
     }
 }
 
@@ -114,6 +114,7 @@ trap_write_word_raw: fn(word: I64, count: I64) {
     length := count
     loop length > (I64{0}) {
         written := I64{0}
+        // Not counted (HostProcess.jet host_syscall): the count reads GS.
         #Unsafe("the OS leaf borrows a stack word; generated calls have 1..8 valid bytes") {
             written = os_write_word_i64(I64{2}, remaining, length)
         }
@@ -213,9 +214,11 @@ trap_gs_failure: fn() {
 // handlers before its first report byte, so their output precedes the
 // report. One claim wins; a concurrent loser parks, and a stop inside that
 // cleanup exits with the first status (Main.jet main_exit_claim). With no
-// live jet_rt_main (an embedding or library host) the report goes straight
-// to fd 2. An observed run's flight recorder first writes its typed dump
-// while the stopping stack is whole (Observe.jet jet_rt_observe_exit).
+// live jet_rt_main (a program that owns its main, an embedding or library
+// host) the report goes straight to fd 2. An observed run's flight recorder
+// first writes its typed dump while the stopping stack is whole (Observe.jet
+// jet_rt_observe_exit). With no root, the observation's exit step runs here
+// too, after the pending output is written, as the root's exit would run it.
 trap_root_prepare: fn() {
     observe: main_observe_exit_code
     if (observe != I64{0}) { _ := coll_call1(observe, I64{1}) }
@@ -223,9 +226,14 @@ trap_root_prepare: fn() {
         _ := trap_root(TRAP_ROOT_PREPARE, I64{0}, I64{0}, I64{0})
         return
     }
-    claim: main_process_stop_code
-    if (claim != I64{0} && main_root_control != I64{0}) {
-        _ := coll_call1(claim, EXIT_RUNTIME_PANIC)
+    if (main_root_control != I64{0}) {
+        claim: main_process_stop_code
+        if (claim != I64{0}) { _ := coll_call1(claim, EXIT_RUNTIME_PANIC) }
+        return
+    }
+    if (observe != I64{0}) {
+        jet_rt_stdout_flush()
+        _ := coll_call1(observe, I64{0})
     }
 }
 

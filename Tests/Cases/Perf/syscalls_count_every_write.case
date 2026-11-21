@@ -1,0 +1,25 @@
+# `jet perf run` counts every system call the runtime makes for the
+# program, the writes of its stdout buffer too, and none of its own. The
+# program prints 3000 lines into a pipe; its buffer's writes all come from
+# its one print line. A plain run of the same program reports the writes it
+# made before its last line, /proc/self/io's syscw. Under `jet perf run` the
+# syscall view holds exactly those writes at the print line, and one more,
+# the exit's write of that last line.
+requires: os-name:linux
+requires: arch:x86_64
+requires: probe test -r /proc/self/io # the plain run's own write count
+fixture: SyscallsCountEveryWrite.fixture
+env: NO_COLOR=1
+step: sh -c '{jet} perf run main.jet --out {work}/writes.jettrace | tail -n 1'
+exit: 0
+stdout: ~ "syscw " # the program ran whole
+json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="write"] #= 2 # the print line's writes and the exit's
+json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="write"][?count=1] #= 1 # the exit's one write of the last line
+json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="write"][?count>1][0].stack[?function="run"][?line=9] #= 1 # the buffer's writes, at the print line
+json: file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="writev"] #= 0 # no other write
+capture: counted file writes.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="write"][?count>1][0].count
+step: jet build main.jet
+exit: 0
+step: sh -c '{work}/.jet/build/main | tail -n 1'
+exit: 0
+json: stdout.after_first("syscw ").trim doc $ = {cap:counted} # the plain run made as many writes as the view counts at the print line

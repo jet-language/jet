@@ -267,9 +267,9 @@ JetCLIPerfThread: struct {
     spawn: [JetCLIPerfSite],
 }
 
-// The host calls of one number from one calling stack (PerfSamples.jet
-// perf_syscall_call): the number, how many, their time, and the calling
-// sites, innermost first, the counting's own frames left out.
+// The host calls of one number from one calling stack (HostProcess.jet
+// host_syscall): the number, how many, their time, and the calling sites,
+// innermost first, the counting's own frames left out.
 JetCLIPerfSyscall: struct {
     number: U64,
     count: U64,
@@ -1799,7 +1799,7 @@ jet_cli_perf_system_read: fn(sampled: &JetCLIPerfSamples, owned: [Bool], threads
         width: link_debug_addr(calls, 0)
         lost: link_debug_addr(calls, 16)
         if lost > 0 -> sampled.syscalls_lost = U64{lost}
-        plumbing: [String]{"perf_syscall_key", "perf_syscall_row", "perf_syscall_call", "host_call"}
+        plumbing: [String]{"perf_syscall_key", "perf_syscall_row", "host_syscall", "host_call", "host_call4", "host_call5", "trap_syscall"}
         at := 24
         loop width >= 4 && at + width * 8 <= calls.len() {
             count: link_debug_addr(calls, at + 8)
@@ -2024,8 +2024,9 @@ jet_cli_perf_sites_json: fn(sites: &&[JetCLIPerfSite]) -> CanonicalJSON Never! {
     )
 }
 
-// The x86-64 Linux name of host call `number`, as the runtime's host calls
-// use them (HostProcess.jet host_call); `syscall <number>` for another.
+// The x86-64 Linux name of host call `number`, as the runtime's system
+// calls use them (HostProcess.jet host_syscall); `syscall <number>` for
+// another.
 jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
     if number == {
         0 -> "read"
@@ -2044,6 +2045,7 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         16 -> "ioctl"
         17 -> "pread64"
         18 -> "pwrite64"
+        20 -> "writev"
         21 -> "access"
         23 -> "select"
         24 -> "sched_yield"
@@ -2051,6 +2053,7 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         33 -> "dup2"
         35 -> "nanosleep"
         39 -> "getpid"
+        40 -> "sendfile"
         41 -> "socket"
         42 -> "connect"
         43 -> "accept"
@@ -2058,6 +2061,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         45 -> "recvfrom"
         49 -> "bind"
         50 -> "listen"
+        54 -> "setsockopt"
+        55 -> "getsockopt"
         56 -> "clone"
         57 -> "fork"
         58 -> "vfork"
@@ -2080,9 +2085,14 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         97 -> "getrlimit"
         102 -> "getuid"
         110 -> "getppid"
+        111 -> "getpgrp"
+        131 -> "sigaltstack"
+        138 -> "fstatfs"
+        149 -> "mlock"
         186 -> "gettid"
         200 -> "tkill"
         202 -> "futex"
+        204 -> "sched_getaffinity"
         217 -> "getdents64"
         228 -> "clock_gettime"
         230 -> "clock_nanosleep"
@@ -2093,6 +2103,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         247 -> "waitid"
         257 -> "openat"
         262 -> "newfstatat"
+        271 -> "ppoll"
+        280 -> "utimensat"
         281 -> "epoll_pwait"
         288 -> "accept4"
         290 -> "eventfd2"
@@ -2102,6 +2114,8 @@ jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
         302 -> "prlimit64"
         318 -> "getrandom"
         322 -> "execveat"
+        324 -> "membarrier"
+        326 -> "copy_file_range"
         332 -> "statx"
         424 -> "pidfd_send_signal"
         434 -> "pidfd_open"
@@ -2214,17 +2228,23 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     alone: if sampled.periods.len() == 0 && sampled.sited -> "the alloc lens alone: each row holds its allocations" else -> "the memory lens alone: each row holds its counters' events"
     cut: if sampled.cost == .Val(cost) && cost.cut > (U64{0}) && sampled.sampler == .Val(used) -> "; {cost.cut} samples' stacks were cut at the {used.depth} callchain entries the kernel writes (perf_event_max_stack), so their outermost callers are missing" else -> ""
     reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under {alone}{natives}{sites}{fold.note}{windowed}{walled}" else -> "{timed}{fold.note}{taken}{natives}{helpers}{stackless}{cut}{nominal}{windowed}{sites}{walled}"
-    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
+    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{TRACE_PROFILE_ROW_LIMIT}, rows_truncated: truncated, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
     if sampled.cost == .Val(cost) {
         // Each signal pays the kernel's delivery and return besides the
         // handler's own time. A sample the kernel wrote to a ring took no
         // signal: its drain's time is the handlers', with the delivery of
         // each signal of a ring's drain timer, and the kernel's time to
-        // write it is the rings' own.
+        // write it is the rings' own. The runtime's part is its handlers
+        // and drains and the signals it asked for, measured; the kernel's
+        // is the rings' writes, estimated from the samples it timed (0
+        // under the timer, which has no ring).
         drained: if cost.ring_samples < sampled.signals -> cost.ring_samples else -> sampled.signals
         signals: sampled.signals - drained
-        took: cost.handler_ns + signals * cost.delivery_ns + cost.ring_ns
+        runtime: cost.handler_ns + signals * cost.delivery_ns
+        took: runtime + cost.ring_ns
         profile.overhead_ns = Val(took)
+        profile.overhead_runtime_ns = Val(runtime)
+        profile.overhead_kernel_ns = Val(cost.ring_ns)
         profile.overhead_status = "measured"
         sampler: "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: "
         profile.overhead_reason = if cost.ring_samples == (U64{0}) -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started" else -> "{sampler}{cost.handler_ns / U64{1000}} in its handlers and drains, each drain timer's signal delivered within them, {signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started, and {cost.ring_ns / U64{1000}} microseconds the kernel took to write the {cost.ring_samples} samples to the threads' rings, as timed when sampling started"
@@ -2490,7 +2510,7 @@ jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu
     status: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
     coverage: if rows.len() == 0 && !limited -> "none" else -> "partial"
     reason: if rows.len() == 0 -> "no supported observations were captured" else -> "only the checked top-level entrypoint is source-attributed; invocation counts are not inferred"
-    Ok(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
+    Ok(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
 }
 
 jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow) Never! {

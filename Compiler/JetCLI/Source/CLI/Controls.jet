@@ -169,7 +169,7 @@ jet_cli_control_items: fn(name: String) -> [String] Never! {
     items
 }
 
-// The front door's E2102 or E2104 for a control flag written wrong: a Bool
+// The front door's E2104 for a control flag written wrong: a Bool
 // takes no value but `=off`, `=true` or `=false`; a Value or Repeated flag
 // needs its `=VALUE`, one of its choices when it has them (the optimizer's
 // pass names for `--opt-disable`); `--trace=` names no file. None when
@@ -181,7 +181,7 @@ jet_cli_control_refusal: fn(argument: String, head: String, color: Bool) -> JetC
     if control.value == {
         .Switch | .Bool -> {
             if valued && value != "off" && value != "true" && value != "false" {
-                return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes no value but `=off`", jet_cli_why("E2102"), "write `{head}` or `{head}=off`", color, JET_DRIVER_EXIT_USAGE))
+                return Val(jet_cli_fail("E2104", "`{head}` takes no value but `=off`, not `={value}`", jet_cli_why("E2104"), "write `{head}` or `{head}=off`", color, JET_DRIVER_EXIT_USAGE))
             }
         }
         .Optional -> {

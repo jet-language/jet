@@ -869,7 +869,7 @@ priv alloc_lock: fn(root: I64) {
             spins = wrapping(spins + I64{1})
         }
         loop os_swap_i64(root, I64{2}) != (I64{0}) {
-            _ := os_syscall_i64(I64{202}, root, I64{128}, I64{2}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{202}, root, I64{128}, I64{2}, I64{0}, I64{0}, I64{0})
         }
     }
 }
@@ -877,7 +877,7 @@ priv alloc_lock: fn(root: I64) {
 alloc_unlock: fn(root: I64) {
     #Unsafe("the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word") {
         if (os_swap_i64(root, I64{0}) == I64{2}) {
-            _ := os_syscall_i64(I64{202}, root, I64{129}, I64{1}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{202}, root, I64{129}, I64{1}, I64{0}, I64{0}, I64{0})
         }
     }
 }
@@ -3283,7 +3283,7 @@ alloc_check_write: fn(data: I64, length: I64) {
     at := I64{0}
     #Unsafe("data lends length readable bytes; write retains no pointer") {
         loop at < length {
-            written: os_syscall_i64(I64{1}, I64{2}, wrapping(data + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
+            written: host_syscall(I64{1}, I64{2}, wrapping(data + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
             if (written == I64{-4}) { next }
             if (written <= I64{0}) {
                 return
@@ -3322,14 +3322,14 @@ alloc_check_image: fn() -> I64 {
         // "/proc/self/exe\0", little-endian.
         os_store_i64(path, I64{7310238724270485551})
         os_store_i64(wrapping(path + I64{8}), I64{111567768086124})
-        fd: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
+        fd: host_syscall(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
-            length: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
+            length: host_syscall(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
             if (length > I64{64}) {
                 mapped: os_map_untracked_i64(I64{0}, length, I64{1}, I64{2}, fd, I64{0})
                 if (mapped > I64{0}) { image = mapped }
             }
-            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     alloc_unmap(path, I64{4096})
@@ -3501,6 +3501,8 @@ priv alloc_check_fail: fn(kind: I64, pointer: I64, size: I64, align: I64, offset
 
 // Write a little-endian packed literal without a String/list carrier or a
 // mapping. The checked count bounds the stack word borrowed by the OS leaf.
+// Raw, not through HostProcess.jet's gate: the allocator's GS failure
+// reaches this, where a counted call's clock read through GS would fault.
 alloc_write_word: fn(word: I64, count: I64) {
     if (count < I64{0} || count > I64{8}) {
         return
@@ -3564,6 +3566,8 @@ alloc_abort: fn() {
     // The signal is thread-directed (tgkill, as libc raise does): a
     // process-directed kill from a task thread may land on another thread,
     // and this thread would reach the exit fallback before the core dump ends it.
+    // Raw, not through HostProcess.jet's gate: the process's last calls,
+    // which may come from any thread in any state.
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         tid: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})

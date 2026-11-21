@@ -27,7 +27,7 @@ use {
     ]
 }
 
-// `cli_diagnostic_copy("E2102")`'s fix line.
+// The fix line for a `jet perf` flag or value it refuses.
 JET_CLI_PERF_FIX: "correct the named flag, or run `jet help` to see the flags"
 
 // `jet perf <action> …`: `argv` starts at `perf`. The front door answers the
@@ -61,17 +61,25 @@ jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> J
         "view" -> jet_cli_perf_view(rest, color)
         "compare" -> jet_cli_perf_compare(rest, color)
         "export" -> jet_cli_perf_export(rest, color)
-        else -> jet_cli_perf_error("unknown `jet perf` action `{action}`", "run `jet perf --help` to see its actions", color)
+        else -> jet_cli_perf_report("E2101", "unknown `jet perf` action `{action}`", "run `jet perf --help` to see its actions", color)
     }
 }
 
-// `perf_error_with_fix`: one E2102 usage report.
+// `perf_error_with_fix`: one E2104 usage report, for input `jet perf` can't
+// run with.
 jet_cli_perf_error: fn(what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", what, jet_cli_why("E2102"), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+    jet_cli_perf_report("E2104", what, fix, color)
 }
 
-// A trace or projection `jet perf` could not write, or wrote and could not
-// verify: one E2105 report (Jet.DriverOperationFailed), naming the problem.
+// One `jet perf` usage report under `code`: E2101 for an action it doesn't
+// have, E2102 for a flag it doesn't have.
+jet_cli_perf_report: fn(code: String, what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+}
+
+// A file, process or capture step `jet perf` could not finish, or a trace it
+// wrote and could not verify: one E2105 report (Jet.DriverOperationFailed),
+// naming the problem.
 jet_cli_perf_failed: fn(what: String, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
@@ -173,7 +181,7 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
             next
         }
         if arg.starts_with("-") {
-            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", usage, color)
+            return jet_cli_perf_report("E2102", "unknown `jet perf view` flag `{arg}`", usage, color)
         }
         if path != None {
             return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
@@ -473,7 +481,7 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
             next
         }
         if arg.starts_with("-") {
-            return jet_cli_perf_error("unknown `jet perf compare` flag `{arg}`", usage, color)
+            return jet_cli_perf_report("E2102", "unknown `jet perf compare` flag `{arg}`", usage, color)
         }
         // copy: the argument list keeps its word; the path list owns its own.
         paths.push(arg.copy())
@@ -501,14 +509,14 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         why: if odd_tool != None -> "compare requires matching toolchain digests" else -> "compare requires matching hardware fingerprints"
         odd := odd_hardware ?? ""
         if odd_tool == .Val(path) -> odd = "{path}"
-        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "{part} identity mismatch between traces: {odd} against {base_side.paths[0]}", why, "recapture every trace on the same machine/toolchain, or pass `--override-identity`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "{part} identity mismatch between traces: {odd} against {base_side.paths[0]}", why, "recapture every trace on the same machine/toolchain, or pass `--override-identity`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if jet_cli_perf_side_mixed(base_side, head_side) == .Val(mixed) {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", mixed, "a side's captures set one source's samples against the other side's", "capture each side from one version of the source, each version into its own folder", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", mixed, "a side's captures set one source's samples against the other side's", "capture each side from one version of the source, each version into its own folder", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if baseline == .Val(name) {
         if jet_cli_perf_baseline_refusal(name) == .Val(message) {
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", message, "`--baseline` selects a pinned baseline name", "create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", message, "`--baseline` selects a pinned baseline name", "create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
     }
     base_wall: jet_cli_perf_side_mean(base_side, "wall")
@@ -1109,8 +1117,9 @@ jet_cli_perf_first_sample: fn(trace: CanonicalJSON) -> JetCLIPerfSample? Never! 
 }
 
 // `profile method=… status=… coverage=… rows=… clocks=… overhead=… window=… run_wall=… run_cpu=…`,
-// and `run_cpu_resolution=…` where an attach's window counted its CPU in
-// ticks (its `window` receipt section).
+// with a measured overhead's two parts after `overhead=`
+// (jet_cli_perf_overhead_parts), and `run_cpu_resolution=…` where an
+// attach's window counted its CPU in ticks (its `window` receipt section).
 jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     profile: jet_cli_perf_profile(trace) ?? return None
     status: jet_cli_perf_field_text(profile, "status") ?? return None
@@ -1129,7 +1138,26 @@ jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
     window: jet_cli_perf_field_text(profile, "window_status") ?? return None
     run_wall: if jet_cli_perf_field_integer(profile, "window_wall_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
     run_cpu: if jet_cli_perf_field_integer(profile, "window_cpu_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
-    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead} window={window} run_wall={run_wall} run_cpu={run_cpu}{jet_cli_perf_cpu_resolution(trace)}")
+    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead}{jet_cli_perf_overhead_parts(profile)} window={window} run_wall={run_wall} run_cpu={run_cpu}{jet_cli_perf_cpu_resolution(trace)}")
+}
+
+// ` runtime=0.54% kernel=1.42%`: a measured overhead's two parts, what the
+// runtime spent sampling and what the kernel spent taking and writing the
+// samples, each a share of the run window's CPU time; in nanoseconds where
+// the profile has no window CPU time; empty where the overhead was not
+// measured.
+jet_cli_perf_overhead_parts: fn(profile: View<CanonicalJSONField>) -> String Never! {
+    runtime: jet_cli_perf_overhead_part(profile, "overhead_runtime_ns") ?? return ""
+    kernel: jet_cli_perf_overhead_part(profile, "overhead_kernel_ns") ?? return ""
+    cpu: jet_cli_perf_overhead_part(profile, "window_cpu_ns") ?? U64{0}
+    if cpu == (U64{0}) -> return " runtime={runtime}ns kernel={kernel}ns"
+    " runtime={jet_cli_perf_hundredths(runtime, cpu)} kernel={jet_cli_perf_hundredths(kernel, cpu)}"
+}
+
+// The profile's nanoseconds under `key`, None when it has none.
+jet_cli_perf_overhead_part: fn(profile: View<CanonicalJSONField>, key: String) -> U64? Never! {
+    digits: jet_cli_perf_field_integer(profile, key) ?? return None
+    checked(U64{Int.parse(digits) ?? return None})
 }
 
 // ` run_cpu_resolution=10ms`, say, where the trace's `window` receipt

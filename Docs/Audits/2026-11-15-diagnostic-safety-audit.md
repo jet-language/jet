@@ -497,8 +497,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1805 | RemoteSourceRefused | Compiler/JetCLI/Source/CLI/RemoteRun.jet:142 | an `https://` address whose bytes match the pin |
 | E2001 | EditionTooNew | Compiler/JetDriver/Source/Driver/Loader.jet:1751 | build with a Jet that knows the edition |
 | E2002 | DeprecatedPastWindow | Compiler/JetSema/Source/Sema/Edition.jet:518 | the item's replacement is used |
-| E2101 | UnknownCommand | Compiler/JetCLI/Source/CLI/Front.jet:898 | the command is spelled under its area |
-| E2102 | UnknownFlag | Compiler/JetCLI/Source/CLI/Bindings.jet:15 | the flag is spelled as Jet defines it |
+| E2101 | UnknownCommand | Compiler/JetCLI/Source/CLI/Budget.jet:77 | the command is spelled under its area |
+| E2102 | UnknownFlag | Compiler/JetCLI/Source/CLI/Cache.jet:72 | the flag is spelled as Jet defines it |
 | E2103 | UnreadableCommandSchema | Compiler/JetCLI/Source/CLI/ProgramCompletions.jet:173 | the program is a readable executable with metadata |
 | E2104 | InvalidCommandInput | Compiler/JetSema/Source/Sema/Calls/Checking.jet:900 | the input is fixed |
 | E2105 | DriverOperationFailed | Compiler/JetCLI/Source/CLI/AuditCopies.jet:72 | the operation's cause is fixed |
@@ -514,9 +514,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:428 | the scope names a declaration of this program |
 | E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:429 | the scope names declarations that hold deep checks |
 | E2122 | DottedPathPrefixUnresolved | Compiler/JetFoundation/Source/Names/Names.jet:75 | the path starts with the name of exactly one module |
-| E2123 | PerfDirectoryNotPrivate | Compiler/JetCLI/Source/CLI/Perf/Session.jet:973 | the profile is kept where only its user can reach it |
-| E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:980 | the program runs under `jet run --observe` |
-| E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:987 | one attach names one process id |
+| E2123 | PerfDirectoryNotPrivate | Compiler/JetCLI/Source/CLI/Perf/Session.jet:991 | the profile is kept where only its user can reach it |
+| E2124 | AttachTargetNotObserved | Compiler/JetCLI/Source/CLI/Perf/Session.jet:998 | the program runs under `jet run --observe` |
+| E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:1005 | one attach names one process id |
 | E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/CanvasProfile.jet:154 | the trace of a native `jet perf run` keeps the code its samples landed in |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:27 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:610 | let the program run to its end |
@@ -601,7 +601,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2904 | PerformanceBudgetOverlap | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:433 | one budget per metric and scope |
 | E2905 | UnresolvedPerformanceBudget | Compiler/JetSema/Source/Sema/BudgetSpecs.jet:399 | the attachment names one target |
 | E2906 | MissingPerformanceEvidence | Compiler/JetCLI/Source/CLI/Measure.jet:181 | the provider records usable evidence |
-| E2908 | PerformanceBudgetFailed | Compiler/JetCLI/Source/CLI/Budget.jet:554 | the provider, report or storage is fixed |
+| E2908 | PerformanceBudgetFailed | Compiler/JetCLI/Source/CLI/Budget.jet:558 | the provider, report or storage is fixed |
 | E2910 | ReactiveArgumentNotLambda | Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet:118 | pass a zero-parameter lambda |
 | E2911 | ReactiveLambdaParameters | Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet:123 | the lambda takes no parameters |
 | E2912 | DerivedReturnsNothing | Compiler/JetSema/Source/Sema/Calls/ReactiveHandles.jet:182 | the lambda returns the value |
@@ -1449,7 +1449,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E2126 | PerfNoInstructions | soundness | A listing of code no sample landed in would show shares the run never measured, so the view refuses rather than list code from somewhere else. |
 | E2203 | DebuggerUnavailable | soundness | Without a working debugger session there is no program to step through. |
 | E2204 | DebugSessionQuit | soundness | Quitting stopped the program before it finished, so it has no result. |
-| E2231 | DebugAttachFailed | soundness | A process the debugger could not take has no stopped state to show. |
+| E2231 | DebugAttachFailed | soundness | A process jet could not attach to has no state jet may show. |
 | E2236 | DebugConfigInvalid | soundness | Attaching to a target that is not as given, or reading a field as a value it does not hold, would debug the wrong program. |
 | E2237 | DebugRequestRefused | soundness | An answer the session can't make faithfully would show a history or a watch the program never had. |
 | E2238 | DebugStaleReference | soundness | A frame or variable read from an earlier stop would show values the program no longer holds. |

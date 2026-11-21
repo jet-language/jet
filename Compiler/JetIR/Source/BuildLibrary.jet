@@ -607,6 +607,13 @@ IR_STOP_FATAL: [String]{"alloc_out_of_memory", "alloc_check_fail", "rt_seq_capac
 // through these functions.
 IR_STOP_DEFERRED: [String]{"alloc_user_call", "alloc_user_drop", "jet_rt_alloc_check_take", "jet_rt_alloc_check_give", "coll_slot_clone", "coll_slot_drop", "context_values_release", "err_payload_release"}
 
+// The runtime functions whose called code word runs no program code: the
+// vDSO's clock_gettime, kernel code (JetRuntime Sync.jet sync_clock_read),
+// and the frame walk's `mov rax, rbp; ret` stub (Alloc.jet
+// alloc_frames_key). So a clock read, or a system call counted under
+// `jet perf run` (HostProcess.jet host_syscall), takes no poll after it.
+IR_STOP_LEAF_CODE: [String]{"sync_clock_read", "alloc_frames_key"}
+
 // The start of the name of each `#FFI(asm)` leaf that calls the code
 // address its first argument holds (JetBackend OS/Linux.jet).
 IR_ADDRESS_CALL_PREFIX: "os_call"
@@ -654,8 +661,9 @@ IRCodeFlow: struct {
 // word an export or an address-taken function is passed, and a function a
 // program or host may define in an export's place (IRFunction.host_symbol)
 // can run program code, which can stop. A C symbol the library calls is a
-// leaf; a thread, signal handler or fiber it starts publishes no stop to
-// its caller. Empty when the library defines no IR_STOP_PUBLISH (a runtime
+// leaf, and so is the code word an IR_STOP_LEAF_CODE function calls; a
+// thread, signal handler or fiber it starts publishes no stop to its
+// caller. Empty when the library defines no IR_STOP_PUBLISH (a runtime
 // fixture's unit without the scheduler), so none of its exports can stop.
 ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
     count: m.functions.len()
@@ -717,6 +725,8 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
             }
         }
     }
+    // An IR_STOP_LEAF_CODE function's code word call is a leaf.
+    leaf_code: loop f in m.functions -> IR_STOP_LEAF_CODE.contains(f.name)
     // A function that calls the code word a rail cell holds, and beside it
     // the cell's data row.
     called_by := [Int]{}
@@ -731,6 +741,7 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
                 }
             }
             .Cell -> {
+                if flow.role == IR_CODE_CALLED && leaf_code[flow.function] -> next
                 if flow.role == IR_CODE_CALLED {
                     called_by.push(flow.function)
                     called_cells.push(at)
@@ -738,8 +749,10 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
             }
             .Param -> {}
             .Unknown -> {
-                if flow.role == IR_CODE_CALLED -> roots[flow.function] = true else {
-                    tainted[flow.role] = true
+                if {
+                    flow.role != IR_CODE_CALLED -> tainted[flow.role] = true
+                    !leaf_code[flow.function] -> roots[flow.function] = true
+                    else -> {}
                 }
             }
         }

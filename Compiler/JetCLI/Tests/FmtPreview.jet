@@ -45,7 +45,7 @@ fmt_preview_root: fn(name: String) -[FS, Env]> String {
     file: "{root}/messy.jet"
     loop flag in ([String]{"--check=true", "--check=false", "--diff=yes", "--dry-run=1"}) {
         if jet_cli_plan([String]{"fmt", flag.copy(), file.copy()}) == .Refused(report, _, code, _) {
-            assert_eq(report.code, "E2102")
+            assert_eq(report.code, "E2104")
             assert_eq(code, JET_DRIVER_EXIT_USAGE)
         } else { panic("`jet fmt {flag}` is refused") }
         assert_eq(cli_files.read(file) ?? panic("source after a refusal"), FMT_PREVIEW_MESSY)

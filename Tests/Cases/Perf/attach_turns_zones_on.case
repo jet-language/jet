@@ -7,11 +7,17 @@
 # without `--zones=` records none, and charges each of the ring's samples
 # 10 ms. The trace's run window is the zones window, the program's own
 # from its opening to its close: about the 500 ms asked for, never the
-# attach's whole run, with the program's CPU in it, to the nanosecond.
+# attach's whole run, with the program's CPU in it, to the nanosecond. The
+# program runs under the authorizer, so jet may trace it, as an attach
+# needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
-session live line: jet run --observe live.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv live
 stdout.trim: ~ "READY" # the program is running its loop

@@ -10,7 +10,7 @@ use {
     native_hex: core.encoding.hex
     native_math: core.math
     native_crypto: core.crypto
-    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_fault_address, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_fault_address, x64_trace_follow_exits, x64_trace_peek, x64_trace_permitted, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -5876,6 +5876,9 @@ NATIVE_DEBUG_EPERM: 1
 
 NATIVE_DEBUG_ESRCH: 3
 
+// The error x64_trace_permitted reports where the system refuses the trace.
+NATIVE_DEBUG_EACCES: 13
+
 // The bytes of a function's start read for its prologue: a stack check, the
 // frame's opening and its saves.
 NATIVE_DEBUG_PROLOGUE: 48
@@ -6650,7 +6653,8 @@ native_trace_signal: fn(status: Int) -> Int Never! {
 // The image the process `pid` runs, for `jet debug` to attach to it:
 // refused (NATIVE_ATTACH_INVALID) unless `pid` is a running process that is
 // `program`'s, when that is not "", and refused (NATIVE_ATTACH_FAILED) when
-// it is another user's or another debugger's.
+// this process may not trace it (native_attach_permitted) or another
+// debugger does.
 native_attach_program: fn(pid: Int, program: String) -> String NativeAttachRefused! {
     if pid <= 0 {
         return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "process id {pid} names no process"})
@@ -6659,10 +6663,7 @@ native_attach_program: fn(pid: Int, program: String) -> String NativeAttachRefus
     if native_status_field(status, "State").starts_with("Z") {
         return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "process {pid} has exited"})
     }
-    own: native_files.read("/proc/self/status") ?? ""
-    if native_status_uid(status) != native_status_uid(own) {
-        return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} belongs to another user"})
-    }
+    if native_attach_permitted(pid, status) == .Err(refused) -> return Err(refused)
     tracer: native_status_field(status, "TracerPid")
     if tracer != "0" {
         return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} is already traced by process {tracer}"})
@@ -6676,8 +6677,26 @@ native_attach_program: fn(pid: Int, program: String) -> String NativeAttachRefus
     Ok(binary)
 }
 
-// Why the system did not let `jet debug` trace process `pid` (errno
-// `code`).
+// Whether this process may trace the process `pid`, whose /proc status file
+// reads `status`, as a debugger's attach needs: the process is this user's,
+// and the kernel lets this process trace it (x64_trace_permitted, which
+// asks with kernel.yama.ptrace_scope among the kernel's rules and stops
+// nothing). `jet debug --attach` and `jet perf attach` both ask here, and
+// are refused (NATIVE_ATTACH_FAILED) with why.
+native_attach_permitted: fn(pid: Int, status: String) NativeAttachRefused! {
+    own: native_files.read("/proc/self/status") ?? ""
+    if native_status_uid(status) != native_status_uid(own) {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} belongs to another user"})
+    }
+    opened: x64_trace_permitted(pid)
+    if opened == 0 -> return Ok()
+    // The mem file's open refuses with EACCES where a trace's attach
+    // refuses with EPERM: the same refusal.
+    code: if opened == -NATIVE_DEBUG_EACCES -> NATIVE_DEBUG_EPERM else -> -opened
+    Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: native_attach_denied(pid, code)})
+}
+
+// Why the system did not let jet trace process `pid` (errno `code`).
 native_attach_denied: fn(pid: Int, code: Int) -> String Never! {
     if code != NATIVE_DEBUG_EPERM -> return "tracing process {pid} failed (errno {code})"
     scope: (native_files.read("/proc/sys/kernel/yama/ptrace_scope") ?? "").trim()
@@ -6687,7 +6706,7 @@ native_attach_denied: fn(pid: Int, code: Int) -> String Never! {
     if scope != "" && scope != "0" {
         return "the system lets only an administrator trace a process (kernel.yama.ptrace_scope is {scope})"
     }
-    "the system refused to let `jet debug` trace process {pid}"
+    "the system refused to let jet trace process {pid}"
 }
 
 // Field `name` of a /proc status file's `text`; "" when it has none.

@@ -167,7 +167,11 @@ words the runtime calls: a code word resolves to the functions whose
 addresses the library installs in a rail cell no other code reaches, or to
 what its caller passes. A call through code the library cannot resolve (a
 closure's, an escaped cell's, an export's code parameter) and an export a
-program may define in its place can stop. Allocation failure, the checked
+program may define in its place can stop. Two calls through code words
+are leaves: the clock read's call of the vDSO's `clock_gettime`, which is
+kernel code, and the frame walk's `mov rax, rbp; ret` stub. So a clock
+read, or a system call counted under `jet perf run`, takes no poll.
+Allocation failure, the checked
 heap's misuse report, capacity panic and invalid layout end the process,
 so they are cut. A program's memory hooks (a context allocator's handler,
 the checked heap's allocation observers, a value's clone and drop glue, a

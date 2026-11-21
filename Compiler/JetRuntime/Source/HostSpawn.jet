@@ -438,7 +438,7 @@ SPAWN_BLOCK_BYTES: I64{216}
     loop signal <= (I64{64}) {
         if (signal != I64{9} && signal != I64{19}) {
             #Unsafe("rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child") {
-                _ := os_syscall_i64(I64{13}, signal, I64{0}, action, I64{8}, I64{0}, I64{0})
+                _ := host_syscall(I64{13}, signal, I64{0}, action, I64{8}, I64{0}, I64{0})
                 handler: fd_word(action, I64{0})
                 if (handler != I64{0} && handler != I64{1}) {
                     _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
@@ -448,7 +448,7 @@ SPAWN_BLOCK_BYTES: I64{216}
         signal = wrapping(signal + I64{1})
     }
     #Unsafe("rt_sigprocmask reads the parent's saved mask word in this spawn's block") {
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     args: wrapping(block + SPAWN_BLOCK_ARGS)
     spawn_exec_child(fd_word(args, I64{0}), fd_word(args, I64{8}), fd_word(args, I64{16}), fd_word(args, I64{24}), fd_word(args, I64{32}), fd_word(args, I64{40}), fd_word(args, I64{48}), fd_word(args, I64{56}), fd_word(args, I64{64}), fd_word(args, I64{72}), fd_word(args, I64{80}), fd_word(args, I64{88}), fd_word(args, I64{96}) != I64{0}, fd_word(args, I64{104}) != I64{0}, fd_word(args, I64{112}) != I64{0}, fd_word(args, I64{120}) != I64{0}, fd_word(args, I64{128}) != I64{0}, fd_word(args, I64{136}), fd_word(args, I64{144}), fd_word(args, I64{152}), fd_word(args, I64{160}))
@@ -503,9 +503,9 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     alloc_guard(stack, I64{4096})
     jet_rt_sentry_unmap(stack, I64{4096})
     #Unsafe("the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
-        _ := os_syscall_i64(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, block, wrapping(block + I64{8}), I64{8}, I64{0}, I64{0})
         pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, wrapping(block + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     jet_rt_free(block, SPAWN_BLOCK_BYTES, I64{8})
     trap_unmap(stack, SPAWN_CHILD_STACK)
@@ -985,7 +985,7 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
                     // musl's readlink: a zero capacity reads into one dummy byte and counts nothing.
                     target: if (p == I64{0}) -> wrapping(stack + I64{4097}) else -> stack
                     #Unsafe("readlink borrows the NUL-terminated output path and writes at most p (or the one dummy) bytes of the owned stack") {
-                        linked = os_syscall_i64(I64{89}, output, target, if (p == I64{0}) -> I64{1} else -> p, I64{0}, I64{0}, I64{0})
+                        linked = host_syscall(I64{89}, output, target, if (p == I64{0}) -> I64{1} else -> p, I64{0}, I64{0}, I64{0})
                     }
                     if (p == I64{0} && linked > I64{0}) { linked = I64{0} }
                     if (linked == p) { return I64{36} }
@@ -1026,7 +1026,7 @@ process_realpath_resolve: fn(path: I64, length: I64, stack: I64, output: I64) ->
     // A relative result joins the working directory, less its leading `..`s.
     cwd := I64{0}
     #Unsafe("getcwd writes at most 4097 bytes of the owned stack") {
-        cwd = os_syscall_i64(I64{79}, stack, I64{4097}, I64{0}, I64{0}, I64{0}, I64{0})
+        cwd = host_syscall(I64{79}, stack, I64{4097}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (cwd < I64{0}) { return -cwd }
     if (cwd == I64{0} || process_byte(stack, I64{0}) != I64{47}) { return I64{2} }

@@ -4,11 +4,16 @@
 # drains that ring, so the trace of a point capture holds the waits the
 # program made before the attach: what each waited for, at which line, and
 # what ended it. Its run window is the attach's own, from its first read of
-# the program to its last, with the program's CPU in it.
+# the program to its last, with the program's CPU in it. The program runs
+# under the authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: AttachDrainsFlightRing.fixture
 env: NO_COLOR=1
-session live line: jet run --observe live.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv live
 stdout.trim: = ready.out # the program has made its waits

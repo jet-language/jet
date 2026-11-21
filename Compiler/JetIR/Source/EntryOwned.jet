@@ -15,7 +15,9 @@
 // its module is built as the runtime library's is (IRModule.stop_points
 // false). It runs under a main of its own (JetBackend Image/Object.jet
 // x64_object_main): host startup, then jet_rt_main_owned_start (the fault
-// handlers), the entry, the stdout flush and status 0. The decision reads
+// handlers, and in an observed program the observation start), the entry,
+// the stdout flush (in an observed program jet_rt_main_owned_end, which
+// runs the observation's exit step after it) and status 0. The decision reads
 // only the built module, so every tier that builds the executable from it
 // makes the same one.
 use jet_foundation.[name_rows_value]
@@ -42,13 +44,13 @@ use jet_foundation.[name_rows_value]
 // The checked Int-to-Float widening stops through the same report as the
 // numeric stop (Numeric.jet numeric_widen_stop), and to_bits is a bit copy.
 // The core.perf routes (PerfSamples.jet) do nothing while zones are off,
-// and only an observed program turns them on: `jet perf run` builds with
-// `--observe` and `jet perf attach` needs the flight ring the observation
-// start opens, both of which link jet_rt_observe_link or the observation
-// start, which keep the root. So in an owned main a zone, frame, plot or
-// progress point is a skipped zone site (X64Select.jet ir_x64_zone_site),
-// and keeps the root's stop polls and cleanup scopes out of the program it
-// measures.
+// and only an observed program turns them on. An observed build's entry
+// (`jet run --observe`, which `jet perf run` makes) calls
+// jet_rt_observe_link, which is root-free too: an owned main runs the
+// observation start and the observation's exit step itself (JetRuntime
+// Main.jet jet_rt_main_owned_start and jet_rt_main_owned_end). So `jet perf
+// run` measures the main a plain build makes, its zone, frame, plot and
+// progress sites included (X64Select.jet ir_x64_zone_site).
 //
 // The generated CLI parser's routes (#6328 S2) are root-free too: the
 // arguments (HostStartup.jet: the owned main captures them first, as
@@ -93,6 +95,7 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_perf_progress",
     "jet_perf_zone_close",
     "jet_perf_zone_open",
+    "jet_perf_zone_open_named",
     "jet_rt_alloc",
     "jet_rt_alloc_8",
     "jet_rt_alloc_value",
@@ -125,6 +128,7 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_move_leave",
     "jet_rt_move_needed",
     "jet_rt_numeric_stop",
+    "jet_rt_observe_link",
     "jet_rt_panic_message",
     "jet_rt_panic_overflow",
     "jet_rt_process_entry_return",
@@ -163,8 +167,10 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
 
 // The runtime routes a stop edge or a drop routine may call with nothing a
 // process exit could observe: they free memory, or enter and leave a
-// cleanup scope (an owned main drops those), or close a zone, which writes
-// a row only in an observed program, and that keeps the root.
+// cleanup scope (an owned main drops those), or close a zone. A stop or a
+// process.exit in an owned main runs no edge; its observation's exit step
+// closes the zones still open as the edges would (JetRuntime PerfSamples.jet
+// perf_zones_close_open).
 IR_ENTRY_QUIET_ROUTES: #run { [String]{
     "jet_perf_zone_close",
     "jet_rt_block_release",
@@ -331,8 +337,10 @@ ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 // Thread.jet) even when nothing allocated: the journey's and the fault
 // schedule's Jet TLS, the task control word process.exit and the
 // session status read (Scheduler.jet scheduler_control_current: 0 on an
-// attached thread with no root), and the `context.<field>` reads of the
-// context record and the thread index (Context.jet). The runtime attaches a
+// attached thread with no root), the `context.<field>` reads of the
+// context record and the thread index (Context.jet), and the observation
+// link, whose run's sampler, zone ring and host call clocks are the
+// thread's (PerfSamples.jet). The runtime attaches a
 // thread exactly when the program links the allocator's cached front doors
 // or Jet TLS (jet_rt_thread_init's guards), and these routes need neither,
 // so a main that calls one attaches its thread itself.
@@ -350,15 +358,9 @@ IR_OWNED_ATTACH_ROUTES: #run { [String]{
     "jet_fault_should_fail",
     "jet_journey_origin",
     "jet_journey_reset",
+    "jet_rt_observe_link",
     "jet_rt_session_propagate",
     "jet_std_process_exit",
-} }
-
-// The root-free routes besides print that may write stdout (through its
-// buffer, HostStdio.jet host_stdout_write). A main that calls one keeps
-// print's buffered writer, so their lines stay in program order.
-IR_OWNED_STDOUT_ROUTES: #run { [String]{
-    "jet_term_stdio_put_text_raw",
 } }
 
 // Decides the main of the program `m` (built by ir_build_program) and
@@ -369,10 +371,13 @@ IR_OWNED_STDOUT_ROUTES: #run { [String]{
 // with a stack check (IRFunction.stack_check), whose growth reads the
 // thread's block (JetRuntime StackSegment.jet). Its
 // process.exit calls jet_std_process_exit_owned, which publishes no stop
-// (there is no root to take one). Unless it calls an IR_OWNED_STDOUT_ROUTES
-// route, its print calls jet_term_write_stdout_line_direct: no other route
-// it may call writes stdout and it runs no test capture, so its lines need
-// no buffer.
+// (there is no root to take one). Its print keeps jet_term_write_stdout_line,
+// the one stdout buffer every program writes through: block-buffered on a
+// pipe or file, line-buffered on a terminal, and drained by the owned main's
+// exit, process.exit, every stop report and the fault report (JetRuntime
+// Host.jet), so the lines and their order match a rooted main's.
+// `owned_observe` is set when it calls jet_rt_observe_link (an observed
+// build, Build.jet ir_observe_link).
 ir_entry_own: fn(m: &IRModule) -> String Never! {
     need: ir_entry_root_need(m)
     if need != "" -> return need
@@ -380,18 +385,10 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     entry_return: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
-    buffered := false
-    loop route in IR_OWNED_STDOUT_ROUTES {
-        row: name_rows_value(m.name_rows, route) ?? -1
-        if row >= 0 && ir_entry_calls(m, row) -> buffered = true
-    }
-    print: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
-    direct: if print >= 0 -> ir_intern_name(m, "jet_term_write_stdout_line_direct") else -> -1
     exit: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
     exit_owned: if exit >= 0 -> ir_intern_name(m, "jet_std_process_exit_owned") else -> -1
     redirect := [Int]{}
     loop _ in 0..<m.names.len() -> redirect.push(-1)
-    if print >= 0 -> redirect[print] = direct
     if exit >= 0 -> redirect[exit] = exit_owned
     cleanup: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
     attach := [Bool]{}
@@ -409,6 +406,8 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
             if op == .CallRuntime && attach[m.functions[id].a[at]] -> m.owned_attach = true
         }
     }
+    observe: name_rows_value(m.name_rows, "jet_rt_observe_link") ?? -1
+    m.owned_observe = observe >= 0 && ir_entry_calls(m, observe)
     m.stop_points = false
     m.owned_main = true
     ""

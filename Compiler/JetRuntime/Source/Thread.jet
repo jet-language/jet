@@ -36,11 +36,14 @@
 // PERF_ZONE_TCB_RING; a fiber borrows its carrier's); @768 the count of the
 // observation's own takes the thread is inside (Alloc.jet ALLOC_TCB_OWN);
 // @776 the thread's sampler ring (PerfSamples.jet PERF_SAMPLES_TCB_RING; a
-// fiber borrows its carrier's). @784 to @1016 stay unused, so the stack
-// segment words start at an offset where the allocator state page, an
-// unattached thread's GS target, reads zero: @1024 stack limit, @1032
-// running segment, @1040 spare segment, @1048 segment room, @1056 probe size
-// (StackSegment.jet STACK_TCB_LIMIT).
+// fiber borrows its carrier's); @784 the depth of counted host calls
+// reading the clock (PerfSamples.jet PERF_SYSCALLS_TCB_DEPTH); @792 to @848
+// their timespecs, one pair per depth (PerfSamples.jet
+// PERF_SYSCALLS_TCB_CLOCK). @856 to @1016 stay
+// unused, so the stack segment words start at an offset where the
+// allocator state page, an unattached thread's GS target, reads zero:
+// @1024 stack limit, @1032 running segment, @1040 spare segment, @1048
+// segment room, @1056 probe size (StackSegment.jet STACK_TCB_LIMIT).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
@@ -122,6 +125,8 @@ thread_base: fn() -> I64 {
 // word (Alloc.jet). jet_rt_alloc_init installs it for the initializing thread.
 thread_detached_base: fn() -> I64 { alloc_root }
 
+// Not counted by `jet perf run` (HostProcess.jet host_syscall): the count
+// reads the GS base, which here may still name a freed TCB.
 thread_set_base: fn(base: I64) {
     #Unsafe("GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word") {
         status: os_syscall_i64(I64{158}, I64{4097}, base, I64{0}, I64{0}, I64{0}, I64{0})
@@ -130,8 +135,8 @@ thread_set_base: fn(base: I64) {
 }
 
 thread_tid: fn() -> I64 {
-    #Unsafe("gettid identifies this thread without reading its inherited GS") {
-        return os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    #Unsafe("gettid retains no memory; every caller runs after thread_set_base, so a counted call reads a live GS") {
+        return host_syscall(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -185,7 +190,7 @@ thread_sole_check: fn(tid: I64) {
     }
     pid := I64{0}
     #Unsafe("getpid retains no memory") {
-        pid = os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        pid = host_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (tid != pid) { sync_sole_end() }
 }
@@ -455,7 +460,7 @@ rt_thread_entry_address: fn() -> I64 {
     // event or its CPU-time timer (PerfSamples.jet).
     perf_sampler: perf_samples_thread_start()
     #Unsafe("rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer") {
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(start + I64{24}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, wrapping(start + I64{24}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     entry: sync_load(start)
     argument: sync_load(wrapping(start + I64{8}))
@@ -491,7 +496,7 @@ thread_rlimit_soft: fn(resource: I64) -> I64 {
     thread_zero(scratch, I64{16})
     status := I64{-1}
     #Unsafe("getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer") {
-        status = if comptime_serving() -> I64{-1} else -> os_syscall_i64(I64{97}, resource, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        status = if comptime_serving() -> I64{-1} else -> host_syscall(I64{97}, resource, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
     soft: sync_load(scratch)
     jet_rt_free(scratch, I64{16}, I64{8})
@@ -636,10 +641,10 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     thread_fork_gate_share(thread_tls_registry)
     tid := I64{0}
     #Unsafe("the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap") {
-        _ := os_syscall_i64(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
         sync_store(wrapping(start + I64{24}), sync_load(wrapping(masks + I64{8})))
         tid = os_clone_i64(THREAD_CLONE_FLAGS, stack, wrapping(handle + I64{16}), wrapping(handle + I64{16}))
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(masks + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, wrapping(masks + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     thread_fork_gate_unshare(thread_tls_registry)
     jet_rt_free(masks, I64{16}, I64{8})
@@ -719,7 +724,7 @@ thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
     thread_fork_gate_share(thread_tls_registry)
     status := I64{0}
     #Unsafe("rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees") {
-        _ := os_syscall_i64(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
         sync_store(wrapping(start + I64{24}), sync_load(wrapping(masks + I64{8})))
         loop {
             sync_store(wrapping(start + I64{32}), size)
@@ -727,7 +732,7 @@ thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
             if (status != I64{11} || size <= THREAD_STACK_FLOOR) { break }
             size = size >> I64{1}
         }
-        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(masks + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
+        _ := host_syscall(I64{14}, I64{2}, wrapping(masks + I64{8}), I64{0}, I64{8}, I64{0}, I64{0})
     }
     thread_fork_gate_unshare(thread_tls_registry)
     jet_rt_free(masks, I64{16}, I64{8})
@@ -927,7 +932,7 @@ rt_thread_synccall_address: fn() -> I64 {
 // The record's system call on this thread: 0, or -errno.
 thread_synccall_run: fn(record: I64) -> I64 {
     #Unsafe("a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run") {
-        return os_syscall_i64(sync_load(record), sync_load(wrapping(record + I64{8})), sync_load(wrapping(record + I64{16})), sync_load(wrapping(record + I64{24})), I64{0}, I64{0}, I64{0})
+        return host_syscall(sync_load(record), sync_load(wrapping(record + I64{8})), sync_load(wrapping(record + I64{16})), sync_load(wrapping(record + I64{24})), I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -962,6 +967,7 @@ thread_synccall_until: fn(word: I64, value: I64) {
     phase: wrapping(record + I64{40})
     loop sync_load(phase) == (I64{0}) -> _ := sync_futex_wait(phase, I64{0}, I64{-1})
     if (sync_load(phase) == I64{1} && thread_synccall_run(record) != I64{0}) {
+        // Not counted (HostProcess.jet host_syscall): only this handler kills.
         #Unsafe("kill(getpid(), SIGKILL) retains no memory") {
             process: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             _ := os_syscall_i64(I64{62}, process, I64{9}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -981,7 +987,7 @@ thread_synccall_capture: fn(record: I64, captured: I64) -> I64 {
     caller: thread_tid()
     process := I64{0}
     #Unsafe("getpid retains no memory") {
-        process = os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        process = host_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     installed := false
     target: wrapping(record + I64{32})
@@ -1006,7 +1012,7 @@ thread_synccall_capture: fn(record: I64, captured: I64) -> I64 {
         sent := I64{-11}
         loop sent == (I64{-11}) {
             #Unsafe("tgkill names a live registered thread of this process") {
-                sent = os_syscall_i64(I64{234}, process, tid, THREAD_SYNCCALL_SIGNAL, I64{0}, I64{0}, I64{0})
+                sent = host_syscall(I64{234}, process, tid, THREAD_SYNCCALL_SIGNAL, I64{0}, I64{0}, I64{0})
             }
         }
         // ESRCH: a thread that ended without detaching has nothing to change.
@@ -1044,7 +1050,7 @@ thread_setxid: fn(number: I64, a: I64, b: I64, c: I64) -> I64 {
     if (root == I64{0}) {
         // No registry: no thread but this one runs Jet code.
         #Unsafe("a credential system call takes word arguments and retains no memory") {
-            return os_syscall_i64(number, a, b, c, I64{0}, I64{0}, I64{0})
+            return host_syscall(number, a, b, c, I64{0}, I64{0}, I64{0})
         }
     }
     captured: jet_rt_alloc(I64{8}, I64{8})

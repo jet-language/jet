@@ -628,11 +628,11 @@ The options below are intentionally named exactly as in `jet help`. Each
 registered flag's `jet help` row opens with the commands that take it
 (`With fmt/doc/split/fold:`); an unscoped row goes with every command. That
 row is the one rule: a command that does not read its own flags refuses a
-registered flag scoped to other commands with E2102 and exit 2 before it
+registered flag scoped to other commands with E2104 and exit 2 before it
 does anything, naming the commands that take it (`jet init --check` writes
 nothing and points at `jet fmt --check`), and `jet help <command>` lists
 exactly the flags the command takes. A value written after a flag that takes
-none is E2102 too, never ignored: a switch takes no `=value`
+none is E2104 too, never ignored: a switch takes no `=value`
 (`jet fmt --check=true`), and a true/false flag takes only `=true` or `=false`.
 
 - `--target` selects a triple, `board.<name>`, or named database target. A
@@ -876,7 +876,7 @@ same file. Flags that come before `-e` are the run's. `jet run -e CODE`
 runs the same way, and so does `jet eval CODE [args...]`, whose flags between
 `eval` and CODE are the run's (`jet eval -A 'input.to_list().len()' log.txt`).
 A `-e` after the program (`jet run hello.jet -e …`) is
-refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
+refused with E2104, and so is `jet dev -e`. As a REPL cell does, CODE
 may declare: a line of it (between `;`s) that is a declaration alone, such as
 a type, a function, an `impl` or a `use`, goes above `run: fn`, so
 `jet -e 'S: struct { amount: Float }; input.csv<S>().map(fn(s) { s.amount }).sum()' sales.csv`
@@ -1912,8 +1912,10 @@ same with no process root. Those routes include exact `Int` arithmetic, except
 shifts, and the generated `#CLI` parser's (argument reads, `Int` parsing,
 refusals on stderr and `process.exit`). It then runs under a main of its own
 with no stop points and no cleanup scopes, and its `process.exit` publishes no
-stop. A stop writes the same
-report and exits with the same code as under the root. Any other program
+stop. Its `print` goes through the same stdout buffer as any other program's.
+A stop writes the same
+report and exits with the same code as under the root. `jet run --observe`
+and `jet perf run` keep the same main. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.
 

@@ -340,7 +340,7 @@ term_mode_saved_key: fn() -> I64 {
 // musl's tcgetattr: ioctl(fd, TCGETS, termios), 0 or -1.
 term_tcgetattr: fn(fd: I64, termios: I64) -> I64 {
     #Unsafe("TCGETS writes the kernel termios into the caller's writable 64-byte struct") {
-        if (os_syscall_i64(I64{16}, fd, I64{21505}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
+        if (host_syscall(I64{16}, fd, I64{21505}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
             return I64{-1}
         }
     }
@@ -350,7 +350,7 @@ term_tcgetattr: fn(fd: I64, termios: I64) -> I64 {
 // musl's tcsetattr(fd, TCSANOW, termios): ioctl(fd, TCSETS, termios), 0 or -1.
 term_tcsetattr: fn(fd: I64, termios: I64) -> I64 {
     #Unsafe("TCSETS reads the kernel termios from the caller's initialized struct") {
-        if (os_syscall_i64(I64{16}, fd, I64{21506}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
+        if (host_syscall(I64{16}, fd, I64{21506}, termios, I64{0}, I64{0}, I64{0}) < I64{0}) {
             return I64{-1}
         }
     }

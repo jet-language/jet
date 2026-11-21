@@ -596,7 +596,9 @@ Which runtime calls a program polls after is read from the runtime IR at
 library build: the stops receipt (`runtime.stops`, JetIR BuildLibrary.jet
 `ir_stop_exports`) lists the exports whose call can reach the stop
 publisher, private helpers and the runtime's rail cells included. A call
-through code the library cannot resolve can stop; allocation failure, a
+through code the library cannot resolve can stop, but the vDSO clock call
+and the frame walk's stub run no program code (IR_STOP_LEAF_CODE), so a
+clock read or a counted system call takes no poll; allocation failure, a
 capacity overflow (a sequence's, a text's or an owner count's), an invalid
 layout and an internal defect (`jet_rt_unreachable`) end the process and
 are cut, and so are a program's memory hooks (an allocator's handler or

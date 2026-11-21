@@ -148,14 +148,18 @@ main_exit_tasks_install: fn(code: I64) {
 
 // Every exit's steps: the exit callbacks, the log's exit step (RouteALog.jet
 // jet_rt_log_start with 1: a span still open on this thread is reported),
-// then the observe writer's exit publication.
+// then the observe writer's exit publication, with the pending output
+// written just before it, so `jet perf run` counts that last write too.
 main_exit_cleanup: fn() {
     handlers: main_exit_handlers_code
     if (handlers != I64{0}) { _ := coll_call1(handlers, I64{0}) }
     log: log_start_code
     if (log != I64{0}) { _ := coll_call1(log, I64{1}) }
     observe: main_observe_exit_code
-    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+    if (observe != I64{0}) {
+        main_flush(wrapping(main_exit_root + I64{16}))
+        _ := coll_call1(observe, I64{0})
+    }
 }
 
 // Called BEFORE the first fatal diagnostic byte, so exit callback output
@@ -246,10 +250,25 @@ main_call_stopped: fn() {
 // JetBackend Image/Object.jet x64_object_main): what jet_rt_main does before
 // the entry, less the process root and what only a root's program links.
 // The entry then runs with no root, so a stop writes its report straight to
-// fd 2 and exits with its code (Trap.jet).
+// fd 2 and exits with its code (Trap.jet). An observed program's main has
+// attached its thread (EntryOwned.jet IR_OWNED_ATTACH_ROUTES), and its
+// observation start runs here as in jet_rt_main; any other owned program
+// has none installed.
 #Export(c) jet_rt_main_owned_start: fn() {
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
+    observe: observe_start_code
+    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+}
+
+// The end of an observed program that owns its main, in place of its main's
+// stdout flush (Image/Object.jet x64_object_main): as at jet_rt_main's
+// return, the pending output is written, then the observation's exit step
+// runs (main_observe_exit_code), so `jet perf run` counts that last write.
+#Export(c) jet_rt_main_owned_end: fn() {
+    jet_rt_stdout_flush()
+    observe: main_observe_exit_code
+    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
 }
 
 // SysV int32 callers observe eax only: Image/Object.jet:70-80 returns it to

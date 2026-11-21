@@ -17,7 +17,7 @@ JetCLIProjectClaim: struct {
 
 // `target_arg` up to its default: the one explicit target, or None when the
 // caller must select the stock project entry.
-jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIReadError! {
+jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIUsageError! {
     target := String?{None}
     skip := false
     loop arg in args {
@@ -33,10 +33,10 @@ jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIReadError! {
             next
         }
         if arg.starts_with("-") {
-            return Err(jet_cli_read_error("unknown `jet status` flag `{arg}`"))
+            return Err(jet_cli_usage_error("E2102", "unknown `jet status` flag `{arg}`"))
         }
         if target != None {
-            return Err(jet_cli_read_error("`jet status` accepts at most one target"))
+            return Err(jet_cli_usage_error("E2104", "`jet status` accepts at most one target"))
         }
         target = Val(arg)
     }

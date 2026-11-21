@@ -1,15 +1,21 @@
 # An `attach` whose `program` is not the image the process runs is refused
 # before the process is touched: the DAP error carries the user-configuration
 # code E2236, nothing stops, and the process runs on untraced. No other
-# debugger is on PATH.
+# debugger is on PATH. The process runs under the authorizer, so jet may
+# trace it and the refusal is its program's.
 requires: os-name:linux
 requires: arch:x86_64
 requires: tool:sleep
+requires: tool:cc
 fixture: DapCLIRejectsACrossExecutableAttachThroughTheProductionWire.fixture
 env: NO_COLOR=1
 step: jet build -O0 main.jet
 exit: 0
-spawn target: sleep 30
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+spawn target: {work}/authorizer sleep 30
+poll asleep: sh -c 'test "$(readlink /proc/{pid:target}/exe)" = "$(readlink -f "$(command -v sleep)")"' until exit: 0 timeout 5s every 10ms # the authorizer has let jet trace it and run `sleep`
 session dap content-length: jet debug --dap {work}/main.jet
 env: PATH={work}/no-tools
 send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"

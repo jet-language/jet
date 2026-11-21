@@ -24,11 +24,11 @@ JetCLICacheRequest: enum {
     Limit(bytes: Int),
 }
 
-jet_cli_cache_size: fn(value: String) -> Int JetCLIReadError! {
-    Ok(store_artifact_parse_size(value) ?? return Err(jet_cli_read_error("invalid cache size `{value}`: {err.message()}")))
+jet_cli_cache_size: fn(value: String) -> Int JetCLIUsageError! {
+    Ok(store_artifact_parse_size(value) ?? return Err(jet_cli_usage_error("E2104", "invalid cache size `{value}`: {err.message()}")))
 }
 
-jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
+jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIUsageError! {
     command := String?{None}
     option := String?{None}
     value := ""
@@ -41,17 +41,17 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
         }
         if arg == "--color" {
             if index + 1 >= args.len() {
-                return Err(jet_cli_read_error("`jet cache --color` needs auto, always, or never"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache --color` needs auto, always, or never"))
             }
             index += 2
             next
         }
         if arg == "--to" || arg == "--host" {
             if index + 1 >= args.len() {
-                return Err(jet_cli_read_error("`jet cache {arg}` needs a size"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache {arg}` needs a size"))
             }
             if option != None {
-                return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache` accepts one size option"))
             }
             option = Val(arg)
             value = args[index + 1]
@@ -60,7 +60,7 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
         }
         if arg.starts_with("--to=") || arg.starts_with("--host=") {
             if option != None {
-                return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache` accepts one size option"))
             }
             is_to: arg.starts_with("--to=")
             option = Val(if is_to -> "--to" else -> "--host")
@@ -69,33 +69,35 @@ jet_cli_cache_parse: fn(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
             next
         }
         if arg.starts_with("-") {
-            return Err(jet_cli_read_error("unknown `jet cache` flag `{arg}`"))
+            return Err(jet_cli_usage_error("E2102", "unknown `jet cache` flag `{arg}`"))
         }
-        if command != None -> return Err(jet_cli_read_error("`jet cache` accepts one command"))
+        if command != None {
+            return Err(jet_cli_usage_error("E2104", "`jet cache` accepts one command"))
+        }
         command = Val(arg)
         index += 1
     }
-    selected: command ?? return Err(jet_cli_read_error("missing `jet cache` command"))
+    selected: command ?? return Err(jet_cli_usage_error("E2104", "missing `jet cache` command"))
     if selected == {
         "status" -> {
             if option != None {
-                return Err(jet_cli_read_error("`jet cache status` does not take a size option"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache status` does not take a size option"))
             }
             Ok(JetCLICacheRequest.Status)
         }
         "prune" -> {
             if option != .Val("--to") {
-                return Err(jet_cli_read_error("`jet cache prune` requires `--to <size>`"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache prune` requires `--to <size>`"))
             }
             Ok(JetCLICacheRequest.Prune{bytes: jet_cli_cache_size(value)})
         }
         "limit" -> {
             if option != .Val("--host") {
-                return Err(jet_cli_read_error("`jet cache limit` requires `--host <size>`"))
+                return Err(jet_cli_usage_error("E2104", "`jet cache limit` requires `--host <size>`"))
             }
             Ok(JetCLICacheRequest.Limit{bytes: jet_cli_cache_size(value)})
         }
-        else -> Err(jet_cli_read_error("`{selected}` isn't a jet cache command"))
+        else -> Err(jet_cli_usage_error("E2101", "`{selected}` isn't a jet cache command"))
     }
 }
 
@@ -123,8 +125,8 @@ jet_cli_cache_error: fn(code: String, what: String, why: String, fix: String, js
     jet_cli_report_output("", code, what, why, fix, false, exit_code)
 }
 
-jet_cli_cache_usage_error: fn(message: String, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
-    jet_cli_cache_error("E2102", message, "`jet cache` has one read-only status command and two explicit mutations", "run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`", json, 2)
+jet_cli_cache_usage_error: fn(refusal: JetCLIUsageError, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    jet_cli_cache_error(refusal.code, refusal.message, "`jet cache` has one read-only status command and two explicit mutations", "run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`", json, 2)
 }
 
 jet_cli_cache_store_error: fn(operation: String, error: ArtifactStoreError, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
@@ -191,7 +193,7 @@ jet_cli_cache_prune: fn(report: ArtifactPruneReport, json: Bool) -> JetDriverVer
 }
 
 jet_cli_cache: fn(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput Never! {
-    request: jet_cli_cache_parse(args) ?? return jet_cli_cache_usage_error(err.message, json)
+    request: jet_cli_cache_parse(args) ?? return jet_cli_cache_usage_error(err, json)
     store: ArtifactStore.from_env() ?? return jet_cli_cache_store_error("open the machine-wide store", err, json)
     if request == {
         .Status -> {

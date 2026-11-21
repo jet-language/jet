@@ -484,7 +484,7 @@ cpu_affinity_count: fn() -> I64 {
     thread_zero(mask, I64{128})
     result := I64{0}
     #Unsafe("sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread") {
-        result = os_syscall_i64(I64{204}, I64{0}, I64{128}, mask, I64{0}, I64{0}, I64{0})
+        result = host_syscall(I64{204}, I64{0}, I64{128}, mask, I64{0}, I64{0}, I64{0})
     }
     count := I64{0}
     if (result > I64{0}) {

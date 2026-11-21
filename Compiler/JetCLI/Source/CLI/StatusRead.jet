@@ -20,6 +20,19 @@ jet_cli_read_error: fn(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
 }
 
+// A command line its command can't run, with the code that names why: E2101
+// for a subcommand the command doesn't have, E2102 for a flag no command
+// has, and E2104 for missing, malformed or conflicting input.
+#Error
+JetCLIUsageError: struct {
+    code: String,
+    message: String,
+}
+
+jet_cli_usage_error: fn(code: String, message: String) -> JetCLIUsageError Never! {
+    JetCLIUsageError{code: code, message: message}
+}
+
 // The run-receipt reader's refusals, at the CLI's read boundary.
 impl JetDriverRunReceiptError -> JetCLIReadError {
     return jet_cli_read_error(self.message)

@@ -12,7 +12,7 @@ net_socket_call: fn(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64,
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
         #Unsafe("the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall") {
-            result = os_syscall_i64(number, fd_word(state, I64{8}), a2, a3, a4, a5, a6)
+            result = host_syscall(number, fd_word(state, I64{8}), a2, a3, a4, a5, a6)
         }
     }
     fd_unlock(state)
@@ -60,14 +60,14 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
     if (fd_word(state, I64{16}) == I64{0}) {
         if (address_out == I64{0}) {
             #Unsafe("accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket") {
-                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), I64{0}, I64{0}, I64{526336}, I64{0}, I64{0})
+                result = host_syscall(I64{288}, fd_word(state, I64{8}), I64{0}, I64{0}, I64{526336}, I64{0}, I64{0})
             }
         } else {
             scratch: jet_rt_alloc(I64{128}, I64{8})
             size: wrapping(scratch + I64{32})
             net_store_uint(size, I64{4}, I64{32})
             #Unsafe("private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer") {
-                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
+                result = host_syscall(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
             }
             if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) {
                 _ := host_call(I64{3}, result, I64{0}, I64{0})
@@ -106,7 +106,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
         size: wrapping(scratch + I64{8})
         net_store_uint(size, I64{4}, I64{4})
         #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
-            result = os_syscall_i64(I64{55}, fd_word(state, I64{8}), level, option, scratch, size, I64{0})
+            result = host_syscall(I64{55}, fd_word(state, I64{8}), level, option, scratch, size, I64{0})
         }
         if (result >= I64{0}) { net_put(value_out, I64{0}, net_load_uint(scratch, I64{4})) }
         jet_rt_free(scratch, I64{128}, I64{8})
@@ -122,7 +122,7 @@ net_socket_address_call: fn(state: I64, address: I64, number: I64) -> I64 {
         scratch: jet_rt_alloc(I64{128}, I64{8})
         net_store_uint(scratch, I64{4}, value)
         #Unsafe("private scratch lends exactly one native int; setsockopt retains no pointer") {
-            result = os_syscall_i64(I64{54}, fd_word(state, I64{8}), level, option, scratch, I64{4}, I64{0})
+            result = host_syscall(I64{54}, fd_word(state, I64{8}), level, option, scratch, I64{4}, I64{0})
         }
         jet_rt_free(scratch, I64{128}, I64{8})
     }
@@ -164,7 +164,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
         if (!reading && temporary) { net_copy_packed(data, length, packed) }
         #Unsafe("the held FD72 lock lends its live nonblocking socket; packed lends exactly length bytes; no pointer survives recvfrom/sendto") {
-            result = os_syscall_i64(if reading -> I64{45} else -> I64{44}, fd_word(state, I64{8}), packed, length, if reading -> I64{0} else -> I64{16384}, I64{0}, I64{0})
+            result = host_syscall(if reading -> I64{45} else -> I64{44}, fd_word(state, I64{8}), packed, length, if reading -> I64{0} else -> I64{16384}, I64{0}, I64{0})
         }
         if reading -> result = replay_read(packed, length, result)
         if (temporary && reading && result > I64{0}) {
@@ -206,7 +206,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         if (RT_HOST_U8_STRIDE != I64{1}) { net_copy_packed(data, length, packed) }
         address_length: jet_socket_address_encode_raw(address, scratch)
         #Unsafe("the FD72 lock retains the socket; private scratch lends sockaddr bytes; packed lends length bytes; sendto retains no pointers") {
-            result = os_syscall_i64(I64{44}, fd_word(state, I64{8}), packed, length, I64{16384}, scratch, address_length)
+            result = host_syscall(I64{44}, fd_word(state, I64{8}), packed, length, I64{16384}, scratch, address_length)
         }
         perf_samples_io(began, PERF_SAMPLES_IO_WRITE, result, PERF_SAMPLES_TARGET_SOCKET, scratch, address_length)
         jet_rt_free(scratch, size, I64{8})
@@ -226,7 +226,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         address_length: wrapping(scratch + I64{32})
         net_store_uint(address_length, I64{4}, I64{32})
         #Unsafe("private scratch lends sockaddr/socklen and packed lends length mutable bytes; MSG_TRUNC returns the complete datagram length while writing at most length bytes") {
-            result = os_syscall_i64(I64{45}, fd_word(state, I64{8}), packed, length, I64{32}, scratch, address_length)
+            result = host_syscall(I64{45}, fd_word(state, I64{8}), packed, length, I64{32}, scratch, address_length)
         }
         if (result >= I64{0}) {
             if !net_socket_decode(scratch, net_load_uint(address_length, I64{4}), address_out) {

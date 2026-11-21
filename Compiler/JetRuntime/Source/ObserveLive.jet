@@ -397,6 +397,8 @@ observe_cstring: fn(text: I64) -> I64 {
     buffer
 }
 
+// Observe's and the profiler's own calls, which `jet perf run` does not
+// count (HostProcess.jet host_syscall): they are not the program's.
 observe_syscall: fn(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     #Unsafe("the vetted Linux calls of Observe and the profiler take words alone or borrow native buffers only for their duration") {
         return os_syscall_i64(number, a, b, c, d, I64{0}, I64{0})
@@ -692,7 +694,8 @@ observe_env_key: fn(index: I64) -> I64 {
     jet_rt_free(inputs, I64{56}, I64{8})
 }
 
-// The observation start jet_rt_main runs before the entry.
+// The observation start jet_rt_main runs before the entry, as does a
+// program's own main (Main.jet jet_rt_main_owned_start).
 // Its hook is kept only in a program that links something to observe: a
 // task (Observe.jet observe_task_linked), a channel, a live value or an
 // event (the snapshot's section code words), or one built by
@@ -710,6 +713,8 @@ observe_start_code := I64{0}
 // A `jet run --observe` build's entry calls this first (JetIR
 // ir_observe_link): the call is the link's reason to keep the observation
 // start, so a program with nothing else to observe still publishes its run.
+// It reads one word, so a program that owns its main keeps it (JetIR
+// EntryOwned.jet IR_ROOT_FREE_ROUTES) and is observed as it is built.
 #Export(c) jet_rt_observe_link: fn() -> I64 { observe_task_linked }
 
 // jet_rt_observe_runtime_start_from_env as a code word's target. Returns

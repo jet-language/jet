@@ -429,7 +429,7 @@ net_unix_fd_option: fn(descriptor: I64, option: I64) -> I64 {
     net_store_uint(wrapping(scratch + I64{8}), I64{4}, I64{4})
     result := I64{0}
     #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
-        result = os_syscall_i64(I64{55}, descriptor, I64{1}, option, scratch, scratch + I64{8}, I64{0})
+        result = host_syscall(I64{55}, descriptor, I64{1}, option, scratch, scratch + I64{8}, I64{0})
     }
     value: net_load_uint(scratch, I64{4})
     jet_rt_free(scratch, I64{16}, I64{8})
@@ -549,7 +549,7 @@ net_unix_wait: fn(stream: I64, wake: I64, limit: I64, output: I64, error: I64) -
             net_put(scratch, I64{0}, fd_word(state, I64{8}) & I64{4294967295} | I64{1} << I64{32})
             net_put(scratch, I64{8}, wake & I64{4294967295} | I64{1} << I64{32})
             #Unsafe("the FD72 lock keeps the stream's descriptor live and unreused for the whole ppoll; the caller's Fd keeps the wake descriptor open; scratch lends the pollfds and timespec") {
-                ready = os_syscall_i64(I64{271}, scratch, I64{2}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{16}), I64{0}, I64{8}, I64{0})
+                ready = host_syscall(I64{271}, scratch, I64{2}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{16}), I64{0}, I64{8}, I64{0})
             }
         }
         fd_unlock(state)

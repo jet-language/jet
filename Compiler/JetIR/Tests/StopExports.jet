@@ -150,6 +150,35 @@ stop_test_exports: fn() -> [IRLibraryExport] {
     assert(receipt.contains("jet_rt_callback"))
 }
 
+#Test("the vDSO clock and the frame walk's stub run no program code, so a call through them takes no poll") {
+    m := stop_test_library()
+    // 15: the clock read, which calls a code word a cell and a call give it;
+    // 16 reads the clock through it.
+    lookup := stop_test_fn("sync_vdso_lookup", 0, 0)
+    m.functions.push(lookup)
+    clock := stop_test_fn("sync_clock_read", 0, 2)
+    _ := ir_emit(clock, IROp.DataAddress, 0, 2, -1, -1, 1)
+    _ := ir_emit(clock, IROp.Load, 1, 0, 0, -1, 1)
+    start: ir_args(clock, [Int]{})
+    _ := ir_emit(clock, IROp.Call, 1, 15, start, 0, 1)
+    stop_test_call(clock, 1, [Int]{1, 1})
+    m.functions.push(clock)
+    // 17: the frame walk, which calls a code word read from the heap.
+    walk := stop_test_fn("alloc_frames_key", 1, 1)
+    _ := ir_emit(walk, IROp.Load, 1, 0, 56, -1, 1)
+    stop_test_call(walk, 1, [Int]{1, 0})
+    m.functions.push(walk)
+    now := stop_test_fn("now", 0, 0)
+    stop_test_call(now, 16, [Int]{})
+    stop_test_call(now, 17, [Int]{})
+    m.functions.push(now)
+    exports := stop_test_exports()
+    exports.push(stop_test_export(18, "jet_rt_now"))
+    receipt: ir_stop_exports(m, exports)
+    assert(!receipt.contains("jet_rt_now"))
+    assert(receipt.contains("jet_rt_callback"))
+}
+
 #Test("a library without the stop publisher, a runtime fixture's unit, has no export that can stop") {
     m := stop_test_library()
     m.functions[0].name = "scheduler_elsewhere"

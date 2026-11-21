@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet.DebugAttachFailed — Jet diagnostic</title>
-<meta name="description" content="The debugger could not attach to the process: {detail}.">
+<meta name="description" content="Jet could not attach to the process: {detail}.">
 <meta property="og:title" content="Jet.DebugAttachFailed — Jet diagnostic">
-<meta property="og:description" content="The debugger could not attach to the process: {detail}.">
+<meta property="og:description" content="Jet could not attach to the process: {detail}.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,16 +25,16 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic E2231</p>
 <h1>Jet.DebugAttachFailed</h1>
-<p>The debugger could not attach to the process: {detail}.</p>
+<p>Jet could not attach to the process: {detail}.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">The debugger could not attach to the process: {detail}.</p>
+<p class="diag-copy what" data-registry-field="what">Jet could not attach to the process: {detail}.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Attaching stops a running program where it is and reads its frames from its image&#39;s own debug information, which needs the system&#39;s leave to trace the process and an image built with that information.</p>
+<p class="diag-copy why" data-registry-field="why">Attaching reads a running program from another process, which the system allows only to a process of the program&#39;s user that it lets trace the program.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Choose the process again: one of your user&#39;s that runs an image built with `jet build -O0`; where the system lets a process trace only its own children (kernel.yama.ptrace_scope 1), start the program with `jet debug &lt;file&gt;` instead.</p>
+<p class="diag-copy fix" data-registry-field="fix">Start the program from the tool that will observe it, `jet debug &lt;file&gt;` or `jet perf run &lt;file&gt;`, or let other processes trace it: kernel.yama.ptrace_scope 0, or prctl(PR_SET_PTRACER) in the program.</p>
 <h2>Worked example</h2>
 <p>No UI snapshot currently mentions this diagnostic.</p>
 <p><a href="../index.html">Back to all error codes</a></p>

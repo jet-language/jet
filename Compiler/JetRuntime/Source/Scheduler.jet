@@ -1693,7 +1693,7 @@ scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
     scratch := I64{0}
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
         scratch = wrapping(os_tls_base_i64() + I64{232})
-        if (os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) {
+        if (host_syscall(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) {
             return I64{-1}
         }
     }
@@ -1704,6 +1704,12 @@ scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
 // the monitor's SCHEDULER_STAT_BYTES of scratch: the bytes read, or a
 // negative count when the file cannot be opened or read.
 scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
+    scheduler_task_path(tid, name, buffer)
+    scheduler_read_path(buffer)
+}
+
+// Writes the NUL-ended path /proc/self/task/<tid>/<name> into `buffer`.
+scheduler_task_path: fn(tid: I64, name: I64, buffer: I64) {
     prefix: rt_static_text("/proc/self/task/")
     at := rt_text_len(prefix)
     rt_text_bytes_copy(buffer, rt_text_data(prefix), at)
@@ -1712,7 +1718,6 @@ scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
     at = wrapping(at + I64{1})
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), rt_text_len(name))
     rt_text_put(wrapping(buffer + at + rt_text_len(name)), I64{0})
-    scheduler_read_path(buffer)
 }
 
 // Writes `value`, at least 0, in decimal at `at`: the digits written.
@@ -1740,10 +1745,10 @@ scheduler_read_path: fn(buffer: I64) -> I64 {
     got := I64{-1}
     #Unsafe("openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return") {
         // openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC).
-        descriptor: os_syscall_i64(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
+        descriptor: host_syscall(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
         if (descriptor < I64{0}) { return descriptor }
-        got = os_syscall_i64(I64{0}, descriptor, buffer, SCHEDULER_STAT_BYTES, I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{3}, descriptor, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        got = host_syscall(I64{0}, descriptor, buffer, SCHEDULER_STAT_BYTES, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{3}, descriptor, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     got
 }
@@ -2359,7 +2364,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     // scheduler_timer_root publishes the handle right after the spawn.
     loop sync_load(wrapping(wheel + (I64{40}))) == (I64{0}) {
         #Unsafe("sched_yield retains no memory and yields this OS thread") {
-            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     _ := thread_join(sync_load(wrapping(wheel + I64{40})), I64{0})
@@ -2420,7 +2425,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     // scheduler_monitor_kick publishes the handle right after the spawn.
     loop sync_load(wrapping(root + (I64{224}))) == (I64{-1}) {
         #Unsafe("sched_yield retains no memory and yields this OS thread") {
-            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            _ := host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
     monitor: sync_load(wrapping(root + I64{224}))

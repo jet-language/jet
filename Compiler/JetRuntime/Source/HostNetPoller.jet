@@ -102,7 +102,7 @@ net_epoll_ctl: fn(root: I64, shard: I64, node: I64, operation: I64, interest: I6
     net_store_uint(event, I64{4}, interest | I64{1073741824} | I64{8192})
     net_store_uint(wrapping(event + I64{4}), I64{8}, net_word(node, I64{16}))
     #Unsafe("the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call") {
-        return os_syscall_i64(I64{233}, net_word(root, I64{8}), operation, net_word(net_word(node, I64{24}), I64{8}), event, I64{0}, I64{0})
+        return host_syscall(I64{233}, net_word(root, I64{8}), operation, net_word(net_word(node, I64{24}), I64{8}), event, I64{0}, I64{0})
     }
 }
 
@@ -138,7 +138,7 @@ net_node_rearm: fn(root: I64, shard: I64, node: I64) {
     loop {
         count := I64{0}
         #Unsafe("events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer") {
-            count = os_syscall_i64(I64{232}, net_word(root, I64{8}), events, I64{64}, I64{-1}, I64{0}, I64{0})
+            count = host_syscall(I64{232}, net_word(root, I64{8}), events, I64{64}, I64{-1}, I64{0}, I64{0})
         }
         if (count == I64{-4}) { next }
         if (count < I64{0}) {

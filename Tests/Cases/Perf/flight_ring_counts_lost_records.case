@@ -3,15 +3,20 @@
 # ring every 100 ms; a record made while the socket is full is dropped and
 # counted, and the count reaches the ring. `jet perf attach` says how many
 # records the program lost, and its trace keeps the count in its `records`
-# receipt section.
+# receipt section. The program runs under the authorizer, so jet may trace
+# it, as an attach needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: FlightRingCountsLostRecords.fixture
 env: NO_COLOR=1
 env: XDG_RUNTIME_DIR={work}/run
 env: TMPDIR={work}/tmp
 step: mkdir -m 700 run tmp
 exit: 0
-session live line: jet run --observe live.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv live
 stdout.trim: = "READY" # the program has made its records

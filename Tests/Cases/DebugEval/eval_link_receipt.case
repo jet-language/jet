@@ -2,8 +2,8 @@
 # library build: JetIR EvalLink.jet) checks each export's syscalls past the
 # eval runtime's stubs. A syscall number is followed through the wrappers
 # that pass it on: rt_sigaction through the stack4 primitive, listen and
-# shutdown through net_socket_call's number parameter, statx and writev as
-# literals. So all five exports below are refused. The stop report is
+# shutdown through net_socket_call's number parameter, statx as a literal.
+# So all four exports below are refused. The stop report is
 # stubbed by function: its header is a stub, but the word helper and the
 # debug escape table, which success paths call too, are checked themselves.
 # An Int clone, whose allocation and stop paths are stubs, is allowed.
@@ -12,7 +12,6 @@ env: NO_COLOR=1
 step: jet run {work}/receipt.jet {jet-dir}/jet-runtime/runtime.eval
 exit: 0
 stdout: ~ "export jet_fd_created_raw refused " # statx (332), through os_statx_created_i64
-stdout: ~ "export jet_term_write_stdout_line_direct refused " # writev (20), through os_write_line_i64
 stdout: ~ "export jet_rt_host_program_start refused " # rt_sigaction (13), through the stack4 primitive
 stdout: ~ "export jet_socket_listen_raw refused " # listen (50), through net_socket_call's number
 stdout: ~ "export jet_socket_shutdown_raw refused " # shutdown (48), the same way

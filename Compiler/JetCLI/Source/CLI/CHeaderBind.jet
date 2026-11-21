@@ -352,10 +352,10 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
     loop index < args.len() {
         argument: args[index]
         if argument != "--pkg" && argument != "--overlay" && argument != "--link" && argument != "-o" && argument != "--out" {
-            return jet_cli_c_bind_argument_error("unknown inspect bind argument {argument}", color)
+            return jet_cli_c_bind_argument_error(if argument.starts_with("-") -> "E2102" else -> "E2104", "unknown inspect bind argument {argument}", color)
         }
         if index + 1 >= args.len() || args[index + 1] == "" {
-            return jet_cli_c_bind_argument_error("inspect bind requires a value after {argument}", color)
+            return jet_cli_c_bind_argument_error("E2104", "inspect bind requires a value after {argument}", color)
         }
         value: args[index + 1]
         if argument == {
@@ -366,9 +366,9 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         }
         index += 2
     }
-    library: lib ?? jet_driver_foreign_library_from_header(header) ?? return jet_cli_c_bind_argument_error("cannot name the C library of `{header}`; pass --pkg <lib>", color)
+    library: lib ?? jet_driver_foreign_library_from_header(header) ?? return jet_cli_c_bind_argument_error("E2104", "cannot name the C library of `{header}`; pass --pkg <lib>", color)
     if !jet_driver_foreign_valid_library(library) {
-        return jet_cli_c_bind_argument_error("`{library}` is not a C library name", color)
+        return jet_cli_c_bind_argument_error("E2104", "`{library}` is not a C library name", color)
     }
     header_text: cli_files.read(header) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), jet_cli_c_bind_unreadable(jet_cli_io_error_text(err)), jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
     overlays := [String:HandleOverlay]{}
@@ -401,7 +401,7 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         held: JetCLIRootedDirectory.open(directory, [String]{}, false) ?? return jet_cli_c_bind_io_error(path, err.message, color)
         stem: if name.ends_with(".jet") -> name.slice(0..<(name.len() - 4)) else -> name
         if stem == "" {
-            return jet_cli_c_bind_argument_error("inspect bind output `{path}` names no file", color)
+            return jet_cli_c_bind_argument_error("E2104", "inspect bind output `{path}` names no file", color)
         }
         provenance: jet_cli_c_bind_provenance(root, directory, stem, library, absolute, header_text, bound) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
         jet_cli_c_bind_publish(held, stem, bound, provenance) ?? return jet_cli_c_bind_io_error(path, err.message, color)
@@ -424,8 +424,8 @@ jet_cli_c_bind_done: fn(header: String, shown: String, bound: CBindFiles) -> Jet
     jet_cli_done("Bound {count} C function{plural} from {header} → {shown}\n", notes.join(""), JET_DRIVER_EXIT_OK)
 }
 
-jet_cli_c_bind_argument_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
-    output := jet_cli_report_output("", "E2102", what, jet_cli_why("E2102"), "run `jet inspect bind --help` for the accepted flags", color, JET_DRIVER_EXIT_USAGE)
+jet_cli_c_bind_argument_error: fn(code: String, what: String, color: Bool) -> JetCLIPlan Never! {
+    output := jet_cli_report_output("", code, what, jet_cli_why(code), "run `jet inspect bind --help` for the accepted flags", color, JET_DRIVER_EXIT_USAGE)
     output.stderr = "{output.stderr}{jet_cli_c_bind_usage()}"
     JetCLIPlan.Done{output: output}
 }

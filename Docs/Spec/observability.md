@@ -113,6 +113,11 @@ starts in a child process is reaped by jet first, so its window is the last
 periodic one (`live`). A program that links no task, channel, live value or
 event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
+`jet perf run` measures the program a plain build makes. A program that owns
+its main (`jet inspect decisions` names it `program-owned`) keeps that main
+under observation. Its main starts the observation before the entry. It runs
+the observation's exit step after its last write, at `process.exit`, at a
+stop and at a fault, as a process root's exit does.
 `jet perf run` samples the program's CPU time: the runtime arms a timer on
 each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
 delivered to that thread, one sample per 125 microseconds of its CPU, 8 kHz),
@@ -223,23 +228,31 @@ the rings, drained but not kept, and 0 dropped by the kernel, which found no
 room in a ring`). Under another sampler it is the process's CPU time over
 the sampling interval.
 The
-profile's overhead is `measured`: `overhead_ns` is the CPU time the
+profile's overhead is `measured`, in two parts that `overhead_ns` sums.
+`overhead_runtime_ns`, the runtime's part, is measured: the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
 time a busy machine kept them preempted) plus, for each signal that carried
 a sample, the kernel's delivery and return, which the runtime times as
 sampling starts by
-sending its own thread 64 signals, plus, under a perf event, the kernel's
+sending its own thread 64 signals; under a perf event a drain timer's
+signals are already in the handlers' time. `overhead_kernel_ns`, the
+kernel's part, is estimated: under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
 deep stack, as the median of three back-to-back pairs of a round with that
 sampler on and one with it off, on the thread's monotonic clock less the
 time it waited on a run queue (its schedstat), so the interrupt's time
-counts and a busy machine's other programs do not. Every 1024 drains of the
+counts and a busy machine's other programs do not; under the CPU timer it
+is 0. Every 1024 drains of the
 starting thread's ring (2 s of its CPU time) its drain timer times one more
 shallow pair with the thread's own sampler held off, and each sample drained
 from then on is charged the median of the last five timings, so the charge
 follows the machine's load and clock as the run goes on; `overhead_reason`
-gives it as a share of the CPU time sampled.
+gives the sum as a share of the CPU time sampled. All three are `null` when
+the overhead is `not_measured` or `not_applicable`. `jet perf view` prints
+the parts after it as shares of the run window's CPU time
+(`overhead=measured runtime=0.54% kernel=1.42%`), in nanoseconds when the
+profile has no window CPU time.
 `jet perf view` sums the rows per function with its share of the
 samples and the CPU time they stand for, at the `interval_us` the trace's
 `perf` receipt section names (none without one),
@@ -711,10 +724,17 @@ row of a table the sampler maps at the start, with the Jet call sites of
 the spawning stack, and fills it as it runs: its kernel id, the function
 it runs, its stack's bytes, its time alive and, as it ends, its CPU time;
 a thread still running at the exit has its CPU time read then, from its
-own CPU-time clock. The main thread's row has its stack limit. Every host
-call through the runtime's central wrapper (HostProcess.jet `host_call`)
-is counted in a row keyed by its number and its calling stack, with its
-time: a vfork child's PATH probes count in the table it shares with its
+own CPU-time clock. The main thread's row has its stack limit. Every system
+call the runtime makes for the program through its syscall gate
+(HostProcess.jet `host_syscall`), and every unbuffered line's `writev`, is
+counted in a row keyed by its number and its calling stack, with its time.
+Not counted: the calls of perf and Observe themselves, of `jet test`'s read
+recorder, of code only a signal handler runs and of a fatal report; the
+memory family (`mmap`, `mprotect`, `munmap`, `mremap`, `madvise`), which
+the memory audit reads at the raw call; and the few calls that borrow
+stack words (signal actions, `stat` facts, terminal `ioctl`s, a thread's
+`clone`). So a run's `write` and `writev` counts are the program's own
+writes. A vfork child's PATH probes count in the table it shares with its
 parent, and a call that never returns, a successful `execve`, counts with
 no time. At most 256 threads and 1024 numbers and stacks are kept; the
 rest are counted. The trace records the `threads` receipt section (type
@@ -907,7 +927,7 @@ is one capture of that side (`jet perf run main.jet --out base/1.jettrace`
 creates the folder). An empty folder is refused. Every capture must share
 the first base capture's toolchain digest and hardware fingerprint unless
 `--override-identity`, and each side's captures must have run one source
-(the same path and digest for every source file); either refusal is E2102
+(the same path and digest for every source file); either refusal is E2104
 naming the capture. The `Captures:` line lists each side's captures. The
 wall, CPU and allocation deltas and the budget line set the sides' means
 against each other; the receipt and heap deltas set the first capture of
@@ -967,6 +987,19 @@ reachable to them; a request another user left is ignored.
 Tests/Cases/Perf/attach_ignores_another_users_request.case is the worked
 example.
 
+An attach needs what `jet debug --attach` needs: the process is this user's,
+and the system lets jet trace it. Where kernel.yama.ptrace_scope is 1, that
+is a process jet started, or one that allowed others with
+prctl(PR_SET_PTRACER). Both commands ask the kernel the same way, by opening
+the process's `/proc/<pid>/mem`, which stops nothing. A process jet may not
+trace is refused with E2231 (`Jet.DebugAttachFailed`, exit 1), the same
+report for both, before the attach reads anything of it or leaves a
+request. Its reason names the kernel's rule, and its Fix starts the program
+from the tool that will observe it (`jet debug <file>` or `jet perf run
+<file>`) or lets other processes trace it.
+Tests/Cases/Perf/attach_needs_the_debuggers_permission.case is the worked
+example.
+
 An attach that can't run is refused by its cause. A process that isn't
 running, or runs without publishing what the attach reads (no live snapshot,
 no flight ring, or no live list for `--lens=alloc`), is E2124
@@ -974,7 +1007,7 @@ no flight ring, or no live list for `--lens=alloc`), is E2124
 observed. A command line that names no one process (no pid, two pids, or a
 word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
 that conflicts with the others, such as `--lens=alloc` without `--source`,
-stays `Jet.UnknownFlag` (exit 2).
+is `Jet.InvalidCommandInput` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
 
 A process that publishes nothing about itself, as the jet CLI does and as a
@@ -1017,7 +1050,7 @@ it with. The window ends early when the process exits: the section's
 `exited_ms` says how far into it, and the view prints `exited 420 ms into
 the 3000 ms window` after the `functions` line. `--for=` reads nothing a
 program publishes, so with `--source`, or on a devserver browser session,
-it is refused (`Jet.UnknownFlag`, exit 2); `--zones=` is that path's
+it is refused (`Jet.InvalidCommandInput`, exit 2); `--zones=` is that path's
 window.
 Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
@@ -1081,25 +1114,34 @@ Tests/Cases/Perf/flight_ring_keeps_the_last_turn.case is the worked example.
 `core.perf` zones, frame marks and plots stay off in such a run: each zone
 site tests one runtime word and calls nothing while it is clear.
 `jet perf attach <pid> --source app.jet --zones=500ms` turns them on for the
-window. It leaves `jet-flight-<pid>.samples.zones` beside the ring and
-rewrites it every 250 ms while the window lasts. The writer's next
-publication answers it by setting the word, writing the zone, frame, plot
+window. It leaves its own lease, `jet-flight-<pid>.samples.zones.<its pid>`,
+then the trigger every attach shares, `jet-flight-<pid>.samples.zones`,
+beside the ring, and rewrites both every 250 ms while the window lasts. An
+unwatched publication makes one `lstat`, of the trigger. While the trigger
+stands, the writer's publication lists the leases and answers the first by
+setting the word, writing the zone, frame, plot
 and log span rows to `.samples.spans`, and opening the zones window: each
 thread samples its CPU time every 125 microseconds, as under `jet perf
 run`, its records going to `.samples.window` rather than the ring, which
-holds too few at that rate. The attach then removes the request, so the next
-publication clears the word and closes the window: each thread samples every
+holds too few at that rate. Ending, the attach removes only its own lease.
+The publication that finds no lease standing removes the trigger, clears
+the word and closes the window: each thread samples every
 10ms again, and a window row in `.spans` names the window's start and end on
 the zones' clock, its interval, the program's CPU time, the handlers' time,
-one signal's delivery time and the records lost in it. A request not
-rewritten within a second was left by an attach that died; the publication
-removes it and closes the window the same way. The attach reads the rows
+one signal's delivery time and the records lost in it. So two attaches
+share one window, and neither turns zones off under the other; one that
+arrives as the last leaves lays the trigger again at its next renewal,
+within 250 ms. A lease not rewritten within a second was left by an attach
+that died; the publication removes it, and with the last the trigger, and
+closes the window the same way. The attach reads the rows
 into the trace with the window's records, of which only the samples stamped
 inside the window count, each zone holding those inside it; its `overhead`
-is the window's measured cost. Without a window row (no window opened) it
-reads the ring's records instead.
-Tests/Cases/Perf/attach_turns_zones_on.case and
-Tests/Cases/Perf/zones_request_lapses_unrenewed.case are the worked examples.
+is the window's measured cost. Without a window row (no window opened, or
+another attach still holds it) it reads the ring's records instead.
+Tests/Cases/Perf/attach_turns_zones_on.case,
+Tests/Cases/Perf/zones_request_lapses_unrenewed.case and
+Tests/Cases/Perf/overlapping_zones_attaches_share_the_window.case are the
+worked examples.
 
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
@@ -1110,8 +1152,8 @@ dropped row by kind, and at exit, or as an attach's zones window closes,
 writes the counts in a last row. The `zones` section keeps them as
 `dropped`. `jet perf view` shows both as `spans cut: <reason>: 1534080
 zones, 2 log spans`, naming each kind that lost any. A zone's `count`
-is the zones the file kept. A new zones request empties the flight ring's file
-first. At a normal exit the program removes its ring, the ring's image, its
+is the zones the file kept. Zones turning on in a flight-recorded run empty
+the flight ring's file first. At a normal exit the program removes its ring, the ring's image, its
 `.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
 `jet perf attach` removes, from the temporary directory and the user's
 private directory, each file of this user's named for a process
@@ -1324,7 +1366,7 @@ console while it is stopped. Otherwise the program's stdin is empty, so
 its reads end at once, and the console's answer to a command it doesn't
 know says that `--stdin=FILE` gives the program its input. `--stdin` is
 refused with `--dap`, `--attach`, `--replay` and a `.jetdump`, and when
-it names the console's own piped stdin (E2102); a FILE that can't be read
+it names the console's own piped stdin (E2104); a FILE that can't be read
 is E2105. `jet debug --dap` keeps stdin for its protocol: its program reads
 the file the launch configuration's `stdin` names, or an empty stdin.
 D-DBG-VERBS1=A names the commands:
@@ -1475,7 +1517,7 @@ once the program has ended is refused with a line of its own. A
 `.jetdump` runs them against the dump, with no banner. It exits 0, or 1
 when the console refused a command (one it doesn't know, or a run-control
 command on a dump) or the program ended with a status other than 0 or a
-signal. `--do` is refused with `--dap` (E2102).
+signal. `--do` is refused with `--dap` (E2104).
 `jet debug .jet/build/main --do segments --do 'disas main.run__entry'`
 checks a build's machine code with no other tool.
 Tests/Cases/Debug/do_runs_commands_against_the_image_file_then_the_running_program.case

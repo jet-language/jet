@@ -33,12 +33,12 @@ jet_cli_import_output: fn(stdout: String, stderr: String, exit_code: Int) -> Jet
 }
 
 // Rust `usage_error`.
-jet_cli_import_usage_error: fn(what: String, fix: String, json: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_import_usage_error: fn(refusal: JetCLIImportUsageError, json: Bool) -> JetDriverVerbOutput Never! {
     why: "source import arguments stay explicit"
     if json {
-        return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report("E2102", what, why, fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USAGE)
+        return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(refusal.code, refusal.what, why, refusal.fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USAGE)
     }
-    jet_cli_import_output("", jet_cli_report("E2102", what, why, fix, false), JET_DRIVER_EXIT_USAGE)
+    jet_cli_import_output("", jet_cli_report(refusal.code, refusal.what, why, refusal.fix, false), JET_DRIVER_EXIT_USAGE)
 }
 
 // Rust `operation_error` (JT0198).
@@ -261,16 +261,16 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
 
 // Rust `run`: `raw` starts at the `import` word.
 jet_cli_import_run: fn(raw: [String], json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
-    args: jet_cli_import_parse_args(raw) ?? return jet_cli_import_usage_error(err.what, err.fix, json)
+    args: jet_cli_import_parse_args(raw) ?? return jet_cli_import_usage_error(err, json)
     language: jet_cli_import_canonical_language(args.language)
     if language == "c" || language == "cpp" {
         foreign: jet_cli_import_foreign_language(language) ?? panic("C/C++ importer language is mapped")
         capability: pkg_foreign_boundary_capability(foreign)
-        return jet_cli_import_usage_error("source conversion for '{language}' is unavailable", "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Import overlay", json)
+        return jet_cli_import_usage_error(JetCLIImportUsageError{code: "E2104", what: "source conversion for '{language}' is unavailable", fix: "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Import overlay"}, json)
     }
     installed: [String]{"py", "pascal", "ada", "java", "csharp", "ts", "js", "go"}
     if !installed.contains(language) {
-        return jet_cli_import_usage_error("source importer '{language}' is not installed", "use jet import py|java|csharp|ts|js|go <dir> for narrow conversion; Ada/Pascal are binder-only/manual; C/C++ use their binder plus checked overlays", json)
+        return jet_cli_import_usage_error(JetCLIImportUsageError{code: "E2104", what: "source importer '{language}' is not installed", fix: "use jet import py|java|csharp|ts|js|go <dir> for narrow conversion; Ada/Pascal are binder-only/manual; C/C++ use their binder plus checked overlays"}, json)
     }
     cwd: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
     absolute: if import_out_files.is_absolute(args.source) -> args.source else -> import_out_files.join(cwd, args.source)

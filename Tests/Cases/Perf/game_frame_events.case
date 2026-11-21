@@ -7,10 +7,15 @@
 # game, whose window starts past retired records. Both hold on O0, O1 and O2.
 # Each attached game starts the way a user makes a program observable
 # (Docs/Spec/observability.md): `jet run --observe` at the tier's level,
-# whose process is the game's, so `jet perf attach` takes its pid.
+# whose process is the game's, so `jet perf attach` takes its pid. It runs
+# under the authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: GameFrameEvents.fixture
 env: NO_COLOR=1
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
 step o0: jet perf run -O0 main.jet --out {work}/o0.jettrace
 exit: 0
 stdout: = "frames=40\n"
@@ -38,7 +43,7 @@ stdout: ~ "game frames=40 draw_events=80 scene=arena cpu=" # every frame, each w
 stdout: ~ "main.jet:13 count=40 ns=" # the physics callback, by the line that registered it
 stdout: ~ "main.jet:14 count=40 ns=" # the render callback, by the line that registered it
 stdout: ~ "receipt game {\"callbacks_without_frame\":0,\"callbacks_without_function\":0,\"draw_events\":80,\"first_sequence\":1,\"frames\":40,\"frames_missing_callbacks\":0,\"last_sequence\":120,\"records_retired\":0,\"rows_truncated\":false}" # a whole run under the relay's bound loses nothing
-session live0 raw: jet run -O0 --observe live.jet
+session live0 raw: {work}/authorizer {jet} run -O0 --observe live.jet
 recv live0 until = "ready\n" within 60s
 stdout: = "ready\n"
 step o0attach: jet perf attach {pid:live0} --source live.jet --out {work}/a0.jettrace
@@ -53,7 +58,7 @@ stdout: !~ "\"records_retired\":0," # the window starts past the records the rel
 signal live0: KILL
 close live0
 exit: any # the case kills the endless game; its status is the signal's
-session live1 raw: jet run -O1 --observe live.jet
+session live1 raw: {work}/authorizer {jet} run -O1 --observe live.jet
 recv live1 until = "ready\n" within 60s
 stdout: = "ready\n"
 step o1attach: jet perf attach {pid:live1} --source live.jet --out {work}/a1.jettrace
@@ -68,7 +73,7 @@ stdout: !~ "\"records_retired\":0," # the window starts past the records the rel
 signal live1: KILL
 close live1
 exit: any # the case kills the endless game; its status is the signal's
-session live2 raw: jet run -O2 --observe live.jet
+session live2 raw: {work}/authorizer {jet} run -O2 --observe live.jet
 recv live2 until = "ready\n" within 60s
 stdout: = "ready\n"
 step o2attach: jet perf attach {pid:live2} --source live.jet --out {work}/a2.jettrace

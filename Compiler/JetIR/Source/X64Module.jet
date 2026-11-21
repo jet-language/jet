@@ -1156,7 +1156,7 @@ ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], deb
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 {
         return [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}
     }
-    main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach)
+    main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach, owned.program.owned_observe)
     debug.push(x64_object_main_debug(main))
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())

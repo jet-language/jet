@@ -112,7 +112,7 @@ fault_stack_start: fn() -> I64 {
         os_store_i64(wrapping(stack + I64{8}), I64{0})
         os_store_i64(wrapping(stack + I64{16}), I64{262144})
         os_store_i64(wrapping(stack + I64{24}), I64{0})
-        status = os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        status = host_syscall(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (status < I64{0}) {
         alloc_unmap(stack, I64{262144})
@@ -129,7 +129,7 @@ priv fault_stack_end: fn(stack: I64) {
     }
     #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
         os_store_i64(wrapping(stack + I64{8}), I64{2})
-        _ := os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := host_syscall(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     alloc_unmap(stack, I64{262144})
 }
@@ -170,7 +170,9 @@ priv fault_stack_end: fn(stack: I64) {
 
 // The default action of signal for this thread, now: SIG_DFL, then tgkill.
 // SA_NODEFER left the signal unblocked, so it is delivered as the syscall
-// returns; exit_group(128 + signal) only if it is not.
+// returns; exit_group(128 + signal) only if it is not. Raw, not through
+// HostProcess.jet's gate: only the fault handler runs this, and a handler's
+// own calls are not counted.
 fault_raise: fn(signal: I64) {
     #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread") {
         _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
@@ -255,9 +257,9 @@ trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bo
             // "/proc/self/exe\0", little-endian.
             os_store_i64(path, I64{7310238724270485551})
             os_store_i64(wrapping(path + I64{8}), I64{111567768086124})
-            fd: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
+            fd: host_syscall(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
             if (fd >= I64{0}) {
-                size: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
+                size: host_syscall(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
                 if (size > I64{64}) {
                     mapped: os_map_untracked_i64(I64{0}, size, I64{1}, I64{2}, fd, I64{0})
                     if (mapped > I64{0}) {
@@ -265,7 +267,7 @@ trace_image: fn(lines: I64, frame: I64, address: I64, with_function: Bool) -> Bo
                         length = size
                     }
                 }
-                _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                _ := host_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
         }
         trace_unmap(path, I64{4096})

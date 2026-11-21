@@ -1,4 +1,4 @@
-Error: Jet.DebugAttachFailed: The debugger could not attach to the process: `<work>/sleeper` has no Jet debug information; build it with `jet build -O0`.
- Why: Attaching stops a running program where it is and reads its frames from its image's own debug information, which needs the system's leave to trace the process and an image built with that information.
- Fix: Choose the process again: one of your user's that runs an image built with `jet build -O0`; where the system lets a process trace only its own children (kernel.yama.ptrace_scope 1), start the program with `jet debug <file>` instead.
+Error: Jet.DebugAttachFailed: Jet could not attach to the process: `<work>/sleeper` has no Jet debug information; build it with `jet build -O0`.
+ Why: Attaching reads a running program from another process, which the system allows only to a process of the program's user that it lets trace the program.
+ Fix: Start the program from the tool that will observe it, `jet debug <file>` or `jet perf run <file>`, or let other processes trace it: kernel.yama.ptrace_scope 0, or prctl(PR_SET_PTRACER) in the program.
 More: jet-lang.dev/e/Jet.DebugAttachFailed

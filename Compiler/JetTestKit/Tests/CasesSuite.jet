@@ -103,6 +103,16 @@ cases_test_source: fn(root: String, name: String, text: String) {
     files.remove_all(root) ?? panic("remove home scratch")
 }
 
+#Test("a run's children get the kit's one stack limit, whatever started the kit") {
+    assert_eq(kit_exec_stack_limit(), None)
+    root: cases_test_root("stack")
+    cases_test_source(root, "stack", "step: jet -c 'ulimit -s'\nstdout: = \"{KIT_STACK_BYTES /% 1024}\\n\"\nstderr: empty\n")
+    context: cases_test_context(root, files.join(root, "scratch"))
+    result: kit_cases_run(cases_test_entry("stack"), context)[0]
+    assert_eq(result.verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove stack scratch")
+}
+
 #Test("cases refuse a row whose HOME or JET_HOME is the invoking user's before it runs") {
     root: cases_test_root("user-home")
     user: files.canonicalize(kit_exec_user_home()) ?? panic("invoking user's home: {err}")

@@ -1,12 +1,17 @@
 # `jet perf attach` names each refusal by its cause. A flag that conflicts
-# with the others stays Jet.UnknownFlag (exit 2); a process that isn't
+# with the others is Jet.InvalidCommandInput (exit 2); a process that isn't
 # running, or runs without publishing what the attach reads, is
 # Jet.AttachTargetNotObserved (exit 1); a command line that names no one
 # process (none, two, or a word that isn't a pid) is Jet.AttachWhichProcess
-# (exit 2). Each report is a CLI snapshot.
+# (exit 2). Each report is a CLI snapshot. The running process runs under
+# the authorizer, so jet may trace it and the refusal is its own.
 requires: os-name:linux
+requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
 step: jet perf attach 4242 --lens=alloc
 exit: 2
 stdout: = ""
@@ -14,22 +19,23 @@ stderr: = ../../CLI/perf_attach_alloc_needs_source.txt
 step: jet perf attach 4242 --for=3s --source live.jet --out timed.jettrace
 exit: 2
 stdout: = ""
-stderr: ~ "Error: Jet.UnknownFlag: `--for=` sets how long jet samples a process from outside, and `--source` reads what the program publishes instead" # a window for the outside sampler, on a program read by what it publishes
+stderr: ~ "Error: Jet.InvalidCommandInput: `--for=` sets how long jet samples a process from outside, and `--source` reads what the program publishes instead" # a window for the outside sampler, on a program read by what it publishes
 stderr: ~ "Fix: Attach with `--zones=<duration>` for a window on what it publishes, or drop `--source` to sample it from outside" # names that path's window
 file: timed.jettrace absent # refused before it traced anything
 step: jet perf attach 4242 --for=601s
 exit: 2
-stderr: ~ "Error: Jet.UnknownFlag: `--for=601s` isn't a window jet understands" # longer than 10 minutes
+stderr: ~ "Error: Jet.InvalidCommandInput: `--for=601s` isn't a window jet understands" # longer than 10 minutes
 stderr: ~ "at most 10 minutes, as `--for=500ms` or `--for=20s`" # and the fix says the bound and the form
 step: jet perf attach 4242 --for=3
 exit: 2
-stderr: ~ "Error: Jet.UnknownFlag: `--for=3` isn't a window jet understands" # a duration names its unit
+stderr: ~ "Error: Jet.InvalidCommandInput: `--for=3` isn't a window jet understands" # a duration names its unit
 step: jet perf attach 4294967295 --source live.jet --out gone.jettrace
 exit: 1
 stdout: = ""
 stderr: = ../../CLI/perf_attach_not_running.txt
 file: gone.jettrace absent # refused before it traced anything
-spawn sleeper: sleep 30
+spawn sleeper: {work}/authorizer sleep 30
+poll asleep: sh -c 'test "$(readlink /proc/{pid:sleeper}/exe)" = "$(readlink -f "$(command -v sleep)")"' until exit: 0 timeout 5s every 10ms # the authorizer has let jet trace it and run `sleep`
 step: jet perf attach {pid:sleeper} --source live.jet --out plain.jettrace
 exit: 1
 stdout: = ""
