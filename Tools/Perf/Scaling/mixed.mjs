@@ -86,8 +86,8 @@ function unit(m, u, r, stats) {
   }
   const scoreA = r.int(3, 19);
   const scoreB = r.int(2, 11);
-  lines.push(`${rec}: struct {`, '    identifier: Int', '    weight: Int', '    label: String', '    markers: [Int]', '}', '');
-  lines.push(`${shape}: enum {`, '    Dot(Int)', '    Segment(start: Int, finish: Int)', '    Named(String)', '    Empty', '}', '');
+  lines.push(`${rec}: struct {`, '    identifier: Int,', '    weight: Int,', '    label: String,', '    markers: [Int],', '}', '');
+  lines.push(`${shape}: enum {`, '    Dot(Int),', '    Segment(start: Int, finish: Int),', '    Named(String),', '    Empty,', '}', '');
   lines.push(`impl ${rec}.${trait} {`,
     `    score: fn(self) -> Int { (self.identifier * ${scoreA} + self.weight * ${scoreB} + self.label.len()) % ${MODULUS} }`, '}', '');
   stats.types += 2;

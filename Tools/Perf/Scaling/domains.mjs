@@ -70,9 +70,9 @@ function build(name, common, kinds, targetLines, r, { entryFile = false } = {}) 
 // ------------------------------------------------------------------ web
 
 const webCommon = [
-  'Request: struct {', '    method: String', '    path: String', '    user_id: Int', '    body: String', '}', '',
-  'Response: struct {', '    status: Int', '    body: String', '}', '',
-  '#Error', 'APIError: enum {', '    NotFound(String)', '    Invalid(field: String, reason: String)', '    Unauthorized', '}', '',
+  'Request: struct {', '    method: String,', '    path: String,', '    user_id: Int,', '    body: String', '}', '',
+  'Response: struct {', '    status: Int,', '    body: String', '}', '',
+  '#Error', 'APIError: enum {', '    NotFound(String),', '    Invalid(field: String, reason: String),', '    Unauthorized', '}', '',
   'respond: fn(status: Int, body: String) -> Response { Response{status: status, body: body} }', '',
   'api_error_status: fn(error: APIError) -> Int {', '    if error == {', '        .NotFound(_) -> 404', '        .Invalid(_, _) -> 422', '        .Unauthorized -> 401', '    }', '}', '',
   'api_error_text: fn(error: APIError) -> String {', '    if error == {', '        .NotFound(what) -> "missing {what}"', '        .Invalid(field, reason) -> "invalid {field}: {reason}"', '        .Unauthorized -> "unauthorized"', '    }', '}', '',
@@ -85,7 +85,7 @@ const web = [
     return {
       entry: `customer${i}_main`, helpers: [`customer${i}_score`],
       lines: [
-        `${T}: struct {`, '    id: Int', '    name: String', '    email: String', '    tier: Int', '    active: Bool', '    tags: [String]', '}', '',
+        `${T}: struct {`, '    id: Int,', '    name: String,', '    email: String,', '    tier: Int,', '    active: Bool,', '    tags: [String]', '}', '',
         `customer${i}_seed: fn(count: Int) -> [${T}] {`, `    rows := [${T}]{}`, '    loop index in 0..<count {',
         `        &rows.push(${T}{id: index + 1, name: "customer-{index}", email: "c{index}@example.com", tier: index % ${r.int(2, 5)}, active: index % 3 != 0, tags: [String]{"t{index % 4}", "${r.pick(WORDS)}"}})`,
         '    }', '    rows', '}', '',
@@ -137,7 +137,7 @@ const web = [
   (i, r, helper) => ({
     entry: `query${i}_main`, helpers: [],
     lines: [
-      `Query${i}: struct {`, '    table: String', '    filters: [String]', '    limit: Int', '    order: String', '}', '',
+      `Query${i}: struct {`, '    table: String,', '    filters: [String],', '    limit: Int,', '    order: String', '}', '',
       `impl Query${i} {`, '    where_eq: fn(&self, column: String, value: Int) { &self.filters.push("{column} = {value}") }', '',
       '    order_by: fn(&self, column: String) { self.order = column }', '',
       '    to_sql: fn(self) -> String {', '        clause := ""', '        loop (index, filter) in self.filters {',
@@ -151,7 +151,7 @@ const web = [
   (i, r, helper) => ({
     entry: `permissions${i}_main`, helpers: [`permissions${i}_level`],
     lines: [
-      `Role${i}: enum {`, '    Guest', '    Member(Int)', '    Admin(String)', '}', '',
+      `Role${i}: enum {`, '    Guest,', '    Member(Int),', '    Admin(String)', '}', '',
       `role${i}_of: fn(id: Int) -> Role${i} {`, '    if id % 3 == {', `        0 -> Role${i}.Guest`, `        1 -> Role${i}.Member(id)`, `        else -> Role${i}.Admin("root")`, '    }', '}', '',
       `can${i}: fn(role: Role${i}, action: String) -> Bool {`, '    if role == {', '        .Guest -> action == "read"', `        .Member(level) -> action != "delete" || level > ${r.int(50, 150)}`, '        .Admin(_) -> true', '    }', '}', '',
       `permissions${i}_level: fn(x: Int) -> Int { (x * ${r.int(2, 9)}) % 101 }`, '',
@@ -165,21 +165,21 @@ const web = [
 // ----------------------------------------------------------------- game
 
 const gameCommon = [
-  'Vec2: struct {', '    x: Float', '    y: Float', '}', '',
+  'Vec2: struct {', '    x: Float,', '    y: Float', '}', '',
   'vec2: fn(x: Float, y: Float) -> Vec2 { Vec2{x: x, y: y} }', '',
   'vec_add: fn(a: Vec2, b: Vec2) -> Vec2 { Vec2{x: a.x + b.x, y: a.y + b.y} }', '',
   'vec_scale: fn(a: Vec2, k: Float) -> Vec2 { Vec2{x: a.x * k, y: a.y * k} }', '',
   'vec_dot: fn(a: Vec2, b: Vec2) -> Float { a.x * b.x + a.y * b.y }', '',
   'clampf: fn(v: Float, lo: Float, hi: Float) -> Float {', '    if {', '        v < lo -> lo', '        v > hi -> hi', '        else -> v', '    }', '}', '',
   'to_score: fn(v: Float) -> Int { (Int.from_float(clampf(v, 0.0, 1000000.0)) ?? 0) % 1000003 }', '',
-  'Behavior: trait {', '    tick: fn(self, dt: Float) -> Float', '    label: fn(self) -> String', '}', '',
+  'Behavior: trait {', '    tick: fn(self, dt: Float) -> Float,', '    label: fn(self) -> String', '}', '',
 ];
 
 const game = [
   (i, r, helper) => ({
     entry: `system${i}_main`, helpers: [`system${i}_frames`],
     lines: [
-      `Body${i}: struct {`, '    position: Vec2', '    velocity: Vec2', '    mass: Float', '    alive: Bool', '}', '',
+      `Body${i}: struct {`, '    position: Vec2,', '    velocity: Vec2,', '    mass: Float,', '    alive: Bool', '}', '',
       `bodies${i}_spawn: fn(count: Int) -> [Body${i}] {`, `    bodies := [Body${i}]{}`, '    loop index in 0..<count {',
       `        &bodies.push(Body${i}{position: vec2(Float.from_int(index), 0.5), velocity: vec2(1.0, Float.from_int(index % 3)), mass: 1.0 + Float.from_int(index % 5), alive: true})`,
       '    }', '    bodies', '}', '',
@@ -196,7 +196,7 @@ const game = [
   (i, r, helper) => ({
     entry: `ai${i}_main`, helpers: [],
     lines: [
-      `Mind${i}: enum {`, '    Idle', '    Patrol(Int)', '    Chase(target: Int, speed: Float)', '    Flee(Float)', '}', '',
+      `Mind${i}: enum {`, '    Idle,', '    Patrol(Int),', '    Chase(target: Int, speed: Float),', '    Flee(Float)', '}', '',
       `mind${i}_next: fn(state: Mind${i}, distance: Int, health: Int) -> Mind${i} {`, '    if state == {', '        .Idle -> {',
       `            if distance < ${r.int(5, 20)} -> return Mind${i}.Chase{target: distance, speed: 1.5}`, `            Mind${i}.Patrol(distance % 4)`, '        }',
       '        .Patrol(point) -> {', `            if health < 20 -> return Mind${i}.Flee(2.0)`, `            Mind${i}.Patrol((point + 1) % 4)`, '        }',
@@ -214,7 +214,7 @@ const game = [
       entry: `waves${i}_main`, helpers: [`wave${i}_pick`],
       lines: [
         `wave${i}_table: fn() -> [Int] {`, '    [Int]{', ...[0, 16, 32, 48].map(start => `        ${values.slice(start, start + 16).join(', ')},`), '    }', '}', '',
-        `Spawn${i}: struct {`, '    kind: Int', '    count: Int', '    delay: Float', '}', '',
+        `Spawn${i}: struct {`, '    kind: Int,', '    count: Int,', '    delay: Float', '}', '',
         `wave${i}_spawns: fn(level: Int) -> [Spawn${i}] {`, `    table: wave${i}_table()`, `    spawns := [Spawn${i}]{}`, '    loop index in 0..<8 {',
         '        value: table[(level * 8 + index) % table.len()]', `        &spawns.push(Spawn${i}{kind: value % 5, count: value % 9 + 1, delay: Float.from_int(value % 30) * 0.1})`, '    }', '    spawns', '}', '',
         `wave${i}_pick: fn(x: Int) -> Int { wave${i}_table()[x % 64] }`, '',
@@ -226,7 +226,7 @@ const game = [
   (i, r, helper) => ({
     entry: `inventory${i}_main`, helpers: [],
     lines: [
-      `Item${i}: struct {`, '    name: String', '    weight: Int', '    value: Int', '    rarity: Int', '}', '',
+      `Item${i}: struct {`, '    name: String,', '    weight: Int,', '    value: Int,', '    rarity: Int', '}', '',
       `inventory${i}_main: fn(seed: Int) -> Int {`, `    items := [Item${i}]{}`,
       `    loop index in 0..<(seed % 7 + 3) -> &items.push(Item${i}{name: "${r.pick(WORDS)}-{index}", weight: index * ${r.int(2, 9)} % 23, value: index * 17 % 101, rarity: index % 5})`,
       `    heavy: items.filter(fn(item) { item.weight > ${r.int(5, 15)} }).len()`,
@@ -238,7 +238,7 @@ const game = [
   (i, r, helper) => ({
     entry: `behaviors${i}_main`, helpers: [],
     lines: [
-      `Turret${i}: struct {`, '    range: Float', '    rate: Float', '    heat: Float', '}', '',
+      `Turret${i}: struct {`, '    range: Float,', '    rate: Float,', '    heat: Float', '}', '',
       `impl Turret${i}.Behavior {`, '    tick: fn(self, dt: Float) -> Float { self.heat + self.rate * dt + self.range * 0.01 }', '', `    label: fn(self) -> String { "turret${i}" }`, '}', '',
       `behaviors${i}_main: fn(seed: Int) -> Int {`,
       `    agents: [Behavior]{Turret${i}{range: ${r.int(5, 30)}.0, rate: 2.0, heat: 0.0}, Turret${i}{range: Float.from_int(seed % 20), rate: 1.0, heat: 0.5}}`,
@@ -251,9 +251,9 @@ const game = [
 // ------------------------------------------------------------------ cli
 
 const cliCommon = [
-  '#Error', 'CLIError: enum {', '    UnknownFlag(String)', '    MissingValue(String)', '    BadNumber(String)', '}', '',
+  '#Error', 'CLIError: enum {', '    UnknownFlag(String),', '    MissingValue(String),', '    BadNumber(String)', '}', '',
   'cli_error_text: fn(error: CLIError) -> String {', '    if error == {', '        .UnknownFlag(flag) -> "unknown flag {flag}"', '        .MissingValue(flag) -> "{flag} needs a value"', '        .BadNumber(text) -> "not a number: {text}"', '    }', '}', '',
-  'Options: struct {', '    verbose: Bool', '    count: Int', '    name: String', '    extra: [String]', '}', '',
+  'Options: struct {', '    verbose: Bool,', '    count: Int,', '    name: String,', '    extra: [String]', '}', '',
   'default_options: fn() -> Options { Options{verbose: false, count: 1, name: "default", extra: [String]{}} }', '',
   'pad_right: fn(text: String, width: Int) -> String {', '    out := text', '    loop out.len() < width -> out = "{out} "', '    out', '}', '',
 ];
@@ -275,7 +275,7 @@ const cli = [
   (i, r, helper) => ({
     entry: `command${i}_main`, helpers: [`command${i}_weight`],
     lines: [
-      `Command${i}: enum {`, '    Build(String)', '    Test(Int)', '    Clean', '    Help', '}', '',
+      `Command${i}: enum {`, '    Build(String),', '    Test(Int),', '    Clean,', '    Help', '}', '',
       `command${i}_parse: fn(word: String, arg: Int) -> Command${i} {`, '    if word == {', `        "build" -> Command${i}.Build("target-{arg}")`, `        "test" -> Command${i}.Test(arg)`, `        "clean" -> Command${i}.Clean`, `        else -> Command${i}.Help`, '    }', '}', '',
       `command${i}_run: fn(command: Command${i}) -> [String] {`, '    if command == {', '        .Build(target) -> [String]{"compiling {target}", "linking {target}"}',
       '        .Test(count) -> [String]{"running {count} tests", "ok"}', '        .Clean -> [String]{"removed build"}', `        .Help -> [String]{"usage: tool${i} <command>"}`, '    }', '}', '',
@@ -288,7 +288,7 @@ const cli = [
   (i, r, helper) => ({
     entry: `table${i}_main`, helpers: [],
     lines: [
-      `Column${i}: struct {`, '    title: String', '    width: Int', '}', '',
+      `Column${i}: struct {`, '    title: String,', '    width: Int', '}', '',
       `table${i}_render: fn(columns: [Column${i}], rows: [[String]]) -> String {`, '    header := ""', '    loop column in columns -> header = "{header}{pad_right(column.title, column.width)}|"', '    out := header',
       '    loop row in rows {', '        line := ""', '        loop (index, cell) in row {', '            width: if index < columns.len() -> columns[index].width else -> 8', '            line = "{line}{pad_right(cell, width)}|"', '        }',
       '        out = "{out}\\n{line}"', '    }', '    out', '}', '',
@@ -330,7 +330,7 @@ const data = [
   (i, r, helper) => ({
     entry: `groups${i}_main`, helpers: [`groups${i}_bucket`],
     lines: [
-      `Sale${i}: struct {`, '    region: String', '    product: Int', '    amount: Float', '}', '',
+      `Sale${i}: struct {`, '    region: String,', '    product: Int,', '    amount: Float', '}', '',
       `groups${i}_bucket: fn(x: Int) -> Int { x % ${r.int(3, 9)} }`, '',
       `groups${i}_sum: fn(rows: [Sale${i}]) -> [String:Float] {`, '    sums := [String:Float]{}', '    loop row in rows -> sums[row.region] = (sums.get(row.region) ?? 0.0) + row.amount', '    sums', '}', '',
       `groups${i}_main: fn(seed: Int) -> Int {`, `    regions: [String]{"north", "south", "east", "${r.pick(WORDS)}"}`, `    rows := [Sale${i}]{}`,
@@ -342,7 +342,7 @@ const data = [
   (i, r, helper) => ({
     entry: `pipeline${i}_main`, helpers: [],
     lines: [
-      `Reading${i}: struct {`, '    sensor: Int', '    value: Float', '    valid: Bool', '}', '',
+      `Reading${i}: struct {`, '    sensor: Int,', '    value: Float,', '    valid: Bool', '}', '',
       `pipeline${i}_main: fn(seed: Int) -> Int {`, `    readings := [Reading${i}]{}`,
       `    loop index in 0..<(seed % 10 + 5) -> &readings.push(Reading${i}{sensor: index % 3, value: Float.from_int(index * ${r.int(3, 19)} % 50), valid: index % 4 != 0})`,
       '    good: readings.filter(fn(reading) { reading.valid && reading.value > 5.0 })', `    scaled: good.map(fn(reading) { reading.value * ${r.int(1, 3)}.5 })`,
@@ -352,7 +352,7 @@ const data = [
   (i, r, helper) => ({
     entry: `csv${i}_main`, helpers: [`csv${i}_width`],
     lines: [
-      '#Error', `RowError${i}: enum {`, '    Short(Int)', '    BadField(String)', '}', '',
+      '#Error', `RowError${i}: enum {`, '    Short(Int),', '    BadField(String)', '}', '',
       `csv${i}_parse: fn(line: String) -> Int RowError${i}! {`, '    fields: line.split(",").to_list()', `    if fields.len() < 3 -> return Err(RowError${i}.Short(fields.len()))`,
       '    count: fields[1].to_int() ?? -1', `    if count < 0 -> return Err(RowError${i}.BadField(fields[1]))`, '    Ok(count + fields[2].len())', '}', '',
       `csv${i}_width: fn(x: Int) -> Int { x % ${r.int(5, 50)} }`, '',
@@ -366,7 +366,7 @@ const data = [
 // ------------------------------------------------------------------ gui
 
 const guiCommon = [
-  'Rect: struct {', '    x: Int', '    y: Int', '    w: Int', '    h: Int', '}', '',
+  'Rect: struct {', '    x: Int,', '    y: Int,', '    w: Int,', '    h: Int', '}', '',
   'rect_area: fn(rect: Rect) -> Int { rect.w * rect.h }', '',
   'rect_contains: fn(rect: Rect, px: Int, py: Int) -> Bool { px >= rect.x && py >= rect.y && px < rect.x + rect.w && py < rect.y + rect.h }', '',
 ];
@@ -375,7 +375,7 @@ const gui = [
   (i, r, helper) => ({
     entry: `layout${i}_main`, helpers: [],
     lines: [
-      `Widget${i}: enum {`, '    Label(String)', '    Button(text: String, id: Int)', '    Spacer(Int)', '    Image(width: Int, height: Int)', '}', '',
+      `Widget${i}: enum {`, '    Label(String),', '    Button(text: String, id: Int),', '    Spacer(Int),', '    Image(width: Int, height: Int)', '}', '',
       `widget${i}_height: fn(widget: Widget${i}) -> Int {`, '    if widget == {', '        .Label(text) -> 12 + text.len() /% 40 * 12', '        .Button(_, _) -> 28', '        .Spacer(size) -> size', '        .Image(_, height) -> height', '    }', '}', '',
       `layout${i}_column: fn(widgets: [Widget${i}], width: Int) -> [Rect] {`, '    rects := [Rect]{}', '    y := 0', '    loop widget in widgets {', `        height: widget${i}_height(widget)`,
       '        &rects.push(Rect{x: 0, y: y, w: width, h: height})', `        y += height + ${r.int(2, 8)}`, '    }', '    rects', '}', '',
@@ -387,8 +387,8 @@ const gui = [
   (i, r, helper) => ({
     entry: `reducer${i}_main`, helpers: [`reducer${i}_step`],
     lines: [
-      `State${i}: struct {`, '    count: Int', '    title: String', '    items: [String]', '    selected: Int', '}', '',
-      `Msg${i}: enum {`, '    Increment(Int)', '    Rename(String)', '    Add(String)', '    Select(Int)', '    Reset', '}', '',
+      `State${i}: struct {`, '    count: Int,', '    title: String,', '    items: [String],', '    selected: Int', '}', '',
+      `Msg${i}: enum {`, '    Increment(Int),', '    Rename(String),', '    Add(String),', '    Select(Int),', '    Reset', '}', '',
       `update${i}: fn(state: State${i}, msg: Msg${i}) -> State${i} {`, '    updated := state', '    if msg == {', '        .Increment(by) -> updated.count = updated.count + by', '        .Rename(title) -> updated.title = title',
       '        .Add(item) -> &updated.items.push(item)', '        .Select(index) -> updated.selected = index', `        .Reset -> updated = State${i}{count: 0, title: "", items: [String]{}, selected: -1}`, '    }', '    updated', '}', '',
       `reducer${i}_step: fn(x: Int) -> Int { (x + ${r.int(1, 9)}) % ${r.int(10, 30)} }`, '',
@@ -400,7 +400,7 @@ const gui = [
   (i, r, helper) => ({
     entry: `style${i}_main`, helpers: [],
     lines: [
-      `Style${i}: struct {`, ...['margin', 'padding', 'border', 'radius', 'font_size', 'line_height', 'weight', 'opacity', 'shadow', 'gap', 'min_width', 'max_width'].map(f => `    ${f}: Int`), '    color: String', '    background: String', '}', '',
+      `Style${i}: struct {`, ...['margin', 'padding', 'border', 'radius', 'font_size', 'line_height', 'weight', 'opacity', 'shadow', 'gap', 'min_width', 'max_width'].map(f => `    ${f}: Int,`), '    color: String,', '    background: String', '}', '',
       `style${i}_default: fn() -> Style${i} { Style${i}{margin: 4, padding: 8, border: 1, radius: 4, font_size: 14, line_height: 20, weight: 400, opacity: 100, shadow: 0, gap: 8, min_width: 0, max_width: 1200, color: "#222", background: "#fff"} }`, '',
       `style${i}_emphasis: fn(base: Style${i}) -> Style${i} {`, '    styled := base', `    styled.weight = ${r.pick([600, 700, 800])}`, '    styled.font_size = base.font_size + 2', '    styled.color = "#000"', '    styled', '}', '',
       `style${i}_css: fn(style: Style${i}) -> String { "margin:{style.margin}px;padding:{style.padding}px;border:{style.border}px;radius:{style.radius}px;font-size:{style.font_size}px;weight:{style.weight};color:{style.color};background:{style.background}" }`, '',
@@ -410,7 +410,7 @@ const gui = [
   (i, r, helper) => ({
     entry: `events${i}_main`, helpers: [],
     lines: [
-      `Event${i}: enum {`, '    Click(x: Int, y: Int)', '    Key(String)', '    Scroll(Int)', '    Resize(w: Int, h: Int)', '}', '',
+      `Event${i}: enum {`, '    Click(x: Int, y: Int),', '    Key(String),', '    Scroll(Int),', '    Resize(w: Int, h: Int)', '}', '',
       `events${i}_handle: fn(event: Event${i}, area: Rect) -> Int {`, '    if event == {', '        .Click(x, y) -> if rect_contains(area, x, y) -> 1 else -> 0',
       '        .Key(name) -> if name == "Enter" -> 2 else -> name.len()', '        .Scroll(delta) -> delta % 5', '        .Resize(w, h) -> (w * h) % 11', '    }', '}', '',
       `events${i}_main: fn(seed: Int) -> Int {`, `    area: Rect{x: 10, y: 10, w: ${r.int(50, 200)}, h: 40}`,
@@ -442,7 +442,7 @@ const embedded = [
   (i, r, helper) => ({
     entry: `ring${i}_main`, helpers: [],
     lines: [
-      `Ring${i}: struct {`, '    data: [Int#16]', '    head: Int', '    count: Int', '}', '',
+      `Ring${i}: struct {`, '    data: [Int#16],', '    head: Int,', '    count: Int', '}', '',
       `impl Ring${i} {`, '    push: fn(&self, value: Int) {', '        self.data[(self.head + self.count) % 16] = value', '        if self.count < 16 -> self.count += 1 else -> self.head = (self.head + 1) % 16', '    }', '',
       '    sum: fn(self) -> Int {', '        total := 0', '        loop k in 0..<self.count -> total += self.data[(self.head + k) % 16]', '        total', '    }', '}', '',
       `ring${i}_main: fn(seed: Int) -> Int {`, `    ring := Ring${i}{data: [Int#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, head: 0, count: 0}`,
@@ -464,7 +464,7 @@ const embedded = [
   (i, r, helper) => ({
     entry: `frame${i}_main`, helpers: [],
     lines: [
-      `Frame${i}: enum {`, '    Sync', '    Header(Int)', '    Payload(remaining: Int, sum: Int)', '    Done(Int)', '}', '',
+      `Frame${i}: enum {`, '    Sync,', '    Header(Int),', '    Payload(remaining: Int, sum: Int),', '    Done(Int)', '}', '',
       `frame${i}_step: fn(state: Frame${i}, byte: Int) -> Frame${i} {`, '    if state == {', `        .Sync -> if byte == ${r.int(120, 130)} -> Frame${i}.Header(0) else -> Frame${i}.Sync`,
       `        .Header(_) -> Frame${i}.Payload{remaining: byte & 7, sum: 0}`, `        .Payload(remaining, sum) -> if remaining <= 1 -> Frame${i}.Done(sum + byte) else -> Frame${i}.Payload{remaining: remaining - 1, sum: sum + byte}`,
       '        .Done(sum) -> if byte == 0 -> state else -> Frame' + i + '.Sync', '    }', '}', '',
@@ -477,7 +477,7 @@ const embedded = [
 // ------------------------------------------------------------- compiler
 
 const compilerCommon = [
-  'Symbol: struct {', '    name: String', '    slot: Int', '    depth: Int', '}', '',
+  'Symbol: struct {', '    name: String,', '    slot: Int,', '    depth: Int', '}', '',
   'symbol_lookup: fn(table: [String:Int], name: String) -> Int { table.get(name) ?? -1 }', '',
 ];
 
@@ -487,7 +487,7 @@ const compiler = [
     return {
       entry: `lexer${i}_main`, helpers: [],
       lines: [
-        `Tok${i}: enum {`, ...kinds.map(k => `    ${k}`), '}', '',
+        `Tok${i}: enum {`, ...kinds.map((k, at) => at < kinds.length - 1 ? `    ${k},` : `    ${k}`), '}', '',
         `lex${i}: fn(codes: [Int]) -> [Tok${i}] {`, `    tokens := [Tok${i}]{}`, '    loop code in codes {', '        token: if code % 12 == {',
         `            0 -> Tok${i}.Num(code)`, `            1 -> Tok${i}.Ident("v{code}")`, `            2 -> Tok${i}.Plus`, `            3 -> Tok${i}.Minus`, `            4 -> Tok${i}.Star`, `            5 -> Tok${i}.Slash`,
         `            6 -> Tok${i}.LParen`, `            7 -> Tok${i}.RParen`, `            8 -> Tok${i}.Comma`, `            9 -> Tok${i}.Let`, `            10 -> Tok${i}.Assign`, `            else -> Tok${i}.End`, '        }', '        &tokens.push(token)', '    }', '    tokens', '}', '',
@@ -501,7 +501,7 @@ const compiler = [
   (i, r, helper) => ({
     entry: `eval${i}_main`, helpers: [`eval${i}_fold`],
     lines: [
-      `Node${i}: enum {`, '    Lit(Int)', '    Var(String)', '    Add(left: Int, right: Int)', '    Mul(left: Int, right: Int)', '    Neg(Int)', '}', '',
+      `Node${i}: enum {`, '    Lit(Int),', '    Var(String),', '    Add(left: Int, right: Int),', '    Mul(left: Int, right: Int),', '    Neg(Int)', '}', '',
       `eval${i}: fn(nodes: [Node${i}], env: [String:Int]) -> Int {`, '    values := [Int]{}', '    loop node in nodes {', '        value: if node == {', '            .Lit(v) -> v', '            .Var(name) -> symbol_lookup(env, name)',
       `            .Add(left, right) -> (values[left] + values[right]) % ${M}`, `            .Mul(left, right) -> (values[left] * values[right]) % ${M}`, '            .Neg(index) -> 0 - values[index]', '        }', '        &values.push(value)', '    }', '    values[values.len() - 1]', '}', '',
       `eval${i}_fold: fn(x: Int) -> Int { (x * ${r.int(2, 9)}) % 1009 }`, '',
@@ -513,7 +513,7 @@ const compiler = [
   (i, r, helper) => ({
     entry: `vm${i}_main`, helpers: [],
     lines: [
-      `Op${i}: enum {`, '    Push(Int)', '    Add', '    Sub', '    Mul', '    Dup', '    Swap', '    Drop', '    Jz(Int)', '    Jmp(Int)', '    Halt', '}', '',
+      `Op${i}: enum {`, '    Push(Int),', '    Add,', '    Sub,', '    Mul,', '    Dup,', '    Swap,', '    Drop,', '    Jz(Int),', '    Jmp(Int),', '    Halt', '}', '',
       `vm${i}_run: fn(program: [Op${i}]) -> Int {`, '    stack := [Int]{}', '    pc := 0', '    fuel := 64', '    loop pc < program.len() && fuel > 0 {', '        fuel -= 1', '        op: program[pc]', '        pc += 1', '        if op == {',
         '            .Push(value) -> &stack.push(value)', '            .Add -> {', '                right: &stack.pop() ?? 0', '                left: &stack.pop() ?? 0', `                &stack.push((left + right) % ${M})`, '            }',
         '            .Sub -> {', '                right: &stack.pop() ?? 0', '                left: &stack.pop() ?? 0', '                &stack.push(left - right)', '            }',
@@ -528,7 +528,7 @@ const compiler = [
   (i, r, helper) => ({
     entry: `types${i}_main`, helpers: [],
     lines: [
-      `Ty${i}: enum {`, '    IntT', '    BoolT', '    StrT', '    ListT(Int)', '    FnT(params: Int, result: Int)', '}', '',
+      `Ty${i}: enum {`, '    IntT,', '    BoolT,', '    StrT,', '    ListT(Int),', '    FnT(params: Int, result: Int)', '}', '',
       `ty${i}_code: fn(ty: Ty${i}) -> Int {`, '    if ty == {', '        .IntT -> 1', '        .BoolT -> 2', '        .StrT -> 3', '        .ListT(element) -> 10 + element', '        .FnT(params, result) -> 100 + params * 10 + result', '    }', '}', '',
       `ty${i}_unify: fn(left: Ty${i}, right: Ty${i}) -> Bool { ty${i}_code(left) == ty${i}_code(right) }`, '',
       `types${i}_main: fn(seed: Int) -> Int {`, `    types: [Ty${i}]{Ty${i}.IntT, Ty${i}.ListT(seed % 3), Ty${i}.FnT{params: 2, result: ${r.int(1, 3)}}, Ty${i}.StrT, Ty${i}.ListT(1)}`, '    matches := 0',
@@ -577,7 +577,7 @@ const scientific = [
   (i, r, helper) => ({
     entry: `ode${i}_main`, helpers: [],
     lines: [
-      `Oscillator${i}: struct {`, '    position: Float', '    velocity: Float', '    damping: Float', '    stiffness: Float', '}', '',
+      `Oscillator${i}: struct {`, '    position: Float,', '    velocity: Float,', '    damping: Float,', '    stiffness: Float', '}', '',
       `ode${i}_step: fn(state: Oscillator${i}, dt: Float) -> Oscillator${i} {`, '    accel: 0.0 - state.stiffness * state.position - state.damping * state.velocity', '    mid_velocity: state.velocity + accel * dt * 0.5',
       `    Oscillator${i}{position: state.position + mid_velocity * dt, velocity: state.velocity + accel * dt, damping: state.damping, stiffness: state.stiffness}`, '}', '',
       `ode${i}_main: fn(seed: Int) -> Int {`, `    state := Oscillator${i}{position: 1.0, velocity: 0.0, damping: 0.${r.int(1, 9)}, stiffness: ${r.int(1, 9)}.0}`,
@@ -589,8 +589,8 @@ const scientific = [
 // ---------------------------------------------------------- generic-lib
 
 const genericCommon = [
-  'Boxed: struct<T> {', '    value: T', '    version: Int', '}', '',
-  'Keyed: struct<K, V> {', '    key: K', '    value: V', '}', '',
+  'Boxed: struct<T> {', '    value: T,', '    version: Int', '}', '',
+  'Keyed: struct<K, V> {', '    key: K,', '    value: V', '}', '',
   'boxed: fn<T>(value: T, version: Int) -> Boxed<T> { Boxed<T>{value: value, version: version} }', '',
   'unbox: fn<T>(box: Boxed<T>) -> T { box.value }', '',
   'keyed: fn<K, V>(key: K, value: V) -> Keyed<K, V> { Keyed<K, V>{key: key, value: value} }', '',
@@ -603,7 +603,7 @@ const genericLib = [
   (i, r, helper) => ({
     entry: `model${i}_main`, helpers: [`model${i}_rank`],
     lines: [
-      `Model${i}: struct {`, '    id: Int', '    label: String', '    score: Int', '}', '',
+      `Model${i}: struct {`, '    id: Int,', '    label: String,', '    score: Int', '}', '',
       `model${i}_rank: fn(x: Int) -> Int { (x * ${r.int(2, 13)}) % 211 }`, '',
       `model${i}_main: fn(seed: Int) -> Int {`, `    models := [Model${i}]{}`,
       `    loop k in 0..<(seed % 6 + 3) -> &models.push(Model${i}{id: k, label: "${r.pick(WORDS)}{k}", score: model${i}_rank(seed + k)})`,
@@ -649,7 +649,7 @@ const generatedKinds = [
     return {
       entry: `registry${i}_main`, helpers: [`registry${i}_code`],
       lines: [
-        `// Generated registry ${i}; do not edit.`, `Registry${i}: enum {`, ...variants.map(v => `    ${v}`), '}', '',
+        `// Generated registry ${i}; do not edit.`, `Registry${i}: enum {`, ...variants.map(v => `    ${v},`), '}', '',
         `registry${i}_to_code: fn(kind: Registry${i}) -> Int {`, '    if kind == {', ...variants.map((v, k) => `        .${v} -> ${k * 3 + 1}`), '    }', '}', '',
         `registry${i}_from_code: fn(code: Int) -> Registry${i} {`, '    if code == {', ...variants.map((v, k) => `        ${k * 3 + 1} -> Registry${i}.${v}`), `        else -> Registry${i}.Kind0`, '    }', '}', '',
         `registry${i}_code: fn(x: Int) -> Int { registry${i}_to_code(registry${i}_from_code(x % 72)) }`, '',
@@ -673,7 +673,7 @@ const generatedKinds = [
     return {
       entry: `accessors${i}_main`, helpers: [],
       lines: [
-        `// Generated accessors ${i}; do not edit.`, `Record${i}: struct {`, ...fields.map(f => `    ${f}: Int`), '}', '',
+        `// Generated accessors ${i}; do not edit.`, `Record${i}: struct {`, ...fields.map(f => `    ${f}: Int,`), '}', '',
         `impl Record${i} {`, ...fields.flatMap(f => [`    get_${f}: fn(self) -> Int { self.${f} }`, `    set_${f}: fn(&self, value: Int) { self.${f} = value }`]), '}', '',
         `accessors${i}_main: fn(seed: Int) -> Int {`, `    record := Record${i}{${fields.map((f, k) => `${f}: ${k}`).join(', ')}}`, ...fields.map((f, k) => `    &record.set_${f}(seed + ${k})`),
         `    (${fields.map(f => `record.get_${f}()`).join(' + ')} + ${helper('seed')}) % ${M}`, '}',

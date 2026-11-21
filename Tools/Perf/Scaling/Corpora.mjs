@@ -37,7 +37,7 @@ function modules(n, r) {
     const a = r.int(3, 97);
     const b = r.int(2, 31);
     files[`modules/part_${i}.jet`] = [
-      `Record${i}: struct {`, '    id: Int', '    weight: Int', '}', '',
+      `Record${i}: struct {`, '    id: Int,', '    weight: Int', '}', '',
       `record_${i}_make: fn(seed: Int) -> Record${i} { Record${i}{id: seed % 97, weight: (seed * ${a}) % 89} }`, '',
       `record_${i}_score: fn(seed: Int) -> Int {`,
       `    record: record_${i}_make(seed)`,
@@ -127,7 +127,7 @@ function wideEnums(n, r) {
   const decl = ['Opcode: enum {'];
   for (let i = 0; i < n; i++) {
     const v = variant(i);
-    decl.push(i % 4 === 0 ? `    ${v}` : i % 4 === 1 ? `    ${v}(Int)` : i % 4 === 2 ? `    ${v}(start: Int, width: Int)` : `    ${v}(String)`);
+    decl.push(i % 4 === 0 ? `    ${v},` : i % 4 === 1 ? `    ${v}(Int),` : i % 4 === 2 ? `    ${v}(start: Int, width: Int),` : `    ${v}(String),`);
   }
   decl.push('}', '');
   const cost = ['opcode_cost: fn(op: Opcode) -> Int {', '    if op == {'];
@@ -160,7 +160,7 @@ function implsTraits(n, r) {
   const traitCount = Math.max(4, Math.floor(n / 8));
   const traits = [];
   for (let k = 0; k < traitCount; k++) {
-    traits.push([`Capability${k}: trait {`, `    measure_${k}: fn(self) -> Int`, `    label_${k}: fn(self) -> String`, '}', '',
+    traits.push([`Capability${k}: trait {`, `    measure_${k}: fn(self) -> Int,`, `    label_${k}: fn(self) -> String`, '}', '',
       `capability_${k}_total: fn(items: [Capability${k}]) -> Int {`, '    total := 0',
       `    loop item in items -> total = (total + item.measure_${k}() + item.label_${k}().len()) % ${M}`, '    total', '}']);
   }
@@ -168,7 +168,7 @@ function implsTraits(n, r) {
   const types = [];
   const entries = [];
   for (let i = 0; i < n; i++) {
-    const lines = [`Entity${i}: struct {`, '    id: Int', '    name: String', '}', ''];
+    const lines = [`Entity${i}: struct {`, '    id: Int,', '    name: String,', '}', ''];
     const chosen = [];
     for (let j = 0; j < 4; j++) {
       const k = (i * 4 + j) % traitCount;
@@ -196,7 +196,7 @@ function generics(n, r) {
   const files = {};
   const entries = [];
   const lines = [
-    'Slot: struct<T> {', '    value: T', '    mark: Int', '}', '',
+    'Slot: struct<T> {', '    value: T,', '    mark: Int', '}', '',
     'wrap: fn<T>(value: T, mark: Int) -> Slot<T> { Slot<T>{value: value, mark: mark} }', '',
     'first_or: fn<T>(items: [T], fallback: T) -> T {', '    if items.len() > 0 -> return items[0]', '    fallback', '}', '',
     'count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {', '    total := 0', '    loop item in items {', '        if keep(item) -> total += 1', '    }', '    total', '}', '',
@@ -204,7 +204,7 @@ function generics(n, r) {
   ];
   for (let i = 0; i < n; i++) {
     const a = r.int(2, 97);
-    lines.push(`Thing${i}: struct {`, '    id: Int', '    weight: Int', '}', '',
+    lines.push(`Thing${i}: struct {`, '    id: Int,', '    weight: Int', '}', '',
       `thing_${i}_use: fn(seed: Int) -> Int {`,
       `    things: [Thing${i}]{Thing${i}{id: seed % 31, weight: ${a}}, Thing${i}{id: seed % 17, weight: ${a + 1}}}`,
       `    chosen: first_or(things, Thing${i}{id: 0, weight: 0})`,
@@ -256,7 +256,7 @@ function dataTables(n, r) {
     lines.push('    }', '}', '');
   }
   const rows = Math.max(8, Math.floor(n / 8));
-  lines.push('Row: struct {', '    id: Int', '    weight: Int', '    name: String', '}', '', 'row_table: fn() -> [Row] {', '    [Row]{');
+  lines.push('Row: struct {', '    id: Int,', '    weight: Int,', '    name: String', '}', '', 'row_table: fn() -> [Row] {', '    [Row]{');
   for (let i = 0; i < rows; i++) lines.push(`        Row{id: ${i}, weight: ${r.int(0, 999)}, name: "row-${i}"},`);
   lines.push('    }', '}', '', 'name_table: fn() -> [String:Int] {', '    [String:Int]{');
   for (let i = 0; i < rows; i++) lines.push(`        "key-${i}": ${r.int(0, 999)},`);
@@ -312,7 +312,7 @@ function errors(n, r) {
     const k = Math.floor(i / 16);
     const lines = [];
     if (i % 16 === 0) {
-      lines.push('#Error', `Fault${k}: enum {`, '    Missing', '    Invalid(Int)', '    Overflow(limit: Int, seen: Int)', '}', '',
+      lines.push('#Error', `Fault${k}: enum {`, '    Missing,', '    Invalid(Int),', '    Overflow(limit: Int, seen: Int)', '}', '',
         `fault_${k}_code: fn(fault: Fault${k}) -> Int {`, '    if fault == {', '        .Missing -> 1', '        .Invalid(value) -> value % 97', '        .Overflow(limit, seen) -> limit + seen', '    }', '}', '');
     }
     const limit = r.int(50, 500);
