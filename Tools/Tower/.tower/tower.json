@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112738,
+    "rev": 112741,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -45047,7 +45047,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -45071,20 +45071,20 @@
         {
           "n": 1,
           "text": "With the release-built jet, pipe.sh shows each watched edit's output within 1.5 s of the write, both for a changed program and for the gap case. The receipt names the root removed. Proof: `jet test Compiler --profile cases --filter DevPartsRoutine/watching_dev_reruns` with the edit-to-output times in its receipt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:01:21.138Z"
+          "evidence": "Receipt, p390 batch compiler (census build of a8df17dfb5, the release-built jet from the landing census), 2026-11-20 at load 12.8/26.0/72.8: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/devwatch.py drives `jet dev app.jet` on the WatchingDevRerunsOnJITGapAndRecovers fixture with stdout on a pipe and times each write to its output line. Changed program v2-v6: 0.130, 0.131, 0.130, 0.131 and 0.132 s. Gap edit: 0.646 s. Recovering edit: 0.147 s. Every edit is under 1.5 s (was 4.9 s for the gap and 3.75 s for the final edit on a34ef0affd). Root removed: the slow path was the Rust-era jet dev (a34ef0affd still held 64 .rs sources), whose gap edit went through the JIT gap fallback and rebuilt beyond one compile. The native jet dev compiles each edit once at O0 and runs the linked image from memory (D-EXEC2=A), so that path no longer exists. The root is named by the mechanism replaced, not by a bisect. `--filter DevPartsRoutine/watching_dev_reruns` passes in the p388, p389 and p390 full suites. Receipt JSON: $JET_SCRATCH_ROOT/lanes/Main/proofs-p389/6544-devwatch.json.",
+          "at": "2026-11-21T04:00:08.779Z"
         },
         {
           "n": 2,
           "text": "Both dev_parts_routine watch cases pass three runs in a row inside the full cases suite, using readiness waits instead of fixed sleeps, with the release gate's retry. Proof: `jet test Compiler --profile cases --filter DevPartsRoutine/` passes three runs in a row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:01:22.054Z"
+          "evidence": "Both watch cases, Tests/Cases/DevPartsRoutine/watching_dev_reruns_on_jit_gap_and_recovers.case and watching_dev_deopts_on_gap_edit_and_recovers.case, PASS in three consecutive full cases suites: p388 (census build of 859b88924b), p389 (113aff2b14) and p390 (a8df17dfb5), with the suite retry. They wait for each build output instead of sleeping (34c2101f19).",
+          "at": "2026-11-21T04:00:10.123Z"
         }
       ],
       "refs": [],
@@ -45092,8 +45092,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:54:22.305Z",
-      "updated": "2026-11-20T08:52:12.646Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-21T04:00:25.193Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-21T04:00:25.193Z"
     },
     {
       "id": "c0zy9mhn",
@@ -130309,6 +130310,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T04:00:25.194Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0166xrw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-21T04:00:10.123Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0166xrw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-21T04:00:08.779Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0166xrw",
+      "note": "#1"
+    },
     {
       "at": "2026-11-21T03:55:28.785Z",
       "by": "Main",
