@@ -1192,6 +1192,22 @@ Tests/Cases/Perf/zones_request_lapses_unrenewed.case and
 Tests/Cases/Perf/overlapping_zones_attaches_share_the_window.case are the
 worked examples.
 
+While a zones window is open the program also keeps a live file,
+`jet-flight-<pid>.samples.live`, owner-only. It stands beside the ring when
+the private directory is a memory file system, else in `/dev/shm/jet-<euid>`,
+made and checked as the private directory is. Where neither is, no live
+file is made. Each thread that closes a zone claims a slot in it at its
+first record of the window. Its zones, frame marks, plots and log spans
+then go to its slot rather than its zone ring, with no lock, allocation or
+system call. A slot keeps the newest 256 KiB of records; each record
+carries a sequence number, so a reader counts the ones it missed. The
+header names the pid, the layout, the zones' clock as a pair that each
+turn refreshes, and how the window ended. At each turn the writer copies
+the slots' new records into `.samples.spans`, so a point attach reads the
+same rows as before. As the window closes, or at the exit, it copies the
+last of them, marks the end in the header and removes the file. A reader
+that holds it open keeps reading until it closes it.
+
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
 rows: a program that closes more zones, log spans, frame marks and plots
@@ -1203,9 +1219,9 @@ writes the counts in a last row. The `zones` section keeps them as
 zones, 2 log spans`, naming each kind that lost any. A zone's `count`
 is the zones the file kept. Zones turning on in a flight-recorded run empty
 the flight ring's file first. At a normal exit the program removes its ring, the ring's image, its
-`.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
-`jet perf attach` removes, from the temporary directory and the user's
-private directory, each file of this user's named for a process
+`.spans`, its `.window` and its live file. A killed program can't, so the next `jet perf run` or
+`jet perf attach` removes, from the temporary directory, the user's
+private directory and `/dev/shm/jet-<euid>`, each file of this user's named for a process
 (`jet-flight-<pid>.…`, `jet-perf-<pid>-…`, `jet-perf-attach-<pid>-…`, an
 attach's copies under the attach's own pid) when that process is gone or
 started after the file was last written, a later process under the same

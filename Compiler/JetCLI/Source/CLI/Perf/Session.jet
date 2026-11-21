@@ -918,17 +918,25 @@ jet_cli_perf_flight_place: fn() -[Env]> {parent: String, name: String} Never! {
 // temporary directory, a session's samples and the files beside them
 // (`jet-perf-<pid>-…`) and an attach's copies (`jet-perf-attach-<pid>-…`);
 // in this user's flight directory, when it is there and theirs alone, a
-// flight-recorded program's ring, image, zones' rows and requests
-// (`jet-flight-<pid>.…`) and an attach's copies. A program that exits
+// flight-recorded program's ring, image, zones' rows, live file and
+// requests (`jet-flight-<pid>.…`) and an attach's copies; and in
+// `/dev/shm/jet-<euid>`, on the same terms, the live files a program kept
+// there (JetRuntime PerfSamples.jet perf_live_path). A program that exits
 // removes its own (JetRuntime PerfSamples.jet perf_flight_end), and a
 // session or attach removes what it reads.
 jet_cli_perf_sweep_leftovers: fn() -[FS, Env, Time]> {
     jet_cli_perf_sweep(perf_sys.temp_dir())
     place: jet_cli_perf_flight_place()
-    home: perf_files.join(place.parent, place.name)
-    facts: perf_files.lstat(home) ?? return
+    jet_cli_perf_sweep_private(perf_files.join(place.parent, place.name))
+    jet_cli_perf_sweep_private("/dev/shm/jet-{perf_sys.geteuid()}")
+}
+
+// jet_cli_perf_sweep of `dir` when it is a directory, not a link, this
+// user owns and no one else can open.
+jet_cli_perf_sweep_private: fn(dir: String) -[FS, Env, Time]> {
+    facts: perf_files.lstat(dir) ?? return
     if facts.is_dir && !facts.is_symlink && facts.owner == Val(perf_sys.geteuid()) && facts.mode & 0o077 == 0 {
-        jet_cli_perf_sweep(home)
+        jet_cli_perf_sweep(dir)
     }
 }
 

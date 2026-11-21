@@ -2768,7 +2768,8 @@ PERF_ZONE_CALIBRATION_NS: I64{1000000}
 
 // The word heading the zone rings (perf_zone_ring), 0 until zones first
 // turn on. A ring is one thread's: its head (bytes written, which its
-// thread alone stores)@0, the next ring@8, its tail (bytes drained, which
+// thread alone stores)@0, the next ring@8, its thread's slot in the live
+// file@16 to @32 (PERF_LIVE_RING_LINE), its tail (bytes drained, which
 // only a drainer stores, under the spans buffer's lock)@64, then
 // PERF_ZONE_RING_BYTES of records from PERF_ZONE_RING_AT. A record: the
 // zone's start and end on the zones' clock, its task, the name's byte
@@ -3279,7 +3280,8 @@ perf_zones_close_open: fn() {
 // the head, which publishes it to the drain (perf_zone_rings_drain); no
 // lock. A ring with no room for it is drained first, under the spans
 // buffer's lock (perf_zone_ring_spill). A thread without a ring, or a name
-// too long for one, writes its row to the spans buffer itself.
+// too long for one, writes its row to the spans buffer itself. While a live
+// file stands, the record goes to the thread's slot instead (perf_live_put).
 perf_zone_ring_put: fn(start: I64, end: I64, name: I64) {
     length: rt_text_len(name)
     size: wrapping(I64{32} + (wrapping(length + I64{7}) & I64{-8}))
@@ -3287,6 +3289,11 @@ perf_zone_ring_put: fn(start: I64, end: I64, name: I64) {
     if (ring == I64{0} || size > PERF_ZONE_RING_RECORD_MOST) {
         scale: perf_zone_scale()
         perf_zone_row(PERF_ZONE_ZONE, perf_zone_ns(start, scale), perf_zone_ns(end, scale), name)
+        return
+    }
+    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
+    line: perf_live_line(ring)
+    if (line != I64{0} && perf_live_put(ring, line, PERF_ZONE_ZONE, start, end, task, rt_text_data(name), length)) {
         return
     }
     head := sync_load(ring)
@@ -3302,7 +3309,6 @@ perf_zone_ring_put: fn(start: I64, end: I64, name: I64) {
         }
         head = wrapping(head + room)
     }
-    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
     perf_zone_row_store(wrapping(data + (head & PERF_ZONE_RING_MASK)), PERF_ZONE_ZONE, start, end, task, rt_text_data(name), length)
     sync_store(ring, wrapping(head + size))
 }
@@ -3435,7 +3441,10 @@ perf_zone_ring_drain: fn(buffer: I64, ring: I64, scale: I64) {
 // (perf_spans_buffer), written out when it fills and at exit
 // (perf_spans_flush); a row larger than the buffer is written alone, after
 // the rows before it. A zone's row comes through its thread's zone ring
-// (perf_zone_ring_put).
+// (perf_zone_ring_put). While a live file stands, a log span, frame mark
+// or plot of a thread that has a zone ring goes to its slot instead
+// (perf_live_put). The ring is not made here: an unattached thread's
+// TCB word reads zero and takes no store.
 perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
     buffer: perf_spans_buffer
     if (buffer == I64{0}) {
@@ -3443,6 +3452,13 @@ perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
     }
     length: rt_text_len(name)
     task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> perf_zone_task()
+    if (kind != PERF_ZONE_ZONE && kind <= PERF_ZONE_PLOT && perf_live_on()) {
+        ring: sync_load(wrapping(thread_base() + PERF_ZONE_TCB_RING))
+        line: if (ring == I64{0}) -> I64{0} else -> perf_live_line(ring)
+        if (line != I64{0} && perf_live_put(ring, line, kind, start, end, task, rt_text_data(name), length)) {
+            return
+        }
+    }
     sync_thread_lock(buffer)
     perf_spans_put(buffer, kind, start, end, task, rt_text_data(name), length)
     sync_thread_unlock(buffer)
@@ -3544,11 +3560,13 @@ perf_spans_drop: fn(buffer: I64, rows: I64, size: I64) {
 }
 
 // Write out the rows the spans buffer holds (perf_zone_row) and those of
-// the zone rings (perf_zone_rings_drain); at exit (perf_samples_exit),
+// the zone rings (perf_zone_rings_drain) and the live file's slots
+// (perf_live_drain); at exit (perf_samples_exit),
 // before the samples' last record, and at each publication of a flight
 // recorder whose zones `jet perf attach` turned on (perf_flight_zones).
 // With `tally`, at exit and as an attach's zones window closes, a file
-// past its bound then gets a PERF_ZONE_DROPPED row: the counts of rows it
+// past its bound, or one whose live slots lost zones, then gets a
+// PERF_ZONE_DROPPED row: the counts of rows it
 // dropped (perf_spans_drop), log spans, zones, frame marks then plotted
 // values, each a word. A reader keeps the last such row.
 perf_spans_flush: fn(tally: Bool) {
@@ -3558,9 +3576,11 @@ perf_spans_flush: fn(tally: Bool) {
     }
     sync_thread_lock(buffer)
     perf_zone_rings_drain(buffer)
+    perf_live_drain(buffer)
     perf_spans_write(buffer, wrapping(buffer + PERF_SPANS_HEADER_BYTES), rt_text_word(wrapping(buffer + I64{8})))
     rt_text_store(wrapping(buffer + I64{8}), I64{0})
-    if (tally && rt_text_word(wrapping(buffer + I64{16})) < I64{0}) {
+    dropped: rt_text_word(wrapping(buffer + I64{16})) < I64{0} || rt_text_word(wrapping(wrapping(buffer + PERF_SPANS_DROPPED_AT) + (PERF_ZONE_ZONE << I64{3}))) > I64{0}
+    if (tally && dropped) {
         row: jet_rt_alloc(I64{64}, I64{8})
         now: perf_zone_now()
         perf_zone_row_store(row, PERF_ZONE_DROPPED, now, now, I64{0}, wrapping(buffer + PERF_SPANS_DROPPED_AT), I64{32})
@@ -5935,8 +5955,9 @@ PERF_FLIGHT_LEASES_BYTES: I64{4096}
 // few for a window sampled at 8 kHz; each thread then samples its CPU time
 // every PERF_SAMPLES_INTERVAL_US (perf_samples_rate), as under `jet perf
 // run`; then the window's opening time, CPU time, handler time and lost
-// records are taken. Without the file no window opens, and zones are on at
-// the flight recorder's interval.
+// records are taken, and the live file is made (perf_live_open). Without
+// the window file no window opens, and zones are on at the flight
+// recorder's interval.
 perf_flight_window_open: fn(path: I64) {
     if (perf_flight_window_at >= I64{0} || perf_samples_fd < I64{0}) {
         return
@@ -5980,6 +6001,7 @@ perf_flight_window_open: fn(path: I64) {
         perf_flight_window_lost = lost
         perf_flight_window_at = opened
     }
+    perf_live_open(path)
 }
 
 // The window closes as zones turn off, the last attach's lease gone or
@@ -5992,7 +6014,8 @@ perf_flight_window_open: fn(path: I64) {
 // then five words, the interval its samples stand for in microseconds, the
 // process's CPU time in it, the nanoseconds the handlers ran in it, the
 // kernel's to deliver one signal (perf_samples_delivery), and the records
-// lost in it.
+// lost in it. The live file goes first (perf_live_close), its slots'
+// records to the spans buffer.
 perf_flight_window_close: fn() {
     opened: perf_flight_window_at
     if (opened < I64{0}) {
@@ -6008,6 +6031,7 @@ perf_flight_window_close: fn() {
         perf_samples_fd = perf_flight_socket
         perf_flight_window_at = I64{-1}
     }
+    perf_live_close(PERF_LIVE_CLOSED)
     perf_samples_flush(perf_flight_window_fd)
     spans: perf_spans_buffer
     if (spans == I64{0}) {
@@ -6026,12 +6050,14 @@ perf_flight_window_close: fn() {
 }
 
 // At the exit (perf_samples_exit): close a window still open, under the
-// flight recorder's lock, which a publication may hold meanwhile.
+// flight recorder's lock, which a publication may hold meanwhile. The live
+// file's header says the run exited.
 perf_flight_window_end: fn() {
     state: perf_flight_state
     if (state == I64{0} || perf_flight_window_at < I64{0} || !perf_flight_lock(state, I64{100000000})) {
         return
     }
+    perf_live_close(PERF_LIVE_EXITED)
     perf_flight_window_close()
     sync_store(state, I64{0})
 }
@@ -6518,7 +6544,8 @@ perf_flight_publish: fn(directory: I64) {
 // (perf_flight_window_open); once none stands the window closes, the zones
 // word is cleared, and the rows stay for the attaches to read, with the
 // counts of those the bound dropped. Log spans keep writing rows while
-// zones are off, within the file's bound (PERF_SPANS_FILE_BYTES).
+// zones are off, within the file's bound (PERF_SPANS_FILE_BYTES). Each
+// turn refreshes the live file's clock pair (perf_live_turn).
 perf_flight_zones: fn(home: I64, path: I64) {
     request: perf_flight_beside(path, rt_static_text(".zones"))
     name: observe_cstring(request)
@@ -6550,6 +6577,7 @@ perf_flight_zones: fn(home: I64, path: I64) {
         perf_flight_window_close()
         perf_zones_set(I64{0})
     }
+    perf_live_turn()
     perf_spans_flush(closing)
 }
 
@@ -6612,6 +6640,533 @@ perf_flight_lease_name: fn(name: I64, prefix: I64, length: I64) -> Bool {
         at = wrapping(at + I64{1})
     }
     true
+}
+
+// The live file. While an attach's zones window is open, the program keeps
+// one owner-only file, `jet-flight-<pid>.samples.live`, which `jet perf
+// attach --follow` reads with pread while the program writes it: beside the
+// published ring when the private directory is a memory file system, else
+// in `jet-<euid>` under /dev/shm, made and checked the same way
+// (perf_live_path). Where neither is, no live file is made, and the window
+// keeps the zone rings alone. It is made as the window opens
+// (perf_live_open) and removed as it closes (perf_live_close).
+//
+// Its header page, at 0: PERF_LIVE_MAGIC, PERF_LIVE_VERSION, the slot
+// count (PERF_LIVE_SLOTS), the slots claimed, the claims that failed, the
+// pid, the end (PERF_LIVE_RUNNING, PERF_LIVE_EXITED or PERF_LIVE_CLOSED),
+// a word kept for the exit status (-1), then which clock pair is current.
+// The two clock pairs follow at PERF_LIVE_CLOCKS_AT, each the zones'
+// clock flag (perf_zone_tsc), its base count and nanoseconds, and the
+// scale (perf_zone_scale). Then the real-time clock's nanoseconds at the
+// timeline's 0, the window's opening on the timeline, and the layout: the
+// lines' offset and size, the slots' offset and size, and the zones
+// buffer's size, so a reader checks the layout it reads. The followers'
+// rows are kept from PERF_LIVE_FOLLOWERS_AT, zero for now.
+//
+// From PERF_LIVE_HEADS_AT comes one PERF_LIVE_LINE line per slot. It holds
+// each of the slot's three buffers' head, tail and next sequence number,
+// then the thread's id, then the turn's read position and next sequence
+// number in the zones buffer (perf_live_drain). From PERF_LIVE_SLOTS_AT
+// come the slots, PERF_LIVE_SLOT bytes each: PERF_LIVE_ZONES bytes of
+// zones, frame marks, plots and log spans, then two buffers kept for waits
+// and samples, which take the record socket for now.
+//
+// A zones buffer's record is a spans row (perf_zone_row) with its sequence
+// number after the length word and its name padded to a word. A zone's
+// edges are on the zones' clock, which a reader converts with the current
+// clock pair; the other kinds' are on the timeline. The slot's thread alone
+// writes it. Before overwriting, it moves the tail past whole records,
+// keeping its newest; then it stores the record, then the head. A record
+// that would cross the buffer's end starts it over, behind a skip record
+// (PERF_ZONE_RING_SKIP) when 32 bytes are left, as in a zone ring. On
+// x86-64, stores reach other cores in program order, so a reader that sees
+// a head sees the records before it. A reader copies a record, then
+// rereads the tail: a record below it was overwritten meanwhile, a gap
+// counted by its sequence numbers.
+PERF_LIVE_MAGIC: I64{3550338754064696650}
+
+PERF_LIVE_VERSION: I64{1}
+
+PERF_LIVE_CLAIMED: I64{24}
+
+PERF_LIVE_FAILED: I64{32}
+
+PERF_LIVE_PID: I64{40}
+
+PERF_LIVE_END: I64{48}
+
+PERF_LIVE_STATUS: I64{56}
+
+PERF_LIVE_CLOCK: I64{64}
+
+PERF_LIVE_CLOCKS_AT: I64{72}
+
+PERF_LIVE_START: I64{136}
+
+PERF_LIVE_OPENED: I64{144}
+
+PERF_LIVE_LAYOUT_AT: I64{152}
+
+PERF_LIVE_FOLLOWERS_AT: I64{1024}
+
+PERF_LIVE_HEADS_AT: I64{4096}
+
+PERF_LIVE_LINE: I64{128}
+
+PERF_LIVE_SLOTS: I64{256}
+
+PERF_LIVE_SLOTS_AT: I64{65536}
+
+PERF_LIVE_SLOT: I64{393216}
+
+PERF_LIVE_ZONES: I64{262144}
+
+PERF_LIVE_ZONES_MASK: I64{262143}
+
+// The file's bytes: PERF_LIVE_SLOTS_AT, then every slot.
+PERF_LIVE_BYTES: I64{100728832}
+
+// A record's words before its name.
+PERF_LIVE_RECORD: I64{40}
+
+PERF_LIVE_RUNNING: I64{0}
+
+PERF_LIVE_EXITED: I64{1}
+
+PERF_LIVE_CLOSED: I64{2}
+
+// A line's words: the zones buffer's tail and next sequence number (its
+// head is at 0), the thread's id, and the turn's read position and next
+// sequence number.
+PERF_LIVE_LINE_TAIL: I64{8}
+
+PERF_LIVE_LINE_SEQUENCE: I64{16}
+
+PERF_LIVE_LINE_THREAD: I64{72}
+
+PERF_LIVE_LINE_READ: I64{80}
+
+PERF_LIVE_LINE_READ_SEQUENCE: I64{88}
+
+// The live state (perf_live_state), one private page: its lock word, which
+// a claim and the window's opening and closing take; the window's
+// generation, 0 while no live file stands; the file's descriptor; its
+// mapping, 0 while none; the windows opened; the two reserved regions the
+// windows map the file over in turn, 0 until reserved; and the file's path.
+PERF_LIVE_STATE_BYTES: I64{4096}
+
+PERF_LIVE_GENERATION: I64{8}
+
+PERF_LIVE_FD: I64{16}
+
+PERF_LIVE_MAP: I64{24}
+
+PERF_LIVE_WINDOWS: I64{32}
+
+PERF_LIVE_REGIONS: I64{40}
+
+PERF_LIVE_PATH: I64{56}
+
+// A zone ring's words for its thread's slot (perf_live_claim), which a
+// fiber borrows with the ring (perf_rings_lend): the slot's line, 0 when
+// the claim failed; the window's generation the claim was made in; and the
+// slot's zones buffer.
+PERF_LIVE_RING_LINE: I64{16}
+
+PERF_LIVE_RING_GENERATION: I64{24}
+
+PERF_LIVE_RING_DATA: I64{32}
+
+// The live state, 0 until the first live file.
+perf_live_state := I64{0}
+
+// Whether a live file stands.
+perf_live_on: fn() -> Bool {
+    state: perf_live_state
+    state != I64{0} && sync_load(wrapping(state + PERF_LIVE_GENERATION)) != I64{0}
+}
+
+// The line of this thread's slot, whose claim its zone ring `ring` holds
+// for the current window. 0 while no live file stands or when the claim
+// failed, and then the thread's records take the zone ring or the spans
+// buffer, as without a live file.
+perf_live_line: fn(ring: I64) -> I64 {
+    state: perf_live_state
+    if (state == I64{0}) { return I64{0} }
+    generation: sync_load(wrapping(state + PERF_LIVE_GENERATION))
+    if (generation == I64{0}) { return I64{0} }
+    if (sync_load(wrapping(ring + PERF_LIVE_RING_GENERATION)) == generation) {
+        return sync_load(wrapping(ring + PERF_LIVE_RING_LINE))
+    }
+    perf_live_claim(state, ring, generation)
+}
+
+// A thread claims the next slot at its first record in the window
+// `generation`, in its own context (a zone or a row, never a handler),
+// under the live state's lock. fallocate reserves the slot's pages, so no
+// later store faults on a full file system. A claim that fails is counted
+// in the header, and the thread keeps its zone ring for the window.
+perf_live_claim: fn(state: I64, ring: I64, generation: I64) -> I64 {
+    sync_thread_lock(state)
+    line := I64{0}
+    map: sync_load(wrapping(state + PERF_LIVE_MAP))
+    if (map != I64{0} && sync_load(wrapping(state + PERF_LIVE_GENERATION)) == generation) {
+        index: sync_load(wrapping(map + PERF_LIVE_CLAIMED))
+        offset: wrapping(PERF_LIVE_SLOTS_AT + wrapping(index * PERF_LIVE_SLOT))
+        // fallocate(fd, 0, offset, length)
+        if (index < PERF_LIVE_SLOTS && observe_syscall(I64{285}, sync_load(wrapping(state + PERF_LIVE_FD)), I64{0}, offset, PERF_LIVE_SLOT) == I64{0}) {
+            line = wrapping(wrapping(map + PERF_LIVE_HEADS_AT) + wrapping(index * PERF_LIVE_LINE))
+            // gettid
+            sync_store(wrapping(line + PERF_LIVE_LINE_THREAD), observe_syscall(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}))
+            sync_store(wrapping(ring + PERF_LIVE_RING_DATA), wrapping(map + offset))
+            sync_store(wrapping(map + PERF_LIVE_CLAIMED), wrapping(index + I64{1}))
+        } else {
+            failed: wrapping(map + PERF_LIVE_FAILED)
+            sync_store(failed, wrapping(sync_load(failed) + I64{1}))
+        }
+    }
+    sync_store(wrapping(ring + PERF_LIVE_RING_LINE), line)
+    sync_store(wrapping(ring + PERF_LIVE_RING_GENERATION), generation)
+    sync_thread_unlock(state)
+    line
+}
+
+// The record of `kind` from `start` to `end` in task `task`, its name the
+// `length` bytes at `name`, in the zones buffer of the slot whose line is
+// `line` (perf_live_line), claimed through the zone ring `ring`: no lock,
+// allocation or system call. False for a record past
+// PERF_ZONE_RING_RECORD_MOST, which goes where it went without a live
+// file.
+perf_live_put: fn(ring: I64, line: I64, kind: I64, start: I64, end: I64, task: I64, name: I64, length: I64) -> Bool {
+    size: wrapping(PERF_LIVE_RECORD + (wrapping(length + I64{7}) & I64{-8}))
+    if (size > PERF_ZONE_RING_RECORD_MOST) { return false }
+    records: sync_load(wrapping(ring + PERF_LIVE_RING_DATA))
+    head := sync_load(line)
+    room: wrapping(PERF_LIVE_ZONES - (head & PERF_LIVE_ZONES_MASK))
+    taken: if (room < size) -> wrapping(room + size) else -> size
+    tail := sync_load(wrapping(line + PERF_LIVE_LINE_TAIL))
+    if (wrapping(wrapping(head + taken) - tail) > PERF_LIVE_ZONES) {
+        loop wrapping(wrapping(head + taken) - tail) > PERF_LIVE_ZONES {
+            tail = wrapping(tail + perf_live_record_bytes(records, tail))
+        }
+        // Before the bytes are overwritten: a reader that copied a record
+        // below this tail drops it.
+        sync_store(wrapping(line + PERF_LIVE_LINE_TAIL), tail)
+    }
+    if (room < size) {
+        if (room >= I64{32}) {
+            rt_text_store(wrapping(wrapping(records + (head & PERF_LIVE_ZONES_MASK)) + I64{24}), PERF_ZONE_RING_SKIP << I64{32})
+        }
+        head = wrapping(head + room)
+    }
+    record: wrapping(records + (head & PERF_LIVE_ZONES_MASK))
+    sequence: sync_load(wrapping(line + PERF_LIVE_LINE_SEQUENCE))
+    rt_text_store(record, start)
+    rt_text_store(wrapping(record + I64{8}), end)
+    rt_text_store(wrapping(record + I64{16}), task)
+    rt_text_store(wrapping(record + I64{24}), length | (kind << I64{32}))
+    rt_text_store(wrapping(record + I64{32}), sequence)
+    coll_copy(name, wrapping(record + PERF_LIVE_RECORD), length)
+    sync_store(wrapping(line + PERF_LIVE_LINE_SEQUENCE), wrapping(sequence + I64{1}))
+    sync_store(line, wrapping(head + size))
+    true
+}
+
+// The bytes from position `at` of the zones buffer `records` to the next
+// record: the rest of the buffer at a skip or where fewer than 32 bytes
+// are left, else the record's.
+perf_live_record_bytes: fn(records: I64, at: I64) -> I64 {
+    offset: at & PERF_LIVE_ZONES_MASK
+    room: wrapping(PERF_LIVE_ZONES - offset)
+    if (room < I64{32}) { return room }
+    shape: rt_text_word(wrapping(wrapping(records + offset) + I64{24}))
+    if ((shape >> I64{32}) == PERF_ZONE_RING_SKIP) { return room }
+    size: wrapping(PERF_LIVE_RECORD + (wrapping((shape & I64{4294967295}) + I64{7}) & I64{-8}))
+    if (size > room) -> room else -> size
+}
+
+// At each turn and as the window closes: the records of every claimed
+// slot's zones buffer the turn has not read yet go to the spans buffer
+// `buffer`, whose lock the caller holds, each zone's edges on the timeline
+// by one scale (perf_zone_ns). So a point attach still reads the window's
+// rows from `<ring>.spans`. Records the writer overwrote before the turn
+// read them, the gap in sequence numbers, count among the zones dropped
+// (PERF_SPANS_DROPPED_AT).
+perf_live_drain: fn(buffer: I64) {
+    state: perf_live_state
+    if (state == I64{0}) {
+        return
+    }
+    map: sync_load(wrapping(state + PERF_LIVE_MAP))
+    if (map == I64{0}) {
+        return
+    }
+    claimed := sync_load(wrapping(map + PERF_LIVE_CLAIMED))
+    if (claimed > PERF_LIVE_SLOTS) { claimed = PERF_LIVE_SLOTS }
+    if (claimed <= I64{0}) {
+        return
+    }
+    scale: perf_zone_scale()
+    scratch: jet_rt_alloc(PERF_ZONE_RING_RECORD_MOST, I64{8})
+    lost := I64{0}
+    index := I64{0}
+    loop index < claimed {
+        line: wrapping(wrapping(map + PERF_LIVE_HEADS_AT) + wrapping(index * PERF_LIVE_LINE))
+        records: wrapping(wrapping(map + PERF_LIVE_SLOTS_AT) + wrapping(index * PERF_LIVE_SLOT))
+        lost = wrapping(lost + perf_live_slot_drain(buffer, line, records, scratch, scale))
+        index = wrapping(index + I64{1})
+    }
+    jet_rt_free(scratch, PERF_ZONE_RING_RECORD_MOST, I64{8})
+    if (lost > I64{0}) {
+        count: wrapping(wrapping(buffer + PERF_SPANS_DROPPED_AT) + (PERF_ZONE_ZONE << I64{3}))
+        rt_text_store(count, wrapping(rt_text_word(count) + lost))
+    }
+}
+
+// One slot's new records (perf_live_drain), copied through `scratch` and
+// checked as any reader checks them: a record whose length or kind does
+// not fit ends the slot's read at its head. The records lost.
+perf_live_slot_drain: fn(buffer: I64, line: I64, records: I64, scratch: I64, scale: I64) -> I64 {
+    head: sync_load(line)
+    at := sync_load(wrapping(line + PERF_LIVE_LINE_READ))
+    expected := sync_load(wrapping(line + PERF_LIVE_LINE_READ_SEQUENCE))
+    lost := I64{0}
+    loop at < head {
+        tail: sync_load(wrapping(line + PERF_LIVE_LINE_TAIL))
+        if (at < tail) {
+            at = tail
+            next
+        }
+        offset: at & PERF_LIVE_ZONES_MASK
+        room: wrapping(PERF_LIVE_ZONES - offset)
+        if (room < I64{32}) {
+            at = wrapping(at + room)
+            next
+        }
+        shape: sync_load(wrapping(wrapping(records + offset) + I64{24}))
+        kind: shape >> I64{32}
+        if (kind == PERF_ZONE_RING_SKIP) {
+            at = wrapping(at + room)
+            next
+        }
+        length: shape & I64{4294967295}
+        size: wrapping(PERF_LIVE_RECORD + (wrapping(length + I64{7}) & I64{-8}))
+        if (kind < I64{0} || kind > PERF_ZONE_PLOT || size > room || size > PERF_ZONE_RING_RECORD_MOST) {
+            at = head
+            break
+        }
+        rt_text_bytes_copy(scratch, wrapping(records + offset), size)
+        // Overwritten while it was copied: the tail moved past it.
+        if (sync_load(wrapping(line + PERF_LIVE_LINE_TAIL)) > at) { next }
+        sequence: rt_text_word(wrapping(scratch + I64{32}))
+        if (sequence > expected) { lost = wrapping(lost + wrapping(sequence - expected)) }
+        expected = wrapping(sequence + I64{1})
+        start := rt_text_word(scratch)
+        end := rt_text_word(wrapping(scratch + I64{8}))
+        if (kind == PERF_ZONE_ZONE) {
+            start = perf_zone_ns(start, scale)
+            end = perf_zone_ns(end, scale)
+        }
+        perf_spans_put(buffer, kind, start, end, rt_text_word(wrapping(scratch + I64{16})), wrapping(scratch + PERF_LIVE_RECORD), length)
+        at = wrapping(at + size)
+    }
+    sync_store(wrapping(line + PERF_LIVE_LINE_READ), at)
+    sync_store(wrapping(line + PERF_LIVE_LINE_READ_SEQUENCE), expected)
+    lost
+}
+
+// Whether the C string `name` names a path on a memory file system (statfs:
+// tmpfs or ramfs), where no store waits on disk writeback.
+perf_live_memory: fn(name: I64) -> Bool {
+    facts: jet_rt_alloc(I64{120}, I64{8})
+    found: observe_syscall(I64{137}, name, facts, I64{0}, I64{0}) == I64{0}
+    kind: rt_text_word(facts) & I64{4294967295}
+    jet_rt_free(facts, I64{120}, I64{8})
+    found && (kind == I64{16914836} || kind == I64{2240043254})
+}
+
+// The live file's path for the published ring `path`, a fresh text: beside
+// it when its directory is on a memory file system, else in `jet-<euid>`
+// under /dev/shm, made owner-only when missing and checked as the private
+// directory is (perf_flight_home). 0 where neither is.
+perf_live_path: fn(path: I64) -> I64 {
+    ring: observe_cstring(path)
+    beside: perf_live_memory(ring)
+    jet_rt_free(ring, wrapping(rt_text_len(path) + I64{1}), I64{1})
+    if (beside) { return perf_flight_beside(path, rt_static_text(".live")) }
+    builder: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(builder, rt_static_text("/dev/shm/jet-"))
+    // geteuid
+    observe_decimal_unsigned(builder, observe_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}))
+    directory: jet_rt_string_builder_finish(builder)
+    name: observe_cstring(directory)
+    // mkdir(name, 0700); one already there is checked as a new one is.
+    _ := observe_syscall(I64{83}, name, I64{448}, I64{0}, I64{0})
+    private: perf_flight_owned_at(I64{-100}, name, I64{16384}) >= I64{0} && perf_live_memory(name)
+    jet_rt_free(name, wrapping(rt_text_len(directory) + I64{1}), I64{1})
+    if (!private) {
+        jet_rt_string_drop(directory)
+        return I64{0}
+    }
+    ring_path: perf_flight_path(directory)
+    jet_rt_string_drop(directory)
+    live: perf_flight_beside(ring_path, rt_static_text(".live"))
+    jet_rt_string_drop(ring_path)
+    live
+}
+
+// The reserved region `which` (0 or 1) the windows map the file over in
+// turn, reserved at its first use with no memory behind it; 0 when it
+// cannot be.
+perf_live_region: fn(state: I64, which: I64) -> I64 {
+    word: wrapping(wrapping(state + PERF_LIVE_REGIONS) + (which << I64{3}))
+    held: sync_load(word)
+    if (held != I64{0}) { return held }
+    // MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE.
+    region: alloc_map_anonymous(I64{0}, PERF_LIVE_BYTES, I64{16418})
+    if (region < I64{0}) { return I64{0} }
+    sync_store(word, region)
+    region
+}
+
+// As an attach's zones window opens (perf_flight_window_open), under the
+// flight recorder's lock: the live file for the published ring `path`
+// (perf_live_path), sized, its header and lines reserved with fallocate,
+// mapped over this window's region and its header written. Then the
+// generation is stored, so each thread's next record claims a slot. The
+// two regions alternate by window, so a thread still storing into the
+// last window's pages, which perf_live_close mapped anonymous, harms
+// nothing.
+perf_live_open: fn(path: I64) {
+    state := perf_live_state
+    if (state == I64{0}) {
+        state = alloc_map_try(PERF_LIVE_STATE_BYTES)
+        if (state == I64{0}) {
+            return
+        }
+        sync_store(wrapping(state + PERF_LIVE_FD), I64{-1})
+        #Unsafe("only the observation writer opens a window, under the flight recorder's lock, and a record reads the state only once it is stored") {
+            perf_live_state = state
+        }
+    }
+    if (sync_load(wrapping(state + PERF_LIVE_MAP)) != I64{0}) {
+        return
+    }
+    live: perf_live_path(path)
+    if (live == I64{0}) {
+        return
+    }
+    name: observe_cstring(live)
+    // O_RDWR|O_CREAT|O_TRUNC|O_NOFOLLOW|O_CLOEXEC, mode 0600.
+    fd: observe_syscall(I64{257}, I64{-100}, name, I64{655938}, I64{384})
+    windows: wrapping(sync_load(wrapping(state + PERF_LIVE_WINDOWS)) + I64{1})
+    which: windows & I64{1}
+    region: if (fd < I64{0}) -> I64{0} else -> perf_live_region(state, which)
+    mapped := I64{-1}
+    // ftruncate to the whole layout, its slots sparse, then fallocate of
+    // the header and lines.
+    if (region != I64{0} && observe_syscall(I64{77}, fd, PERF_LIVE_BYTES, I64{0}, I64{0}) == I64{0} && observe_syscall(I64{285}, fd, I64{0}, I64{0}, PERF_LIVE_SLOTS_AT) == I64{0}) {
+        mapped = alloc_map_shared_at(region, PERF_LIVE_BYTES, fd)
+        // A fixed mapping that failed may have unmapped the region.
+        if (mapped != region) {
+            sync_store(wrapping(wrapping(state + PERF_LIVE_REGIONS) + (which << I64{3})), I64{0})
+        }
+    }
+    if (region == I64{0} || mapped != region) {
+        if (fd >= I64{0}) {
+            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+            _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0})
+        }
+        jet_rt_free(name, wrapping(rt_text_len(live) + I64{1}), I64{1})
+        jet_rt_string_drop(live)
+        return
+    }
+    jet_rt_free(name, wrapping(rt_text_len(live) + I64{1}), I64{1})
+    rt_text_store(region, PERF_LIVE_MAGIC)
+    rt_text_store(wrapping(region + I64{8}), PERF_LIVE_VERSION)
+    rt_text_store(wrapping(region + I64{16}), PERF_LIVE_SLOTS)
+    // getpid
+    rt_text_store(wrapping(region + PERF_LIVE_PID), observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
+    rt_text_store(wrapping(region + PERF_LIVE_END), PERF_LIVE_RUNNING)
+    rt_text_store(wrapping(region + PERF_LIVE_STATUS), I64{-1})
+    opened: perf_zone_now()
+    rt_text_store(wrapping(region + PERF_LIVE_START), wrapping(perf_flight_realtime() - opened))
+    rt_text_store(wrapping(region + PERF_LIVE_OPENED), opened)
+    layout: wrapping(region + PERF_LIVE_LAYOUT_AT)
+    rt_text_store(layout, PERF_LIVE_HEADS_AT)
+    rt_text_store(wrapping(layout + I64{8}), PERF_LIVE_LINE)
+    rt_text_store(wrapping(layout + I64{16}), PERF_LIVE_SLOTS_AT)
+    rt_text_store(wrapping(layout + I64{24}), PERF_LIVE_SLOT)
+    rt_text_store(wrapping(layout + I64{32}), PERF_LIVE_ZONES)
+    perf_live_clock(region)
+    sync_thread_lock(state)
+    sync_store(wrapping(state + PERF_LIVE_FD), fd)
+    sync_store(wrapping(state + PERF_LIVE_MAP), region)
+    sync_store(wrapping(state + PERF_LIVE_WINDOWS), windows)
+    sync_store(wrapping(state + PERF_LIVE_PATH), live)
+    sync_store(wrapping(state + PERF_LIVE_GENERATION), windows)
+    sync_thread_unlock(state)
+}
+
+// The clock pair readers convert a zone's edges with, refreshed at each
+// turn (perf_flight_zones) in the live file mapped at `map`: the spare pair
+// is written, then which pair is current, so no reader sees half of one.
+perf_live_clock: fn(map: I64) {
+    spare: (rt_text_word(wrapping(map + PERF_LIVE_CLOCK)) & I64{1}) ~ I64{1}
+    pair: wrapping(wrapping(map + PERF_LIVE_CLOCKS_AT) + (spare << I64{5}))
+    rt_text_store(pair, perf_zone_tsc)
+    rt_text_store(wrapping(pair + I64{8}), perf_zone_tsc_base)
+    rt_text_store(wrapping(pair + I64{16}), perf_zone_ns_base)
+    rt_text_store(wrapping(pair + I64{24}), perf_zone_scale())
+    sync_store(wrapping(map + PERF_LIVE_CLOCK), spare)
+}
+
+// At each turn while a live file stands (perf_flight_zones): its clock
+// pair.
+perf_live_turn: fn() {
+    state: perf_live_state
+    if (state == I64{0}) {
+        return
+    }
+    map: sync_load(wrapping(state + PERF_LIVE_MAP))
+    if (map != I64{0}) { perf_live_clock(map) }
+}
+
+// As the window closes (perf_flight_window_close), or at the exit
+// (perf_flight_window_end): no new record takes a slot, the slots' records
+// go to the spans buffer (perf_live_drain), `end` (PERF_LIVE_CLOSED or
+// PERF_LIVE_EXITED) goes to the header, and the file's name goes. Its pages
+// go once the last reader closes it: the region is mapped anonymous again,
+// so a thread storing a record it began before the generation's store
+// writes fresh private pages.
+perf_live_close: fn(end: I64) {
+    state: perf_live_state
+    if (state == I64{0}) {
+        return
+    }
+    map: sync_load(wrapping(state + PERF_LIVE_MAP))
+    if (map == I64{0}) {
+        return
+    }
+    sync_store(wrapping(state + PERF_LIVE_GENERATION), I64{0})
+    spans: perf_spans_buffer
+    if (spans != I64{0}) {
+        sync_thread_lock(spans)
+        perf_live_drain(spans)
+        sync_thread_unlock(spans)
+    }
+    sync_store(wrapping(map + PERF_LIVE_END), end)
+    path: sync_load(wrapping(state + PERF_LIVE_PATH))
+    perf_flight_unlink(path)
+    jet_rt_string_drop(path)
+    sync_thread_lock(state)
+    // MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|MAP_NORESERVE over the region.
+    _ := alloc_map_anonymous(map, PERF_LIVE_BYTES, I64{16434})
+    _ := observe_syscall(I64{3}, sync_load(wrapping(state + PERF_LIVE_FD)), I64{0}, I64{0}, I64{0})
+    sync_store(wrapping(state + PERF_LIVE_FD), I64{-1})
+    sync_store(wrapping(state + PERF_LIVE_MAP), I64{0})
+    sync_store(wrapping(state + PERF_LIVE_PATH), I64{0})
+    sync_thread_unlock(state)
 }
 
 // `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
