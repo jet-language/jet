@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112900,
+    "rev": 112915,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44,7 +44,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-11-20T14:08:48.458Z",
+    "completionCursor": "2026-11-21T11:59:55.195Z",
     "dayStart": {
       "date": "2026-11-21",
       "openCards": 315,
@@ -51615,6 +51615,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T07:07:46.921Z"
+        },
+        {
+          "n": 10,
+          "text": "The case runner never errors on a step whose child exits, as expected, before reading its stdin: in the p413 full suite (dev ba5711569a, 2026-11-21) Tests/Cases/Debug/stdin_file_is_the_program_s_input_while_the_console_reads_commands.case reported ERROR \"stdin: closed during write `process stdin`: process stdin closed; child exited 2 without reading it\" on the step `jet debug echo.jet --stdin=/dev/stdin`, whose expected result is exactly that exit 2 refusal before any read. It passed in p410 on the same refusal, so the outcome depends on whether the child exits before the write. Fix: a write to a child that has exited (EPIPE) ends the stdin feed and the step is judged on its exit and streams. Proof: a testkit unit whose child exits at once without reading a large stdin, run 200 times under load, always judged on its exit; and that case passes 50 times in a row under the cases suite.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T12:20:31.268Z"
+        },
+        {
+          "n": 11,
+          "text": "A case that copies jet and runs the copy never fails with ETXTBSY: in the p413 full suite (dev ba5711569a, 2026-11-21) Tests/Cases/CLI/compiler_aliases_run_the_compiler_verbs.case reported ERROR \"spawn: I/O error during resolve `.../work/bin/jet`: Text file busy (os error 26)\", so a write descriptor to the fresh copy was still open (in this process or a child forked meanwhile) when it was executed. Fix the root: the copy is written through a descriptor that no concurrently spawned child can inherit (O_CLOEXEC, closed before the spawn), or the runner retries exec only on ETXTBSY with that reason. Proof: a testkit unit that copies a binary and executes it while other threads spawn children, run 1000 times under load with no ETXTBSY; and the case passes 50 times in a row under the cases suite.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T12:20:32.081Z"
         }
       ],
       "refs": [],
@@ -51622,9 +51640,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-21T07:07:46.921Z",
+      "updated": "2026-11-21T12:20:32.081Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 11
     },
     {
       "id": "c08zzpo5",
@@ -54189,6 +54207,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c115 cause (Rivet, 2026-11-21): jet perf run spawns jet run --observe (Perf/Session.jet:197-199), whose jet_rt_observe_link route is not root-free, so ir_entry_own keeps the process root and the profiled program is a rooted main, not the shipped owned main. Decided within this card's scope: an observed program keeps its owned main, since a profiler must measure the shipped program. c114 decided: one load and branch before each runtime syscall (the host_call gate), measured inside noise against at least 210 ns per syscall (20M getppid, p407 O2); perf's own and signal-handler syscalls stay ungated; the #6444 cat bench gates it."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c94 checked, left open: zones (Perf/attach_turns_zones_on), flight ring (Perf/attach_drains_flight_ring), alloc (Perf/heap_snapshot_types_retention_and_diff) and outside (Perf/attach_samples_a_plain_jet_process) each assert the real window in their headers; the browser family (perf_attach_drives_real_devserver_browser_lifecycle) is KNOWN-FAILING under #5931 (known-failing.tsv, devserver E2104), so c94 waits on #5931."
         },
         {
@@ -55673,6 +55696,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T11:12:25.856Z"
+        },
+        {
+          "n": 115,
+          "text": "jet perf run measures the same program a plain build makes: on p407 an owned-main program made 3000 fd-1 writes when built plainly but 11 under jet perf run, so the profiled program was not the shape it measures. Found by Rivet on #6444 c2 (2026-11-21). Proof: a case that builds an owned-main program plainly and under jet perf run and shows the same entry shape and the same write count.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T11:12:30.695Z"
         }
       ],
       "refs": [],
@@ -55680,9 +55712,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T11:12:25.856Z",
+      "updated": "2026-11-21T11:34:58.579Z",
       "updatedBy": "Main",
-      "criteriaLastN": 114
+      "criteriaLastN": 115
     },
     {
       "id": "c0in2dft",
@@ -59156,6 +59188,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:08:46.574Z"
+        },
+        {
+          "n": 27,
+          "text": "The ReadInto memory pair measures peak RSS independent of who launches it: Tools/Perf/ReadInto/Memory.jet and its original memory.mjs read the same binaries 32 KB apart in both arms (1264/1344 against 1296/1376 KB, p407, 2026-11-21) because the measured program inherits its launcher's environment (env -i gives 1200 KB, an extra 30 KB of environment 1328-1352 KB; found by Lens proving #6995 c15). Both tools hand the timer one fixed, minimal environment. Proof: Memory.jet and memory.mjs report the same peak RSS for each arm, within the runs' own spread.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T12:16:01.449Z"
         }
       ],
       "refs": [],
@@ -59167,9 +59208,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:13.176Z",
-      "updated": "2026-11-17T01:48:53.389Z",
+      "updated": "2026-11-21T12:16:01.449Z",
       "updatedBy": "Main",
-      "criteriaLastN": 26
+      "criteriaLastN": 27
     },
     {
       "id": "c0t02esm",
@@ -72474,6 +72515,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c29 waits on D-IMAGE-SECTIONS1 (posted 2026-11-21, drafted by Lens, reviewed by Rivet through r3): no ratified decision lists sections or their bytes (D-DEBUG-LISTING1 covers segments and symbols, D-DISASM1 machine code), and segments cannot give .rodata's size because the read-only LOAD holds .rodata and .eh_frame together. Meanwhile CoreActivation's nm count moves to `jet debug --do symbols`, whose rows are nm --defined-only's set (staged as Lens-6995-c11-tasks-case-coreactivation-symbols); size -A and the BuildEntry readelf -x case wait on the ballot."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c15 proof attempt on the p399 batch compiler (dev 50b6fec6e7), 2026-11-21: Memory.jet and memory.mjs both ran rc=0 without --write against the same jet, with no gdb in either tool (facts read by jet debug at exit). They agree on every verdict (allocations_per_read, peak_live_heap_bytes, peak_rss_kb: win), on peak RSS (1268 / 1344 KB) and on the plain arm peak live heap (153008). They differ slightly on allocations per read (surface 1.0988 vs 1.1017, plain 4.0272 vs 4.0283) and surface peak live heap (152680 vs 148824). These are separate runs of a socket-read workload, so the count of reads may vary per run; that is not yet shown. c15 is NOT met: the proof needs either the same counted run read both ways, or a shown run-to-run spread that covers the difference. Logs: $JET_SCRATCH_ROOT/lanes/Main/proof-6995-c15/{run.log,mjs.log}."
         },
         {
@@ -72682,11 +72728,11 @@
         {
           "n": 15,
           "text": "The counting runtime allocator facts of a built program (allocations per operation, peak live heap) are read with Jet tools at process exit, by jet debug stopping at the exit or by jet perf reporting the totals, so Tools/Perf/ReadInto/Memory.jet drops gdb. Proof: Memory.jet runs with no external debugger and reports the same numbers on both Jet arms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T12:07:13.254Z"
+          "evidence": "Run by Lens with the p407 batch compiler on a dev b946c4dfc4 tree, 2026-11-21, checked by Main from the evidence files: Tools/Perf/ReadInto/Memory.jet twice and its original memory.mjs once more, all rc=0 with no gdb (a git grep at ba5711569a finds no gdb under Tools/Perf/ReadInto, and the outside-debugger guard has no ReadInto gap row). The counting allocator facts come from jet debug at the program's end (D-PERF-ALLOCATOR1 = A). The earlier attempt's bar was the same counted run read both ways or a run-to-run spread covering the difference; the spread is now shown. Surface allocations per read: Memory.jet runs {1.077, 1.073, 1.075} and {1.056, 1.048, 1.036}, memory.mjs {1.017, 1.053, 1.060}; plain 4.013-4.028 in all. Surface peak live heap is bimodal, 148936-149032 or 152680, in both tools; plain 153008-153104. The variation is the socket workload's read count (partial reads), the same within one tool as across tools. Every verdict agrees (allocations_per_read, peak_live_heap_bytes and peak_rss_kb: win). Not part of c15's allocator facts, but noted: peak RSS, measured from outside, reads a constant 32 KB higher under memory.mjs than Memory.jet in both arms (1296/1376 against 1264/1344 KB).",
+          "at": "2026-11-21T12:12:00.764Z"
         },
         {
           "n": 16,
@@ -72700,11 +72746,11 @@
         {
           "n": 17,
           "text": "Jet tools list a built image symbols and segment headers and disassemble a named function of a built image (the D-DISASM1 listing used without a live session), so Tools/Perf/CodegenCeiling.jet and the cases SingleThreadRc x6, Perf zone x4 (hot.sh), SimdWitness and AllocatorFamilies drop objdump. Proof: each runs with no external disassembler and checks the same facts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T12:07:15.105Z"
+          "evidence": "Landed across 6c1b9ede03 (jet debug IMAGE --do symbols|segments|disas reads the built file), 110a60b7d7 and b33b37cd08 (CodegenCeiling, the four Perf zone cases with hot.sh, AllocatorFamilies) and 5b4d42c3d2 (p410: SingleThreadRc x6 and SimdWitness read `jet debug .jet/build/main --do 'disas NAME'` from the file with nothing on PATH, and check that no \"Breakpoint hit\" appears). p410 batch compiler (dev b946c4dfc4, 2026-11-21): the six SingleThreadRc cases pass, Tests/Guards/debug_names_no_outside_debugger passes, and the full cases suite has 0 FAIL, the zone and AllocatorFamilies cases included. A `git grep objdump` at b946c4dfc4 over every named user (checked against the allowed Debug/objdump_disassembles_main_from_text_section.case, which it finds) leaves only prose and the check that refuses an objdump-format recording in Tools/Perf/CodegenCeiling.jet and its gate case. SimdWitness runs with no disassembler and checks the same fact (packed instructions); that fact still fails, as before the move, on its known #6414 codegen gap.",
+          "at": "2026-11-21T11:37:00.691Z"
         },
         {
           "n": 18,
@@ -72840,7 +72886,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T10:53:05.750Z",
+      "updated": "2026-11-21T12:17:50.924Z",
       "updatedBy": "Main",
       "criteriaLastN": 29
     },
@@ -129079,6 +129125,719 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T09:23:06.557Z"
+    },
+    {
+      "id": "D-DEBUG-PANELS1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "Registers, memory and machine code at a stop: three panels in the Canvas Debug view, with the same words in the console and the editor adapter",
+      "situation": "At a stop, the Canvas Debug view shows six panels at once: Source, Call Stack, Locals, Watches, Tasks and the Debug Console. RemedyBG and the RAD Debugger also show the registers, a memory window and the machine code around the stop. Jet's view shows none of the three. jet debug can list machine code with disas, but Canvas only prints it into the console transcript. The console has no word for registers or memory. The VS Code adapter shows only a runtime frame's pc and cfa, under [raw] Locals, and reads no memory. You decide how the three panels look, how a user opens and aims each, how the console spells them, and how memory is shown. We recommend three always-present panels fed by two new console words and the existing disas listing, so the console, Canvas and VS Code show the same facts.",
+      "gist": "How should the Canvas Debug view show registers, memory and machine code at a stop, and how does a user open, aim and read each?",
+      "lesson": "A register is one of the processor's few named slots, such as rax or rsp; rip holds the next instruction's address. Memory is the program's bytes, read at an address. A memory panel prints them in rows of 16, as hex and as text, or as numbers of a chosen type. Machine code is the instructions the processor runs, which disas already lists. Optimized code keeps many locals in registers, so these panels show where a value really is.",
+      "explainer": "Beginner path: open the Debug view in Canvas and stop at a breakpoint. Three new panels, Registers, Memory and Disassembly, join the six the view already shows at once. Each panel's header folds it, and the page keeps that choice for the next session. Disassembly shows the selected function as disas lists it, scrolled to an arrow on the next instruction. Registers lists the general registers, each with the local it holds. In Locals, Show memory on a value opens Memory at its bytes.\n\nExpert path: the console gains registers [--all] and memory WHERE [COUNT] [as TYPE]. WHERE takes three forms. The first is a place, as watch takes it: a local, a field path under it, and at most one index at the end, such as order.lines[2]. The second is a hex address, such as 0x7f3a1c002010. The third is a register, such as $rsp. Any of the three may end in + or - and a number of bytes, as $rsp+16.\n\nTYPE is a Jet number type. U8, the default, shows hex bytes and text. Int, I64, I32, I16, I8, U64, U32, U16, Float and F32 show one number per item; I64 reads as Int. A TYPE that is not a number type, such as String, is refused, naming the number types. COUNT counts items of TYPE, and defaults to 64 bytes' worth. Canvas and the adapter call the same two session calls, so a panel and the console never disagree.\n\nA place shows its own bytes: a stack slot's, or a String's or List's header. Show memory on a List opens on its buffer, as its element type when that is a number type. In Memory, every aligned 8-byte word that points into the program's mapped memory is underlined. Clicking it follows the pointer, and Back returns. Bytes that belong to a local of the selected frame carry its name above them, as the RAD Debugger labels them. A List's buffer is labeled by index.\n\nDisassembly reuses the ratified D-DISASM1 listing rows, so call targets open their function and breakpoint marks match the console. Stepping from Disassembly steps by line, since the ratified D-DISASM1 adds no instruction stepping.\n\nRegisters label two kinds of fact, drawn apart. A local's name, such as total, means the image's location lists place that local in the register at this pc. An arrow, such as -> items[0], means the register's value is the address of a local's bytes or of an item in its buffer. That second label is a match the debugger found, not a location fact.\n\nThe panels follow the selected task and frame. In an outer frame, rip and rsp are that frame's, and the registers the call saved are recovered from the image's call frame information. Any other register reads not saved, as gdb prints it, instead of a guess.\n\nA parked task resumes with only rip, rsp, rbx, rbp and r12 to r15 saved, so its other registers read not saved. A task running on another runtime thread shows that thread's registers; every thread is stopped at a stop. A queued task that never ran has no registers, and Registers says so.\n\nThe register set is the same at -O0, -O1 and -O2: rax to r15, rip and rflags, 18 rows with the flags spelled out. --all, or All in the panel, adds xmm0 to xmm15 as hex and as two Floats, mxcsr, fs_base and gs_base. The level changes the labels. At -O0 locals live in stack slots, so few registers name one; at -O2 the image's location lists put many in registers.\n\nA register whose value changed since the previous stop of the same task and frame is highlighted. In a replay, the previous stop is the one shown before, in either direction. After selecting another task or frame, nothing is highlighted until that task's or frame's next stop.\n\nEdge cases are named, never guessed. A local the image cannot show answers <Unavailable>, and a parameter not kept answers unavailable (not kept at this point), as Locals prints them today. A local held in a register names that register, since it has no address, and offers the register's word to follow.\n\nA stop inside the runtime or linked C code lists its code by symbol and offset, as disas does. Its registers carry no local labels. With a runtime frame selected, a place in WHERE resolves in the nearest Jet frame outward, and the answer names that frame.\n\nMemory is read page by page against the program's memory map. A live or replayed program's map is the kernel's for that process, and a dump's map is its own region list. So a range that starts in unmapped memory shows ?? there and the mapped bytes after it.\n\nOver code, Memory puts the program's bytes back under the debugger's trap bytes and placed jumps, as disas does. The debugger's own code, its evaluation room and a placed condition, reads [debugger], and pointers into it are not offered to follow. After fix, the old entry's bytes are the jump fix wrote, labeled with where it goes. A huge range is read 4 KiB at a time as the panel scrolls. A console answer stops at 4096 bytes, naming where it cut.\n\nEach tier shows what it holds. A live run and a replay show everything above. A dump holds the stopped thread's general registers, only the registers it marked for other tasks, no xmm registers, and only the memory regions it kept. Its #Secret bytes, and every copy of them, were zeroed when the dump was written. Memory shows ## over a Secret local's own bytes, and other zeroed bytes read 00; the panel says the dump was redacted.\n\nCanvas's live and replay sessions build the entry at -O0, as they do today. So in Canvas, -O2 code reaches the panels only through a dump of an -O2 build. jet debug -O2, and VS Code through the adapter, show the panels' facts at any level. jet debug --attach shows the same words with the same rules; Canvas has no attach session.\n\nThe panels exist where Jet's native debugger runs, on x86-64 Linux. The register table lives in the loader, so another native host brings its own rows. A web build runs in the browser, where no Jet debugger stops it; DevTools' memory inspector reads its linear memory.\n\nEverything is read-only. Writing a register or a byte changes the program under the user's code, touches replay and fix, and needs its own ballot.",
+      "story": "Theo's -O2 build prints a wrong total. He runs jet debug -O2 and stops in the loop of sum. locals says i is <Unavailable>. disas shows the add reading [r12+rcx*8]. registers shows rcx is 2, and marks r12 -> items[0]. He types memory $r12 3 as Int, and it prints 12, 29 and -5. A negative price had slipped into the list. In Canvas the same panels show it at -O0, where items sits in its stack slot and Show memory opens its buffer.",
+      "inWild": "// gdb: registers, 16 bytes in hex at the stack pointer, then the code.\n(gdb) info registers\n(gdb) x/16xb $rsp\n(gdb) disassemble /s\n// lldb: the same three.\n(lldb) register read\n(lldb) memory read --size 1 --count 16 $rsp\n(lldb) disassemble --frame --mixed",
+      "detail": "Code read on dev 50aae50f71. The console's commands are NATIVE_DEBUG_HELP (JetDebug Native.jet:6558). They include disassemble (disas), symbols and segments, and no word for registers or memory. disas dispatches at Native.jet:2784. Listing rows are NativeListedRow (JetDebug NativeListing.jet:303), cut to a window around an address by native_listing_window (NativeListing.jet:337). Bytes no instruction covers become native_listing_invalid rows (NativeListing.jet:382).\n\nThe loader reads the stopped thread's registers with PTRACE_GETREGS (JetBackend Image/Loader.jet:2119, 2831-2840). That is the kernel's 27-word user_regs_struct, X64_TRACE_REGISTERS (Loader.jet:2185), including fs_base and gs_base. No ptrace read of the SSE registers exists; only the evaluation room saves them, with xsave, inside the program.\n\nMemory is read through x64_trace_read (Loader.jet:2779). It returns the bytes up to where a mapping ends, and None when the first byte is unmapped. Stops are all-stop: every other thread is stopped too (Native.jet:3953-3955).\n\nA parked task's registers come from native_task_registers (Native.jet:6921). It fills rip, rsp and the six registers the fiber switch saves, and copies the rest from the stopped thread, so those must read not saved. A dump marks which registers it knows for each task (native_dump_known, NativeDump.jet:366). Outer frames unwind callee-saved registers by the image's call frame information, with a mask of known registers (unwind_from, Native.jet:5764-5804).\n\nThe watch command reads its place with debug_place (JetDebug Debug/Expression.jet:74, used at Native.jet:3257): a local, a field path, and one index at the end. Its refusal names the grammar. Watches use the CPU's debug registers, DR0 to DR7, which are the debugger's own state. Locals prints <Unavailable> (NATIVE_DEBUG_UNAVAILABLE, Native.jet:6583) and unavailable (not kept at this point) (NATIVE_DEBUG_NOT_KEPT, Native.jet:6587).\n\nThe adapter answers initialize with supportsDisassembleRequest true and no readMemory support (JetCLI CLI/DebugDap.jet:191). Its scopes answer Locals for a Jet frame, and [raw] Locals with presentationHint registers for a runtime frame (DebugDap.jet:289). That scope shows the frame's pc and cfa (DebugDap.jet:1235-1243). The ratified D-DBG-DAP1 records memory features as absent until a later ballot adds them; A adds readMemory only.\n\nThe Canvas protocol's debug commands already include disassemble (Docs/Spec/Reference/canvas-protocol.md:307). Its listing goes into the transcript that the overlay's trace field shows. The overlay carries locals, watches, call_stack, trace and source (canvas-protocol.md:316, 360). Its limits include 32 call-stack frames and 128 trace entries (canvas-protocol.md:355). The native and native-recorded tiers build the entry with jet build -O0 (canvas-protocol.md:319-321).\n\nThe page's six panels are Source, Call Stack, Locals, Watches, Tasks and the Debug Console (JetCanvas CanvasAssets/HTML.jet). The Debug view shows every debugger panel at once (debug-profile.js:1-3), and has no Panels menu. Every tier runs under Jet's own native debugger: native for jet dev at -O0, native-recorded for a replay and native-dump for a crash dump (canvas-protocol.md:357, 366-369).\n\nA dump is written through perf_flight_redacted (JetRuntime PerfSamples.jet:6937). secret_redact (Secret.jet:228-234) zeroes every Secret run and every copy of one, and the dump keeps no list of where. NativeDump redacts locals by their type (NativeDump.jet:421-426, 680). A live session shows #Secret values.\n\nThe audit's surfaces check, in the 2026-11-19 debug and profile audit, measured a painted stop in 56.8 ms at a load average of 26, with six panels. Its verdict is that the view lacks three of RemedyBG's panels.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Three always-present panels fed by console words, in Canvas, the console and the adapter",
+          "detail": "The console gains registers [--all] and memory WHERE [COUNT] [as TYPE]. Canvas gains Registers, Memory and Disassembly beside the six panels it already shows at once; each header folds its panel. Memory has a type selector, from bytes to Int or Float. Disassembly shows disas's rows for the selected function. The adapter gains readMemory and a Registers scope. One engine answers all three surfaces, and nothing writes to the program.",
+          "technical": "Engine: NativeSession gains registers(task, frame, all) and memory(where, count, type). registers reads the 27 words it already reads at each stop, or the selected task's saved registers. For an outer frame it unwinds callee-saved registers as bt does, and marks the rest not saved. --all adds one PTRACE_GETFPREGS read in the loader, for xmm0 to xmm15 and mxcsr. A parked task and a dump read those as not saved.\n\nDR0 to DR7 are never listed: they hold the debugger's watches, which breaks lists. Each register carries the local the image's location lists place in it at that pc. A register whose value is the address of a local's bytes, or of an item in its buffer, carries an arrow label instead.\n\nmemory resolves a place with debug_place, as watch does, and refuses with its refusal text. An unknown $register is refused with the register names. A COUNT of 0, a negative COUNT or one that is not a number is refused: COUNT is a positive number of items. A TYPE that is not a number type is refused, naming the number types. A place in a register has no address: memory answers with the register and its value.\n\ngdb's words point to these. As the ratified D-DBG-VERBS1 has it, an unknown gdb word answers with its Jet word. So info registers answers with registers, and x/16xb $rsp answers with memory $rsp 16.\n\nBytes are read page by page against the memory map: the kernel's for a live or replayed program, and the region list for a dump. Unmapped bytes print as ??. Originals go back under trap bytes and placed jumps, and the debugger's own code reads [debugger]. After fix, the old entry's jump is labeled. The console prints at most 4096 bytes per command, saying where it cut.\n\nCanvas: the overlay gains registers, the selected task's and frame's 18 register rows with labels and a changed flag. It also gains disassembly, the 16 listing rows around the pc from native_listing_window. A folded panel's field is not sent.\n\nThe request gains a reads list, such as {kind: memory, where, count, type} or {kind: disassembly, function, from}. The answer gains a reads field: the address, the bytes, a mapped mask and the labels, or more listing rows. Reads stay out of the transcript, so scrolling never fills the Debug Console. This is a protocol addition, as B's is, but it calls the console words' session calls. The page keeps at most 64 memory pages, and fold state in its local settings.\n\nAdapter: supportsReadMemoryRequest true, a memoryReference on each variable with an address, and a Registers scope whose variables are the register rows. On a runtime frame, the Registers scope joins [raw] Locals, which keeps its pc and cfa. Writes stay unsupported.",
+          "code": "// The listings are illustrative: A is not built.\n(Jet) registers\nrax 0x0000000000000029  41\nrbx 0x0000000000000029  41   total\nrcx 0x0000000000000002  2\nr12 0x00007f3a1c002010       -> items[0]\nrsp 0x00007ffd5e3a1f40\nrip 0x0000000000401a7c  sum+44\nrflags 0x246  ZF PF IF\n(Jet) memory items 24\n0x7ffd5e3a1f58  items: len=3 cap=4 buffer=0x7f3a1c002010\n  03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00\n  10 20 00 1c 3a 7f 00 00\n(Jet) memory $r12 3 as Int\n0x7f3a1c002010  items[0..3]  12  29  -5\n(Jet) memory 0x0 8\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n\n// Canvas Debug view, every panel present:\n// Source | Call Stack | Locals | Watches | Tasks | Registers | Memory | Disassembly | Console"
+        },
+        {
+          "key": "B",
+          "name": "Canvas-only panels",
+          "detail": "Canvas gains the same three panels, fed by new overlay fields and a new memory request in the Canvas protocol. The console and the adapter gain nothing. RemedyBG's layout is matched in Canvas alone.",
+          "technical": "The overlay gains registers and disassembly as in A, and the protocol gains a memory request {address, count} answered with bytes. The session code that builds them is called by the Canvas service only. The console keeps disas and no register or memory word, and the adapter keeps memory unsupported. Memory takes a place, an address or a register, resolved by the session as in A, since the Canvas service already holds a NativeSession.",
+          "code": "// Illustrative.\n// Canvas Debug view: Registers, Memory and Disassembly panels.\n// Memory's address box takes 0x7f3a1c002010; Locals > items > Show memory.\n(Jet) memory items\nUnknown command `memory`. Commands: step (s), next (n), ..."
+        },
+        {
+          "key": "C",
+          "name": "Console words only, shown in the transcript",
+          "detail": "The console gains registers and memory, and Canvas shows their answers in the Debug Console transcript, as disas works in Canvas today. No new panel is drawn, and the adapter gains nothing.",
+          "technical": "The same registers and memory session calls as A, printed as text. Canvas sends them through the commands field, and the answers land in the overlay's trace, capped at 128 entries. Nothing stays on screen as the user steps: each stop needs the words typed again. Following a pointer is typing memory with the next address.",
+          "code": "// Illustrative.\n(Jet) registers\nrbx 0x0000000000000029  41   total\n(Jet) memory 0x7f3a1c002010 24\n0x7f3a1c002010  0c 00 00 00 00 00 00 00 1d 00 ...\n// Canvas: the same text in the Debug Console; no panel."
+        },
+        {
+          "key": "D",
+          "name": "A without the adapter change",
+          "detail": "A's panels in Canvas and A's two console words, with the adapter as it is. VS Code keeps [raw] Locals for runtime frames. It reports memory as unsupported, as the ratified D-DBG-DAP1 profile has it.",
+          "technical": "The engine, console and Canvas halves of A, unchanged. The adapter answers initialize with no readMemory support, and sends no memoryReference and no Registers scope. VS Code's debug console evaluates expressions only, so it gets no registers or memory.",
+          "code": "// Illustrative.\n// VS Code: Variables shows Locals only; View Binary Data is not offered.\n// Its debug console evaluates expressions, so registers is not a word there."
+        },
+        {
+          "key": "E",
+          "name": "A with panels opened from a new Panels menu",
+          "detail": "As A, but the three panels are hidden until the user opens each from a new Panels menu in the Debug view. The six panels stay always present.",
+          "technical": "The Debug view gains a Panels menu, which it does not have today, listing Registers, Memory and Disassembly. An unopened panel's overlay field is not sent. The open set is kept in the page's local settings. Show memory in Locals opens Memory without the menu.",
+          "code": "// Illustrative.\n// Canvas Debug view: Panels > Registers, Memory, Disassembly\n// Source | Call Stack | Locals | Watches | Tasks | Console   (until opened)"
+        },
+        {
+          "key": "F",
+          "name": "A with gdb's spellings",
+          "detail": "As A, but the console words are gdb's: info registers [all] for registers, and x/COUNT FORMAT WHERE for memory. The format takes gdb's size letters b, h, w and g, for 1, 2, 4 and 8 bytes. It takes gdb's display letters x, d, u, f and c, for hex, signed, unsigned, float and character.",
+          "technical": "The engine and the panels are A's. The console parses gdb's format letters after x/ into COUNT and TYPE. So x/16xb $rsp is memory $rsp 16, and x/3dg $r12 is memory $r12 3 as Int. info registers rip rsp names registers.\n\nThe ratified D-DBG-VERBS1 rule is gdb's words where gdb has one, and plain words where it has none. For gdb's info subcommands it chose plain words: breaks for info breakpoints, and tasks for info threads. A reads the rule that way for info registers. x is one gdb word, but its meaning lives in a format language no other Jet word uses. A spells the same choices as a Jet type; F keeps gdb's letters.",
+          "code": "// Illustrative.\n(Jet) info registers\nrbx 0x0000000000000029  41   total\n(Jet) x/16xb $rsp\n0x7ffd5e3a1f40  29 00 00 00 00 00 00 00 ...\n(Jet) x/3dg $r12\n0x7f3a1c002010  12  29  -5"
+        },
+        {
+          "key": "G",
+          "name": "A with a bytes-only memory view",
+          "detail": "As A, but memory shows only hex bytes and text, 16 to a row. There is no as TYPE, and the panel has no type selector.",
+          "technical": "memory WHERE [COUNT], COUNT in bytes. Show memory on a List opens on its buffer as bytes. Reading the third Int of a List is reading 8 little-endian bytes at offset 16 by eye. Labels and pointer following are A's.",
+          "code": "// Illustrative.\n(Jet) memory $r12 24\n0x7f3a1c002010  0c 00 00 00 00 00 00 00 1d 00 00 00 00 00 00 00\n0x7f3a1c002020  fb ff ff ff ff ff ff ff"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "RemedyBG",
+          "note": "A Windows debugger whose Registers, Memory and Disassembly windows stay open beside the source with every other panel. They update at each stop and highlight changed registers. Its memory window takes an expression, shows bytes or typed values, and follows pointers. This is A's Canvas layout; RemedyBG has no console words or adapter.",
+          "code": "// RemedyBG: every window shown at once.\n// Memory: type &buf[0] in the address box; pick the element type."
+        },
+        {
+          "lang": "RAD Debugger",
+          "note": "Its memory view labels bytes with the locals and fields that occupy them, shows them as typed values, and follows pointers by click. It reads registers per frame, unwinding saved ones. A takes the byte labels, the typed view and the per-frame registers from it.",
+          "code": "// RAD Debugger: open Memory on a watch; bytes carry the names of the locals they belong to."
+        },
+        {
+          "lang": "gdb",
+          "note": "info registers, x/NFU ADDR and disassemble answer in the console, and the TUI's layout regs keeps registers on screen. In an outer frame gdb prints <not saved> for a register the call did not save. A uses that rule. F takes gdb's spellings; A spells x's format as a Jet type.",
+          "code": "(gdb) info registers rip rsp\n(gdb) x/16xb $rsp\n(gdb) layout regs"
+        },
+        {
+          "lang": "lldb",
+          "note": "register read and memory read name the two nouns, and memory read takes a format and a size. Its VS Code adapter answers readMemory and shows a Registers scope. A's adapter requests follow lldb's adapter.",
+          "code": "(lldb) register read --all\n(lldb) memory read --format d --size 8 --count 3 $r12"
+        },
+        {
+          "lang": "VS Code",
+          "note": "Its debugger UI shows a Registers scope when the adapter sends one, opens a hex view on any variable with a memoryReference, and has a Disassembly view. It shows what A's adapter half sends, and what D leaves out.",
+          "code": "// Variables > Registers; right-click a variable > View Binary Data."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A shows the three panels RemedyBG shows, always present like the six the view shows today, and keeps one engine behind every surface. The console, Canvas and VS Code read the same registers, the same bytes and the same listing rows. A panel never shows what the console cannot, and a test of the console word covers the panel too.",
+        "gains": [
+          "The Debug view shows registers, memory and machine code at every stop, with no menu to find.",
+          "Memory is aimed by Jet place, address or register, read as bytes or as a Jet number type, and pointers are followed by click.",
+          "Registers name the locals the image places in them, and mark the ones that point at a local's bytes.",
+          "VS Code's hex view and Registers scope work through the adapter.",
+          "Each tier shows what it holds: a live run and a replay everything, and a dump its own registers and regions, with what it lacks named."
+        ],
+        "losses": [
+          {
+            "loss": "Two new console words, registers and memory, which gdb users type as info registers and x.",
+            "mitigation": "The ratified D-DBG-VERBS1 already chose plain words for gdb's info subcommands, as breaks and tasks. Typed in Jet's console, info registers and x/16xb answer with the Jet word to type. x's meaning lives in a format language no other Jet word uses, and as TYPE names the same choices with Jet's types. F offers gdb's spellings if you prefer them."
+          },
+          {
+            "loss": "Each stop's answer grows by 18 register rows and 16 listing rows.",
+            "mitigation": "The registers are already read at each stop, and the listing decodes 16 instructions. A folded panel's rows are not sent. Memory is sent only when a panel asks for it, 4 KiB at a time. The added bytes are not measured; the estimate is about 3 KB of JSON a stop."
+          },
+          {
+            "loss": "Three more panels take room in a view that already shows six.",
+            "mitigation": "Each header folds its panel, and the page keeps the fold for the next session. E hides them behind a menu if you prefer that."
+          },
+          {
+            "loss": "A memory panel shows any byte of the program, including secrets in a live run.",
+            "mitigation": "A live session's print already shows #Secret values. A dump zeroed its Secret bytes when it was written, and the panel says so."
+          },
+          {
+            "loss": "Canvas's live and replay sessions are -O0, so Canvas shows -O2 code only from a dump.",
+            "mitigation": "jet debug -O2 and VS Code show the same facts at any level. A Canvas level choice changes what Canvas builds, and needs its own ballot."
+          },
+          {
+            "loss": "The panels show values but cannot change them.",
+            "mitigation": "Writing a register or a byte touches replay and fix, so it gets its own ballot. Read-only panels already answer the criterion."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It meets the criterion in Canvas, but gives the console and VS Code nothing. The panels would have a second request path that no console test covers."
+          },
+          {
+            "key": "C",
+            "reason": "Nothing stays on screen across stops, so it is not the panels the criterion asks for. Each stop needs the words typed again, and the transcript's 128 entries push older answers out."
+          },
+          {
+            "key": "D",
+            "reason": "It saves one adapter change, but VS Code users then see no registers and no bytes, though A's engine answers both. The ratified D-DBG-DAP1 left memory to a later ballot; this is that ballot."
+          },
+          {
+            "key": "E",
+            "reason": "The Debug view shows every panel at once today, as RemedyBG does. A menu adds a step to find each panel, and a beginner may never open them. Folding gives the same room back."
+          },
+          {
+            "key": "F",
+            "reason": "gdb users know the words, but x's format letters are a second small language beside Jet's types. The ratified D-DBG-VERBS1 already replaced gdb's info subcommands with plain words."
+          },
+          {
+            "key": "G",
+            "reason": "Reading a negative Int from eight little-endian bytes by eye is the slow step the panel should remove. RemedyBG and the RAD Debugger both show typed values."
+          }
+        ],
+        "tradeoff": "Two console words, three more panels on screen and a larger stop answer, for RemedyBG's three panels in Canvas, the console and VS Code from one engine."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Rivet. Rivet rejected r0 and r1, checking every claim against the code at dev 50aae50f71. r2 fixed every finding and Rivet accepted it, leaving one wording nit that changes no option."
+      },
+      "checkInstructions": "Under A: the audit's surfaces check probe (Run.jet ... canvas) shows the nine panels at a painted stop, lists them in its log, and prints Verdict: holds.\n\nA new case, Debug/registers_and_memory_at_a_stop.case, builds a small program at -O0 and -O2 and stops in sum. It checks that registers prints rip at the stop's address. At -O2 it checks a register labeled with a local, and an arrow label on a register holding a List's buffer.\n\nThe case checks that memory items 24 prints the List header, memory $r12 3 as Int prints the three Ints, and memory 0x0 8 prints ??. It checks the refusals of memory items 0, memory nope.x, memory $rq and memory items 3 as String. It checks that info registers and x/16xb $rsp answer with their Jet words.\n\nIn an outer frame it checks a caller-saved register reads not saved. With a parked task selected, it checks rax reads not saved and rbx does not. Over a breakpoint's address, memory shows the original byte, not the trap. A dump case checks registers match the dump's, that --all reads xmm0 as not saved, and that a #Secret local's bytes print as ## with the redaction noted.\n\nA Canvas protocol case checks the overlay's registers and disassembly fields at a stop. It checks that a memory read returns a 4 KiB page in reads, and that the transcript does not grow. An adapter case sends readMemory on a variable's memoryReference and checks the bytes. It checks the Registers scope on a Jet frame, and beside [raw] Locals on a runtime frame.\n\nUnder B: the same Canvas case, through its memory request. Under C: the console case alone. Under D: A's cases without the adapter case. Under E: A's Canvas case after opening the panels from the menu. Under F: the console case in gdb's spellings. Under G: the console case without as TYPE.\n\nEvidence labels: current behavior is read from code on dev 50aae50f71 and the surfaces check of the 2026-11-19 audit. No option is built; every listing shown is illustrative. The size of the larger stop answer is an estimate, not a measurement.",
+      "surface": {
+        "gist": "How should Canvas show registers, memory and machine code at a stop, and how is each opened and read?",
+        "lesson": "Registers are the processor's named slots, such as rax; rip holds the next instruction's address. A memory panel prints the program's bytes, 16 per row, or as numbers. Disassembly lists the stopped function's machine code. Optimized code keeps locals in registers. Today Canvas shows none of the three.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Always-present panels, console words, adapter",
+            "gist": "Three panels beside today's six, fed by two new console words.",
+            "gains": [
+              "Same facts in Canvas, the console and VS Code.",
+              "Memory aimed by place, address or register; shown as bytes or numbers."
+            ],
+            "losses": [
+              "Two new console words.",
+              "About 34 more rows per stop."
+            ],
+            "proposed": {
+              "code": "(Jet) registers\nrbx 0x0000000000000029  41   total\nr12 0x00007f3a1c002010       -> items[0]\n(Jet) memory $r12 3 as Int\n0x7f3a1c002010  items[0..3]  12  29  -5"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Canvas-only panels",
+            "gist": "The three panels in Canvas only, through a new protocol request.",
+            "gains": [
+              "No new console words."
+            ],
+            "losses": [
+              "Nothing for the console or VS Code."
+            ],
+            "proposed": {
+              "code": "// Canvas: Memory's address box 0x7f3a1c002010\n(Jet) memory items\nUnknown command `memory`."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Console words only",
+            "gist": "registers and memory print into the transcript; no panel.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "Nothing stays on screen across stops."
+            ],
+            "proposed": {
+              "code": "(Jet) registers\nrbx 0x0000000000000029  41   total\n// Canvas: the same text in the Debug Console"
+            }
+          },
+          {
+            "key": "D",
+            "name": "A without the adapter",
+            "gist": "A, but VS Code stays as it is.",
+            "gains": [
+              "The adapter profile is unchanged."
+            ],
+            "losses": [
+              "No registers or bytes in VS Code."
+            ],
+            "proposed": {
+              "code": "// VS Code: Locals only; View Binary Data not offered."
+            }
+          },
+          {
+            "key": "E",
+            "name": "A with a Panels menu",
+            "gist": "A, but the three panels stay hidden until opened from a new menu.",
+            "gains": [
+              "Today's view is unchanged until asked."
+            ],
+            "losses": [
+              "A step to find each panel."
+            ],
+            "proposed": {
+              "code": "// Canvas Debug view: Panels > Registers, Memory, Disassembly"
+            }
+          },
+          {
+            "key": "F",
+            "name": "A with gdb's spellings",
+            "gist": "A, but info registers and x/COUNT FORMAT WHERE.",
+            "gains": [
+              "gdb users type what they know."
+            ],
+            "losses": [
+              "A format-letter language beside Jet's types."
+            ],
+            "proposed": {
+              "code": "(Jet) info registers\n(Jet) x/3dg $r12\n0x7f3a1c002010  12  29  -5"
+            }
+          },
+          {
+            "key": "G",
+            "name": "A with bytes only",
+            "gist": "A, but memory never shows typed numbers.",
+            "gains": [
+              "One display, no type selector."
+            ],
+            "losses": [
+              "Numbers read from bytes by eye."
+            ],
+            "proposed": {
+              "code": "(Jet) memory $r12 24\n0x7f3a1c002010  0c 00 00 00 00 00 00 00 1d 00 ..."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives RemedyBG's three panels, always present like today's six. One engine serves every surface, so a panel never shows what the console cannot.",
+          "gains": [
+            "Panels at every stop: live, replay and dump.",
+            "Registers name the locals they hold.",
+            "VS Code's hex view works."
+          ],
+          "losses": [
+            {
+              "loss": "Two new console words.",
+              "mitigation": "The console already uses plain words for gdb's info subcommands, and gdb's words answer with the Jet word."
+            },
+            {
+              "loss": "Read-only panels.",
+              "mitigation": "Writing touches replay and fix, so it gets its own ballot."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Nothing for the console or VS Code."
+            },
+            {
+              "key": "C",
+              "reason": "Nothing stays on screen."
+            },
+            {
+              "key": "D",
+              "reason": "VS Code misses what A's engine answers."
+            },
+            {
+              "key": "E",
+              "reason": "A menu step today's view does not need."
+            },
+            {
+              "key": "F",
+              "reason": "A second small format language."
+            },
+            {
+              "key": "G",
+              "reason": "Reading numbers from bytes is the step to remove."
+            }
+          ],
+          "tradeoff": "Two console words and three more panels, for the three panels everywhere from one engine."
+        },
+        "trio": {
+          "current": {
+            "note": "Canvas shows six panels, none of these three; the console has disas only.",
+            "code": "(Jet) registers\nUnknown command `registers`. Commands: step (s), next (n), ..."
+          },
+          "wild": {
+            "lang": "RemedyBG and lldb",
+            "note": "RemedyBG shows all three with the rest; lldb names the two words.",
+            "code": "(lldb) register read\n(lldb) memory read --count 64 $rsp"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Panels could drift from what the console shows.",
+          "attempts": [
+            "Build the panels from their own Canvas requests, as B does: rejected, it gives the panels a request path no console test covers.",
+            "Feed every panel from the console's session calls, and answer Canvas's reads through those calls, outside the transcript: kept."
+          ],
+          "result": "One engine answers the console, Canvas and the adapter, so one test covers all three."
+        },
+        {
+          "loss": "A huge memory range could stall the page or flood the console.",
+          "attempts": [
+            "Send panel reads as console commands: rejected, their answers would fill the transcript and push the user's history out.",
+            "Send all requested bytes at once: rejected, a 1 GiB range would stall the session.",
+            "Read 4 KiB pages as the panel scrolls, through a reads field kept out of the transcript; keep at most 64 pages, and cap a console answer at 4096 bytes with the cut named: kept."
+          ],
+          "result": "Any range can be browsed, no answer is larger than one page, and the transcript holds only what the user typed."
+        },
+        {
+          "loss": "In an outer frame or a parked task, most register values are not knowable.",
+          "attempts": [
+            "Show the stopped thread's values in every frame and task: rejected, they would be another frame's or thread's values.",
+            "Recover callee-saved registers from the image's call frame information, take a parked task's from what its switch saved, and show the rest as not saved: kept."
+          ],
+          "result": "A register shown in any frame or task is that frame's value, or says it is unknown."
+        },
+        {
+          "loss": "An unavailable local, or one held in a register, has no bytes to show.",
+          "attempts": [
+            "Show the stack slot an -O0 build would use: rejected, it shows stale bytes as the value.",
+            "Answer as Locals does for the first, and for the second name the register and offer its word to follow: kept."
+          ],
+          "result": "Memory never shows bytes that are not the value."
+        },
+        {
+          "loss": "Memory over code could show the debugger's own bytes.",
+          "attempts": [
+            "Show the raw bytes the program holds: rejected, a breakpoint would read as a trap byte the user never wrote.",
+            "Put originals back under trap bytes and placed jumps, as disas does, and label the debugger's own code [debugger]: kept."
+          ],
+          "result": "Memory over code shows the program's code, and the disassembly and the bytes agree."
+        },
+        {
+          "loss": "A dump or a replay may not hold every byte or register a panel asks for.",
+          "attempts": [
+            "Read the image file for missing regions: rejected, it shows the image's bytes, not the program's at the stop.",
+            "Show the dump's own registers and regions, print missing bytes as ?? and missing registers as not saved, show ## over a Secret local's own bytes, and say the dump was redacted: kept."
+          ],
+          "result": "Each tier shows what it holds and names what it lacks; a zeroed copy of a secret reads 00 under the redaction note."
+        },
+        {
+          "loss": "The panels exist only where Jet's native debugger runs.",
+          "attempts": [
+            "Show WebAssembly linear memory for a web build: rejected, no Jet debugger runs in the browser, so no stop exists to show.",
+            "Keep the register table in the loader, per architecture, so a later native host adds its own rows: kept."
+          ],
+          "result": "x86-64 Linux gets the panels now; a web build points to DevTools' memory inspector."
+        }
+      ],
+      "draftedBy": "Lens",
+      "reviewedBy": "Rivet",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T11:32:24.849Z"
+    },
+    {
+      "id": "D-IMAGE-SECTIONS1",
+      "cardId": "c00ni11n",
+      "group": "tooling",
+      "title": "A built program's sections: their sizes and a named section's bytes, from jet debug's file-first console",
+      "situation": "A built program file is cut into named sections: .text holds the code, .rodata the constants, .data the values the program changes. Two Jet checks still ask binutils about them. The Core battery cost report reads every section's size with size -A. A build test proves a folded 50,000,000-byte string left no bytes behind, by reading .data and .rodata with readelf -x. The ratified D-DEBUG-LISTING1 lists symbols and segments, but no sections. You decide how Jet lists sections and shows one's bytes. We recommend a sections word that owns both, whatever the open debugger-panels ballot decides.",
+      "gist": "How should jet debug list a built program's sections and show a named section's bytes, so Jet's own checks drop size and readelf?",
+      "lesson": "A section is a named run of bytes in a program file, such as .text for code or .rodata for constants. A segment is what the loader maps into memory, and one segment can hold several sections. On a Jet image, the read-only segment holds .rodata and .eh_frame together, so a segment's size cannot say how big .rodata is. Debug info and the symbol table are sections that no segment loads.",
+      "explainer": "Beginner path: jet debug IMAGE --do sections lists every section of the program file, in file order, without starting it. Each row holds the name, the type, then offset, address, size, flags and align, each named, as segments names its fields. The flags are readelf's letters, all of them, in readelf's order. W is written, A loaded and X code; M, S, I, L, O, G, T, C and E follow. So .tbss shows WAT.\n\nExpert path: sections NAME... lists only the named sections, in the order given. When the file holds two sections of one name, it lists both, in file order. sections NAME... --bytes prints each listed section's bytes under its row. Each byte row holds an address, 16 bytes in hex, and the same bytes as text, with a dot for each byte that does not print. That is the look of the byte rows the open debugger-panels ballot proposes, and of readelf -x's text column.\n\nThe bytes always come from the file, since sections lists the file. So a section no segment loads, such as .symtab or .debug_info, prints its bytes as well. With --bytes, every section row ends with from the file: before a start, at a stop and in a dump alike. A row listed without --bytes carries no such words. A program's own memory is the memory word's job, if the panels ballot passes one.\n\nSize: at the interactive console, --bytes prints at most 4096 bytes of each section. The cap is per section, unlike the panels ballot's per-command cap, so sections .data .rodata --bytes can print 8192 bytes. Where it cuts, the console prints cut at ADDRESS: 4096 of SIZE bytes shown; --do prints the whole section. To see the rest, run the same sections command with --do.\n\nA --do command prints every byte, since a script asked for it, so the build test reads the whole section. This rule belongs to sections; it does not change the panels ballot's memory word.\n\nScripts read these rows, so their columns change only with a decision, as the ratified D-DEBUG-LISTING1 set for symbols and segments.\n\nEdge cases are named. A name the image lacks is refused with No section `NAME`, so --do exits 1. A section that takes no file space, such as .bss, prints its row, then (no bytes in the file). The reader checks the type before it reads any bytes.\n\nAn image with no section headers prints `IMAGE` has no section headers and exits 0, as segments does for program headers. A file with more than 65,279 sections keeps its real count in the first header, and the reader takes it from there. The null header that opens every table is not listed.\n\nA stripped image lists its own sections. When it names a side debug file, sections prints that file's name under its rows, as debug info: main.debug. To list the side file's sections, run jet debug on the side file itself; its code sections print (no bytes in the file), since the side file keeps only debug info.\n\nThe reader takes 64-bit little-endian ELF files, Jet's or not, as symbols does. So the cost report can list the C stand-ins its tests build. A file that is not a 64-bit ELF is refused as symbols refuses it: `X` is not a 64-bit ELF image. A big-endian ELF is refused: `X` is a big-endian ELF image. A web build's wasm sections are out of scope, as jet debug does not run on the web.\n\nThe two users move with it. The cost report reads sections for each section's size. The build test reads sections .data .rodata --bytes. It checks that no row is sixteen 78 bytes, the letter x, or sixteen 79 bytes, the letter y. That is the same fact its readelf check proves today.",
+      "story": "Mia adds a JSON import to a program and its release build grows by 40 KB. She runs jet debug on both builds with --do sections and compares the rows. .text grew by 3 KB; .rodata grew by 37 KB. She runs sections .rodata --bytes and finds a whole Unicode table that a fold left in. She never left Jet's tools, and the cost report reads the same rows on every battery.",
+      "inWild": "// binutils: section sizes, then two sections' bytes.\n$ size -A main\n$ readelf -x .data -x .rodata main\n// gdb lists sections, and x reads bytes at an address.\n(gdb) maint info sections\n(gdb) x/16xb 0x400120\n// lldb\n(lldb) image dump sections",
+      "detail": "Code read on gate p407, dev 50aae50f71; dev b946c4dfc4 has no JetDebug change since. The file-first console is native_image_command (JetDebug NativeImageList.jet:237). It answers symbols, segments, disassemble and help from the file, and returns None for anything else, which starts the program. A stop answers symbols and segments at Native.jet:2787, and a dump at NativeDump.jet:651, both through native_image_listing (NativeImageList.jet:62). The help line is NATIVE_DEBUG_HELP (Native.jet:6558).\n\nThe reader already walks the section header table. native_image_symbols reads it to find .symtab (NativeImageList.jet:97-127), and native_elf_header and native_elf_section find a section by name (NativeFacts.jet:302-315). native_elf_section does not check the type, so the reader tests for NOBITS before reading.\n\nnative_image_bytes refuses a file that is not ELFCLASS64 (NativeImageList.jet:80). It never reads the data-encoding byte, so a big-endian file would be misread today; the new refusal closes that. native_image_side finds the side file through .gnu_debuglink (NativeImageList.jet:88). Segment rows are native_image_segments_text (NativeImageList.jet:191), pinned by its test (NativeImageList.jet:317).\n\nThe memory word is not built. The open debugger-panels ballot proposes it, as memory WHERE [COUNT] [as TYPE] under its recommendation and as gdb's x/COUNT FORMAT WHERE under its option F. Under its option B the console gets no memory word. Its byte rows show hex bytes and text, and it caps a console answer at 4096 bytes. A here does not depend on which of these passes.\n\nProbed on gate p407 with a two-line program built at -O2. segments lists a read-only LOAD of 7,588 bytes, an executable LOAD of 33,839 and a writable LOAD of 1,620. The section headers, read with a 20-line script, list 18 sections. .rodata is 2,415 bytes and .eh_frame 4,884, both in the read-only LOAD. .text is 33,839, and .data 1,592.\n\nEight .debug_ sections, .symtab, .strtab, .shstrtab and .jet_command load in no segment. jet debug IMAGE --do sections answers Unknown command `sections`, after starting the program and stopping at its first line.\n\nThe cost report is Tools/Perf/CoreActivation.mjs and its Jet twin CoreActivation/run.jet. It runs size -A and reads each section's name and size (run.jet:284-293). Its deltas are .text bytes, .rodata bytes and defined symbols (run.jet:217-219). A pending change moves its defined-symbol count to the rows of symbols, which list what nm --defined-only lists.\n\nThe cost report's Gauntlet entry builds stand-in programs with a fake jet. In that change, the fake jet's debug answers carry the rows jet debug printed for the same stand-in images, and the entry's expected output pins their counts. Under A the fake jet gains sections rows, taken the same way.\n\nThe build test is Tests/Cases/BuildEntry/a_folded_string_read_only_for_its_length_costs_no_bytes.case. It requires tool:readelf, runs readelf -x .data -x .rodata on the -O2 image, and checks that no row reads 78787878 78787878 78787878 78787878, or the same with 79.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A sections word that owns its byte rows; a memory word, if one passes, also takes a section name",
+          "detail": "The file-first console gains sections [NAME...] [--bytes]. Plain, it lists every section in file order. With names, it lists those, in the order given. --bytes prints each listed section's bytes from the file under its row, 16 to a row, as hex and text. The same word answers at a stop and in a crash dump, as symbols does, and reads the file there too.\n\nIf the debugger-panels ballot passes a console memory word, under either spelling, that word also takes a section name as its place. It then reads the section's loaded bytes from the program. If that ballot passes no console word, nothing more changes here.",
+          "technical": "NativeImageList.jet gains native_image_sections, which walks the section header table it already reads for .symtab, and native_image_sections_text, which pads the columns as segments does. Types are named as readelf names them: PROGBITS, NOBITS, SYMTAB, STRTAB, NOTE, RELA, DYNAMIC, INIT_ARRAY, FINI_ARRAY and others; any other type prints as hex. --bytes reads the file at the section's offset, and every section row it prints ends with from the file.\n\nThe interactive console prints at most 4096 bytes of each section. Where it cuts, it prints cut at ADDRESS: 4096 of SIZE bytes shown; --do prints the whole section. To see the rest, run the same sections command with --do, which prints every byte.\n\nA section name in the memory word names the section's loaded address and size. memory .rodata reads from the section's start, and COUNT, when given, stops at the section's end and says so. Under gdb's spelling, x/16xb .rodata prints the first 16 bytes; x with no COUNT reads one item, as gdb does. A byte offset works as for a register, as .rodata+16, and as TYPE works as for any address.\n\nTwo sections of one name are refused in memory: Two sections are named `.data`, at 0x40bdc0 and 0x40c400; give memory an address. A section no segment loads is refused: `.symtab` is not loaded; sections .symtab --bytes shows it. As for every word but the listing words, memory starts the program first when none runs, so it always reads a program. Its cap and default COUNT stay the panels ballot's.",
+          "code": "// Illustrative: A is not built. Sizes are from the probe's -O2 image.\n$ jet debug .jet/build/main --do sections\n.rodata             PROGBITS    offset 0x120       address 0x400120            size 2415       flags A    align 8\n.eh_frame           PROGBITS    offset 0xa90       address 0x400a90            size 4884       flags A    align 8\n.text               PROGBITS    offset 0x4000      address 0x402000            size 33839      flags AX   align 16\n.data               PROGBITS    offset 0x1dc0      address 0x40bdc0            size 1592       flags WA   align 8\n.debug_info         PROGBITS    offset 0x251e      address 0x0                 size 233        flags      align 1\n...\ndebug info: main.debug\n$ jet debug .jet/build/main --do 'sections .rodata --bytes'\n.rodata             PROGBITS    offset 0x120       address 0x400120            size 2415       flags A    align 8    from the file\n0x400120  34 32 0a 00 00 00 00 00 01 00 00 00 00 00 00 00  42..............\n0x400130  ...\n$ jet debug .jet/build/main\n(Jet) sections .text --bytes\n.text               PROGBITS    offset 0x4000      address 0x402000            size 33839      flags AX   align 16   from the file\n0x402000  f3 0f 1e fa 55 48 89 e5 ...\n...\ncut at 0x403000: 4096 of 33839 bytes shown; --do prints the whole section\n$ jet debug .jet/build/main --do 'sections .nope'\nNo section `.nope`\n// Only if the panels ballot passes a memory word:\n(Jet) memory .data 16\n0x40bdc0  .data  16 of 1592 bytes\n0x40bdc0  2a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  *...............\n(Jet) memory .symtab\n`.symtab` is not loaded; sections .symtab --bytes shows it"
+        },
+        {
+          "key": "B",
+          "name": "Sections inside the existing listing: segments nests them, disas shows their bytes",
+          "detail": "No new word. segments prints each program header's sections, indented, under its row, then the sections no segment loads, under not loaded. disas .rodata lists a section that holds no code as rows of 16 hex bytes and text.",
+          "technical": "native_image_segments_text interleaves section rows, matched by address range, under each LOAD row. disassemble takes a section name as well as a function or line, and lists a data section with A's byte rows. Every script that parses segments today skips the new indented rows. disas reads the live program at a stop, so its bytes follow the program.",
+          "code": "// Illustrative.\n$ jet debug .jet/build/main --do segments\nLOAD         offset 0x0         address 0x400000            file 7588      memory 7588      flags r-- align 4096\n  .rodata             size 2415\n  .eh_frame           size 4884\n...\nnot loaded\n  .debug_info         size 233\n$ jet debug .jet/build/main --do 'disas .rodata'"
+        },
+        {
+          "key": "C",
+          "name": "A new jet inspect image command",
+          "detail": "jet inspect image IMAGE --sections lists A's rows, and --bytes NAME prints one section's bytes. jet inspect's --json gives the rows as JSON. The debugger keeps symbols and segments, and gains nothing.",
+          "technical": "Inspect.jet gains an image plane that calls the same reader as A. Its rows and refusals are A's; --json emits name, type, offset, address, size, flags and align per section. It reads only files, so it has no stop or dump to disagree with.",
+          "code": "// Illustrative.\n$ jet inspect image .jet/build/main --sections\n$ jet inspect image .jet/build/main --bytes .rodata --json"
+        },
+        {
+          "key": "D",
+          "name": "sections for sizes, and gdb's find for a byte search instead of a dump",
+          "detail": "sections lists rows as A does, with no --bytes. A second word, find BYTES [in NAME...], prints each address where the bytes occur in the named sections, or Not found. BYTES is a quoted text or hex bytes.",
+          "technical": "find scans the section bytes in the image file and prints at most 100 hits, naming how many more. gdb's find takes a start address and a length; this form takes section names instead.",
+          "code": "// Illustrative.\n$ jet debug .jet/build/constant --do 'find \"xxxxxxxxxxxxxxxx\" in .data .rodata'\nNot found"
+        },
+        {
+          "key": "E",
+          "name": "A, with readelf -x's byte rows",
+          "detail": "As A, but --bytes prints rows as readelf -x does: the address, four groups of four bytes, and the text. Checks written for readelf carry over unchanged.",
+          "technical": "Only the byte row format differs from A. Each group is four bytes in file order, written with no spaces between bytes.",
+          "code": "// Illustrative.\n$ jet debug .jet/build/main --do 'sections .rodata --bytes'\n.rodata             PROGBITS    offset 0x120  ...\n  0x00400120 34320a00 00000000 01000000 00000000 42.............."
+        },
+        {
+          "key": "F",
+          "name": "sections lists the rows; only the memory word shows bytes, and reads the file before a start",
+          "detail": "sections lists A's rows, with no --bytes. The console memory word the panels ballot proposes takes a section name and prints its bytes. Before a start it reads the file; at a stop, the running program; in a dump, the dump's memory. F stands only if that ballot passes a console memory word.",
+          "technical": "memory becomes a file-first word: with no session it answers from the file, for a section name or an address inside a loaded section. An unloaded section, such as .symtab, reads from the file before a start, and is refused at a stop as not loaded. Rows gain the text column, as that ballot's byte rows have it. COUNT, offsets, as TYPE and duplicate names follow A's rules for memory.\n\nUnder gdb's spelling, x/COUNT FORMAT .rodata reads COUNT items from the section's start; gdb's x has no form that prints a whole section, so F adds one: x .rodata. The build test needs every byte, so F lifts that ballot's 4096-byte cap for every --do memory answer, addresses included. Under that ballot's option B there is no console word, and A applies.",
+          "code": "// Illustrative: F is not built.\n$ jet debug .jet/build/main --do 'memory .rodata'\n0x400120  .rodata  2415 bytes, from the file\n0x400120  34 32 0a 00 00 00 00 00 01 00 00 00 00 00 00 00  42..............\n...\n// Under gdb's spelling:\n$ jet debug .jet/build/main --do 'x .rodata'"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "binutils",
+          "note": "size -A prints each section's name, size and address. readelf -S lists the section headers, and readelf -x NAME dumps a section in groups of four bytes. They are the tools Jet's checks call today.",
+          "code": "$ size -A main\n$ readelf -S main\n$ readelf -x .rodata main"
+        },
+        {
+          "lang": "gdb",
+          "note": "maint info sections lists sections, under a maintenance prefix. x reads bytes at an address, from the running program or, before a run, from the file's sections. It has no form that dumps a section by name.",
+          "code": "(gdb) maint info sections\n(gdb) x/16xb 0x400120"
+        },
+        {
+          "lang": "lldb",
+          "note": "image dump sections lists a loaded module's sections from the console. memory read reads bytes at an address; it has no form that dumps a section by name.",
+          "code": "(lldb) image dump sections main\n(lldb) memory read 0x400120 0x400130"
+        },
+        {
+          "lang": "Rust (cargo-bloat)",
+          "note": "cargo bloat reports what takes space in a build, by crate or function, with .text's share. It is a separate install, and reads only code.",
+          "code": "$ cargo bloat --release --crates"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A finishes the listing the ratified D-DEBUG-LISTING1 began, with sections beside symbols and segments, and it owns its byte rows. So both checks drop binutils whatever the open debugger-panels ballot decides. sections reads the file, as the other listing words do; a memory word, if one passes, reads the program and also takes a section name.",
+        "gains": [
+          "The cost report and the build test run with no size or readelf.",
+          "Section sizes are exact even where one segment holds several sections.",
+          "Stands alone: no outcome of the panels ballot changes it.",
+          "Any section's bytes, loaded or not, from the file, in the same row look as that ballot's byte rows."
+        ],
+        "losses": [
+          {
+            "loss": "One new console word.",
+            "mitigation": "It joins symbols and segments, which the ratified D-DEBUG-LISTING1 put in the same place. gdb and lldb also list sections from the console."
+          },
+          {
+            "loss": "If a memory word passes, two words show bytes: sections from the file, memory from the program.",
+            "mitigation": "They answer different questions, as readelf -x and gdb's x do. Each row says where its bytes come from."
+          },
+          {
+            "loss": "A --do --bytes answer is not capped, so a 50 MB section prints about 200 MB.",
+            "mitigation": "Only a script that names the section gets it whole. The build test's sections hold a few kilobytes when the fold works."
+          },
+          {
+            "loss": "A readelf -x check must rewrite its pattern from groups of four bytes to single bytes.",
+            "mitigation": "Only one test uses readelf -x. Its two patterns become sixteen single bytes, the same fact."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Scripts already parse segments' fixed rows, and nested rows break them. A disassembler printing constants reads as code."
+          },
+          {
+            "key": "C",
+            "reason": "The ratified D-DEBUG-LISTING1 rejected a jet inspect image command, since it splits image listings across two commands. C splits them again."
+          },
+          {
+            "key": "D",
+            "reason": "find answers the build test with less output, but no one can look at the bytes. A pattern over A's rows answers the same question."
+          },
+          {
+            "key": "E",
+            "reason": "readelf's groups look like numbers but keep file order, so on x86-64 0a000000 is 10, not 0xa000000. A's rows match the panels ballot's byte rows instead."
+          },
+          {
+            "key": "F",
+            "reason": "It hangs on the panels ballot's outcome and spelling. It makes memory read two sources under one word, and it changes that ballot's size cap for every --do answer."
+          }
+        ],
+        "tradeoff": "One more console word, which owns its bytes, for exact section sizes and checks that need no other ballot."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Rivet. Rivet rejected r0, r1 and r2, checking each claim against NativeImageList.jet and the ratified listing and disassembly decisions. r3 fixed every finding, and Rivet accepted it with no changes left."
+      },
+      "checkInstructions": "Under A: a new case, Debug/sections_list_an_image_and_its_bytes.case, builds a small program at -O0 and -O2. It checks that --do sections lists .text with flags AX and .rodata with flags A. The size of .text must equal the executable LOAD's file size from segments. It checks that sections .rodata --bytes prints rows of 16 bytes in hex and text, whose first row holds the program's first constant.\n\nThe case checks that sections .nope exits 1 with No section `.nope`, and that .bss prints (no bytes in the file). sections .symtab --bytes prints the file's bytes. At a stop after a global is written, sections .data --bytes still shows the file's first value, and its row ends with from the file. The answer is the same in a crash dump.\n\nAt the interactive console, sections .text --bytes stops after 4096 bytes with cut at ADDRESS: 4096 of SIZE bytes shown; --do prints the whole section. Two sections each get their own 4096. The same command under --do prints it whole. A section named twice lists both.\n\nIt checks the refusals: a text file is not a 64-bit ELF image; a big-endian ELF fixture is a big-endian ELF image. On a release image with a side file, sections prints debug info: NAME under its rows. jet debug on that side file lists its code sections with (no bytes in the file).\n\nIf the panels ballot passes a memory word, its case gains rows. memory .data 16 at a stop shows the written value, and memory .symtab is refused as not loaded. .rodata+16, a COUNT past the end and a name used twice behave as stated, with the stated texts.\n\nThe build test drops requires: tool:readelf, and reads jet debug .jet/build/constant --do 'sections .data .rodata --bytes'. Its two checks become a row of sixteen 78 bytes and a row of sixteen 79 bytes. The cost report runs sections instead of size -A, in both twins, and its fake jet answers sections with the rows jet debug prints for its stand-ins. Both users then run with no size or readelf on the path.\n\nUnder B: the same case through segments and disas .rodata. Under C: through jet inspect image. Under D: the sizes, and find for the build test. Under E: A's case with readelf's rows. Under F: A's case through memory, with the file read before a start.\n\nEvidence labels: current behavior is read from code on gate p407, dev 50aae50f71, unchanged on dev b946c4dfc4. The section list and sizes come from a -O2 image built on gate p407, read with a 20-line script. The memory word's spellings, rows and cap are the open debugger-panels ballot's. No option is built; every listing shown is illustrative.",
+      "surface": {
+        "gist": "How should jet debug list a program file's sections and show one section's bytes?",
+        "lesson": "A section is a named run of bytes in a program file: .text for code, .rodata for constants. One segment can hold several sections. Two Jet checks ask size and readelf about sections today.",
+        "options": [
+          {
+            "key": "A",
+            "name": "A sections word, with --bytes from the file",
+            "gist": "Does a sections word list sizes and, with --bytes, print the file's bytes, whatever the panels ballot decides?",
+            "gains": [
+              "Both checks drop binutils on their own.",
+              "Shows any section's bytes, loaded or not."
+            ],
+            "losses": [
+              "With a memory word, two words show bytes, from two sources."
+            ],
+            "proposed": {
+              "code": "$ jet debug main --do 'sections .rodata --bytes'\n0x400120  34 32 0a 00 00 00 00 00 ...  42......"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Nested in segments; bytes through disas",
+            "gist": "Should segments nest each section under its segment, and disas print a data section's bytes?",
+            "gains": [
+              "No new word."
+            ],
+            "losses": [
+              "Breaks scripts that parse segments.",
+              "disas prints data."
+            ],
+            "proposed": {
+              "code": "$ jet debug main --do segments\nLOAD  ...  flags r-- align 4096\n  .rodata  size 2415\n$ jet debug main --do 'disas .rodata'"
+            }
+          },
+          {
+            "key": "C",
+            "name": "jet inspect image",
+            "gist": "Should a new jet inspect image command list sections and bytes instead?",
+            "gains": [
+              "JSON output."
+            ],
+            "losses": [
+              "Image listings split across two commands again."
+            ],
+            "proposed": {
+              "code": "$ jet inspect image main --sections\n$ jet inspect image main --bytes .rodata"
+            }
+          },
+          {
+            "key": "D",
+            "name": "sections plus a find word",
+            "gist": "Should a find word search sections for bytes, with no byte dump?",
+            "gains": [
+              "Short output for the build test."
+            ],
+            "losses": [
+              "No way to look at the bytes."
+            ],
+            "proposed": {
+              "code": "$ jet debug constant --do 'find \"xxxxxxxxxxxxxxxx\" in .data .rodata'\nNot found"
+            }
+          },
+          {
+            "key": "E",
+            "name": "A with readelf's rows",
+            "gist": "Should --bytes print readelf -x's four-byte groups instead?",
+            "gains": [
+              "readelf checks carry over."
+            ],
+            "losses": [
+              "Groups look like numbers but are not."
+            ],
+            "proposed": {
+              "code": "  0x00400120 34320a00 00000000 01000000 00000000 42.............."
+            }
+          },
+          {
+            "key": "F",
+            "name": "Bytes only through the memory word",
+            "gist": "Should only the panels ballot's memory word show a section's bytes, reading the file before a start?",
+            "gains": [
+              "One byte word."
+            ],
+            "losses": [
+              "Hangs on another ballot's outcome and spelling.",
+              "Changes that ballot's size cap."
+            ],
+            "proposed": {
+              "code": "$ jet debug main --do 'memory .rodata'\n0x400120  .rodata  2415 bytes, from the file"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "sections owns its rows and its bytes, from the file, so both checks drop binutils whatever else passes.",
+          "gains": [
+            "No size or readelf in either check.",
+            "No dependence on an open ballot."
+          ],
+          "losses": [
+            {
+              "loss": "One new console word.",
+              "mitigation": "It joins symbols and segments, as gdb and lldb list sections from the console."
+            },
+            {
+              "loss": "With a memory word, bytes show two ways.",
+              "mitigation": "File bytes and program bytes, each labeled."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Breaks scripts that parse segments."
+            },
+            {
+              "key": "C",
+              "reason": "Splits image listings across two commands again."
+            },
+            {
+              "key": "D",
+              "reason": "Hides the bytes."
+            },
+            {
+              "key": "E",
+              "reason": "Groups that misread as numbers."
+            },
+            {
+              "key": "F",
+              "reason": "Depends on another ballot's outcome and changes its cap."
+            }
+          ],
+          "tradeoff": "One more word, for sizes and file bytes that need no other ballot."
+        },
+        "trio": {
+          "current": {
+            "note": "jet debug has no sections word, so the checks call binutils.",
+            "code": "$ jet debug main --do sections\nUnknown command `sections`. Commands: step (s), ..."
+          },
+          "wild": {
+            "lang": "binutils",
+            "note": "size -A lists sizes; readelf -x dumps a section.",
+            "code": "$ size -A main\n$ readelf -x .rodata main"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A new word adds to the console's vocabulary.",
+          "attempts": [
+            "Read section sizes from segments: rejected, the read-only segment holds .rodata and .eh_frame together, and debug sections load in none.",
+            "Nest sections in segments' rows: rejected, it breaks the fixed rows scripts parse today.",
+            "Add sections beside symbols and segments: kept."
+          ],
+          "result": "One word, in the listing family."
+        },
+        {
+          "loss": "Two words could show bytes.",
+          "attempts": [
+            "Leave bytes to the memory word alone (F): rejected, it depends on an open ballot's outcome and spelling, and the build test would have no path under that ballot's option B.",
+            "Let sections show file bytes, and let a memory word, if one passes, take a section name for program bytes: kept."
+          ],
+          "result": "Each word reads one source and says which; the checks need only sections."
+        },
+        {
+          "loss": "A whole section can be very large.",
+          "attempts": [
+            "Cap every answer at 4096 bytes: rejected, the build test must read every byte to prove a run is absent.",
+            "Cap the interactive console, and print a --do answer whole: kept."
+          ],
+          "result": "Nothing large reaches a person's console; a script gets what it names."
+        },
+        {
+          "loss": "A readelf pattern must be rewritten.",
+          "attempts": [
+            "Print readelf's four-byte groups: rejected, they read as numbers in the wrong byte order and differ from the panels ballot's byte rows.",
+            "Print single bytes with a text column and rewrite the one test's two patterns: kept."
+          ],
+          "result": "Bytes look one way across the console, and the test checks the same fact."
+        }
+      ],
+      "draftedBy": "Lens",
+      "reviewedBy": "Rivet",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T12:17:43.548Z"
     }
   ],
   "questions": [
@@ -131345,6 +132104,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T12:20:32.081Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "11 criteria, soft limit 6: A load race found in the p413 full suite, in this card's scope"
+    },
+    {
+      "at": "2026-11-21T12:20:32.081Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#11 A case that copies jet and runs the copy never fails with ET"
+    },
+    {
+      "at": "2026-11-21T12:20:31.268Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "10 criteria, soft limit 6: A load race found in the p413 full suite, in this card's scope"
+    },
+    {
+      "at": "2026-11-21T12:20:31.268Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#10 The case runner never errors on a step whose child exits, as"
+    },
+    {
+      "at": "2026-11-21T12:17:50.924Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T12:17:45.141Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-IMAGE-SECTIONS1",
+      "note": "reviewed by Rivet"
+    },
+    {
+      "at": "2026-11-21T12:17:44.346Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-IMAGE-SECTIONS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T12:17:43.548Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-IMAGE-SECTIONS1",
+      "note": "A built program's sections: their sizes and a named section's bytes, from jet debug's file-first console (draft)"
+    },
+    {
+      "at": "2026-11-21T12:16:01.449Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0ejfsdq",
+      "note": "27 criteria, soft limit 6: A measurement defect in this card's ReadInto pair found while proving #6995 c15"
+    },
+    {
+      "at": "2026-11-21T12:16:01.449Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ejfsdq",
+      "note": "#27 The ReadInto memory pair measures peak RSS independent of wh"
+    },
+    {
+      "at": "2026-11-21T12:12:00.764Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-21T11:59:55.196Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-21T11:59:55.195Z"
+    },
+    {
+      "at": "2026-11-21T11:37:00.691Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-21T11:34:58.580Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T11:32:26.731Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DEBUG-PANELS1",
+      "note": "reviewed by Rivet"
+    },
+    {
+      "at": "2026-11-21T11:32:25.848Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-DEBUG-PANELS1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T11:32:24.849Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-DEBUG-PANELS1",
+      "note": "Registers, memory and machine code at a stop: three panels in the Canvas Debug view, with the same words in the console and the editor adapter (draft)"
+    },
+    {
+      "at": "2026-11-21T11:12:30.695Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "112 criteria, soft limit 6: A profiler defect found while proving #6444 c2, in this card's jet perf run scope"
+    },
+    {
+      "at": "2026-11-21T11:12:30.695Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#115 jet perf run measures the same program a plain build makes: "
+    },
     {
       "at": "2026-11-21T11:12:25.856Z",
       "by": "Main",
