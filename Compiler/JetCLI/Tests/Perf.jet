@@ -63,6 +63,7 @@ use {
         jet_cli_perf_observed,
         jet_cli_perf_outside_flame,
         jet_cli_perf_outside_folded,
+        jet_cli_perf_outside_function,
         jet_cli_perf_outside_lines,
         jet_cli_perf_outside_tree_add,
         jet_cli_perf_pc_json,
@@ -1005,6 +1006,17 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
         },
     )
     assert_eq(jet_cli_perf_outside_flame(value), [String]{"0 main 100.0% {"#".repeat(40)}", "1 Statements.sema_stmt_check 70.0% {"#".repeat(28)}"})
+}
+
+// A function's object in the `functions` section is A-canonical, with its
+// declaration or without, so the trace that holds it verifies.
+#Test("an outside attach's function rows are A-canonical, with a declaration or without") {
+    declared: jet_cli_perf_outside_function(JetCLIPerfOutsideRow{name: "Statements.sema_stmt_check", own: 60, total: 90, seen: -1, file: "Compiler/JetSema/Source/Statements.jet", line: 212, package: "Compiler/JetSema", root: false})
+    bare: jet_cli_perf_outside_function(JetCLIPerfOutsideRow{name: "main", own: 0, total: 100, seen: -1, file: "", line: 0, package: "", root: true})
+    assert_eq(String.from_bytes(canonical_json_bytes(declared)) ?? "", "{{\"file\":\"Compiler/JetSema/Source/Statements.jet\",\"line\":212,\"name\":\"Statements.sema_stmt_check\",\"self\":60,\"total\":90}}\n")
+    assert_eq(String.from_bytes(canonical_json_bytes(bare)) ?? "", "{{\"name\":\"main\",\"self\":0,\"total\":100}}\n")
+    _: canonical_json_parse(canonical_json_bytes(declared)) ?? panic(err.message)
+    _: canonical_json_parse(canonical_json_bytes(bare)) ?? panic(err.message)
 }
 
 // A folded stack holds at least one sample in 100; a rarer one's samples

@@ -70,6 +70,12 @@ jet_cli_perf_error: fn(what: String, fix: String, color: Bool) -> JetDriverVerbO
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", what, jet_cli_why("E2102"), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
 }
 
+// A trace or projection `jet perf` could not write, or wrote and could not
+// verify: one E2105 report (Jet.DriverOperationFailed), naming the problem.
+jet_cli_perf_failed: fn(what: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
 // `render_perf_json`: the status envelope with the projection as its `perf`
 // field. Canonical JSON escapes exactly what a status string escapes, so the
 // canonical bytes are the field's JSON text.

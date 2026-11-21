@@ -57,7 +57,7 @@ jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriver
         stem: if shown.ends_with(extension) -> shown.slice(0..<shown.count_bytes() - extension.count_bytes()) else -> shown
         target: if out_at >= 0 -> args[out_at] else -> "{stem}.pb.gz"
         bytes: perf_gzip.compress(jet_cli_perf_pprof_profile(trace)) ?? return jet_cli_perf_error("the profile is too large to compress", usage, color)
-        jet_cli_perf_export_write(target, bytes) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        jet_cli_perf_export_write(target, bytes) ?? return jet_cli_perf_failed(err.message, color)
         return JetDriverVerbOutput{stdout: "Profile: {target}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     text: if mode == {
@@ -69,7 +69,7 @@ jet_cli_perf_export: fn(args: [String], color: Bool) -[FS, Env, Time]> JetDriver
     if out_at < 0 {
         return JetDriverVerbOutput{stdout: text, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    jet_cli_perf_export_write(args[out_at], text.bytes()) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    jet_cli_perf_export_write(args[out_at], text.bytes()) ?? return jet_cli_perf_failed(err.message, color)
     JetDriverVerbOutput{stdout: "Export: {args[out_at]}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
