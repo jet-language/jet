@@ -250,10 +250,25 @@ main_call_stopped: fn() {
 // JetBackend Image/Object.jet x64_object_main): what jet_rt_main does before
 // the entry, less the process root and what only a root's program links.
 // The entry then runs with no root, so a stop writes its report straight to
-// fd 2 and exits with its code (Trap.jet).
+// fd 2 and exits with its code (Trap.jet). An observed program's main has
+// attached its thread (EntryOwned.jet IR_OWNED_ATTACH_ROUTES), and its
+// observation start runs here as in jet_rt_main; any other owned program
+// has none installed.
 #Export(c) jet_rt_main_owned_start: fn() {
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
+    observe: observe_start_code
+    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
+}
+
+// The end of an observed program that owns its main, in place of its main's
+// stdout flush (Image/Object.jet x64_object_main): as at jet_rt_main's
+// return, the pending output is written, then the observation's exit step
+// runs (main_observe_exit_code), so `jet perf run` counts that last write.
+#Export(c) jet_rt_main_owned_end: fn() {
+    jet_rt_stdout_flush()
+    observe: main_observe_exit_code
+    if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
 }
 
 // SysV int32 callers observe eax only: Image/Object.jet:70-80 returns it to

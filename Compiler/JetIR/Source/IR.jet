@@ -586,6 +586,9 @@ IRDataReloc: struct {
 // the program's entry runs under a main of its own, with no process root
 // (EntryOwned.jet ir_entry_own). `owned_attach`:
 // that main attaches its thread first (IR_OWNED_ATTACH_ROUTES).
+// `owned_observe`: that main's program is an observed build (Build.jet
+// ir_observe_link), so it ends with the observation's exit step
+// (JetBackend Image/Object.jet x64_object_main).
 // `single_thread`: the program provably never runs a second thread (JetCLI
 // Host.jet jet_cli_single_thread), so x86-64 selection updates its RC
 // counts without the lock prefix; false for the runtime library.
@@ -664,6 +667,7 @@ IRModule: struct {
     quiet_routes: NameTable{name_table_sized(2)},
     owned_main: Bool{false},
     owned_attach: Bool{false},
+    owned_observe: Bool{false},
     single_thread: Bool{false},
     user_values: Bool{false},
     // A `--checked-alloc` build's module (IRChecks.checked_alloc): the word

@@ -214,9 +214,11 @@ trap_gs_failure: fn() {
 // handlers before its first report byte, so their output precedes the
 // report. One claim wins; a concurrent loser parks, and a stop inside that
 // cleanup exits with the first status (Main.jet main_exit_claim). With no
-// live jet_rt_main (an embedding or library host) the report goes straight
-// to fd 2. An observed run's flight recorder first writes its typed dump
-// while the stopping stack is whole (Observe.jet jet_rt_observe_exit).
+// live jet_rt_main (a program that owns its main, an embedding or library
+// host) the report goes straight to fd 2. An observed run's flight recorder
+// first writes its typed dump while the stopping stack is whole (Observe.jet
+// jet_rt_observe_exit). With no root, the observation's exit step runs here
+// too, after the pending output is written, as the root's exit would run it.
 trap_root_prepare: fn() {
     observe: main_observe_exit_code
     if (observe != I64{0}) { _ := coll_call1(observe, I64{1}) }
@@ -224,9 +226,14 @@ trap_root_prepare: fn() {
         _ := trap_root(TRAP_ROOT_PREPARE, I64{0}, I64{0}, I64{0})
         return
     }
-    claim: main_process_stop_code
-    if (claim != I64{0} && main_root_control != I64{0}) {
-        _ := coll_call1(claim, EXIT_RUNTIME_PANIC)
+    if (main_root_control != I64{0}) {
+        claim: main_process_stop_code
+        if (claim != I64{0}) { _ := coll_call1(claim, EXIT_RUNTIME_PANIC) }
+        return
+    }
+    if (observe != I64{0}) {
+        jet_rt_stdout_flush()
+        _ := coll_call1(observe, I64{0})
     }
 }
 

@@ -468,7 +468,7 @@ perf_syscalls_fd := I64{-1}
 // over its call that the runtime patches while zones are on
 // (perf_zone_tables_turn); a site of code no table lists tests this word
 // through the runtime's data symbol jet_rt_perf_zones. Either calls
-// jet_perf_zone_open and _close only then.
+// jet_perf_zone_open, _open_named and _close only then.
 perf_zones_on := I64{0}
 
 // The rows not yet written to the spans file (perf_zone_row), 0 until the
@@ -2601,8 +2601,10 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // in a ring (PERF_SAMPLES_RING_COUNT), all 0 under the timer: eleven
 // words. A second exit writes a later one. Under the alloc lens the heap
 // snapshot named `exit` comes first (perf_samples_heap), then the
-// allocations' records. An attach's zones window still open closes first
-// (perf_flight_window_end), so the clock record goes to the record socket.
+// allocations' records. The zones still open on the exiting thread of a
+// main with no process root close first (perf_zones_close_open), then an
+// attach's zones window still open (perf_flight_window_end), so the clock
+// record goes to the record socket.
 // Each live sampler's end record is written first, the sampler disabled
 // (perf_precise_ends), and every ring's samples then drained
 // (perf_precise_rings_drain), then
@@ -2611,6 +2613,7 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
 // (perf_causal_idle_write) and tasks' timings (perf_causal_rows_write), and
 // the threads and host calls (perf_system_exit).
 perf_samples_exit: fn() {
+    perf_zones_close_open()
     perf_flight_window_end()
     perf_spans_flush(true)
     fd: perf_samples_fd
@@ -2746,6 +2749,20 @@ PERF_ZONE_RING_RECORD_MOST: I64{4096}
 // The TCB word (Thread.jet's layout) of the thread's zone ring, which a
 // fiber borrows from the carrier it runs on (perf_rings_lend).
 PERF_ZONE_TCB_RING: I64{760}
+
+// The zones open on a thread while no process root runs (Main.jet
+// main_root_control): a main that owns its process (JetIR EntryOwned.jet)
+// has no stop edge to close them at a stop or a process.exit, so the
+// observation's exit step closes them (perf_zones_close_open). They follow
+// the thread's zone ring, at PERF_ZONE_OPEN_AT (PERF_ZONE_RING_AT plus
+// PERF_ZONE_RING_BYTES): their count@0, then each one's start and borrowed
+// name, a word each, the innermost last. Past PERF_ZONE_OPEN_MOST a zone
+// is counted only.
+PERF_ZONE_OPEN_AT: I64{65664}
+
+PERF_ZONE_OPEN_BYTES: I64{4096}
+
+PERF_ZONE_OPEN_MOST: I64{255}
 
 // A site's opcode byte: `test eax, imm32`, whose flags nothing reads,
 // falls through while zones are off; `jmp rel32`, over the same four bytes,
@@ -2990,6 +3007,16 @@ perf_zones_refused: fn() {
     jet_int_owned_from_i64(if (perf_zones_on == I64{0}) -> I64{0} else -> perf_zone_edge())
 }
 
+// jet_perf_zone_open for a zone named by the borrowed text `name`. With no
+// process root, the thread also keeps the zone as open
+// (perf_zone_open_push), so the observation's exit step can end it.
+#Export(c) jet_perf_zone_open_named: fn(name: I64) -> I64 {
+    if (perf_zones_on == I64{0}) { return jet_int_owned_from_i64(I64{0}) }
+    start: perf_zone_edge()
+    if (main_root_control == I64{0}) { perf_zone_open_push(start, name) }
+    jet_int_owned_from_i64(start)
+}
+
 // Now on the zones' clock (perf_zone_tsc): one read of the time-stamp
 // counter, or of the timeline (perf_zone_now). Inlined into the zone's open
 // and close on every tier, as is perf_zone_ticks, so an edge is the
@@ -3113,18 +3140,100 @@ perf_zone_task: fn() -> I64 {
 }
 
 // The close of the zone named by the borrowed text `name` that opened at
-// `start` (jet_perf_zone_open): its record, from `start` to now, in this
-// thread's zone ring (perf_zone_ring_put). A close publishes no stop, so its
-// call is no stop point, and a zone that closes on a stop edge still
-// records.
+// `start` (jet_perf_zone_open or _open_named): its record, from `start` to
+// now, in this thread's zone ring (perf_zone_ring_put). A close publishes
+// no stop, so its call is no stop point, and a zone that closes on a stop
+// edge still records. The zone is no longer open (perf_zone_open_drop),
+// recorded or not.
 #Export(c) jet_perf_zone_close: fn(name: I64, start: I64) {
     began: host_native_int(start)
-    if (began == I64{0} || perf_zones_on == I64{0}) {
+    if (began == I64{0}) {
+        return
+    }
+    if (perf_zones_on == I64{0}) {
+        perf_zone_open_drop(began)
         return
     }
     perf_zone_ring_put(began, perf_zone_edge(), name)
+    perf_zone_open_drop(began)
     // A closed zone is a progress point of the causal lens.
     perf_causal_progress(name)
+}
+
+// Keeps the zone that opened at `start`, named by `name`, as open on this
+// thread (PERF_ZONE_OPEN_AT); a thread without a ring keeps none.
+perf_zone_open_push: fn(start: I64, name: I64) {
+    ring: perf_zone_ring()
+    if (ring == I64{0}) {
+        return
+    }
+    open: wrapping(ring + PERF_ZONE_OPEN_AT)
+    count: rt_text_word(open)
+    if (count < PERF_ZONE_OPEN_MOST) {
+        entry: wrapping(open + wrapping(I64{8} + (count << I64{4})))
+        rt_text_store(entry, start)
+        rt_text_store(wrapping(entry + I64{8}), name)
+    }
+    rt_text_store(open, wrapping(count + I64{1}))
+}
+
+// Forgets the open zone that started at `start` on this thread, the
+// innermost first: a zone moved out of its block may close out of order.
+// Past PERF_ZONE_OPEN_MOST an unkept zone only lowers the count.
+perf_zone_open_drop: fn(start: I64) {
+    ring: sync_load(wrapping(thread_base() + PERF_ZONE_TCB_RING))
+    if (ring == I64{0}) {
+        return
+    }
+    open: wrapping(ring + PERF_ZONE_OPEN_AT)
+    count: rt_text_word(open)
+    if (count == I64{0}) {
+        return
+    }
+    if (count > PERF_ZONE_OPEN_MOST) {
+        rt_text_store(open, wrapping(count - I64{1}))
+        return
+    }
+    at := count
+    loop at > (I64{0}) {
+        at = wrapping(at - I64{1})
+        entry: wrapping(open + wrapping(I64{8} + (at << I64{4})))
+        if (rt_text_word(entry) == start) {
+            // The ones opened after it move down a place.
+            next := wrapping(at + I64{1})
+            loop next < count {
+                from: wrapping(open + wrapping(I64{8} + (next << I64{4})))
+                to: wrapping(from - I64{16})
+                rt_text_store(to, rt_text_word(from))
+                rt_text_store(wrapping(to + I64{8}), rt_text_word(wrapping(from + I64{8})))
+                next = wrapping(next + I64{1})
+            }
+            rt_text_store(open, wrapping(count - I64{1}))
+            return
+        }
+    }
+}
+
+// At the observation's exit step (perf_samples_exit): each zone still open
+// on this thread (PERF_ZONE_OPEN_AT) records its row, ending now, the
+// innermost first, as its stop edge would under a process root.
+perf_zones_close_open: fn() {
+    if (perf_zones_on == I64{0}) {
+        return
+    }
+    ring: sync_load(wrapping(thread_base() + PERF_ZONE_TCB_RING))
+    if (ring == I64{0}) {
+        return
+    }
+    open: wrapping(ring + PERF_ZONE_OPEN_AT)
+    count := rt_text_word(open)
+    if (count > PERF_ZONE_OPEN_MOST) { count = PERF_ZONE_OPEN_MOST }
+    loop count > (I64{0}) {
+        count = wrapping(count - I64{1})
+        entry: wrapping(open + wrapping(I64{8} + (count << I64{4})))
+        perf_zone_ring_put(rt_text_word(entry), perf_zone_edge(), rt_text_word(wrapping(entry + I64{8})))
+    }
+    rt_text_store(open, I64{0})
 }
 
 // The zone's record in this thread's ring: plain stores, then one store of
@@ -3166,8 +3275,9 @@ perf_zone_ring: fn() -> I64 {
     base: thread_base()
     held: sync_load(wrapping(base + PERF_ZONE_TCB_RING))
     if (held != I64{0}) { return held }
-    // Fresh pages read zero: an empty ring, its head and tail at 0.
-    ring: alloc_map_try(wrapping(PERF_ZONE_RING_AT + PERF_ZONE_RING_BYTES))
+    // Fresh pages read zero: an empty ring, its head and tail at 0, and no
+    // open zone.
+    ring: alloc_map_try(wrapping(PERF_ZONE_OPEN_AT + PERF_ZONE_OPEN_BYTES))
     if (ring == I64{0}) { return I64{0} }
     rings: perf_zone_rings
     loop {

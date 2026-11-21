@@ -1913,7 +1913,8 @@ shifts, and the generated `#CLI` parser's (argument reads, `Int` parsing,
 refusals on stderr and `process.exit`). It then runs under a main of its own
 with no stop points and no cleanup scopes, and its `process.exit` publishes no
 stop. A stop writes the same
-report and exits with the same code as under the root. Any other program
+report and exits with the same code as under the root. `jet run --observe`
+and `jet perf run` keep the same main. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.
 

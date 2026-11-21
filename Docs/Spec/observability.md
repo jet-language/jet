@@ -113,6 +113,11 @@ starts in a child process is reaped by jet first, so its window is the last
 periodic one (`live`). A program that links no task, channel, live value or
 event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
+`jet perf run` measures the program a plain build makes. A program that owns
+its main (`jet inspect decisions` names it `program-owned`) keeps that main
+under observation. Its main starts the observation before the entry. It runs
+the observation's exit step after its last write, at `process.exit`, at a
+stop and at a fault, as a process root's exit does.
 `jet perf run` samples the program's CPU time: the runtime arms a timer on
 each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
 delivered to that thread, one sample per 125 microseconds of its CPU, 8 kHz),

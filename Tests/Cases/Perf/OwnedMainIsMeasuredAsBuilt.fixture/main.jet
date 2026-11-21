@@ -1,0 +1,8 @@
+// Owns its main: it calls only root-free routes and cleans up nothing on a
+// stop. Prints 3000 lines of 1024 bytes, the LF included, all from one print
+// line. They fill an 8192-byte stdout buffer exactly 375 times, so a
+// buffered stdout has nothing left to write at the exit.
+run: fn() {
+    line: "x".repeat(1023)
+    loop _ in 0..<3000 -> print(line)
+}
