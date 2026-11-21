@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112834,
+    "rev": 112850,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23980,6 +23980,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "D-SEMINDEX-TYPED1 posted to the owner (2026-11-21): whether typed Jet code reads the state graphs, fact registry and derivations of a checked index (c19 typed half). Drafted by Lens; Rivet rejected it twice (5 findings, then 1), verifying every claim against dev 50b6fec6e7 and the p399 jet; passed on the third review. c19 stopped-check half filed as Lens-3202-c19-stopped-check-no-facts."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "D-DEP-FEATURES1 (c20(a)) drafted by Lens, reviewed by Main against code and posted: DepSpec has Path, Git, Registry and Foreign with no features (Jetpack/PackageModel Manifest.jet); Variant.features is the foreign-provider variant; the build session has no option or dependency method, so C adds surface; the typed-argument path is proved by Lens-3202-c20a-dependency-features, which passes on the gate-p392 jet and fails when its checks are inverted. The review found the mitigation false on dev (jet doc cut the head at a braced default); the ballot now says so and c37 fixes it. The c20a proof is held until the ballot is ratified A."
         },
         {
@@ -24380,6 +24385,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T05:54:45.361Z"
+        },
+        {
+          "n": 39,
+          "text": "The index derivations give one record per derived item, each credited to the item it derives. Today sema_compiler_index_derivations (JetSema SemanticIndex.jet:1952) lowers a struct methods into Impl items whose span covers only the struct name, so each is credited to the struct. In the typestate fixture Reservation gets 3 records with 2 different source digests, book, pay, check_in and room_key get none, and the 176 records hold only 122 unique ids (54 duplicated). Found by Lens on the p399 jet, 2026-11-21, building c19. Proof: a case over a struct with methods asserts one derivation per method, credited to that method, with unique ids, and the same values in the typed result and `jet inspect semindex --json`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T07:42:23.872Z"
         }
       ],
       "refs": [
@@ -24409,10 +24423,10 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T07:09:46.632Z",
+      "updated": "2026-11-21T07:42:23.872Z",
       "updatedBy": "Main",
       "workOrder": 19,
-      "criteriaLastN": 38
+      "criteriaLastN": 39
     },
     {
       "id": "c0svneex",
@@ -55452,11 +55466,11 @@
         {
           "n": 98,
           "text": "One unwinder: `jet debug` unwinds every frame by the same CFI rows the profiler uses, and its private prologue model (Native.jet native_frame_base, native_caller_rbp) is deleted. Today that model gives the wrong frame (CFA = rbp+16 with the caller's rbp) when a pause or crash dump lands on a tail `jmp` after `pop rbp` (Lens, 2026-11-20). Proof: a JetDebug unit test unwinds a pause at a ret and at a tail jmp at O0, O1 and O2 to the full stack, and the Debug suite passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T17:09:55.949Z",
+          "evidence": "Landed 749bf57d5b (dev): jet debug unwinds every frame by the CFI rows the profiler uses; native_frame_base and native_caller_rbp are deleted (0 references at 49abf9184a). Unit Compiler/JetDebug/Tests/Native.jet a_pause_at_a_ret_or_a_tail_jump_unwinds_the_whole_stack loops -O0, -O1, -O2 and asserts pauses at a ret and at a tail jmp unwind to run(): pass in the p400 batch suite (units 28 packages, 0 failed). Debug suite on p400 (49abf9184a): 151 PASS, 0 FAIL; the one KNOWN-FAILING case, Debug/canvas_graph_source_id_stays_project_relative_for_relative_entries, is the #3594 process-file-fd REFUSAL, unrelated to unwinding.",
+          "at": "2026-11-21T07:46:46.025Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -55539,6 +55553,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T04:53:14.472Z"
+        },
+        {
+          "n": 106,
+          "text": "jet debug labels inlined code truthfully at -O1 and -O2. (1) A nested inline names its immediate caller: `disas square` printed `square, inlined into run on line 8`, but line 8 is in sum_squares and run calls on line 16 (NativeListing.jet:95 pairs the outermost function with the innermost call line). (2) A call line outside the listed function file names its file: at -O2 `inlined args_from_argv, called on line 172` means Core/Process/Process.jet:172 and reads as prog.jet:172 (NativeListing.jet:214). Found proving c95 on the p399 jet, 2026-11-21. Proof: a Debug case asserting both labels at -O1 and -O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T07:31:15.143Z"
+        },
+        {
+          "n": 107,
+          "text": "Stopped in an inlined function at -O1 and -O2, `locals` lists its parameters with their values, or `<Unavailable>` with why, never `(none)`. Found proving c95 on the p399 jet (2026-11-21): stopped in the inlined `square`, `Locals:` showed `(none)` for its parameter `i`, while the stop instruction `mov r8,r14` reads i from r14. An earlier fixture with square on its own line showed `i = <Unavailable>`. Proof: a Debug case stopping in an inlined function at -O1 and -O2 that shows its parameter value, plus a JetDebug unit test on the inlined parameter location.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T07:31:17.134Z"
+        },
+        {
+          "n": 108,
+          "text": "G40: the Canvas Debug view shows memory, registers and disassembly at a stop, as RemedyBG does; on p399 (Chromium 152) the view shows none of them. The panels' surface needs a ballot first. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft, landing p401), probes in its Probes/run-p399.log, axis D11. Proof: the D11 probe axis log listing the three panels at a painted stop.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:11:19.963Z"
         }
       ],
       "refs": [],
@@ -55546,9 +55587,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T07:09:44.974Z",
+      "updated": "2026-11-21T08:11:19.963Z",
       "updatedBy": "Main",
-      "criteriaLastN": 105
+      "criteriaLastN": 108
     },
     {
       "id": "c0in2dft",
@@ -61641,6 +61682,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "Blocked on an engine choice (2026-11-21, Rivet): plugin.load today translates the literal artifact into native code at build time (JetPlugin Link.jet), and the runtime only verifies the bytes. A path computed at run time needs a run-time WASM engine, and none exists. D-CORE-PLUGINPATH1=A compiles at load but names no native engine (it was written against the Rust host Wasmtime). Ballot D-PLUGIN-ENGINE1 is being drafted (interpreter, load-time translator, baseline JIT, out-of-process helper). The sema/Core half is staged held until it is ratified, so no load-always-refuses surface ships."
+        },
+        {
           "at": "2026-11-17",
           "by": "Main",
           "text": "c1 has no engine: guests are translated into the host image at build time (ir_plugin_guest, JetPlugin link step), and Docs/Proposals/plugin-wasm-engine-2026-10-29.md section 1 scopes run-time translation out. D-CORE-PLUGINPATH1=A doesn't say how a run-time path gets compiled, whether by JetPlugin+JetIR+x64 in the runtime or by another engine. That's on Main's ballot list. c2 (Limits) goes ahead on the build-time guests (DeclTypes)."
@@ -61679,7 +61725,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-17T21:05:59.908Z",
+      "updated": "2026-11-21T08:10:41.683Z",
       "updatedBy": "Main"
     },
     {
@@ -69861,7 +69907,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "c7 still fails on p399 (review G41): print_first 11.1 ms and 13.2 ms in two runs against lldb 7.7 and 7.8 ms on the same image and host. Source: Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft, landing p401), probes in its Probes/run-p399.log."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -69929,6 +69981,15 @@
             "card": 6841,
             "n": 70
           }
+        },
+        {
+          "n": 8,
+          "text": "G42: a jet debug print that reads a field, indexes, calls a function or runs in an inlined frame answers within lldb's print_first on the same image. On p399 these took 34 to 66 ms, while Int arithmetic took 1.2 to 6.7 ms. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft, landing p401), probes in its Probes/run-p399.log. Proof: the review's D1 probe axis rows for those print kinds, each at most lldb's.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:11:19.007Z"
         }
       ],
       "refs": [],
@@ -69939,9 +70000,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:45.070Z",
-      "updated": "2026-11-21T03:41:09.618Z",
+      "updated": "2026-11-21T08:11:19.007Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c01b7gdb",
@@ -72207,6 +72268,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c15 proof attempt on the p399 batch compiler (dev 50b6fec6e7), 2026-11-21: Memory.jet and memory.mjs both ran rc=0 without --write against the same jet, with no gdb in either tool (facts read by jet debug at exit). They agree on every verdict (allocations_per_read, peak_live_heap_bytes, peak_rss_kb: win), on peak RSS (1268 / 1344 KB) and on the plain arm peak live heap (153008). They differ slightly on allocations per read (surface 1.0988 vs 1.1017, plain 4.0272 vs 4.0283) and surface peak live heap (152680 vs 148824). These are separate runs of a socket-read workload, so the count of reads may vary per run; that is not yet shown. c15 is NOT met: the proof needs either the same counted run read both ways, or a shown run-to-run spread that covers the difference. Logs: $JET_SCRATCH_ROOT/lanes/Main/proof-6995-c15/{run.log,mjs.log}."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "D-PERF-TARGET1 posted to the owner after three non-drafter reviews by Rivet against code at 97d2a287ab: 9 findings, then 2, then PASS, every one repaired (only run samples at 8,000/s; the command form reads relay or outside samples, never live records without --source; Yama scope 2; wall_ns for wall time and exit status; exact memory/topdown unavailable lines). The text was first fitted to Tower's post limits offline. c1, c2, c5, c11 and c14-c17 wait on its ratification."
         },
         {
@@ -72511,20 +72577,20 @@
         {
           "n": 24,
           "text": "Perf/attach_samples_a_plain_jet_process (the proof of c13) gives the same verdict under full-suite load as it does alone. In the p391 suite it FAILED with `functions ... samples > 250: actual 186`; alone on the same p391 compiler it passed 3 of 3 right after. The 250 bar assumes the spinning thread gets about a second of CPU in the attach window, which suite load takes away. Fix it without weakening detection, inside D-PERF-ATTACH-WINDOW1=A: make the window load-robust (e.g. bound it in target CPU time rather than wall time) or derive the bar from the CPU the target actually used, never a looser fixed bar. Proof: the case passes in 3 consecutive full suites, and a sampler that keeps no samples still fails it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T04:36:07.139Z"
+          "evidence": "Fix 3f49d4ac83 (on dev since p392, whose tree f768b6597e contains it): the outside attach window is the samplers own, and its CPU is the sampled threads schedstat run time. The case drops the fixed `samples > 250` and holds samples to that CPU: samples > 0, window_cpu_ns > 0, window_cpu_ns <= 2000000*samples + 20000000 (Tests/Cases/Perf/attach_samples_a_plain_jet_process.case:38-41). Perf/attach_samples_a_plain_jet_process PASSED in 3 consecutive full cases suites, p392, p394 and p399 (it failed in p391 before the fix). A sampler that keeps no samples fails `samples > 0` at line 38, and fails the ratio once the spinner runs 20 ms.",
+          "at": "2026-11-21T07:18:30.481Z"
         },
         {
           "n": 25,
           "text": "A release build never breaks the next command in its package. Found proving c19 on the p391 batch compiler: `jet build --release --output-dir=rel app.jet` inside a package writes `rel/app.debug` as a symbolic link to `.jet/symbols/.build-id/..`. The next `jet run app.jet` in that package then fails with Jet.DriverOperationFailed: \"Can't securely read the sources ... rel/app.debug is a symbolic link\", and its Fix tells the user to remove a file Jet itself wrote. Jet's own build outputs (the image, its debug link, .jet/) never count as package sources, or the debug file is written so no source walk trips on it. Proof: a case that builds --release with --output-dir inside the package, then runs `jet run` and `jet check` there with exit 0, and `jet crash` still names the frames of that release image's raw report.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T04:44:59.118Z"
+          "evidence": "Landed 996f45aa18, with the hard-link debug file; its split-unit regression fixed by Lens-p399-fixes (089970018b). Case BuildEntry/release_output_dir_inside_the_package_keeps_it_runnable (jet build --release --output-dir=rel inside the package, then jet run and jet check exit 0, then the image overflows and jet crash names `depth` from the store) PASSED in the p399 and p400 full suites. The unit a_split_debug_image_is_read_through_its_debug_link passes on p400 (proof row sp399fixes-1, rc=0; units 0 failed).",
+          "at": "2026-11-21T07:46:47.032Z"
         },
         {
           "n": 26,
@@ -72538,11 +72604,11 @@
         {
           "n": 27,
           "text": "jet debug says when it cannot read a stop's source instead of printing a blank line: on the p394 compiler, `jet debug JET --break $TREE/Compiler/JetSema/Source/Sema/CheckProgram.jet:759 -- check hello.jet` run from a directory other than the tree root stops correctly at CheckProgram.jet:759 in sema_function_result() but prints \"759 |         <- here\" with the source text missing; from the tree root it prints \"759 |     complete: value != None        <- here\". The image records the source path relative to the build root, and the debugger resolves it against its own working directory. It should find the source relative to the build root recorded in the image (or the absolute path given to --break), and when no readable file exists it should print that the source is unavailable, with the path it tried, never an empty source line. Proof: a Debug case that runs jet debug on a built image from another directory and shows the stop's source line, and one with the source file removed that names the missing path. Transcripts: $JET_SCRATCH_ROOT/lanes/Main/proof-6995-c23/transcript.txt (blank) and transcript-root.txt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T06:36:40.752Z"
+          "evidence": "Landed Rivet c27.r2 as 9aee67021d in p400: the debugger resolves a stop source against the build root recorded in the image (digest-verified, .git walk capped) and says when it cannot read it. p400 full suite (49abf9184a): Debug/built_image_shows_its_source_from_another_directory PASS, Debug/built_image_names_its_missing_source PASS, Debug/built_image_never_shows_a_changed_source PASS, Debug/built_image_finds_its_source_through_a_breakpoint_path PASS, and the Debug suite 151 PASS, 0 FAIL.",
+          "at": "2026-11-21T07:46:48.161Z"
         }
       ],
       "refs": [],
@@ -72550,7 +72616,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T07:09:45.792Z",
+      "updated": "2026-11-21T07:46:48.161Z",
       "updatedBy": "Main",
       "criteriaLastN": 27
     },
@@ -128321,6 +128387,168 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T05:55:43.682Z"
+    },
+    {
+      "id": "D-SEMINDEX-TYPED1",
+      "cardId": "c0dktg7a",
+      "group": "api",
+      "title": "Let Jet code read the state graphs, fact registry and derivations of a checked index",
+      "situation": "Jet code that calls `compiler.check` gets a semantic index. It can read the index's definitions, references, calls, structural nodes, effects, arithmetic and outputs. The same index also holds three more lists: state graphs, the fact registry and derivations. `jet inspect compiler check` prints all three in its JSON. Jet code cannot name them, because the CompilerSemanticIndex record has no such members. So the typed value and the CLI JSON disagree on what an index is.\n\nYou decide whether the record gains the three members, or whether the CLI JSON drops them. We recommend adding them: the compiler already builds every value, and the JSON already prints it.",
+      "gist": "Should Jet code read the same three index lists the CLI JSON already prints?",
+      "lesson": "A semantic index is the compiler's record of what a checked program means. Jet code gets it from `compiler.check`, and `jet inspect compiler check` prints it as JSON. Three lists appear only in the JSON. State graphs list each typestate's states and the operations between them. The fact registry lists every fact name: effects, states and tags. Derivations say how each item's facts were established and whether they are still current.",
+      "explainer": "Beginner path: under A, a build step can loop over `index.state_graphs` to list each typestate's states. It can also check that every tag in the fact registry denies Net. Under B, it cannot. The fact registry leaves every CLI output. `jet inspect semindex` keeps state graphs and the program's own derivations, as JSON a build step would have to run and parse.\n\nExpert path: under A, every member has the same name and value in Jet code and in `jet inspect compiler check`. So a tool written against the JSON and a build step written in Jet agree. The values are built once, by the producer that builds the other seven lists. Nothing new is computed; the three lists become nameable.",
+      "story": "Mia writes a build step that refuses a release if any typestate has an unreachable state. Under A she reads `index.state_graphs`, finds a state whose `reachable` is false, and calls `b.error` at its span. Under B she shells out to `jet inspect compiler check`, parses its JSON, and maps spans back by hand. Her step breaks the day the JSON changes.",
+      "inWild": "// Roslyn (C#): a SemanticModel exposes the same symbols, operations and\n// flow analysis to analyzers in code that the compiler's own tools print.\nvar model = compilation.GetSemanticModel(tree);\nvar flow = model.AnalyzeControlFlow(method.Body);\nforeach (var exit in flow.ExitPoints) { /* ... */ }",
+      "detail": "Code read on dev 49abf9184a. The producer is sema_compiler_semantic_index_from_checked (Compiler/JetSema/Source/Sema/SemanticIndex.jet:2106). It already writes the three lists into the CompilerSemanticIndex value, at lines 2267, 2268 and 2269.\n\n`jet inspect compiler check` prints that value whole, through jet_cli_compiler_checked_value in InspectCompiler.jet. So its JSON carries the three lists.\n\nThe public record is its rows in Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet:190-198. They are schema_version, source_digest, definitions, references, calls, structural_nodes, effects, arithmetic and outputs. Typed code checks member reads against those rows, so `index.state_graphs` does not type-check.\n\nTake a 24-line typestate program (Tests/Cases/Typestate/Fixtures/CorrectLifecycleOk). Its JSON holds one state graph: Reservation, with Pending, Confirmed, CheckedIn and three transitions. It holds 19 fact-registry rows: 14 effect roots, Reservation.State and the 4 built-in tags Credential, Input, PII and Secret. It holds one derivation per checked item, Core's included.\n\nThe case CompilerAPI/typed_consumers_match_cli_json compares typed and JSON values for source_digest, definitions, references, calls and effects. Its header says the other three are not compared, because typed code cannot read them.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add the three members and their records",
+          "detail": "CompilerSemanticIndex gains state_graphs, fact_registry and derivations, with the records they hold. Each is named and shaped exactly as the JSON prints it today. Jet code and `jet inspect compiler check` then read one value with one set of members. The semantic-index schema_version stays 20, because the JSON does not change.",
+          "technical": "New CoreRecordRows: CompilerSemanticIndex.state_graphs [CompilerStateGraph], .fact_registry [CompilerFactDeclaration] and .derivations [CompilerDerivationRecord].\n\nCompilerStateGraph {owner: String, module: String, states: [CompilerStateNode], transitions: [CompilerStateTransition]}. CompilerStateNode {name: String, terminal: Bool, reachable: Bool?, span: SourceSpan}. CompilerStateTransition {operation: String, from: String?, to: String}.\n\nCompilerFactDeclaration {kind: String, name: String, members: [String], deny: [String], from: [String]}.\n\nCompilerDerivationRecord {id, subject, claim, producer, method, rule: String, premises: [String], identity, assumptions: [String], disposition: String, observation?, payload?}. Its identity is CompilerDerivationIdentity {source, build, run, target: String}. Its observation is CompilerDerivationObservation {counterexample: String?, event: String?}. Its payload is CompilerDerivationPayload {kind: String, json: String}.\n\nThe eight record names join ir_host_value_name (RuntimeHandles.jet) beside the other index records. Typed code that reaches them then lowers. The JetIR guard host_value_fields_reach_only_lowerable_records covers them. The producer is unchanged.",
+          "code": "use compiler: core.compiler\n\nINDEX: #run { (compiler.check(compiler.parse(embed_file(\"main.jet\")) ?? panic(\"parse\")) ?? panic(\"check\")).semantic_index() ?? panic(\"index\") }\n\nSTATES: #run (loop g in INDEX.state_graphs -> \"{g.owner}: {(loop s in g.states -> s.name).join(\",\")}\").join(\"\\n\")\nTAGS: #run (loop f in INDEX.fact_registry -> (if f.kind == \"Tag\" -> \"{f.name} denies {f.deny.join(\",\")}\" else -> \"\")).join(\"\")\nSTALE: #run (loop d in INDEX.derivations -> (if d.disposition != \"current\" -> d.subject else -> \"\")).join(\" \")"
+        },
+        {
+          "key": "B",
+          "name": "Drop the three lists from the CLI JSON",
+          "detail": "The record keeps its nine members. `jet inspect compiler check` stops printing the three lists, so the typed value and the JSON agree by both lacking them. Under B the fact registry leaves every CLI output. `jet inspect semindex` keeps state graphs and the program's own derivations. That command is built by a separate index producer, from documentation modules, and has its own shape.",
+          "technical": "InspectCompiler writes the index without the three fields, or the producer stops building them. The semantic-index JSON of `inspect compiler check` changes, so its schema_version moves from 20 to 21. The open criterion asking typed code to read these lists could not be met. It would be reworded.",
+          "code": "// Jet code cannot read the facts; a build step runs the CLI instead.\n// jet inspect semindex main.jet --json | jq '.semindex.state_graphs'"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C# (Roslyn)",
+          "note": "Analyzers read the compiler's semantic model through typed APIs; the compiler's own tools use the same model.",
+          "code": "var model = compilation.GetSemanticModel(tree);\nvar symbol = model.GetDeclaredSymbol(node);"
+        },
+        {
+          "lang": "Rust (rust-analyzer)",
+          "note": "The `ide` crate's typed API and the LSP JSON are produced from one HIR; the LSP layer converts at the edge.",
+          "code": "let nav = analysis.goto_definition(position)?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The compiler already builds the three lists inside the index value, and the CLI already prints them; only the public record leaves them out. A makes the record match the value it already is, so the typed result and the JSON are one shape. B removes facts users can see today. It also sends Jet code to a second producer with a different shape.",
+        "gains": [
+          "Jet code and `jet inspect compiler check` read one index with the same ten list members.",
+          "Build steps can check typestates, tags and derivation freshness without running a command.",
+          "No new computation: the producer is unchanged, and the JSON and its schema_version stay as they are."
+        ],
+        "losses": [
+          {
+            "loss": "Eight more public record names in core.compiler.",
+            "mitigation": "Each is the exact shape the JSON already prints, so no new concept is taught. The names follow the existing Compiler* index records."
+          },
+          {
+            "loss": "Derivation method and disposition, and fact kind, are strings, not enums; payload.json is JSON text.",
+            "mitigation": "The other index records already use strings for such words, such as CompilerArithmeticOperation.policy. The JSON prints the same words. Turning them into enums later is one change for both readers."
+          },
+          {
+            "loss": "Derivations include Core's items: the 24-line example sees 176 records, most of them Core's.",
+            "mitigation": "Each record names its target (identity.target), so a reader keeps its own package's records in one filter. The JSON already holds the same list."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It deletes facts users read today from the JSON, and bumps the index schema for that removal. It leaves Jet code no way to read typestates, the fact registry or derivations. The only route left is running a CLI and parsing a second producer's different shape."
+          }
+        ],
+        "tradeoff": "Eight more public record names, for one index shape across Jet code and the CLI."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet code read the three index lists the CLI JSON already prints?",
+        "lesson": "A semantic index is the compiler's record of what a checked program means. Jet code gets it from `compiler.check`, and `jet inspect compiler check` prints it as JSON. Three of its lists, state graphs, the fact registry and derivations, appear only in the JSON. Jet code cannot name them. The vote decides whether Jet code gains them or the JSON loses them.",
+        "trio": {
+          "current": {
+            "note": "Observed on the current compiler for a small typestate program.",
+            "code": "// jet inspect compiler check ts.jet: the JSON has the list\n\"state_graphs\":[{\"owner\":\"Reservation\",\"module\":\"core.compiler\",\"states\":[{\"name\":\"Pending\",...},...],\n  \"transitions\":[{\"operation\":\"book\",\"from\":null,\"to\":\"Pending\"},...]}]\n\n// Jet code: the same index has no such member\nSTATES: #run INDEX.state_graphs   // error: no member `state_graphs`"
+          },
+          "wild": {
+            "lang": "C# (Roslyn)",
+            "note": "Analyzers read the compiler's semantic model through typed APIs, the same model the compiler's own tools use.",
+            "code": "var model = compilation.GetSemanticModel(tree);\nvar flow = model.AnalyzeControlFlow(method.Body);\nforeach (var exit in flow.ExitPoints) { /* ... */ }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Add the three members and their records",
+            "gist": "Jet code reads the same three lists, with the same names and values, as the JSON.",
+            "gains": [
+              "One index shape in Jet code and the CLI JSON.",
+              "Build steps can check typestates, tags and derivations directly.",
+              "The JSON and its version stay unchanged."
+            ],
+            "losses": [
+              "Eight more public record names.",
+              "Some members are words in strings, not enums."
+            ],
+            "proposed": {
+              "code": "STATES: #run (loop g in INDEX.state_graphs ->\n    \"{g.owner}: {(loop s in g.states -> s.name).join(\",\")}\").join(\"\\n\")\nTAGS: #run (loop f in INDEX.fact_registry ->\n    (if f.kind == \"Tag\" -> \"{f.name} denies {f.deny.join(\",\")}\" else -> \"\")).join(\"\")\nSTALE: #run (loop d in INDEX.derivations ->\n    (if d.disposition != \"current\" -> d.subject else -> \"\")).join(\" \")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Drop the three lists from the CLI JSON",
+            "gist": "Both sides agree by both lacking the lists; the fact registry is printed nowhere.",
+            "gains": [
+              "No new public record names."
+            ],
+            "losses": [
+              "The fact registry is no longer printed anywhere.",
+              "Jet code still cannot read them.",
+              "The index schema version moves for a removal."
+            ],
+            "proposed": {
+              "code": "// Jet code cannot read the facts; a build step runs a command instead.\n// jet inspect semindex main.jet --json | jq '.semindex.state_graphs'"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The compiler already builds the three lists, and the CLI already prints them. Only the public record leaves them out. A makes the record match the value it already is.",
+          "gains": [
+            "Typed results and JSON become one shape."
+          ],
+          "losses": [
+            {
+              "loss": "Eight more public record names.",
+              "mitigation": "Each is the exact shape the JSON already prints, so nothing new is taught."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B removes facts users read today and still leaves Jet code unable to read them."
+            }
+          ],
+          "tradeoff": "Eight more public names, for one index shape across Jet code and the CLI."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Eight more public record names.",
+          "attempts": [
+            "Expose the three lists as JSON text members (state_graphs_json: String): rejected, typed code would parse JSON at compile time and the two readers would again differ in shape.",
+            "Reuse the ProgramInfo records StateInfo and TransitionInfo for state_graphs: rejected. StateInfo has no span, and TransitionInfo.from is a StateRef that cannot be absent, so a constructor (book: no state to Pending) has no honest row. Reusing them would also change the JSON the CLI prints today."
+          ],
+          "result": "The records stay, each the shape already printed."
+        }
+      ],
+      "draftedBy": "Lens",
+      "reviewedBy": "Rivet",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T07:39:54.222Z"
     }
   ],
   "questions": [
@@ -130587,6 +130815,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T08:11:19.963Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "105 criteria, soft limit 6: gaps found by the best-in-existence review revision 6 (c39), p399 probes, 2026-11-21"
+    },
+    {
+      "at": "2026-11-21T08:11:19.963Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#108 G40: the Canvas Debug view shows memory, registers and disas"
+    },
+    {
+      "at": "2026-11-21T08:11:19.008Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0phknv8",
+      "note": "8 criteria, soft limit 6: gaps found by the best-in-existence review revision 6 (c39), p399 probes, 2026-11-21"
+    },
+    {
+      "at": "2026-11-21T08:11:19.008Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0phknv8",
+      "note": "#8 G42: a jet debug print that reads a field, indexes, calls a "
+    },
+    {
+      "at": "2026-11-21T08:11:18.035Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0phknv8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T08:10:41.683Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T07:46:48.162Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-21T07:46:47.033Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-21T07:46:46.025Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#98"
+    },
+    {
+      "at": "2026-11-21T07:42:23.872Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0dktg7a",
+      "note": "29 criteria, soft limit 6: a defect in the semantic index derivations this card owns"
+    },
+    {
+      "at": "2026-11-21T07:42:23.872Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dktg7a",
+      "note": "#39 The index derivations give one record per derived item, each"
+    },
+    {
+      "at": "2026-11-21T07:40:08.400Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T07:40:00.832Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-SEMINDEX-TYPED1",
+      "note": "reviewed by Rivet"
+    },
+    {
+      "at": "2026-11-21T07:39:59.731Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-SEMINDEX-TYPED1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T07:39:54.222Z",
+      "by": "Lens",
+      "action": "decision.add",
+      "ref": "D-SEMINDEX-TYPED1",
+      "note": "Let Jet code read the state graphs, fact registry and derivations of a checked index (draft)"
+    },
+    {
+      "at": "2026-11-21T07:31:17.134Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "104 criteria, soft limit 6: the debugger and profiler defects found proving c95 belong to this card"
+    },
+    {
+      "at": "2026-11-21T07:31:17.134Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#107 Stopped in an inlined function at -O1 and -O2, `locals` list"
+    },
+    {
+      "at": "2026-11-21T07:31:15.143Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "103 criteria, soft limit 6: the debugger and profiler defects found proving c95 belong to this card"
+    },
+    {
+      "at": "2026-11-21T07:31:15.143Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#106 jet debug labels inlined code truthfully at -O1 and -O2. (1)"
+    },
+    {
+      "at": "2026-11-21T07:18:30.481Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-21T07:12:48.738Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T07:09:52.867Z",
       "by": "Main",
