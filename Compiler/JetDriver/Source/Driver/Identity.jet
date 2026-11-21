@@ -48,7 +48,7 @@ use {
         record_decode,
         record_encode,
     ]
-    jet_foundation.[ModuleLayer, TComptimeValue, SymbolTable, symbol_is_local, symbol_table_key]
+    jet_foundation.[ModuleLayer, NameTable, TComptimeValue, SymbolTable, name_table_sized, symbol_is_local, symbol_table_key]
     jet_sema.[
         SemaCallSiteFact,
         SemaNameReferenceFact,
@@ -517,14 +517,21 @@ JetDriverEvalAsk: struct {
 // built into jet: a tool that checks a checkout reads that checkout's files
 // as data. Either way the read is held beneath the tree's root (no-follow),
 // and only the tree's own packages may read it. `reader` names them on a
-// tree's first `toolchain:` read and `packages` keeps them by root, so a
+// tree's first `toolchain:` read: `roots` interns the tree's root and
+// `packages[id - 1]` keeps the packages of the root with id `id`, so a
 // compile that reads none never walks the toolchain's manifests. A file
 // reads the tree when the package it is in (its nearest package directory)
 // is one of them.
 JetDriverToolchainTree: struct {
     root: String?,
     reader: JetDriverToolchainPackageReader,
-    packages: [String:[String]],
+    roots: NameTable{name_table_sized(2)},
+    packages: [JetDriverToolchainPackages]{[JetDriverToolchainPackages]{}},
+}
+
+// The package directories of one toolchain tree (JetDriverToolchainTree).
+JetDriverToolchainPackages: struct {
+    directories: [String],
 }
 
 // The host's census of the toolchain's own packages under `root` (the

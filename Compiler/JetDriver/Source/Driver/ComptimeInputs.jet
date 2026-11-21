@@ -28,6 +28,9 @@ use {
         body_node,
         Span,
         TComptimeValue,
+        name_count,
+        name_index,
+        name_intern,
         diagnostic_from_registry,
         JET_COMPTIME_TOOLCHAIN_PREFIX,
     ]
@@ -224,10 +227,13 @@ jet_driver_toolchain_admits: fn(tree: Shared<JetDriverToolchainTree>, file: Stri
     }
     if !file.starts_with("{root}/") -> return None
     package: permit.value.reader.package_of(root, file) ?? return None
-    if !permit.value.packages.has_key(root) {
-        permit.value.packages[root] = permit.value.reader.packages(root)
+    known: name_count(permit.value.roots)
+    id: name_index(name_intern(permit.value.roots, root))
+    if id == 0 -> return None
+    if id == known {
+        permit.value.packages.push(JetDriverToolchainPackages{directories: permit.value.reader.packages(root)})
     }
-    if permit.value.packages[root].contains(package) -> return Val(root)
+    if permit.value.packages[id - 1].directories.contains(package) -> return Val(root)
     None
 }
 
