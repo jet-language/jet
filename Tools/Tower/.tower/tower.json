@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112973,
+    "rev": 112975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55888,11 +55888,11 @@
         {
           "n": 118,
           "text": "The debugger evaluator returns the right value for a call that returns a list. Found by Lens on gate-p420 (dev 4f1f6c1c7f, 2026-11-21): with `build: fn(i: Int, items: Int) -> [Int] { out := [Int]{}; out.push(i); loop k in 1..<items -> out.push(i + k); out }`, stopped at a line inside main, `jet debug main.jet --break main.jet:33 --do continue --do \"print build(3, 2).len()\" --do \"print build(3, 2)\"` prints `.len() = 0` and `build(3, 2) = [3533934837823998284, <Unavailable>, … 140737488319240 more]` instead of 2 and [3, 4], while `print [Int]{3, 4}` is right. So the evaluator reads a returned list from the wrong place: its result slot or the list header is not where the call left it. Fixed at the evaluators call-result path for every growing value (list, text, map), not for this call. Proof: a Debug case that prints a called list, text and map result and their .len() on O0, O1 and O2, with the expected values.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T17:08:06.581Z"
+          "evidence": "dev b66642b8bc (fix 23c9ed608d, case reasons b66642b8bc): `jet test Compiler --profile cases --filter \"Debug/print_a_called_list_text_and_map\"` PASS on gate-p428 (built from 71c563d975) with the landed case, which prints numbers(3, 2) = [3, 4], words(\"xy\", 3) = \"xyxyxy\", counts(\"k\", 7) = [\"k\": 7], each .len() (2, 6, 1) and the same through function values as Ok(...), at a stop on O0, O1 and O2. The rest of Tests/Cases/Debug ran on gate-p428: 162 PASS, 1 known-failing, no new failure.",
+          "at": "2026-11-21T19:29:52.023Z"
         }
       ],
       "refs": [],
@@ -55900,7 +55900,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T18:02:26.194Z",
+      "updated": "2026-11-21T19:29:52.023Z",
       "updatedBy": "Main",
       "criteriaLastN": 118
     },
@@ -72703,6 +72703,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "c16 (2026-11-21): the first slice was written but never submitted: perf attach failure lines with status, errno, ptrace_scope and reason, plus detached and setuid. It was lost when its scratch clone was deleted, and no copy exists. c16 restarts from this criterion text."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "c5 part 1 transcript (dev 24356fa7b8, gate-p419 jet with its jet.debug): `jet debug $D/jet --break Compiler/JetSema/Source/Sema/CheckProgram.jet:9910 --do bt --do locals --do \"print module_index\" -- check t.jet`, rc 0 in 74 s. \"Breakpoint hit CheckProgram.jet:9910 in sema_check_declaration_module()\"; backtrace #0 sema_check_declaration_module, #1 sema_check_declaration_module_in_shared [inlined], #2 sema_check_declaration_modules, #3 sema_collect_comptime_declarations, #4 jet_driver_compile_loaded_stages (Pipeline.jet:5972) ... #12 jet_cli_compile_check (Host.jet:302), #15 jet_cli_compile_on_worker.lambda; locals print the checked item: module_result = SemaGraphModuleResult{module_name: \"t\", source_file: \"t.jet\", ...}, module_index = 0, foreign = true; `values` reads \"unavailable (not kept at this point)\". Full transcript: $JET_SCRATCH_ROOT/lanes/Main/c5-debug-p419.txt. Part 2 (jet perf run of jet build Compiler naming the hottest functions) runs in the next free heavy slot."
         },
         {
@@ -73084,7 +73089,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T17:22:12.012Z",
+      "updated": "2026-11-21T18:18:58.430Z",
       "updatedBy": "Main",
       "criteriaLastN": 29
     },
@@ -132890,6 +132895,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T19:29:52.023Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#118"
+    },
+    {
+      "at": "2026-11-21T18:18:58.430Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-21T18:18:18.988Z",
       "by": "Main",
