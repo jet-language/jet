@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112850,
+    "rev": 112858,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55580,6 +55580,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T08:11:19.963Z"
+        },
+        {
+          "n": 109,
+          "text": "G43: jet perf view's causal refusal reads the experiments the lens kept. On p399 it said the run kept 2 experiments where the lens record has 155. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axis P6 (P6 stays open: the lens also withheld its gains on a 5153 to 4540 MHz clock drop although its rows match the hand speedup within 0.4 points). Proof: run.py … p6 shows the view's reason and the check's counts agreeing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:11:53.863Z"
+        },
+        {
+          "n": 110,
+          "text": "G44: a zone capture counts the zones it dropped, and jet perf view prints that count with its cause. On p399 the view of a recorded zones.jet run counted 465,920 zones for two million calls, and its receipt said nothing of the rest. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axis P2. Proof: run.py … p2 shows count=2000000, or the count plus a dropped count that sums to it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:11:54.972Z"
+        },
+        {
+          "n": 111,
+          "text": "G45: a crash dump flight sample taken outside every task names the runtime function its program counter is in, found through the symbol table jet perf view uses; on p399 it reads only `in the runtime`. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axis D9. Proof: the review probe `run.py ... d9` shows each events row with a Jet place or a runtime function.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:11:39.163Z"
+        },
+        {
+          "n": 112,
+          "text": "Debug info is byte-deterministic: the same compiler building the same tree writes the same .debug_info, whatever the build order. The a0.0.046 admit (2026-11-21, dev 49abf9184a) failed its pack step because s2 rebuilt a jet-bare whose .debug_info named the Core type `FileReader` bare, where the chain and the p400 census builds named it `<corelib>/core.files.FileReader`. The 21-byte difference changed the jet-bare digest, and with it the runtime pack IDENTITY and compilerSha256 (80f7d3b3… against b181dc0f…). .text, .rodata, .data, .symtab and the Jet debug sections were byte-identical. Proof: a JetBackend/JetIR unit test in which two registration orders give identical .debug_info bytes, and the release admit pack step passing (rebuilt pack byte-identical to pack2).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T08:26:17.433Z"
         }
       ],
       "refs": [],
@@ -55587,9 +55623,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T08:11:19.963Z",
+      "updated": "2026-11-21T08:26:17.433Z",
       "updatedBy": "Main",
-      "criteriaLastN": 108
+      "criteriaLastN": 112
     },
     {
       "id": "c0in2dft",
@@ -69984,12 +70020,12 @@
         },
         {
           "n": 8,
-          "text": "G42: a jet debug print that reads a field, indexes, calls a function or runs in an inlined frame answers within lldb's print_first on the same image. On p399 these took 34 to 66 ms, while Int arithmetic took 1.2 to 6.7 ms. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft, landing p401), probes in its Probes/run-p399.log. Proof: the review's D1 probe axis rows for those print kinds, each at most lldb's.",
+          "text": "G42: a jet debug print that reads a field, indexes a list, calls a function or runs in an inlined frame answers within lldb's print_first on the same host. On p399 these took 34 to 66 ms, against 1.2 to 6.7 ms for Int arithmetic on a plain frame's locals. Fix: find what those prints compile that Int arithmetic does not, and keep it from the first such print at a stop. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c39-review-draft), axes D3 and D4. Proof: Run.jet … d4 print_evaluates_compiled_expressions and Run.jet … d3 inlined prints answer within lldb's print_first on the same host.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-21T08:11:19.007Z"
+          "at": "2026-11-21T08:11:52.815Z"
         }
       ],
       "refs": [],
@@ -70000,7 +70036,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:45.070Z",
-      "updated": "2026-11-21T08:11:19.007Z",
+      "updated": "2026-11-21T08:11:52.815Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -130815,6 +130851,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T08:26:17.433Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "109 criteria, soft limit 6: a determinism defect in the debug info this card owns, found by the a0.0.046 release gate"
+    },
+    {
+      "at": "2026-11-21T08:26:17.433Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#112 Debug info is byte-deterministic: the same compiler building"
+    },
+    {
+      "at": "2026-11-21T08:11:54.972Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#110: match the review row and its proof exactly (I had paraphrased it from a summary); was: G44: a zone capture counts or reports its dropped zones. On p399 the view counted 465,920 zones for 2,000,000 calls and said nothing of the rest. Found by Docs/Audits/2026-11-19-debug-profile-best-in-"
+    },
+    {
+      "at": "2026-11-21T08:11:53.863Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#109: match the review row and its proof exactly (I had paraphrased it from a summary); was: G43: the causal lens view agrees with its lens record. On p399 the view reported 2 experiments where the record held 155, and it withheld its gains on a 5153 to 4540 MHz clock drop although its rows m"
+    },
+    {
+      "at": "2026-11-21T08:11:52.815Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0phknv8",
+      "note": "#8: match the review row and its proof exactly (I had paraphrased it from a summary); was: G42: a jet debug print that reads a field, indexes, calls a function or runs in an inlined frame answers within lldb's print_first on the same image. On p399 these took 34 to 66 ms, while Int arithmet"
+    },
+    {
+      "at": "2026-11-21T08:11:39.163Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#111: match the review G45 row exactly (I had paraphrased it from a summary); was: G45: a crash dump's runtime flight samples name the runtime function they were taken in, not a bare address. Found by Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6 (Lens-6841-c3"
+    },
+    {
+      "at": "2026-11-21T08:11:23.731Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "108 criteria, soft limit 6: gaps found by the best-in-existence review revision 6 (c39), p399 probes, 2026-11-21"
+    },
+    {
+      "at": "2026-11-21T08:11:23.731Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#111 G45: a crash dump's runtime flight samples name the runtime "
+    },
+    {
+      "at": "2026-11-21T08:11:22.660Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "107 criteria, soft limit 6: gaps found by the best-in-existence review revision 6 (c39), p399 probes, 2026-11-21"
+    },
+    {
+      "at": "2026-11-21T08:11:22.660Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#110 G44: a zone capture counts or reports its dropped zones. On "
+    },
+    {
+      "at": "2026-11-21T08:11:21.510Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "106 criteria, soft limit 6: gaps found by the best-in-existence review revision 6 (c39), p399 probes, 2026-11-21"
+    },
+    {
+      "at": "2026-11-21T08:11:21.510Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#109 G43: the causal lens view agrees with its lens record. On p3"
+    },
     {
       "at": "2026-11-21T08:11:19.963Z",
       "by": "Main",
