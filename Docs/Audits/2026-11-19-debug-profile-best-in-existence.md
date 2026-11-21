@@ -1,7 +1,7 @@
-# Best debugger and profiler in existence: adversarial review, revision 5 (2026-11-19)
+# Best debugger and profiler in existence: adversarial review, revision 6 (2026-11-21)
 
-Card: #6841 c39. Base: dev `a67dbdce08` (gate p339; revision 4 was on
-`a3fa36e63f`). Follows
+Card: #6841 c39. Base: dev `50b6fec6e7` (gate p399). Revision 5 was on
+`a67dbdce08` (gate p339), and revision 4 on `a3fa36e63f`. Follows
 [`2026-11-18-best-debugger-profiler.md`](2026-11-18-best-debugger-profiler.md)
 (the designs, levers and ranked plan, now #6841 c43-c58),
 [`2026-11-17-debug-latency-vs-lldb.md`](2026-11-17-debug-latency-vs-lldb.md)
@@ -17,61 +17,84 @@ in existence, and needs nothing but `jet`.
 Terms: "event" (one typed occurrence in a trace, a flight ring or a recording)
 is used as [the vocabulary page](../Spec/vocabulary.md) defines it.
 
-## Revision 5: what changed
+## Revision 6: what changed
 
-Revision 4 read its verdicts from the case rows of gates p306 to p309. A case
-row proves that a behavior exists; it does not measure the behavior against a
-peer, and revision 4 called eleven axes "holds" on that footing. Revision 5
-sets those verdicts aside and proves every axis again with one harness,
-[`BestInExistence20261119/Probes/run.py`](BestInExistence20261119/Probes/run.py),
-run against the gate p339 compiler. Its output is
-[`run.log`](BestInExistence20261119/Probes/run.log). Where a peer runs on
-Linux, the harness runs it on the same image and host: lldb 21.1.8, gdb 17.2
-and Linux `perf` 7.2.9. Where it does not (WinDbg TTD, RemedyBG, the RAD
-Debugger, Live++, Tracy, Superluminal, VTune, Instruments, Coz, Replay.io), the
-peer's own published figure is used, with its source.
+Revision 5 found 20 gaps (G21 to G40), and #6841 took them as c70 to c89.
+Revision 6 runs every axis again, with the same harness, on the gate p399
+compiler. Its output is
+[`run-p399.log`](BestInExistence20261119/Probes/run-p399.log). Revision 5's
+[`run.log`](BestInExistence20261119/Probes/run.log) stays beside it, because it
+holds the only gdb and Linux `perf` runs: neither is on this host any longer, so
+their figures below come from revision 5, on p339, and say so.
 
-What the probes found that revision 4 did not say:
+Closed by the p399 probes:
 
-- In an `-O2` image a loop's locals keep their first values at every hit, and
-  jet, lldb and gdb all show the stale values (D3).
-- A `Shared` value shows as a bare pointer (D3).
-- A generic instance's frame is named `__jet_small_dbump`, and at `-O1` and
-  `-O2` its inlined locals are listed under its caller (generic instances).
-- Three DebugLatency measures are above lldb's: `first_stop`, `print_first` and
-  `watch_per_stop` (D1).
-- A recorded zone costs 59 ns, where Tracy's costs about 27 ns per thread (P2).
-- The causal prediction for the line sped up by hand is now too high: 16.8% to
-  26.6% predicted, 10.9% to 16.2% measured (P6).
-- The view charges a runtime helper that takes a third of `fib`'s time to
-  `fib`'s lines without naming it there; Linux `perf` names it (P1).
+- G21: seven of DebugLatency's eight measures are at most lldb's, two runs
+  back to back. `print_first` is not (D1, now G41).
+- G22: a taken recording name is refused before the program runs, under
+  `jet debug --record` and `jet run --record` (D2).
+- G23: an `-O1` replay's first stop lists `(none)` (D2).
+- G24: an `-O2` loop's locals read 0, 1, 2 at successive hits, in jet and in
+  lldb (D3).
+- G25: a `Shared` local shows as `Shared{Score{count: 0}}` (D3).
+- G26: `x * 1000000000000000000` evaluates to `11000000000000000000` (D4).
+- G27: `[i, 2][0] == 3` and `"{i}" == "3"` run in the program, at 49.7 ns a hit
+  for the String condition (D6).
+- G28: a deadlock stops as `Jet.Deadlock` at the root task's waiting line (D8).
+- G29 and G30: a dump's caller frame shows its moved tasks as `<consumed>`, and
+  a small program's dump is 2.2 MB, its image kept beside it by build hash (D9).
+- G31: a DAP `pause` at 0 ms stops in `run` with its frame (D11).
+- G32: the Canvas axis ran on p399 itself (D11).
+- G33 and G34: an instance frame reads `small.bump()`, and at `-O1` and `-O2`
+  its inlined locals show in its own frame (generic instances).
+- G35: `fib`'s line 7 names its `stop poll ×2` in the cost facts (P1, P7).
 
-And what revision 4 could not claim:
+Still open, or new:
 
-- A recording costs 1.02 times the plain run with four threads running in
-  parallel (D2).
-- A condition that never holds costs 9.5 ns a hit, against gdb's 69 µs and
-  lldb's 916 µs on the same image (D6).
-- Per-line top-down analysis works on this AMD host, where `perf stat
-  --topdown` refuses (P5).
+- G41 (new): `print_first` is 11.1 and 13.2 ms against lldb's 7.7 and 7.8
+  (D1, D4).
+- G42 (new): a print that reads a field, indexes a list, calls a function or
+  runs in an inlined frame takes 34 to 66 ms. Int arithmetic on a plain frame's
+  locals takes 1.2 to 6.7 ms (D3, D4).
+- G36: a recorded zone costs 29.56 ns, against Tracy's 27 (P2). Revision 5
+  measured 59.25 ns. The criterion moved to #6958 c11.
+- G37 (c88): the timeline is drawn only from a finished capture (P2).
+- G38 (c89) and c94: an attached capture's header gives `run_wall=861299318ns`
+  for a 500 ms window, and `Sample wall 2214ns` (P3, P4).
+- G40: the Canvas Debug view shows no memory, registers or disassembly (D11).
+- G43 (new): the causal lens withheld its gains on a CPU clock drop. Its view
+  then gives a refusal reason that its own record contradicts (P6).
+- G44 (new): a capture of two million zones counts 465,920 of them, and says
+  nothing of the rest (P2).
+- G45 (new): a dump's flight sample outside every task says only `in the
+  runtime`, where `jet perf view` names the runtime function (D9).
+- c106 and c107 (open, found on p399): inlined code at `-O1` and `-O2` is
+  labeled with the wrong call line, and an inlined function's parameter shows
+  `(none)` (D3).
+
+The probe harness had one defect: `run.py`'s d7 broke on `prog.jet:17`, a line
+the fixture no longer has code on. The session ran through without its `fix`.
+`run.py` now breaks on line 15, and the log's D7 section is that run.
 
 ## Method
 
 The AGENTS.md adversarial design review rule, once per axis:
 
 1. **Peer.** The strongest existing tools on the axis, their best case stated
-   fairly with a source, and what they do that Jet does not.
-2. **Jet today.** What `jet` does on the probe, quoted from `run.log`.
+   fairly with a source, and what they do that Jet does not. The verdict table
+   names the one best tool per axis.
+2. **Jet today.** What `jet` does on the probe, quoted from `run-p399.log`.
 3. **Attack.** Hidden costs, an easier workload, a narrower scope, a deferred
    hard case, and what the probe could not show.
-4. **Verdict.** `holds`, `holds only within stated limits`, or `fails`, for the
-   claim "jet alone matches or beats the best peer here, today". A limit is
-   stated only when no peer escapes it either, or when it is a consequence of
+4. **Verdict.** `holds`, `holds only within stated limits`, `fails`, or `open`,
+   for the claim "jet alone matches or beats the best peer here, today". A limit
+   is stated only when no peer escapes it either, or when it is a consequence of
    Jet's design that the peer pays for elsewhere. Anything else that loses is
-   `fails`, and so is anything the probes did not show.
-5. **Gap.** Every gap names its fix. A gap with an open criterion names it;
-   the others are proposed criteria for #6841 (G21 onward, in [Gaps](#gaps)
-   and the dispositions table).
+   `fails`. An axis whose p399 probe did not show the claim either way is
+   `open`.
+5. **Gap.** Every gap names its fix. A gap with a criterion names it; the others
+   are proposed criteria for #6841 (G41 onward, in [Gaps](#gaps) and the
+   dispositions table).
 
 ### The probes
 
@@ -81,28 +104,43 @@ they are, the three probe programs beside it
 ([`record_cost.jet`](BestInExistence20261119/Probes/record_cost.jet),
 [`hits.jet`](BestInExistence20261119/Probes/hits.jet) and
 [`zones.jet`](BestInExistence20261119/Probes/zones.jet)), the 2026-11-18
-review's `deadlock.jet`, and `Tools/Perf/DebugLatency`. The axes D2, D3, D4, D6
-and generic instances have since moved to
+review's `deadlock.jet`, and `Tools/Perf/DebugLatency`. The axes D2, D3, D4, D6,
+generic instances and canvas are in
 [`Run.jet`](BestInExistence20261119/Probes/Run.jet) beside it, which takes the
-same arguments but `--perf` and runs the same commands with the same report;
-`run.py` keeps the others. `Run.jet`'s `canvas` axis (D11) takes
-`--chromium`, `--chromedriver` and `--jetpack`: the jetpack pins the browser in
-the probe's work directory with `jetpack browser lock`, as the Canvas cases do,
-and Tools/CanvasTest drives the page; that scenario runs with the host's `PATH`,
-which the browser needs. Every other `jet` command runs
-with `PATH` set to an empty directory. A console session is driven one command
-at a time, and each command is timed from sending it to the next `(Jet) `
-prompt. A DAP session is timed from each request to its response, or to the
-event it waits for.
+same arguments but `--perf` and runs the same commands with the same report.
+`Run.jet`'s `canvas` axis (D11) takes `--chromium`, `--chromedriver` and
+`--jetpack`: the jetpack pins the browser in the probe's work directory with
+`jetpack browser lock`, as the Canvas cases do, and Tools/CanvasTest drives the
+page. That scenario runs with the host's `PATH`, which the browser needs. Every
+other `jet` command runs with `PATH` set to an empty directory. A console
+session is driven one command at a time, and each command is timed from sending
+it to the next `(Jet) ` prompt. A DAP session is timed from each request to its
+response, or to the event it waits for.
+
+`run-p399.log` holds, in axis order:
+
+- `run.py`'s axes and `Run.jet`'s;
+- D1 run twice back to back;
+- D7 rerun with the corrected line;
+- the canvas axis;
+- one section by hand: the taken recording name of D2.
 
 Every command's line gives its wall time, its CPU time and the host's load
 average when it started. The host is an AMD Ryzen 9 7950X3D (Zen 4, 32 CPUs)
-with `perf_event_paranoid` 2 and Yama `ptrace_scope` 1. Other agents' builds
-shared it. The 1-minute load average was 6 to 30 for most axes, 53 to 141
-during D1, and about 230 during D11 and P1. Each axis ran alone, in a
-memory-capped systemd scope at `nice 10`. Timings under 1 ms are noise at that
-load. The verdicts rest on ratios of 10 or more, or on a jet and a peer run
-back to back under the same load.
+with `perf_event_paranoid` 2. Other agents' builds
+shared it. The 1-minute load average was:
+
+| Axes | 1-minute load |
+|---|---|
+| `run.py`'s axes | 5.4 to 6.7 |
+| `Run.jet`'s axes | 7 to 11 |
+| D1 and D7 | 18 to 27 |
+| canvas | 26 |
+
+Each axis ran alone, in a memory-capped systemd scope at `nice 10`. Timings
+under 1 ms are noise at that load. The verdicts rest on ratios of 10 or more, or
+on a jet and a peer run back to back under the same load. lldb 21.1.8 is the
+one peer run on this host.
 
 Rerun one axis with, for example:
 
@@ -123,33 +161,37 @@ Neither runs on Linux. lldb is the Linux peer this probe can measure: it loads
 the image's DWARF up front, then answers a step or the print of a plain local
 at once.
 
-**Jet today.** `run.log`, D1: `Tools/Perf/DebugLatency` on a 120,015-line image
-(20,000 functions, 5 runs each), jet and lldb on the same image and host,
-interleaved, at a load average of 53 to 141. Milliseconds, the median:
+**Jet today.** The `run-p399.log` D1 section. The probe runs
+`Tools/Perf/DebugLatency` on a 120,015-line image (20,000 functions, 5 runs
+each). jet and lldb run on the same image and host, interleaved. It ran twice,
+back to back, at a load average of 18 to 27. Milliseconds, the median:
 
-| Measure | jet | lldb | At most lldb's |
-|---|---|---|---|
-| `first_stop` | 895 | 793 | missed |
-| `print_place` | 0.3 | 160.8 | met |
-| `print_first` | 137.7 | 79.4 | missed |
-| `second_eval` | 6.2 | 9.4 | met |
-| `per_step` | 1.6 | 9.9 | met |
-| `print_again` | 3.5 | 25.7 | met |
-| `watch_per_stop` | 30.8 | 22.8 | missed |
-| `condition_per_hit` | 0.0 | 5.8 | met |
+| Measure | jet, run 1 | lldb, run 1 | jet, run 2 | lldb, run 2 | At most lldb's |
+|---|---|---|---|---|---|
+| `first_stop` | 123 | 239 | 158 | 261 | met |
+| `print_place` | 0.1 | 19.0 | 0.1 | 19.5 | met |
+| `print_first` | 11.1 | 7.7 | 13.2 | 7.8 | missed |
+| `second_eval` | 1.4 | 1.7 | 1.3 | 1.6 | met |
+| `per_step` | 0.4 | 1.5 | 0.4 | 1.7 | met |
+| `print_again` | 0.5 | 3.1 | 0.5 | 3.6 | met |
+| `watch_per_stop` | 2.2 | 9.0 | 2.4 | 10.0 | met |
+| `condition_per_hit` | 0.0 | 1.0 | 0.0 | 1.0 | met |
 
-**Attack.** The load inflated both columns: lldb's `per_step` was under 1 ms on
-a quiet host (the 2026-11-17 audit). Ratios at this load are what the probe
-shows, and three of them lose. Building is not in the table: `jet debug
-prog.jet` builds first, as `lldb` never does, and its first prompt on the small
-fixtures came 51 to 288 ms after start, against 2 to 5 ms on a prebuilt image
-(D4, D6).
+Revision 5 measured `first_stop` at 895 ms and `watch_per_stop` at 30.8, both
+above lldb's.
 
-**Verdict.** Fails: `first_stop`, `print_first` and `watch_per_stop` are above
+**Attack.** `print_first` is above lldb's in both runs, by 3.4 and 5.4 ms; c70
+says every measure. Building is not in the table: `jet debug prog.jet` builds
+first, as `lldb` never does. The image's build took 3.9 and 4.7 s. On the small
+fixtures, the first prompt of a source session came 55.6 to 199.4 ms after
+start, against 25.5 to 32.9 ms on a prebuilt image and 3.9 ms on attach (D2 to
+D11, generic instances).
+
+**Verdict.** Fails narrowly: one of eight measures, `print_first`, is above
 lldb's.
 
-**Gap.** G21: every DebugLatency measure at most lldb's. This is c70 (open),
-with c71 (open, one in-process evaluation mechanism).
+**Gap.** G41: `print_first` at most lldb's again. c70 was met on an earlier
+gate and does not hold on p399.
 
 ### D2. Record, replay, reverse, "why"
 
@@ -169,27 +211,30 @@ with c71 (open, one in-process evaluation mechanism).
 What they do that Jet does not: rr, TTD and Pernosco record any native process,
 in any language, and see every instruction, FFI code included.
 
-**Jet today.** `run.log`, D2:
+**Jet today.** The `run-p399.log` D2 section:
 
 - Reverse-next, reverse-step, reverse-finish and reverse-continue land on the
-  right lines with the right values, in 7.6 to 17.6 ms each. Reverse-continue
-  goes back to the previous watch hit (`total: 0 -> 2`).
-- `why total` names the write, its task and the value before, in 21 ms.
+  right lines with the right values, in 8.4 to 12.2 ms each. Reverse-continue
+  goes back to the previous watch hit (`total: 0 -> 2`) in 11.6 ms.
+- `why total` names the write, its task and the value before, in 39.3 ms.
 - A logpoint added during a replay prints all three of its hits from the
   recording (`k=0 d=0 total=0`, `k=1 d=2 total=0`, `k=2 d=4 total=2`), as
   Replay.io's print statements do.
 - One `-O2` recording of three workers replays on `-O0`, `-O1` and `-O2` images
-  with the same output. `why d` in an `-O2` image recovers the optimized-away
-  local from the `-O0` replay (`d = 2 (recovered from the -O0 replay)`), in
-  126 ms.
+  with the same output. The `-O1` replay's first stop lists `(none)`.
+- In the `-O2` image, `why d` answers in 16.5 ms. It names line 20 in the
+  inlined `run` frame ("before: none: this line binds it").
+- A second `--record=NAME` with a taken NAME is refused before the program
+  runs, under `jet debug` and `jet run` alike: `Jet.ReplayNameTaken: The
+  recording name `dup` is taken, and nothing ran` (the section by hand).
 - Recording cost, `record_cost.jet` at `-O2`, the faster of two runs each:
 
   | Workload | Plain | Recorded | Ratio | Replay file |
   |---|---|---|---|---|
-  | `cpu 36`: four fib tasks in parallel | 96.97 ms | 99.14 ms | 1.02 | 2,823 bytes |
-  | `sync 20000`: channel ping-pong and a shared counter | 146.35 ms | 134.94 ms | 0.92 (noise) | 5,123,528 bytes |
+  | `cpu 36`: four fib tasks in parallel | 78.30 ms | 75.47 ms | 0.96 (noise) | 2,809 bytes |
+  | `sync 20000`: channel ping-pong and a shared counter | 156.01 ms | 142.41 ms | 0.91 (noise) | 5,123,515 bytes |
 
-  The recorded `cpu` runs used 2.0 and 2.3 CPU seconds per wall second: the
+  The recorded `cpu` runs used 2.42 and 2.41 CPU seconds per wall second: the
   threads ran in parallel while recording. rr would have run them on one core.
 
 **Attack.**
@@ -198,24 +243,13 @@ in any language, and see every instruction, FFI code included.
   clocks, inputs), not instructions. The effects of an FFI call, relaxed
   atomics and address-dependent behavior are seen only through the replay's
   divergence check.
-- A name that is already recorded makes `--record=NAME` fail after the run
-  (`Jet.ReplayFinalizeFailed`), so the run's work is lost. It should refuse
-  before the program starts.
-- At `-O1`, the first stop of a replay lists the function's not-yet-bound
-  locals as `<Unavailable>` (`done = <Unavailable>   lines = <Unavailable> …`),
-  where `-O0` shows `(none)`.
+- Both ratios are under 1: at this load the probe cannot tell a recorded run
+  from a plain one, so it bounds the cost, not measures it.
 
 **Verdict.** Holds only within stated limits: Jet processes, with FFI code seen
-at its boundary. Inside that limit it beats rr on parallel programs (1.02,
-where rr gives up the cores) and TTD on cost (1.02 against 10x-20x). It also
-adds what no peer has: one recording replayed at three tiers, and `-O2` values
-recovered from the `-O0` replay.
-
-**Gaps.**
-
-- G22: `--record=NAME` refuses a taken name before the program runs.
-- G23: at `-O1`, a stop lists no local whose binding has not run, as `-O0`
-  does.
+at its boundary. Inside that limit it beats rr on parallel programs (no
+measurable cost, where rr gives up the cores) and TTD on cost (against 10x-20x).
+It also adds what no peer has: one recording replayed at three tiers.
 
 ### D3. Jet-typed values at O2, inlined frames included
 
@@ -223,39 +257,35 @@ recovered from the `-O0` replay.
 PDB is good. lldb and gdb show `<optimized out>` where a location list has no
 entry. No peer shows a value the optimizer deleted.
 
-**Jet today.** `run.log`, D3:
+**Jet today.** The `run-p399.log` D3 section:
 
-- On `LldbShowsO2InlinedFramesAndTheirLocals`' `-O2` image, jet, lldb and gdb
-  all show `sum_squares` inlined into `run` with `i` and `total`. Jet adds the
-  types (`i: Int = 0`) and names a task `task 2` and a channel `channel 2, 0 of
-  1 held`, where lldb shows `(Task<Int>) helper = 0x00007ffff7f44e18`.
+- On `LldbShowsO2InlinedFramesAndTheirLocals`' `-O2` image, jet and lldb both
+  show `sum_squares` inlined into `run` with `i`, `n` and `total`. Jet adds the
+  types (`i: Int = 0`).
+- On `ReplayReverse`'s `-O2` image, a breakpoint inside `loop k in 0..<3`
+  stops three times. Jet shows `k` 0, 1, 2, `d` 0, 2, 4 and `total` 0, 0, 2, and
+  so does lldb.
+- Jet shows `tally = Shared{Score{count: 0}}` and `helper = task 2`. lldb shows
+  `(Shared<module:29:package:12:case_fixture:0.1.0:prog.jet.Score>) tally =
+  0x00007ffff7ef1f18` and `(Task<Int>) helper = 0x00007ffff7f44e18`.
 - `print n + 1` and `print total + n * 10` evaluate in an inlined frame, and
-  `print count + 1` in its caller.
+  `print count + 1` and `print sum_squares(3)` in its caller.
 
 **Attack.**
 
-- **Stale values at `-O2`.** On `ReplayReverse`'s `-O2` image, a breakpoint on
-  line 21 inside `loop k in 0..<3` stops three times. Jet shows
-  `k = 0   total = 0` at all three stops, and so do lldb (`(Int) k = 0`) and gdb
-  (`k = 0`). The image's location lists name a place that keeps the first
-  iteration's values. The true values are `k` 0, 1, 2 and `total` 0, 0, 2, as
-  the `-O0` image shows. A debugger that shows a wrong value is worse than one
-  that says `<optimized out>`.
-- **A Shared value is a pointer.** `tally`, a `Shared` `Score`, shows as
-  `tally = 0x7ffff7ef1f18` at every stop and as
-  `tally: Pointer = 0x7ffff7ef1f18` in `locals`. `print tally.count` reads 0.
-- The first two prints in an inlined frame took 134 and 118 ms.
+- Two open criteria were found on this compiler, proving c95. c106: `disas
+  square` labels a nested inline with the outermost function and the innermost
+  call line (`inlined into run on line 8`, where line 8 is in `sum_squares`).
+  c107: stopped in the inlined `square`, `Locals:` shows `(none)` for its
+  parameter `i`, which the stop instruction reads from `r14`.
+- The first two prints in an inlined frame took 66.3 and 57.2 ms; the prints in
+  its caller took 1.8 and 2.1 ms.
 
-**Verdict.** Fails: at `-O2` the debugger shows wrong values for live locals.
+**Verdict.** Fails narrowly: jet shows the right values where lldb shows
+pointers, but an inlined function's parameter can show `(none)` (c107), and an
+inline's label can name the wrong call line (c106).
 
-**Gaps.**
-
-- G24: at `-O2`, a local's location list never names a stale place. A stop
-  shows the current value or `<optimized out>`, and the `-O2` loop probe shows
-  `k` 0, 1, 2 in jet and in lldb.
-- G25: a `Shared` value shows its type and its contents (as the source line
-  prints it, `Shared{Score{count: 0}}`) at a stop, in `locals`, in `print` and
-  in DAP variables.
+**Gaps.** c106 and c107 (open).
 
 ### D4. Expression evaluation
 
@@ -269,31 +299,43 @@ DevTools evaluates any JavaScript in the paused frame, and its eager-evaluation
 previews refuse side effects
 ([developer.chrome.com](https://developer.chrome.com/docs/devtools/console/reference)).
 
-**Jet today.** `run.log`, D4: the compiler evaluates fields, indexing,
-arithmetic, method calls and function calls (`largest(xs[0], xs[2])`). A call
-that can fail shows `Ok(3)` or `Err(ParseError.Empty)`. A call with an effect is
-refused before it runs ("uses the effect `IO`"). An unknown name gets the
-compiler's message. No peer proves an expression free of side effects before
-running it.
+**Jet today.** The `run-p399.log` D4 section:
+
+- The compiler evaluates fields, indexing, arithmetic, method calls and
+  function calls (`largest(xs[0], xs[2])`).
+- A call that can fail shows `Ok(3)` or `Err(ParseError.Empty)`.
+- A call with an effect is refused before it runs ("uses the effect `IO`").
+- An unknown name gets the compiler's message.
+- `print x * 1000000000000000000` gives `11000000000000000000`: the runtime
+  entry the image lacked is loaded with the expression's code.
+- A condition of the wrong type is refused when set ("is a Bool ParseError!,
+  not a Bool").
+
+No peer proves an expression free of side effects before running it.
 
 **Attack.**
 
-- **Latency.** In a `jet debug prog.jet` session a print takes 31 to 46 ms. In a
-  session on a prebuilt image it takes 1.6 to 2.1 ms. lldb's first print on the
-  large image is faster than jet's (D1, `print_first`).
-- **The image limits the language.** `print x * 1000000000000000000` is
-  refused: "it needs the runtime's `jet_int_mul`, which the running image does
-  not hold". lldb evaluates any expression its process can run.
-- Evaluation still has a fork path beside the in-process one (c71).
+- **Latency by expression.** Each print's time depends on what it reads:
+  - A print that reads a field, indexes a list, calls a function or reads a
+    String took 34.3 to 65.7 ms: seven on one stop of
+    `print_evaluates_compiled_expressions` and three on
+    `print_a_fallible_call_shows_ok_or_err`. D2's `print tally.count` took
+    46.1 ms, and D3's `print n + 1` in an inlined frame 66.3 ms.
+  - Int arithmetic on a plain frame's locals took 1.2 to 6.7 ms: `print n * 2`
+    in a source session (3.2 ms), the three prints of
+    `new_operations_at_a_stop_evaluate` on a prebuilt image, and D3's
+    `print count + 1` (1.8 ms).
+  - DebugLatency's `print_first` is the one of these lldb is measured on, and
+    it is above lldb's (D1).
+- Evaluation runs in the stopped process (c71), so an expression that loops
+  forever would hold the stop. lldb bounds its expressions with a timeout; the
+  probe did not try one that does not end.
 
-**Verdict.** Fails: latency (G21), and expressions that need a runtime entry
-the image lacks.
+**Verdict.** Fails narrowly, on latency: DebugLatency's `print_first`, and
+every print beyond Int arithmetic on a plain frame's locals.
 
-**Gaps.**
-
-- G21, with c71 (open).
-- G26: an expression that needs a runtime entry the image lacks still
-  evaluates, by loading the entry beside the expression's own code.
+**Gaps.** G41, and G42: a print that reads fields, indexes, calls or runs in an
+inlined frame answers within lldb's `print_first`.
 
 ### D5. Watch and data breakpoints
 
@@ -302,18 +344,21 @@ the image lacks.
 rr adds reverse watchpoints. Chrome DevTools has no data breakpoint on a
 JavaScript value.
 
-**Jet today.** `run.log`, D5: `watch total` stops at each write that changes it
-(`total: 0 -> 2`, `2 -> 6`) and ends when its frame returns. `watch xs[3]` keeps
-stopping after `xs` grows from 4 items to 104 and then 204, where a debug
-register on the old address would go silent. In a replay, `rc` goes back to
-the previous watch hit (D2).
+**Jet today.** The `run-p399.log` D5 section:
+
+- `watch total` stops at each write that changes it (`total: 0 -> 2`,
+  `2 -> 6`) and ends when its frame returns.
+- `watch xs[3]` keeps stopping after `xs` grows from 4 items to 104 and then
+  204, where a debug register on the old address would go silent.
+- In a replay, `rc` goes back to the previous watch hit (D2).
+- DebugLatency's `watch_per_stop` is 2.2 and 2.4 ms, against lldb's 9.0 and
+  10.0 (D1).
 
 **Attack.** There are four hardware slots, as in every live debugger. Arming
-the list watch took 49.6 ms. On the large image, a watch stop takes 30.8 ms
-against lldb's 22.8 (D1).
+the list watch took 48.3 ms, where `watch total` took 0.3 ms.
 
-**Verdict.** Fails on cost: `watch_per_stop` is above lldb's (G21). What a
-watch can follow beats gdb and lldb.
+**Verdict.** Holds: a watch stop costs a quarter of lldb's, and a watch follows
+a moved list, which gdb's and lldb's cannot.
 
 ### D6. Conditional breakpoints and logpoints
 
@@ -323,31 +368,29 @@ own engine
 ([developer.chrome.com](https://developer.chrome.com/docs/devtools/javascript/breakpoints)).
 Replay.io's logpoints run against the past (D2).
 
-**Jet today.** `run.log`, D6: `hits.jet` on one `-O0` image, with a breakpoint
-on line 15 whose condition `i == -1` never holds.
+**Jet today.** The `run-p399.log` D6 section: `hits.jet` on one `-O0` image,
+with a breakpoint on line 15 whose condition never holds.
 
 | Debugger | Hits | Time over the plain run, per hit |
 |---|---|---|
-| jet, the condition placed in the program | 1,000,000 | 9.5 ns |
-| jet, a placed logpoint `"s{step}"` that writes every hit | 1,000,000 | 91.9 ns |
-| gdb 17.2, `break hits.jet:15 if i == -1` | 100,000 | 68,858 ns |
-| lldb 21.1.8, `--condition 'i == -1'` | 100,000 | 916,166 ns |
+| jet, `i == -1` placed in the program | 1,000,000 | 16.2 ns |
+| jet, `"{i}" == "-1"` placed in the program | 1,000,000 | 49.7 ns |
+| jet, a placed logpoint `"s{step}"` that writes every hit | 1,000,000 | 119.3 ns |
+| lldb 21.1.8, `--condition 'i == -1'` | 100,000 | 636,831 ns |
+| gdb 17.2, `break hits.jet:15 if i == -1` (revision 5, p339) | 100,000 | 68,858 ns |
 
-DebugLatency's `condition_per_hit` agrees: 0.0 ms against lldb's 5.8 (D1).
+`conditional_breakpoint_runs_in_process` places all four of its conditions,
+`[i, 2][0] == 3` and `"{i}" == "3"` among them, and each stops on the right hit.
+DebugLatency's `condition_per_hit` agrees: 0.0 ms against lldb's 1.0 (D1).
 
-**Attack.**
+**Attack.** Setting a placed condition costs a compile, 116 to 180 ms, and a
+logpoint 239 to 336 ms. lldb sets one at once, then pays 0.64 ms a hit. At that
+rate jet's condition is ahead from about the 280th hit.
 
-- A condition that allocates (`[i, 2][0] == 3`) or a logpoint that reads a
-  `String` is not placed. The console says so, and each hit is then a stop.
-- Setting a placed condition costs a compile, 105 to 121 ms, and a logpoint 198
-  to 217 ms. gdb and lldb set one at once.
-
-**Verdict.** Holds only within stated limits: a placed condition beats gdb by
-7,000 times and lldb by 96,000 times a hit. One that cannot be placed pays for
-a stop, as every gdb condition does. The time to set one is D1's gap.
-
-**Gap.** G27: a condition or logpoint that allocates or reads a `String` is
-placed, and allocates in the scratch arena the evaluator already uses.
+**Verdict.** Holds only within stated limits: a placed condition beats lldb by
+39,000 times a hit and gdb by 4,000 times, and a String condition is placed
+too. The limit is the compile when it is set, which a condition that will be
+hit a few hundred times repays.
 
 ### D7. Hot patch
 
@@ -355,15 +398,17 @@ placed, and allocates in the scratch arena the evaluator already uses.
 ([liveplusplus.tech](https://liveplusplus.tech/docs/documentation.html)). Chrome
 DevTools edits a running script's function and keeps the page's state.
 
-**Jet today.** `run.log`, D7: `fix` swaps `score` in the running native process
-in 198 ms, and the next call runs the edit. A change of parameters is refused
-before anything is installed, with the reason ("restart the program"), in
-250 ms.
+**Jet today.** The `run-p399.log` D7 section:
+
+- `fix` swaps `score` in the running native process in 165.8 ms, and the next
+  call runs the edit (`round 1 score 1010`).
+- A change of parameters is refused before anything is installed, with the
+  reason ("restart the program to run the edit"), in 170.9 ms.
 
 **Attack.** A function on a stack keeps its old code until it returns. Inlined
 copies of an old function survive a swap.
 
-**Verdict.** Holds: five times faster than Live++'s second, and transactional.
+**Verdict.** Holds: six times faster than Live++'s second, and transactional.
 
 ### D8. Tasks, channels, locks and deadlocks
 
@@ -373,50 +418,48 @@ monitor cycles when asked
 ([docs.oracle.com](https://docs.oracle.com/en/java/javase/21/docs/api/java.management/java/lang/management/ThreadMXBean.html)).
 Visual Studio's Parallel Stacks window draws tasks.
 
-**Jet today.** `run.log`, D8: `cycle.jet` stops with exit 70 and names every
-task in the cycle, what it waits for and where. The 2026-11-18 review's
-`deadlock.jet`, which hung then, now stops the same way. Under `--observe` the
-stop writes a dump whose `tasks` lists all three tasks, each with typed locals
-(`from_a: Receiver<Int> = channel 2, 0 of 1 held`). `tasks` in a live session
-lists each task's state, wait and stack.
+**Jet today.** The `run-p399.log` D8 section:
 
-**Attack.** The stop is reported as a `Jet.Panic` at `<core.prelude>:0`, with the
-panic's generic "Why" text, not at the waiting line.
+- `cycle.jet` stops with exit 70 as `Jet.Deadlock: Tasks wait on each other`,
+  at the main task's waiting line (`--> cycle.jet:23`). It names every task in
+  the cycle, what it waits for and where.
+- The 2026-11-18 review's `deadlock.jet`, which hung then, stops the same way.
+- Under `--observe` the stop writes a dump whose `tasks` lists all three tasks,
+  each with typed locals (`from_a: Receiver<Int> = channel 2, 0 of 1 held`).
+- `tasks` in a live session lists each task's state, wait and stack in 0.4 ms.
 
 **Verdict.** Holds: Jet stops a cycle that Go leaves running whenever another
 goroutine still runs, and it names the waits.
-
-**Gap.** G28: a deadlock stop has its own report, at the root task's waiting
-line, not a panic in `<core.prelude>`.
 
 ### D9. Post-mortem dumps
 
 **Peer.** WinDbg and Visual Studio open minidumps with full types; Crashpad
 writes them in production. gdb opens a Linux core with C types.
 
-**Jet today.** `run.log`, D9: the dump opens typed in 33 ms, and `bt`, `locals`,
-`print`, `tasks` and the last flight events answer in 0.1 to 0.3 ms each. The
-Secret shows `<redacted>`, its text is not in the file, and the file is mode
-600. A program that holds 64 MB of lists keeps its dump's memory within the
-32 MiB budget and says what it cut.
+**Jet today.** The `run-p399.log` D9 section:
+
+- The dump opens typed, with its first prompt in 81.5 ms. `bt`, `locals`,
+  `print`, `tasks` and the last flight events answer in 0.1 to 0.4 ms each, and
+  `disas` lists `check`'s machine code by source line in 14.5 ms.
+- `frame 1` shows `run()` with `first = <consumed>`, `second = <consumed>` and
+  `third = <consumed>`: the three tasks were joined before the stop.
+- The Secret shows `<redacted>`, its text is not in the file, and the file is
+  mode 600.
+- The dump is 2,202,568 bytes. It names its image by build hash
+  (`crash-cd5ba1722bc10c09.image beside the dump`).
+- A program that holds 48 MB of lists keeps its dump within the 32 MiB budget,
+  says what it cut (31,096,832 bytes), and shows `<cut off>` where it cut.
 
 **Attack.**
 
-- **A caller frame loses its locals.** `frame 1` in `crash.jet`'s dump shows
-  `first`, `second` and `third`, three live tasks, as `<Unavailable>`.
-- **Size.** The `crash.jet` dump is 55,130,032 bytes, of which 53,022,480 are
-  the image. A minidump names its modules and fetches them from a symbol
-  server.
-- Three flight events read `sample`, with no place.
+- The image beside the dump is 58.6 MB for a 21-line program. A minidump names
+  its modules and fetches them from a symbol server.
+- Two of the 15 flight events read `sample  outside every task  in the
+  runtime`. P1's view names the runtime function each such sample landed in
+  (`unit_os_syscall_i64__asm`); the dump does not.
 
-**Verdict.** Fails narrowly: a dump loses the live locals of a caller frame.
-
-**Gaps.**
-
-- G29: every live local of every frame in a dump shows its value, and every
-  flight event in it names its place.
-- G30: a dump names its image by build hash, and copies the image's bytes only
-  when no copy of that build is on disk.
+**Verdict.** Holds: typed, budgeted and redacted, where a minidump is none of
+the three by default.
 
 ### D10. Visualizers
 
@@ -424,15 +467,14 @@ Secret shows `<redacted>`, its text is not in the file, and the file is mode
 formatters: a second language, kept apart from the type
 ([learn.microsoft.com](https://learn.microsoft.com/en-us/visualstudio/debugger/create-custom-views-of-native-objects)).
 
-**Jet today.** `run.log`, D10: a `Ring`'s `debug_view` shows its three live
-items in order (`Ring{0: 3, 1: 4, 2: 5}`) in `locals` and `print`, in 1.3 to
-1.9 ms, without running the target (`viewed.txt exists: false`). A view from a
-package works the same way.
+**Jet today.** The `run-p399.log` D10 section: a `Ring`'s `debug_view` shows
+its three live items in order (`Ring{0: 3, 1: 4, 2: 5}`) in `locals` and
+`print`, in 2.2 to 6.7 ms, without running the target (`viewed.txt exists:
+false`). A view from a package works the same way. The view runs in the
+stopped process, by the one evaluation mechanism (c71).
 
-**Attack.** The view runs in a fork, the mechanism c71 removes.
-
-**Verdict.** Holds: the visualizer is Jet, is checked by the compiler, and never
-runs in the program.
+**Verdict.** Holds: the visualizer is Jet, is checked by the compiler, and has
+no effect on the program.
 
 ### D11. Surfaces: terminal, DAP, graphical
 
@@ -440,74 +482,58 @@ runs in the program.
 window. VS Code over DAP attaches, pauses, restarts and steps back. Chrome
 DevTools puts sources, console and performance in one window.
 
-**Jet today.** `run.log`, D11, at a load average of about 230:
+**Jet today.** The `run-p399.log` D11 and Canvas sections:
 
-- Over DAP: `initialize` in 140 to 474 ms; a breakpoint stop, `restart` (41.8
-  ms to the next stop), `variables` and `evaluate`.
-- In a replay over DAP: `reverseContinue` (53 ms) and `stepBack` (41.8 ms) land
+- Over DAP:
+  - `initialize` answers in 55.5 to 57.0 ms.
+  - A `pause` sent with `configurationDone` stops in `run` at line 2, with its
+    frame; sent 100 ms later, at line 3.
+  - A breakpoint stop, `restart` (3.6 ms to the next stop), `variables` and
+    `evaluate` all answer.
+- In a replay over DAP, `reverseContinue` (7.2 ms) and `stepBack` (8.6 ms) land
   on the right line, and `evaluate k` reads the earlier value.
-- The console attaches to a running `-O0` image (first prompt 22.2 ms), breaks
+- The console attaches to a running `-O0` image (first prompt 3.9 ms), breaks
   in `tick`, and leaves the program running when it detaches.
-- In the Canvas Debug view (`run.log`, Canvas, on the gate p372 compiler, three
-  runs back to back at a load average of about 10), Continue to a breakpoint
-  paints the stop in 56.6 to 93.4 ms: the source line active, both frames and
-  `x = 2` in Locals. Start to the entry shown paused takes 124 to 148 ms, and a
-  watch typed and entered paints its value in 131 to 183 ms. Each time runs in
-  the page from the input event to the first frame painted after the view
-  shows the result. The Profile view paints its timeline 235 to 289 ms after
-  Profile entry, with Hot Lines and Selection beside it.
-- At the stop, the window shows six panels at once: Source, Call Stack,
-  Locals, Watches, Tasks and the Debug Console.
+- The Canvas Debug view, at a load average of 26:
+  - The page loads and draws in 295.9 ms.
+  - Start to the entry shown paused takes 159.3 ms.
+  - Continue to a breakpoint paints the stop in 56.8 ms, with the source line
+    active, both frames and `x = 2` in Locals.
+  - A watch typed and entered paints its value in 195.1 ms.
+  - At the stop, the window shows six panels at once: Source, Call Stack,
+    Locals, Watches, Tasks and the Debug Console.
+- The Profile view paints its timeline 262.3 ms after Profile entry, with Hot
+  Lines and Selection beside it.
 
 **Attack.**
 
-- A `pause` sent as the program starts answers with a thread named `root (task
-  1, blocked)` and no frames (`"stackFrames": []`). Sent 100 ms later, it
-  shows `run` at line 3.
 - RemedyBG also shows memory, registers and disassembly at a stop; the Debug
-  view has none of the three. `jet debug` and DAP disassemble (c95), but the
-  Canvas does not show it.
+  view has none of the three. `jet debug` disassembles (D9's `disas`), but the
+  Canvas does not show it. The probe prints "Verdict: does not hold".
 - RemedyBG runs on Windows alone, so its time is not measured here. It shows a
-  stop in well under a second; the slowest of the three runs here took 93.4 ms.
-- The probe's program is a few lines long, so its profile is one or no
-  sample: the axis times the Profile view's paint, not what it shows.
+  stop in well under a second; jet's took 56.8 ms.
+- The probe's program is a few lines long, so its profile is one sample: the
+  axis times the Profile view's paint, not what it shows.
 
-**Verdict.** Fails: an early pause shows no stack, and the Debug view lacks
-three of RemedyBG's panels at a stop.
+**Verdict.** Fails: the Debug view lacks three of RemedyBG's panels at a stop.
 
-**Gaps.**
-
-- G31: a `pause` before the program's first Jet frame stops at that frame, or
-  says that the program has not started yet, never with an empty stack.
-- G40: the Canvas Debug view shows memory, registers and disassembly at a stop,
-  as RemedyBG does.
+**Gap.** G40: the Canvas Debug view shows memory, registers and disassembly at
+a stop, as RemedyBG does.
 
 ### Generic instances
 
 **Peer.** Every native debugger stops in each instantiation of a template and
 names it as the source spells it (`Stack<int>::push`).
 
-**Jet today.** `run.log`, generic instances: a breakpoint on the generic
-module's line 7 stops in both instances at `-O0`, `-O1` and `-O2`, and a step
-from the call site enters the instance.
+**Jet today.** The `run-p399.log` generic instances section:
 
-**Attack.**
+- A breakpoint on the generic module's line 7 stops in both instances,
+  `small.bump()` and `large.bump()`, at `-O0`, `-O1` and `-O2`.
+- At `-O1` and `-O2` the frame reads `small.bump()  at prog.jet:7  [inlined]`,
+  and its local `by = 1` shows in it.
+- A step from the call site enters the instance at every tier.
 
-- Frames are named `__jet_small_dbump()` and `__jet_large_dbump()`, not as the
-  source spells the instance (`small.bump`).
-- At `-O1` and `-O2` the inlined instance's locals move to its caller. The stop
-  on line 20 shows `by = <Unavailable>   total = <Unavailable>   total =
-  <Unavailable>`, and the stop inside the instance shows `(none)`. At `-O0` it
-  shows `by = 1`.
-
-**Verdict.** Fails: the names are not Jet's, and inlined instance locals are
-listed in the wrong frame.
-
-**Gaps.**
-
-- G33: a generic instance's frame is named as the source spells it.
-- G34: at `-O1` and `-O2`, an inlined frame's locals are listed in that frame,
-  never in its caller.
+**Verdict.** Holds: named as written and scoped right at every tier.
 
 ## Profiler axes
 
@@ -519,30 +545,30 @@ listed in the wrong frame.
 precise PEBS and IBS program counters where the host allows them
 ([man7.org](https://man7.org/linux/man-pages/man1/perf-record.1.html)).
 
-**Jet today.** `run.log`, P1: four threads of `fib` at `-O2`, one sample per
-125 µs of each thread's CPU time (8 kHz), 16,227 samples in `fib` over 2.0 CPU
-seconds. The receipt measures the sampler's own cost: 2.75%, of which the
-kernel's signal delivery is 2.48 µs a sample. Linux `perf record -e
-task-clock:u -F 8000 -g` on the same image took 16K samples. Neither gets a
-precise program counter on this host: Jet's receipt says `precise: false`, and
-`perf` refuses `cycles:upp` ("Invalid argument") and `ibs_op//u` ("enable
-system wide with '-a'").
+**Jet today.** The `run-p399.log` P1 section:
 
-**Attack.** `perf` splits the samples as `burn.fib` 66.0% self and
-`jet_ir_stop_turn` 33.7% self: a third of the time is in the runtime's stop
-poll. Jet charges those samples to `fib`'s lines (line 7 71%, line 5 24%), as
-its design says a helper's samples should be charged. Only the capture's
-receipt says so, as one total for the whole run: "5242 samples in
-compiler-emitted helpers, such as stop polls, count at the line that called
-them". The view does not show which helper or which line, and line 7's cost
-facts name only `exact Int spill ×3`. `perf` shows the split at once.
+- Four threads of `fib` run at `-O2`, sampled once per 125 µs of each thread's
+  CPU time (8 kHz). 16,238 samples land in `fib`, and the capture kept 16,267
+  of the 16,309 that 2,039 ms of CPU time gives.
+- The receipt measures the sampler's own cost: 1.75%, of which the kernel's
+  ring writes are 28.6 ms.
+- Line 7's row carries `cost: stop poll ×2` beside its 62%.
+- 28 samples fell outside `burn.jet`, each named (`unit_os_syscall_i64__asm
+  11`, `unit.alloc_frames_key 4`, ...).
+- Neither jet nor `perf` gets a precise program counter at
+  `perf_event_paranoid` 2. Jet's receipt says `precise: false` and names the
+  skid source, `task_clock_interrupt`. In revision 5, `perf` refused
+  `cycles:upp` and `ibs_op//u` on this host.
 
-**Verdict.** Fails narrowly: the rate, the stacks and the stated overhead match
-Superluminal, but the view hides runtime time inside the calling line.
+**Attack.** `perf` is not on the host any longer, so the probe could not repeat
+revision 5's split of `fib`'s samples. On p339, `perf` gave the runtime's stop
+poll 33.7% self. c86 then inlined the poll's quiet test and named the poll per
+line. The p399 view shows that naming, but this run has no hardware reference
+to check the 5-point bar against.
 
-**Gap.** G35: a line's row splits its samples into its own code and each runtime
-helper it calls, named in Jet terms (`stop poll 33%`), and the compiler's cost
-facts name the stop poll where it is emitted.
+**Verdict.** Holds: the rate, whole stacks on every thread and a measured
+overhead under 2%, with Superluminal's rate and stacks. The precise-PC limit
+binds `perf` on this host too.
 
 ### P2. Zones, frame marks and plots; zero cost when off
 
@@ -553,34 +579,44 @@ in parallel
 ([Tracy manual, "Performance impact"](https://github.com/wolfpld/tracy/blob/master/manual/tracy.tex)).
 Per thread that is about 27 ns a zone.
 
-**Jet today.** `run.log`, P2: zones, frame marks and plots share the timeline.
-`zones.jet`, two million calls at `-O2`, the faster of two runs:
+**Jet today.** The `run-p399.log` P2 section: zones, frame marks and plots
+share the timeline (`zone physics count=5`, `frames count=5`,
+`plot moved count=5`). `zones.jet` makes two million calls at `-O2`; the table
+gives the faster of two runs:
 
 | Run | Per call |
 |---|---|
-| plain, `jet run` | 6.58 ns |
-| a zone in each call, profiling off (`jet run`) | 8.53 ns |
-| plain, `jet perf run` | 6.65 ns |
-| a zone in each call, `jet perf run` | 65.90 ns |
+| plain, `jet run` | 6.21 ns |
+| a zone in each call, profiling off (`jet run`) | 8.40 ns |
+| plain, `jet perf run` | 6.66 ns |
+| a zone in each call, `jet perf run` | 36.22 ns |
 
-A zone costs 1.94 ns when nothing is profiling and 59.25 ns when it records.
+A zone costs 2.19 ns when nothing is profiling and 29.56 ns when it records.
+Revision 5 measured 59.25 ns.
 
-**Attack.** That is twice Tracy's per-thread cost and 26 times its headline
-figure. Tracy's zones compile to nothing without `TRACY_ENABLE`; Jet's strip
-setting does the same, but the default build keeps the 1.94 ns. Jet's
-timeline, in `jet perf view` and in Canvas's Profile view (c58), is drawn from
-a finished capture. Tracy's is live.
+**Attack.**
 
-**Verdict.** Fails: a recorded zone costs 59 ns against Tracy's 27, and the
+- 29.56 ns is still above Tracy's 27 ns per thread, and 13 times its headline
+  figure.
+- The view of the recorded run counts `zone tick count=465920` for two million
+  calls, with no word of the other 1,534,080. Whether the zones were dropped,
+  or the count is wrong, the probe cannot tell.
+- Tracy's zones compile to nothing without `TRACY_ENABLE`. Jet's strip setting
+  does the same, but the default build keeps the 2.19 ns.
+- Jet's timeline, in `jet perf view` and in Canvas's Profile view, is drawn
+  from a finished capture. Tracy's is live.
+
+**Verdict.** Fails: a recorded zone costs 29.6 ns against Tracy's 27, and the
 timeline is not live.
 
 **Gaps.**
 
-- G36: a recorded zone costs at most Tracy's per thread: under 27 ns a zone on
-  `zones.jet`.
-- G37: the timeline is drawn while the program runs, from its flight ring.
-  Revision 4 disposed of this as G18 under c58, but c58's Profile view draws a
-  finished capture.
+- G36: a recorded zone costs under 27 ns on `zones.jet`. The criterion moved to
+  #6958 c11, which was met there; this probe does not meet it on p399.
+- G37 (c88): the timeline is drawn while the program runs, from its flight
+  ring.
+- G44: a capture counts every zone the program entered, or says how many it
+  dropped and why.
 
 ### P3 and P9. One timeline: waits, wakers, off-CPU time, I/O
 
@@ -589,23 +625,32 @@ a wait. Tracy shows zones and locks live, with context switches only when it
 runs elevated. Off-CPU flame graphs (eBPF) show blocked time by stack
 ([brendangregg.com](https://www.brendangregg.com/offcpuanalysis.html)).
 
-**Jet today.** `run.log`, P3: every wait names its waker (`task 2 in time sleep
-at main.jet:29, woken by its timeout`; `tcp connect … with peer
-127.0.0.1:45633, woken by its peer`). Off-CPU time is shown by stack, and reads
-and writes with their byte counts, with no privilege needed. `jet perf attach
---zones=500ms` turns a running program's zones on for half a second (43 frames
-of 10.4 ms).
+**Jet today.** The `run-p399.log` P3, P9 section:
 
-**Attack.** Jet sees Jet code only; a wait inside FFI code is invisible. The
-attached capture's header says `run_wall=1443ns run_cpu=0ns` for a 500 ms
-window. Liveness is P2's gap.
+- Every wait names its waker (`task 1 in shared lock at main.jet:12, woken by
+  task 2 at main.jet:31`; `tcp connect … with peer 127.0.0.1:43039, woken by
+  its peer`).
+- Off-CPU time is shown by stack.
+- Reads and writes appear with their byte counts.
+- Every runtime thread shows its CPU and off-CPU time.
+- Each syscall shows its count, its time and its calling Jet frame (c72).
+- None of this needs privilege.
+- `jet perf attach --zones=500ms` turns a running program's zones on for half a
+  second: 50 frames of 10.4 ms.
+
+**Attack.**
+
+- Jet sees Jet code only; a wait inside FFI code is invisible.
+- The attached capture's header says `run_wall=861299318ns` for a 500 ms
+  window, `Sample wall 2214ns`, and `native process_cpu=0ns observed_at=0ns`.
+- Liveness is P2's gap.
 
 **Verdict.** Holds only within stated limits: Jet processes. There, exact
 wakers from the scheduler beat Superluminal's inferred ones, with no privilege
 needed.
 
-**Gap.** G38: an attached capture's header gives the window's wall and CPU
-time.
+**Gap.** G38 (c89, with c94 for the other lenses): an attached capture's header
+gives the window's own wall and CPU time.
 
 ### P4. Memory and heap
 
@@ -615,19 +660,22 @@ DevTools heap snapshots show retainer paths and compare two snapshots
 ([developer.chrome.com](https://developer.chrome.com/docs/devtools/memory-problems/heap-snapshots)).
 Go's pprof samples the heap by stack ([pkg.go.dev](https://pkg.go.dev/runtime/pprof)).
 
-**Jet today.** `run.log`, P4, at `-O2`:
+**Jet today.** The `run-p399.log` P4 section, at `-O2`:
 
 - allocations by Jet type and line (`[Message]  chat.jet:22`);
 - live snapshots at named marks, and `compare --heap` between two of them
   (`[Int]  chat.jet:22 run  +200 blocks  +3200 bytes`);
-- retainer paths (`entry frame[2].history[49].body  150 blocks`);
-- a snapshot of a running program that held its allocations for 102 µs.
+- retainer paths (`rooms[3].history[49].body  200 blocks  3200 bytes`);
+- a snapshot of a running program that held its allocations for 148 µs.
 
-The alloc lens states its own cost: 145 ns an allocation, 4.23% of CPU time.
+The alloc lens states its own cost: 206 ns an allocation, 6.49% of CPU time.
 
-**Attack.** The attach snapshot reads the checked heap, so the program must
-start with `--checked-alloc`, as the probe's `held.jet` does. At exit, the
-retainer of all 200 blocks is "no root reached".
+**Attack.**
+
+- The attach snapshot reads the checked heap, so the program must start with
+  `--checked-alloc`, as the probe's `held.jet` does.
+- At exit, the retainer of all 200 blocks is "no root reached".
+- The attach capture's header has P3's fault (`Sample wall 4338ns`, c94).
 
 **Verdict.** Holds: Jet types and retainer paths, as Chrome DevTools gives
 them, on a native program, with the cost stated.
@@ -640,12 +688,16 @@ retiring, bad speculation, front-end bound and back-end bound, on Intel CPUs
 `perf stat --topdown` gives level 1 where the kernel has the metric groups
 ([man7.org](https://man7.org/linux/man-pages/man1/perf-stat.1.html)).
 
-**Jet today.** `run.log`, P5, on this Zen 4 host at `perf_event_paranoid` 2:
-levels 1 and 2 per function and per line (`td.jet:35`: 90% back end bound, and
-at level 2, 90% memory bound), with
-low-confidence lines marked, and L1D, LLC and dTLB misses and page faults per
-line. `perf stat --topdown` on the same program refuses: "Topdown requested
-but the topdown metric groups aren't present".
+**Jet today.** The `run-p399.log` P5 section, on this Zen 4 host at
+`perf_event_paranoid` 2:
+
+- Levels 1 and 2 per function and per line. `td.jet:35` is 100% back-end bound,
+  and at level 2, 100% memory bound.
+- Low-confidence lines are marked.
+- L1D, LLC and dTLB misses and page faults are given per line.
+
+In revision 5, `perf stat --topdown` on the same program refused: "Topdown
+requested but the topdown metric groups aren't present".
 
 **Verdict.** Holds: per-line top-down analysis without privilege, where Linux
 `perf` gives none. VTune does not cover AMD CPUs.
@@ -657,31 +709,42 @@ ferret it predicted 21.4% and the change gave 21.2%, and on dedup 9% and
 8.95%, at 17.6% average overhead
 ([Curtsinger and Berger, SOSP 2015](https://arxiv.org/abs/1608.03676)).
 
-**Jet today.** `run.log`, P6, the `-O2` arm of
-`causal_profile_predicts_speedup`: the ranking is right (`narrow` first), and a
-run too short to rank is refused with its reason. The prediction misses: the
-fixture's check stops with "the narrow line sped up by hand gained 109 to 162,
-outside its predicted 168 to 266".
+**Jet today.** The `run-p399.log` P6 section, the `-O2` arm of
+`causal_profile_predicts_speedup`:
 
-**Verdict.** Fails: Coz's prediction lands within a point; Jet's is high by a
-third.
+- The lens's rows put the narrow line's virtual round at 1,026.4 µs against a
+  baseline of 1,259.8: a 18.5% gain.
+- Sped up by hand, the narrow line gained 18.7% (1,275.9 to 1,036.8 µs).
+- For the wide line, the lens gives 0.0% and the hand speedup 0.4%.
 
-**Gap.** G39: the prediction for a line sped up by hand is within its stated
-interval at `-O0`, `-O1` and `-O2`. This is c55 (open).
+**Attack.**
+
+- The lens withheld its gains: "the profiled run's CPUs clocked 5153 to 4540
+  MHz and it could not fit how that slowed its tasks". The check reports
+  "the lens flagged its gains", not a prediction it can hold to an interval.
+- `jet perf view` of the same capture gives another reason: "the run kept 2
+  experiments of 25 ms … and no line had 6". The lens's own record counts 155
+  experiments, 568 rounds on the narrow line and 784 on the wide one. One of
+  the two reports is wrong.
+
+**Verdict.** Open: the rows land within 0.4 points of the hand measurement, as
+Coz's do, but the profiler withheld the prediction, so the probe has none to
+judge.
+
+**Gaps.** G39 (c55, met on p391, not shown on p399), and G43: the view's
+refusal reason agrees with the lens's record.
 
 ### P7. Static cost beside measured cost
 
 **Peer.** No tool ships the compiler's cost facts per line beside measured
 cost. `llvm-mca` predicts a snippet's throughput, apart from any profile.
 
-**Jet today.** `run.log`, P7: each hot line carries the compiler's facts
-(`cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every
-loop turn)`).
+**Jet today.** The `run-p399.log` P7 section: each hot line carries the
+compiler's facts (`cost: exact Int spill ×2 — semantic remainder (loop depth 1,
+repeats every loop turn) · cost: stop poll — semantic remainder`). Revision 5's
+gap, that the facts left out the stop poll, is closed.
 
-**Attack.** The facts leave out the stop poll, which takes a third of `fib`'s
-time (P1, G35).
-
-**Verdict.** Holds: no peer has the facts at all. G35 completes them.
+**Verdict.** Holds: no peer has the facts at all.
 
 ### P8. Diffs and regression gates
 
@@ -689,11 +752,13 @@ time (P1, G35).
 ([github.com/google/pprof](https://github.com/google/pprof)), with no test of
 significance.
 
-**Jet today.** `run.log`, P8: five captures against five, an exact Mann-Whitney
-U per function and per line, adjusted by Benjamini-Hochberg (`spin_hot_loop
-1224 -> 2385 samples (+94%) slower (p=0.008)`). One capture each gets no
-verdict, with the reason. Captures export to pprof and to OTLP JSON, and both
-read back.
+**Jet today.** The `run-p399.log` P8 section:
+
+- Five captures against five get an exact Mann-Whitney U per function and per
+  line, adjusted by Benjamini-Hochberg (`spin_hot_loop 1215 -> 2427 samples
+  (+99%) slower (p=0.008)`).
+- One capture each gets no verdict, with the reason.
+- Captures export to pprof and to OTLP JSON, and both read back.
 
 **Attack.** The pprof export carries one location per line and drops
 inclusive samples, allocations and counters; its comment says so.
@@ -705,9 +770,9 @@ inclusive samples, allocations and counters; its comment says so.
 **Peer.** Parca and Grafana Pyroscope profile every process on a host through
 eBPF. Go's pprof endpoint serves profiles from any service that imports it.
 
-**Jet today.** `run.log`, P10: `jet perf attach` drains a running program's
-flight ring in 38 ms (its waits, wakers and off-CPU stacks), and `jet inspect
-live --attach` shows its tasks and channels.
+**Jet today.** The `run-p399.log` P10 section: `jet perf attach` drains a
+running program's flight ring in 128 ms (its waits, wakers and off-CPU stacks),
+and `jet inspect live --attach` shows its tasks, channels and effects in 1 ms.
 
 **Attack.** The program must have started with `--observe`, as D-OBSERVE-LIVE1
 sets; the probe's does. eBPF profilers see every process, Jet's or not.
@@ -717,10 +782,10 @@ sets; the probe's does. eBPF profilers see every process, Jet's or not.
 
 ### Nothing but `jet`
 
-**Jet today.** `run.log`, tools: every probe but the canvas axis's scenario
-ran with `PATH` empty. lldb, gdb, `perf`, rr, go, pprof and otelcol were absent
-from it and from the host's `PATH`. The peers ran only as comparators, from
-paths given to the harness.
+**Jet today.** The `run-p399.log` tools section: every probe but the canvas
+axis's scenario ran with `PATH` empty. lldb, gdb, `perf`, rr, go, pprof and
+otelcol were absent from it and from the host's `PATH`. lldb ran only as the
+comparator, from a path given to the harness.
 
 **Verdict.** Holds for the terminal, DAP, every profiler view and the Canvas,
 which `jet dev --canvas` serves to the user's own browser. The canvas axis
@@ -728,36 +793,36 @@ needs `jetpack` and chromedriver only to pin and drive that browser.
 
 ## Verdict table
 
-"Today" is the verdict for "jet alone matches or beats the best peer", from the
-gate p339 probes in `run.log`.
+"Today" is the verdict for "jet alone matches or beats the best tool", from
+the gate p399 probes in `run-p399.log`.
 
-| Axis | Best peers | Today | Gaps |
-|---|---|---|---|
-| D1 start, step, latency | RemedyBG, the RAD Debugger, lldb | fails | G21 |
-| D2 record, replay, reverse, why | rr and Pernosco, WinDbg TTD, Replay.io | holds only within stated limits | G22, G23 |
-| D3 typed values at O2 | Visual Studio, the RAD Debugger, lldb | fails | G24, G25 |
-| D4 evaluation | lldb, Chrome DevTools | fails | G21, G26 |
-| D5 watch | gdb, lldb, rr | fails | G21 |
-| D6 conditions, logpoints | gdb, lldb, Chrome DevTools, Replay.io | holds only within stated limits | G27 |
-| D7 hot patch | Live++, Chrome DevTools | holds | none |
-| D8 tasks, deadlocks | Go, Java, Visual Studio | holds | G28 |
-| D9 dumps | WinDbg, Visual Studio, gdb | fails | G29, G30 |
-| D10 visualizers | natvis, gdb and lldb formatters | holds | none |
-| D11 surfaces | RemedyBG, the RAD Debugger, VS Code | fails | G31, G40 |
-| Generic instances | every native debugger | fails | G33, G34 |
-| P1 sampling | Superluminal, Linux `perf` | fails | G35 |
-| P2 zones | Tracy | fails | G36, G37 |
-| P3/P9 one timeline | Superluminal, Tracy, eBPF off-CPU | holds only within stated limits | G38 |
-| P4 heap | Instruments, Heaptrack, Chrome DevTools | holds | none |
-| P5 counters | VTune, Linux `perf` | holds | none |
-| P6 causal | Coz | fails | G39 |
-| P7 static cost | none | holds | G35 |
-| P8 diffs | pprof | holds | none |
-| P10 always-on, attach | Parca, Pyroscope, Go pprof | holds only within stated limits | none |
-| Nothing but `jet` | none | holds | none |
+| Axis | Best tool | Other peers | Today | Gaps |
+|---|---|---|---|---|
+| D1 start, step, latency | RemedyBG (lldb measured) | the RAD Debugger | fails | G41 |
+| D2 record, replay, reverse, why | rr with Pernosco | WinDbg TTD, Replay.io | holds only within stated limits | none |
+| D3 typed values at O2 | the RAD Debugger | Visual Studio, lldb | fails | c106, c107 |
+| D4 evaluation | lldb | Chrome DevTools, gdb | fails | G41, G42 |
+| D5 watch | rr (reverse watches) | gdb, lldb | holds | none |
+| D6 conditions, logpoints | Chrome DevTools | Replay.io, gdb, lldb | holds only within stated limits | none |
+| D7 hot patch | Live++ | Chrome DevTools | holds | none |
+| D8 tasks, deadlocks | Go's runtime | Java, Visual Studio | holds | none |
+| D9 dumps | WinDbg | Visual Studio, gdb | holds | none |
+| D10 visualizers | Visual Studio natvis | gdb and lldb formatters | holds | none |
+| D11 surfaces | RemedyBG | the RAD Debugger, VS Code | fails | G40 |
+| Generic instances | Visual Studio | every native debugger | holds | none |
+| P1 sampling | Superluminal | Linux `perf` | holds | none |
+| P2 zones | Tracy | none | fails | G36, G37, G44 |
+| P3/P9 one timeline | Superluminal | Tracy, eBPF off-CPU | holds only within stated limits | G38 |
+| P4 heap | Chrome DevTools heap snapshots | Instruments, Heaptrack | holds | none |
+| P5 counters | VTune | Linux `perf` | holds | none |
+| P6 causal | Coz | none | open | G39, G43 |
+| P7 static cost | none | `llvm-mca` | holds | none |
+| P8 diffs | pprof | none | holds | none |
+| P10 always-on, attach | Parca | Pyroscope, Go pprof | holds only within stated limits | none |
+| Nothing but `jet` | none | none | holds | none |
 
-c39 is not met: ten axes fail, and each has its gaps below. The limits that no
-engineering removes:
+c39 is not met: five axes fail and one is open, and each has its gaps below.
+The limits that no engineering removes:
 
 - Jet sees Jet processes.
 - Unsafe and FFI code is seen only at its boundary.
@@ -766,81 +831,66 @@ engineering removes:
 
 ## Gaps
 
-Every axis that does not hold, with its gap and fix. G21, G32 and G39 have
-criteria (c70 with c71, c83, and c55). The rest are proposed criteria for
+Every axis that does not hold, with its gap and fix, and one finding on an axis
+that holds (G45). G37, G38 (with c94), G39, c106 and c107 have criteria. G36's
+criterion moved to #6958 c11. G40 and G41 to G45 are proposed criteria for
 #6841, and each names its proof.
 
-- **G21** (D1, D4, D5). `first_stop`, `print_first` and `watch_per_stop` are
-  above lldb's on the 120,015-line image. Fix: c70 and c71. Proof:
-  `run.py … d1` shows every bar met.
-- **G22** (D2). `--record=NAME` fails after the run when NAME is taken. Fix:
-  check the name before the program starts. Proof: a case that records the
-  same name twice and sees the refusal before any program output.
-- **G23** (D2). At `-O1` a stop lists not-yet-bound locals as `<Unavailable>`.
-  Fix: list a local only from its binding on, at every tier. Proof: `Run.jet …
-  d2`'s `-O1` replay shows `(none)` at line 18.
-- **G24** (D3). `-O2` location lists name stale places: `k = 0` at every loop
-  hit, in jet, lldb and gdb. Fix: end each location range where the value's
-  register or slot is redefined, and say `<optimized out>` past it. Proof:
-  `Run.jet … d3` shows `k` 0, 1, 2 at `-O2` in jet and lldb.
-- **G25** (D3). A `Shared` value shows as `Pointer = 0x…`. Fix: type a `Shared`
-  local by its contents. Proof: `Run.jet … d3` shows `Shared{Score{count: 0}}`.
-- **G26** (D4). An expression that needs a runtime entry the image lacks is
-  refused. Fix: load the entry with the expression's code. Proof: `Run.jet …
-  d4` prints `x * 1000000000000000000`'s overflow stop or value.
-- **G27** (D6). A condition that allocates, or a logpoint that reads a
-  `String`, is not placed. Fix: place it, with its allocations in the scratch
-  arena. Proof: `Run.jet … d6`'s `[i, 2][0] == 3` condition placed.
-- **G28** (D8). A deadlock is reported as a panic at `<core.prelude>:0`. Fix: a
-  deadlock report at the root task's waiting line. Proof: `run.py … d8`.
-- **G29** (D9). A dump shows a caller frame's live tasks as `<Unavailable>`, and
-  three flight events have no place. Fix: keep every frame's live locals, and
-  the place of every event. Proof: `run.py … d9`'s `frame 1`.
-- **G30** (D9). A dump is 55 MB for a small program because it copies the 53
-  MB image. Fix: name the image by build hash and copy it only when no copy of
-  that build is on disk. Proof: `run.py … d9` prints a dump under 4 MB.
-- **G31** (D11). A DAP `pause` at start answers with an empty stack. Fix: stop
-  at the first Jet frame, or say that the program has not started. Proof:
-  `run.py … d11`'s 0 ms pause.
-- **G32** (D11). The Canvas Debug and Profile views were not probed against
-  RemedyBG. Fix: `Run.jet`'s canvas axis, which times the first painted stop
-  and lists the panels shown (c83). Proof: its log in `run.log`, which found
-  G40.
-- **G33** (generic instances). Frames are named `__jet_small_dbump`. Fix: name
-  an instance frame as the source spells it (`small.bump`). Proof: `Run.jet …
-  generic`.
-- **G34** (generic instances). At `-O1` and `-O2`, inlined locals are listed
-  under the caller, three times as `<Unavailable>`. Fix: scope each inlined
-  local to its inlined frame. Proof: `Run.jet … generic` shows `by = 1` in the
-  inlined frame at every tier.
-- **G35** (P1, P7). The runtime's stop poll takes 33.7% of `fib`'s samples, and
-  the view shows it neither by helper nor by line; only the receipt gives one
-  run-wide total. Fix: split a line's samples by the runtime helper they land
-  in, and add the poll to the cost facts. Proof: `run.py … p1` shows the poll's
-  share on line 7, within 5 points of `perf`'s.
-- **G36** (P2). A recorded zone costs 59.25 ns. Fix: find where the 59 ns
-  goes (the probe does not split it) and cut the zone's record to a few stores
-  into the thread's ring. Proof: `run.py … p2` shows a zone on under 27 ns.
-- **G37** (P2). The timeline is drawn only from a finished capture. Fix: Canvas's
-  Profile view and `jet perf attach --follow` draw from the flight ring while
-  the program runs. Proof: a case that sees a zone drawn before the program
-  exits. A new user surface, so a ballot first.
-- **G38** (P3). An attached capture's header says `run_wall=1443ns
-  run_cpu=0ns` for a 500 ms window. Fix: set the header from the window's
-  clocks. Proof: `run.py … p3` shows a wall time of about 500 ms.
-- **G39** (P6). The causal prediction is high by a third. Fix: c55. Proof:
-  `run.py … p6` passes its check.
+- **G36** (P2). A recorded zone costs 29.56 ns, above 27. Fix: find the
+  remaining 2.6 ns in the zone's record, which the probe does not split. Proof:
+  `run.py … p2` shows a zone on under 27 ns. Criterion: #6958 c11, met there
+  and not on p399.
+- **G37** (P2, c88). The timeline is drawn only from a finished capture. Fix:
+  Canvas's Profile view and an attach follow mode draw from the flight ring
+  while the program runs, after a ballot for the new surface. Proof: a case
+  that sees a zone drawn before the program exits.
+- **G38** (P3, c89; c94 for every lens). An attached capture's header says
+  `run_wall=861299318ns` for a 500 ms window, and `Sample wall 2214ns`. Fix:
+  set the header from the window's clocks. Proof: `run.py … p3` shows a wall
+  time of about 500 ms.
+- **G39** (P6, c55). The lens withheld its prediction on this run. Proof:
+  `run.py … p6` passes its check on a run whose clocks hold.
 - **G40** (D11). The Canvas Debug view shows no memory, registers or
   disassembly at a stop, which RemedyBG shows. Fix: those three panels in the
-  Debug view, the disassembly from the listing `jet debug` gives (c95). Proof:
+  Debug view, the disassembly from the listing `jet debug` gives. Proof:
   `Run.jet … canvas` prints `Verdict: holds`. A new user surface, so a ballot
   first.
+- **G41** (D1, D4). `print_first` is 11.1 and 13.2 ms against lldb's 7.7 and
+  7.8 on the 120,015-line image. Fix: find what the first print in a stopped
+  function pays that `second_eval` (1.3 ms) does not, and move it to the stop.
+  Proof: `run.py … d1` shows every bar met in two runs back to back.
+- **G42** (D3, D4). A print that reads a field, indexes a list, calls a
+  function or runs in an inlined frame takes 34 to 66 ms, against 1.2 to 6.7
+  ms for Int arithmetic on a plain frame's locals. Fix: find what those prints
+  compile that Int arithmetic does not, and keep it from the first such print
+  at a stop. Proof: `Run.jet … d4`'s `print_evaluates_compiled_expressions` and
+  `Run.jet … d3`'s inlined prints answer within lldb's `print_first` on the
+  same host.
+- **G43** (P6). `jet perf view`'s causal refusal says the run kept 2
+  experiments, where the lens's record has 155. Fix: the view reads the
+  experiments the lens kept. Proof: `run.py … p6` shows the view's reason and
+  the check's counts agreeing.
+- **G44** (P2). `jet perf view` of a recorded `zones.jet` run counts 465,920
+  zones for two million calls, and its receipt says nothing of the rest. Fix:
+  the capture counts the zones it dropped, and the view prints that count with
+  its cause. Proof: `run.py … p2` shows `count=2000000`, or the count plus a
+  dropped count that sums to it.
+- **G45** (D9). A dump's flight sample outside every task reads `in the
+  runtime`. Fix: it names the runtime function its program counter is in, by
+  the symbol table `jet perf view` uses. Proof: `run.py … d9` shows each
+  `events` row with a Jet place or a runtime function.
+- **c106** (D3, open). A nested inline's label names the outermost function
+  with the innermost call line, and a call line outside the listed file does
+  not name its file.
+- **c107** (D3, open). Stopped in an inlined function at `-O1` and `-O2`,
+  `locals` shows `(none)` for its parameter.
 
 ## Finding dispositions
 
 G1 to G20 are revision 4's gaps, each with the criterion that closed it. G21
-onward are this revision's: G21, G32 and G39 have criteria, and the rest are
-proposed for #6841.
+to G40 are revision 5's, taken as c70 to c89; revision 6's probes close G21 to
+G35 but G32's c83 (whose proof is this revision's canvas log). G41 onward are
+this revision's, proposed for #6841.
 
 <!-- audit-dispositions:v1 -->
 | finding | disposition | target or reason |
@@ -865,24 +915,29 @@ proposed for #6841.
 | G18 a live timeline | card | #6841 c58, reopened as G37 |
 | G19 heap snapshots pass on a gate | card | #6841 c52 |
 | G20 attach drains the flight ring | card | #6841 c51 |
-| G21 interactive latency above lldb's | card | #6841 c70, c71 |
-| G22 a taken record name fails after the run | card | #6841 (proposed criterion) |
-| G23 O1 lists unbound locals | card | #6841 (proposed criterion) |
-| G24 stale O2 location lists | card | #6841 (proposed criterion) |
-| G25 a Shared value shows as a pointer | card | #6841 (proposed criterion) |
-| G26 evaluation refused for a missing runtime entry | card | #6841 (proposed criterion) |
-| G27 allocating conditions are not placed | card | #6841 (proposed criterion) |
-| G28 deadlock reported as a prelude panic | card | #6841 (proposed criterion) |
-| G29 dump caller-frame locals unavailable | card | #6841 (proposed criterion) |
-| G30 dump copies the whole image | card | #6841 (proposed criterion) |
-| G31 DAP pause at start has no frames | card | #6841 (proposed criterion) |
+| G21 interactive latency above lldb's | card | #6841 c70, c71; print_first reopened as G41 |
+| G22 a taken record name fails after the run | card | #6841 c73 |
+| G23 O1 lists unbound locals | card | #6841 c74 |
+| G24 stale O2 location lists | card | #6841 c75 |
+| G25 a Shared value shows as a pointer | card | #6841 c76 |
+| G26 evaluation refused for a missing runtime entry | card | #6841 c77 |
+| G27 allocating conditions are not placed | card | #6841 c78 |
+| G28 deadlock reported as a prelude panic | card | #6841 c79 |
+| G29 dump caller-frame locals unavailable | card | #6841 c80 |
+| G30 dump copies the whole image | card | #6841 c81 |
+| G31 DAP pause at start has no frames | card | #6841 c82 |
 | G32 Canvas not probed against RemedyBG | card | #6841 c83 |
-| G33 generic instance frame names | card | #6841 (proposed criterion) |
-| G34 inlined locals listed in the caller | card | #6841 (proposed criterion) |
-| G35 runtime helper time hidden in its line | card | #6841 (proposed criterion) |
-| G36 a recorded zone costs 59 ns | card | #6841 (proposed criterion) |
-| G37 no live timeline | card | #6841 (proposed criterion) |
-| G38 attach header wall and CPU time | card | #6841 (proposed criterion) |
-| G39 causal prediction high | card | #6841 c55 |
+| G33 generic instance frame names | card | #6841 c84 |
+| G34 inlined locals listed in the caller | card | #6841 c85 |
+| G35 runtime helper time hidden in its line | card | #6841 c86 |
+| G36 a recorded zone costs more than Tracy's | card | #6841 c87, moved to card 6958 c11 |
+| G37 no live timeline | card | #6841 c88 |
+| G38 attach header wall and CPU time | card | #6841 c89, c94 |
+| G39 causal prediction not shown | card | #6841 c55 |
 | G40 Canvas Debug view lacks memory, registers, disassembly | card | #6841 (proposed criterion) |
+| G41 print_first above lldb's | card | #6841 (proposed criterion) |
+| G42 a print beyond Int arithmetic costs a compile | card | #6841 (proposed criterion) |
+| G43 the causal view's refusal contradicts the lens | card | #6841 (proposed criterion) |
+| G44 a zone capture's count misses zones silently | card | #6841 (proposed criterion) |
+| G45 a dump's runtime samples name no function | card | #6841 (proposed criterion) |
 <!-- /audit-dispositions -->

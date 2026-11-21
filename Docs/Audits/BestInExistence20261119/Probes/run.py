@@ -413,7 +413,7 @@ def d5():
 def d7():
     heading("D7: hot patch")
     note("fix_swaps_function_in_native_process (the program writes its edit over prog.jet at round 1)")
-    console([JET, "debug", "prog.jet", "--break", "prog.jet:17"], fixture("Debug", "FixSwapsFunctionInNativeProcess"),
+    console([JET, "debug", "prog.jet", "--break", "prog.jet:15"], fixture("Debug", "FixSwapsFunctionInNativeProcess"),
             stdin_lines("Debug", "fix_swaps_function_in_native_process"))
     note("transactional_fix_checks_before_install")
     console([JET, "debug", "prog.jet", "--break", "prog.jet:26"], fixture("Debug", "TransactionalFixChecksBeforeInstall"),
