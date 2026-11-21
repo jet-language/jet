@@ -4,13 +4,35 @@
 # writes .jet/build/STEM and STEM.rs: bin/small for the control and import
 # arms, bin/big for the use arm, bin/failing for time's use arm, a shell
 # script for the data battery (it allocates through libc), no build at all
-# for http's use arm, and no Rust for regex.
+# for http's use arm, and no Rust for regex. `debug IMAGE --do symbols`
+# prints the rows jet debug lists for the stand-in IMAGE is a copy of, and
+# refuses the shell script as jet debug does.
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 case $1 in
   --version) echo "jet stand-in 1.0" ;;
   check) echo "ok: \`$2\` has no problems" ;;
   run) echo "42" ;;
+  debug)
+    for bin in small big failing; do
+      if cmp -s "$2" "$here/bin/$bin"; then
+        if [[ $bin == big ]]; then
+          echo "0x401000            1         function  battery_open"
+          echo "0x401010            1         function  battery_call"
+          echo "0x401020            1         function  battery_close"
+          echo "0x401030            56        function  _start"
+        else
+          echo "0x401000            36        function  _start"
+        fi
+        echo "0x403000            0         label     __bss_start"
+        echo "0x403000            0         label     _edata"
+        echo "0x403000            0         label     _end"
+        exit 0
+      fi
+    done
+    echo "Error: Jet.DebuggerUnavailable: \`jet debug\` could not run the native debugger: \`$2\` is not a 64-bit ELF image." >&2
+    exit 1
+    ;;
   build)
     stem=${3%.jet}
     battery=${stem%_*}

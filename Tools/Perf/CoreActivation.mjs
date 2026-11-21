@@ -5,7 +5,7 @@
 //   control: no import;  import: `use` only;  use: one call.
 // Each arm reports, separately:
 //   compile: `jet check` wall and `jet build --release` wall (unavoidable compile cost);
-//   linked:  binary bytes, `size -A` sections, defined-symbol count (`nm --defined-only`);
+//   linked:  binary bytes, `size -A` sections, defined-symbol count (`jet debug IMAGE --do symbols` rows);
 //   reach:   Core modules present in the generated Rust (reachable-dependency proxy);
 //   startup: process wall median over --samples runs of the AOT binary;
 //   alloc:   allocation count and peak live bytes of one AOT run (LD_PRELOAD counter);
@@ -86,9 +86,15 @@ function sections(binary) {
   return out;
 }
 
-function symbolCount(binary) {
-  const r = spawnSync("nm", ["--defined-only", binary], { encoding: "utf8", maxBuffer: 1 << 28 });
-  return r.status === 0 ? r.stdout.split("\n").filter(Boolean).length : "unavailable";
+// The image's defined symbols, as many as `jet debug IMAGE --do symbols` lists
+// rows (run in the arm's directory `dir`, as --jet is named from there), or
+// "unavailable" when it refuses the image. An image that keeps no symbol table
+// has none.
+function symbolCount(jet, dir, stem) {
+  const r = timed(jet, ["debug", `.jet/build/${stem}`, "--do", "symbols"], { cwd: dir });
+  if (r.status !== 0) return "unavailable";
+  if (r.stdout.endsWith(" keeps no symbol table\n")) return 0;
+  return r.stdout.split("\n").filter(Boolean).length;
 }
 
 function reachableCoreModules(rustPath) {
@@ -136,7 +142,7 @@ function measureArm(args, battery, arm) {
     row.reason = "AOT build failed";
     return row;
   }
-  row.binary = { bytes: statSync(binary).size, sha256: sha256(binary), sections: sections(binary), defined_symbols: symbolCount(binary) };
+  row.binary = { bytes: statSync(binary).size, sha256: sha256(binary), sections: sections(binary), defined_symbols: symbolCount(args.jet, dir, stem) };
   row.reach = reachableCoreModules(join(dir, ".jet/build", `${stem}.rs`));
   const walls = [];
   let stdout = null;

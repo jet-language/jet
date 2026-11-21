@@ -5,7 +5,7 @@
 //   control: no import;  import: `use` only;  use: one call.
 // Each arm reports, separately:
 //   compile: `jet check` wall and `jet build --release` wall (unavoidable compile cost);
-//   linked:  binary bytes, `size -A` sections, defined-symbol count (`nm --defined-only`);
+//   linked:  binary bytes, `size -A` sections, defined-symbol count (`jet debug IMAGE --do symbols` rows);
 //   reach:   Core modules present in the generated Rust (reachable-dependency proxy);
 //   startup: process wall median over --samples runs of the AOT binary;
 //   alloc:   allocation count and peak live bytes of one AOT run (LD_PRELOAD counter);
@@ -292,9 +292,14 @@ sections: fn(binary: String) -> Dyn {
     Dyn.Object(out)
 }
 
-symbol_count: fn(binary: String) -> Dyn {
-    ran: timed(process.cmd([String]{"nm", "--defined-only", binary}))
+// The image's defined symbols, as many as `jet debug IMAGE --do symbols`
+// lists rows (run in the arm's directory `dir`, as `jet` is named from
+// there), or "unavailable" when it refuses the image. An image that keeps
+// no symbol table has none.
+symbol_count: fn(jet: String, dir: String, stem: String) -> Dyn {
+    ran: timed(process.cmd([jet, "debug", ".jet/build/{stem}", "--do", "symbols"]).cwd(dir))
     if ran.status != Val(0) -> return "unavailable".encode()
+    if ran.stdout.ends_with(" keeps no symbol table\n") -> return 0.encode()
     ran.stdout.split("\n").filter(fn(line) { line != "" }).len().encode()
 }
 
@@ -374,7 +379,7 @@ measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: 
         return Ok(row)
     }
     bytes: files.read_bytes(binary)
-    row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(binary), defined_symbols: symbol_count(binary)})
+    row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(binary), defined_symbols: symbol_count(jet, dir, stem)})
     row.reach = Val(reachable_core_modules("{binary}.rs"))
     walls := [Int]{}
     stdout := ""
