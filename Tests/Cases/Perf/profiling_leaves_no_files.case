@@ -3,15 +3,20 @@
 # window's records (`.window`) when it exits. One that is killed leaves
 # them, and the next `jet perf attach` removes them, since their program is
 # gone, while the running program it attaches to keeps its own. An attach's
-# own copies go once it has read them.
+# own copies go once it has read them. Each program runs under the
+# authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: ProfilesLeaveNoFiles.fixture
 env: NO_COLOR=1
 env: XDG_RUNTIME_DIR={work}/run
 env: TMPDIR={work}/tmp
 step: mkdir -m 700 run tmp
 exit: 0
-session ends line: jet run --observe live.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session ends line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv ends
 stdout.trim: ~ "READY" # the program is running its loop
@@ -29,7 +34,7 @@ exit: 1 # grep counts no line
 stdout: = "0\n" # at its exit the program removed all four, and the attach left no copy
 step: rm stop
 exit: 0
-session killed line: jet run --observe live.jet
+session killed line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv killed
 stdout.trim: ~ "READY" # a second run
@@ -42,7 +47,7 @@ close killed
 exit: any # the case's KILL ends the program
 step: sh -c 'ls run/jet/jet-flight-*.samples run/jet/jet-flight-*.samples.image run/jet/jet-flight-*.samples.spans run/jet/jet-flight-*.samples.window'
 exit: 0 # a killed program removes none of them
-session live line: jet run --observe live.jet
+session live line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv live
 stdout.trim: ~ "READY" # a third run

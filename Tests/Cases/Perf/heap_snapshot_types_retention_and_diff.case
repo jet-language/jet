@@ -15,11 +15,16 @@
 # program, its run window running from its first read of the program to the
 # snapshot's answer with the program's CPU in it. With `--zones=500ms` too,
 # the window holds the 500 ms and is no longer than the attach took. A run
-# not started with allocation tracking is refused.
+# not started with allocation tracking is refused. Each attached program
+# runs under the authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
 requires: arch:x86_64
+requires: tool:cc
 fixture: HeapSnapshotRetention.fixture
 env: NO_COLOR=1
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
 step o0: jet perf run -O0 --lens=alloc chat.jet --out {work}/o0.jettrace
 exit: 0
 stdout: = "messages=200\n"
@@ -71,7 +76,7 @@ stdout: ~ "].body  " # to each message's body
 step o2compare: jet perf compare {work}/o2.jettrace --heap start..after-chat
 exit: 0
 stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +" # the diff names the allocating line and its growth
-session held line: jet run --observe --checked-alloc held.jet
+session held line: {work}/authorizer {jet} run --observe --checked-alloc held.jet
 stderr: null
 recv held
 stdout.trim: ~ "READY" # every body is live and the program waits
@@ -107,7 +112,7 @@ stdout: !~ " run_cpu=0ns" # with the program's CPU in it
 signal held: KILL
 close held
 exit: any # the case's KILL ends the program
-session plain line: jet run --observe held.jet
+session plain line: {work}/authorizer {jet} run --observe held.jet
 stderr: null
 recv plain
 stdout.trim: ~ "READY" # an observed run without allocation tracking

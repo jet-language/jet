@@ -3,10 +3,15 @@
 # running, or runs without publishing what the attach reads, is
 # Jet.AttachTargetNotObserved (exit 1); a command line that names no one
 # process (none, two, or a word that isn't a pid) is Jet.AttachWhichProcess
-# (exit 2). Each report is a CLI snapshot.
+# (exit 2). Each report is a CLI snapshot. The running process runs under
+# the authorizer, so jet may trace it and the refusal is its own.
 requires: os-name:linux
+requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
 step: jet perf attach 4242 --lens=alloc
 exit: 2
 stdout: = ""
@@ -29,7 +34,8 @@ exit: 1
 stdout: = ""
 stderr: = ../../CLI/perf_attach_not_running.txt
 file: gone.jettrace absent # refused before it traced anything
-spawn sleeper: sleep 30
+spawn sleeper: {work}/authorizer sleep 30
+poll asleep: sh -c 'test "$(readlink /proc/{pid:sleeper}/exe)" = "$(readlink -f "$(command -v sleep)")"' until exit: 0 timeout 5s every 10ms # the authorizer has let jet trace it and run `sleep`
 step: jet perf attach {pid:sleeper} --source live.jet --out plain.jettrace
 exit: 1
 stdout: = ""

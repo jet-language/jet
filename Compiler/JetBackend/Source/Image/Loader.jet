@@ -2828,6 +2828,17 @@ x64_trace_write: fn(trace: X64Trace, address: Int, bytes: [U8]) -> Bool {
     done == bytes.len()
 }
 
+// Whether the kernel lets this process trace the process `pid`: 0, or the
+// -errno opening its `/proc` mem file failed with. That open passes the
+// kernel's ptrace attach check, Yama's ptrace_scope among it, and stops
+// nothing.
+x64_trace_permitted: fn(pid: Int) -> Int {
+    fd: loader_open("/proc/{pid}/mem")
+    if os_failed(fd) -> return fd
+    loader_close(fd)
+    0
+}
+
 // The trace's stopped thread's registers, X64_TRACE_REGISTERS words in the
 // kernel's order; None when the kernel refused.
 x64_trace_registers: fn(trace: X64Trace) -> [Int]? {

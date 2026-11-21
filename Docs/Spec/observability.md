@@ -987,6 +987,19 @@ reachable to them; a request another user left is ignored.
 Tests/Cases/Perf/attach_ignores_another_users_request.case is the worked
 example.
 
+An attach needs what `jet debug --attach` needs: the process is this user's,
+and the system lets jet trace it. Where kernel.yama.ptrace_scope is 1, that
+is a process jet started, or one that allowed others with
+prctl(PR_SET_PTRACER). Both commands ask the kernel the same way, by opening
+the process's `/proc/<pid>/mem`, which stops nothing. A process jet may not
+trace is refused with E2231 (`Jet.DebugAttachFailed`, exit 1), the same
+report for both, before the attach reads anything of it or leaves a
+request. Its reason names the kernel's rule, and its Fix starts the program
+from the tool that will observe it (`jet debug <file>` or `jet perf run
+<file>`) or lets other processes trace it.
+Tests/Cases/Perf/attach_needs_the_debuggers_permission.case is the worked
+example.
+
 An attach that can't run is refused by its cause. A process that isn't
 running, or runs without publishing what the attach reads (no live snapshot,
 no flight ring, or no live list for `--lens=alloc`), is E2124

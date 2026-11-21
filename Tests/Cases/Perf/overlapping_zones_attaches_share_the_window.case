@@ -6,15 +6,20 @@
 # ends early, and the window stays open for the second: the second's trace
 # holds one window, opened before it began, that lasts its whole 2 s. The
 # first, ending while the second holds the window, finds no window row, so
-# it keeps its zone rows with the ring's records.
+# it keeps its zone rows with the ring's records. The program runs under
+# the authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
+requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
 env: XDG_RUNTIME_DIR={work}/run
 env: TMPDIR={work}/tmp
 step: mkdir -m 700 run tmp
 exit: 0
-session live line: jet run --observe live.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: {work}/authorizer {jet} run --observe live.jet
 stderr: null
 recv live
 stdout.trim: ~ "READY" # the program is running its loop

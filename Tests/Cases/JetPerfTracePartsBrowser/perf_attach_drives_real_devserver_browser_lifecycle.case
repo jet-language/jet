@@ -1,8 +1,14 @@
 # PORT + support.rs37-72 exact TCP HTTP polling/nonce algorithm.
 # PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; no mock relay, shell, or blessed bytes.
 # have_rustc is toolchain-availability, erased per owner. Real public dev lifecycle remains.
+# The devserver runs under the authorizer, so jet may trace it, as an attach needs.
+requires: os-name:linux
+requires: tool:cc
 fixture: PerfAttachDrivesRealDevServerBrowserLifecycle.fixture
-spawn dev: jet dev app.jet --target=web --port={free-port:browser}
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+spawn dev: {work}/authorizer {jet} dev app.jet --target=web --port={free-port:browser}
 stdout: null
 stderr: null
 step: jet test client/browser_client.jet

@@ -11,6 +11,7 @@ use {
     perf_sys: core.sys
     perf_time: core.time
     jet_backend.[link_debug_addr]
+    jet_debug.[native_attach_permitted]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
         CanonicalJSON,
@@ -457,8 +458,13 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     if for_ms > 0 && source != None {
         return jet_cli_perf_error("`--for=` sets how long jet samples a process from outside, and `--source` reads what the program publishes instead", "attach with `--zones=<duration>` for a window on what it publishes, or drop `--source` to sample it from outside", color)
     }
-    if !perf_files.is_dir("/proc/{target_pid}") {
-        return jet_cli_perf_attach_unobserved(target_pid, "it isn't running, or this user can't see it", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
+    status: perf_files.read("/proc/{target_pid}/status") ?? return jet_cli_perf_attach_unobserved(target_pid, "it isn't running, or this user can't see it", "start the program with `jet run --observe`, then attach to the pid it runs as", color)
+    // An attach needs what a debugger's does: the process
+    // is this user's and the system lets jet trace it. Asked before anything
+    // of it is read, and refused with the debugger's own report.
+    if native_attach_permitted(target_pid, status) == .Err(refused) {
+        report: refused.diagnostic()
+        return jet_cli_report_output("", report.code, report.what, report.why, report.fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
     target: jet_cli_perf_session_target()
     // The attach's window on the program opens before its first read of it

@@ -19,12 +19,17 @@
 # bar of 250 the case set then). A sample each millisecond of user CPU, the
 # samples are at least half that CPU less 20 ms: the kernel's share of the
 # spin, which the task clock doesn't sample, and the other threads' few
-# milliseconds each, under a period, which give none.
+# milliseconds each, under a period, which give none. The check runs under
+# the authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
 requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' schedstat run time
+requires: tool:cc
 fixture: AttachSamplesAPlainJetProcess.fixture
 env: NO_COLOR=1
-spawn busy: jet check spin.jet
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+spawn busy: {work}/authorizer {jet} check spin.jet
 stdout: null
 stderr: null
 poll spinning: sh -c 'for c in $(cat /proc/{pid:busy}/task/*/children); do test "$(cut -d " " -f 14 /proc/$c/stat)" -ge 20 && exit 0; done; exit 1' until exit: 0 timeout 120s every 20ms # its compile-time work spins

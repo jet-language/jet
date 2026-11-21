@@ -1,0 +1,54 @@
+# `jet perf attach` needs what `jet debug --attach` needs: the process is
+# this user's, and the system lets jet trace it. Where
+# kernel.yama.ptrace_scope is 1, a process may trace only the processes it
+# started, or one that allowed it with prctl(PR_SET_PTRACER). The case, not
+# jet, starts the program here, so both commands refuse it with the same
+# E2231 before reading anything of it, and the program runs on. The same
+# program under the authorizer, which allows any process to trace it, is
+# attached.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:cc
+requires: probe grep -qx 1 /proc/sys/kernel/yama/ptrace_scope # the system lets a process trace only the processes it started
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/run
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 run tmp
+exit: 0
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: ~ "READY" # the program is running its loop
+step: jet perf attach {pid:live} --source live.jet --zones=300ms --out refused.jettrace
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.DebugAttachFailed: Jet could not attach to the process: the system lets a process trace only the processes it started (kernel.yama.ptrace_scope is 1), and process {pid:live} has not allowed others with prctl(PR_SET_PTRACER).\n" # the debugger's refusal, with its reason
+stderr: ~ " Fix: Start the program from the tool that will observe it, `jet debug <file>` or `jet perf run <file>`, or let other processes trace it" # a next step for either command
+file: refused.jettrace absent # refused before it read anything
+step: sh -c 'ls run/jet | grep -c "\.zones"'
+exit: 1 # grep counts no line
+stdout: = "0\n" # and before it asked for the program's zones
+step: jet debug --attach {pid:live}
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.DebugAttachFailed: Jet could not attach to the process: the system lets a process trace only the processes it started (kernel.yama.ptrace_scope is 1), and process {pid:live} has not allowed others with prctl(PR_SET_PTRACER).\n" # the debugger refuses it the same way
+stderr: ~ " Fix: Start the program from the tool that will observe it, `jet debug <file>` or `jet perf run <file>`, or let other processes trace it" # with the same next step
+process {pid:live}: alive-nonzombie
+await: process {pid:live} state not-in ["T","t"] timeout 2s every 20ms
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program
+session allowed line: {work}/authorizer {jet} run --observe live.jet
+stderr: null
+recv allowed
+stdout.trim: ~ "READY" # the same program, which any process may trace
+step: jet perf attach {pid:allowed} --source live.jet --zones=300ms --out allowed.jettrace
+exit: 0
+file: allowed.jettrace ~ "\"kind\":\"zone\"" # attached, with the zones it turned on
+signal allowed: KILL
+close allowed
+exit: any # the case's KILL ends the program
