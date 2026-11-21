@@ -4,7 +4,9 @@
 # with no process root (jet_rt_main) between them. The view counts as many
 # writes there as the built program makes when it runs plainly. count.py
 # reads that count from /proc/PID/io once the program has exited, before it
-# is reaped.
+# is reaped. Two more programs own their main and end inside a zone, one by
+# a stop and one by process.exit. With no stop edge to close it, the zone
+# still keeps its row, as it does under a process root.
 requires: os-name:linux
 requires: arch:x86_64
 requires: tool:python3
@@ -28,3 +30,16 @@ file: .jet/build/main !~ "jet_rt_root_begin" # the built image links no process 
 step: python3 count.py {work}/.jet/build/main
 exit: 0
 json: stdout.after_first("syscw ").trim doc $ = {cap:counted} # the plain run makes as many writes as the view counts
+step: jet inspect decisions stops.jet
+exit: 0
+stdout: ~ "Main: program-owned" # the stopping program owns its main too
+step: jet perf run stops.jet --out stops.jettrace
+exit: 70
+stderr: ~ "Stop: Jet.ArithmeticOrBoundsFailure" # it stops inside the zone
+json: file stops.jettrace doc $.content.spans[?kind="zone"][?symbol.name="stopping"] #= 1 # the zone open at the stop keeps its row
+step: jet inspect decisions exits.jet
+exit: 0
+stdout: ~ "Main: program-owned" # the exiting program owns its main too
+step: jet perf run exits.jet --out exits.jettrace
+exit: 3
+json: file exits.jettrace doc $.content.spans[?kind="zone"][?symbol.name="exiting"] #= 1 # the zone open at process.exit keeps its row

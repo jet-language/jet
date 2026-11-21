@@ -539,7 +539,8 @@ time-stamp counter where it is invariant (the monotonic clock elsewhere),
 and its close records it in a ring of its thread's own with plain stores,
 no lock; the run drains the rings as it writes the spans out, converting
 the counter to the monotonic clock from a calibration it took as zones
-turned on.
+turned on. A zone still open when the program stops or calls
+`process.exit` ends there, and its row is kept.
 
 `jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
 of each trace against each other when both kept one, and

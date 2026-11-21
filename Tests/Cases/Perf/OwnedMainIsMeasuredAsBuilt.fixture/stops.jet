@@ -1,0 +1,12 @@
+// Owns its main and stops inside a zone: the list has 3 items and the loop
+// reads a fourth.
+use perf: core.perf
+
+sum: fn(xs: [Int], n: Int) -> Int {
+    _z: perf.zone("stopping")
+    total := 0
+    loop i in 0..<n -> total += xs[i]
+    total
+}
+
+run: fn() { print(sum([Int]{1, 2, 3}, 5)) }
