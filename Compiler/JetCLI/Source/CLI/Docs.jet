@@ -170,19 +170,53 @@ jet_cli_doc_source_for: fn(path: String, source: String, span: Span) -> JetCLIDo
     JetCLIDocSource{path: path, start: start, end: end, line: position[0], column: position[1], link: "{path}#L{position[0]}"}
 }
 
-// `declaration_text`: the declaration head before its first `{`, whitespace
-// collapsed.
+// `declaration_text`: the declaration head before the `{` that opens its
+// body, whitespace collapsed.
 jet_cli_doc_declaration_text: fn(source: String, span: Span) -> String Never! {
     bytes: source.bytes()
     start: jet_cli_doc_min(span.start, bytes.len())
-    end := jet_cli_doc_max(jet_cli_doc_min(span.end, bytes.len()), start)
-    loop index in start..<end {
-        if bytes[index] == (U8{123}) {
-            end = index
-            break
-        }
-    }
+    end: jet_cli_doc_body_start(bytes, start, jet_cli_doc_max(jet_cli_doc_min(span.end, bytes.len()), start))
     jet_cli_doc_collapse_whitespace(semindex_doc_text(bytes, start, end))
+}
+
+// The offset of the `{` that opens the body of the declaration in
+// bytes[start, end), else `end`. A `{` inside parentheses or brackets (a
+// parameter default such as `Bool{false}` or `[String]{}`) or inside a
+// string literal belongs to the head.
+jet_cli_doc_body_start: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    depth := 0
+    quote := U8{0}
+    escaped := false
+    loop index in start..<end {
+        byte: bytes[index]
+        if escaped {
+            escaped = false
+            next
+        }
+        if quote != (U8{0}) {
+            if byte == (U8{92}) && quote == (U8{34}) -> escaped = true
+            if byte == quote -> quote = U8{0}
+            next
+        }
+        if byte == (U8{34}) || byte == (U8{96}) -> quote = byte
+        if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+        if (byte == (U8{41}) || byte == (U8{93})) && depth > 0 -> depth -= 1
+        if byte == (U8{123}) && depth == 0 -> return index
+    }
+    end
+}
+
+#Test("a declaration head keeps braced defaults and strings and ends at its body") {
+    head: fn(text: String) -> String {
+        bytes: text.bytes()
+        jet_cli_doc_collapse_whitespace(semindex_doc_text(bytes, 0, jet_cli_doc_body_start(bytes, 0, bytes.len())))
+    }
+    assert_eq(head("install: fn(name: String, loud: Bool{{false}}) -> String {{\n    name\n}}"), "install: fn(name: String, loud: Bool{{false}}) -> String")
+    assert_eq(head("join: fn(parts: [String]{{}}, sep: String{{\"(\"}}) -> String {{ parts.join(sep) }}"), "join: fn(parts: [String]{{}}, sep: String{{\"(\"}}) -> String")
+    assert_eq(head("quote: fn(mark: String{{\"\\\"{{\"}}) {{ print(mark) }}"), "quote: fn(mark: String{{\"\\\"{{\"}})")
+    assert_eq(head("raw: fn(text: String{{`{{`}}) {{ print(text) }}"), "raw: fn(text: String{{`{{`}})")
+    assert_eq(head("Point: struct {{\n    x: Int,\n}}"), "Point: struct")
+    assert_eq(head("ping: fn()"), "ping: fn()")
 }
 
 // `source_docs`: the `///` block directly above the declaration line, as its
