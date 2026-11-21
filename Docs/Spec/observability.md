@@ -399,7 +399,14 @@ pays its own before its joiner sees it, all of them: a pause can end owing
 a delay a line's sample counted meanwhile, so the end pauses again until
 it owes none. Left owing, that delay would be one no thread paid, since
 its joiner is forgiven it, and the experiment would still take it off its
-time, so every gain would read high. A thread another thread wakes from
+time, so every gain would read high. A task that paused also runs
+slower than its pauses account for: measured against the same body's
+tasks in baselines, its run time less its pauses is a few microseconds
+longer. The runtime measures that tax per body from the run's own tasks,
+the running median of a baseline task's run time less its pauses against
+that of a task that paused in another experiment, and counts it as paid
+at the paying task's end, which pauses that much less. Left in, it would
+make every gain read low. A thread another thread wakes from
 a park owes nothing for the delays inserted while it was parked, as in
 Coz: its waker paid them. Charged them, a thread that joins short tasks
 would pause for them again on the program's critical path. Other delays
@@ -1066,6 +1073,38 @@ Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
 attaches to a busy `jet check` for 3 seconds.
 
+`jet perf attach --lens=counts -- <command>` counts a command's work from
+its start (D-PERF-TARGET1): jet starts the command, opens two of the
+kernel's counters on it before it runs, user-mode instructions and cycles,
+with `inherit`, so every thread and child process it starts adds into them,
+then lets it run and reads them once it has reaped it. The command keeps
+jet's terminal; a word without a `/` is looked up on `PATH`. After it ends
+the attach prints `counts instructions:u=81204417733
+cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000`, then
+the trace's path. `cpu_ns` is the user and system time the reap reports,
+every child the command waited for included, and `peak_rss_bytes` is the
+largest resident set any one of its processes reached, not a sum. The
+totals are the whole command's, not one row per process. The trace holds
+them, with the wall time from start to reap (`wall_ns`), as the `counts`
+receipt section (type `JetPerfCounts`), its run window is the command's
+whole run, and `jet perf view` prints the same line. The attach exits with
+the command's exit code, or 128 plus the signal that ended it. Where the
+kernel shares the counters with other events they ran part of the time,
+the counts are scaled to the whole, `scaled` is true and the line ends
+` scaled`. Where the kernel won't count (`perf_event_paranoid` above 2, or
+a machine without the counters, as a virtual machine may be) the command
+still runs: `status` is `unavailable`, with the kernel's `errno`, the
+`paranoid` level and the `reason`, and the line reads `counts unavailable
+errno=13 perf_event_paranoid=3 cpu_ns=… peak_rss_bytes=… · the kernel
+refused this user the counters; set the sysctl kernel.perf_event_paranoid
+to 2 or lower`. A count missing the start would mislead, so `--lens=counts`
+on a pid is refused (`Jet.UnknownFlag`, exit 2) with the `--` form as its
+fix; so are `--for=`, `--zones=`, `--source` and `--lens=alloc` with a
+command, a command without `--lens=counts`, and a pid with a command
+(`Jet.AttachWhichProcess`). A program that can't be started is
+`Jet.DriverOperationFailed` (exit 1).
+Tests/Cases/Perf/attach_counts_a_command.case is the worked example.
+
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the
 attach's first read of the program (its live snapshot) and closes after its
@@ -1506,6 +1545,42 @@ D-DBG-VERBS1=A names the commands:
   one that names a side debug file names it under its rows (`debug info:
   main.debug`), and a big-endian image is refused. It reads the file at a
   stop and in a dump alike.
+- `registers [--all]` reads the selected frame's registers
+  (D-DEBUG-PANELS1), one row each: the name in a column of 7, the value
+  as 16 hex digits, the value in decimal when it fits in 32 bits, then a
+  label. A register a local lives in names it (`r13    0x000000000000003f
+  63          total`); one that points at a local's bytes or a List's item
+  says `-> items[0]`; rip names its code (`sum+1341`) and rflags its set
+  flags (`PF ZF IF`). An outer frame knows rip, rsp and what its callee
+  saved; any other register reads `not saved`, as do those a dump didn't
+  write and those a parked task's switch didn't save. `--all` adds xmm0 to
+  xmm15, mxcsr, fs_base and gs_base; the vector registers are known only
+  in the innermost frame of a live stop.
+- `memory WHERE [COUNT] [as TYPE]` reads the program's bytes. WHERE is a
+  local, a field path under one or a List item (`items[2]`), `0x` and an
+  address, `$` and a register (`$rsp`), or a section (`.rodata`), each
+  with an optional `+N` or `-N` of bytes. A local's bytes are those its
+  header points at; the heading names WHERE, its type and size, or a
+  List's `len=3 cap=5 buffer=0x…`. Rows hold 16 bytes in hex, then as
+  text, as `sections --bytes` does; `as TYPE` (U8, Int, I64, I32, I16, I8,
+  U64, U32, U16, Float or F32) prints COUNT values instead, 8 a row. Each
+  row names the locals and List items that start in it. The default is 64
+  bytes, and the console shows at most 4096, `--do` included, and says
+  where it cut. A read past a section's end stops there and says so. `??`
+  marks a byte no mapping holds, `##` a #Secret local's bytes in a dump,
+  and a run of the debugger's own code is one `[debugger]` row; the bytes
+  under a breakpoint read as the program's own. A local held in a
+  register has no address: the answer names the register and its value,
+  and `memory $r13` reads where that value points. In a dump an index must
+  be a number. gdb's words answer with Jet's, refused: `info registers`
+  with `registers`, `x/16xb $rsp` with `memory $rsp 16`, `info
+  breakpoints` with `breaks`.
+  Tests/Cases/Debug/registers_and_memory_at_a_stop.case is the worked
+  example. The Canvas Debug view shows the same reads in its Registers,
+  Memory and Disassembly panels (canvas-protocol.md, "Debug session");
+  canvas_debug_machine_panels_read_registers_memory_and_code.case is
+  theirs. The editor adapter reads them too: a Registers scope and
+  `readMemory` (below).
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
@@ -1580,8 +1655,8 @@ program stopped, and it runs on. The end of stdin ends the session once the
 requests waiting for a stop are answered. A replay's runs are made as
 recorded, without stopping for requests.
 `stackTrace` with `showRawFrames: true` adds the machine frames, each named
-`[raw] <function>` with its `instructionPointerReference`, whose one scope,
-`[raw] Locals`, holds its pc and canonical frame address; a `showRawFrames`
+`[raw] <function>` with its `instructionPointerReference`, whose `[raw]
+Locals` scope holds its pc and canonical frame address; a `showRawFrames`
 that is not true or false is E2236 (`jet.invalidArguments`). A frame id or
 variable reference names the stop it was made at: once the program runs
 again it is E2238 (`jet.staleReference`). The error's `jetCode` names the
@@ -1618,6 +1693,23 @@ instruction and instruction breakpoints are not offered, so the editor
 steps by line from its disassembly view.
 Tests/Cases/Debug/dap_disassemble_lists_the_stop.case is the worked
 example.
+
+Every frame, a Jet frame or a `[raw]` one, has a Registers scope
+(`presentationHint: "registers"`), whose variables are the `registers`
+rows of that frame: each register's `value` in hex, a small value's
+decimal and its label (`0x0000000000000029  41  total`), or `not saved`.
+A local with bytes of its own (a stack slot, or the header an aggregate's
+local points to) carries their address as its `memoryReference`, and
+`initialize` answers `supportsReadMemoryRequest`, so an editor's hex view
+opens on it. `readMemory` answers `count` bytes from `memoryReference` plus
+`offset` as `memory` reads them, the program's own bytes under the
+debugger's traps and jumps: its `data` (base64) runs up to the first byte
+it cannot read, and `unreadableBytes` counts those after it that it cannot
+read either, which the editor skips. A `memoryReference` that is no hex
+address, or a `count` past 65536, is E2236. A register is no place a watch
+takes: `dataBreakpointInfo` on one has no data id. Nothing writes a
+register or a byte. Tests/Cases/Debug/dap_reads_registers_and_memory.case
+is the worked example.
 
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the

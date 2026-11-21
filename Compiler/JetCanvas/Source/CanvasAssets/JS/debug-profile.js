@@ -135,7 +135,7 @@
     const stack = (overlay && overlay.call_stack) || [];
     debugViewFill("debug-stack-rows", stack.map((frame) => debugViewRow([[frame, ""]])), "Not paused");
     const locals = (overlay && overlay.locals) || [];
-    debugViewFill("debug-locals-rows", locals.map((local) => debugViewRow([[local.name, "key"], [local.value, ""], [local.type, "type"]])), "Not paused");
+    debugViewFill("debug-locals-rows", locals.map(debugLocalRow), "Not paused");
     // Each watch with the value the stop read, or why it has none: stale
     // when it was drawn on another revision, else out of the stop's scope.
     const watched = (overlay && overlay.watches) || [];
@@ -154,6 +154,323 @@
     debugViewFill("debug-console-log", trace.map((line) => debugViewRow([[line, ""]])), "Start the entry to debug it");
     const log = debugViewElement("debug-console-log");
     if (log) log.scrollTop = log.scrollHeight;
+    renderDebugMachine();
+  }
+
+  // The machine panels: Registers, Memory and Disassembly
+  // beside the others. Each panel's header folds it, and the fold is kept in
+  // local settings; a folded Registers or Disassembly panel is not sent.
+  // Memory and more disassembly are a request's `reads`, which stay out of
+  // the console. The page keeps at most DEBUG_MEMORY_PAGES pages read at the
+  // stop, so Back and a followed pointer read once.
+  var DEBUG_MEMORY_PAGE = 4096;
+  var DEBUG_MEMORY_PAGES = 64;
+  var DEBUG_MEMORY_ROW = 16;
+  var DEBUG_LISTING_MORE = 16;
+  var DEBUG_LISTING_KEPT = 256;
+  var DEBUG_MEMORY_TYPES = { "": 1, U8: 1, I8: 1, U16: 2, I16: 2, U32: 4, I32: 4, F32: 4, U64: 8, I64: 8, Int: 8, Float: 8 };
+  var debugMachine = { session: null, where: "", type: "", back: [], pages: [], listing: [], before: [], after: [] };
+
+  function debugPanelFolded(id) {
+    return storedFlag("jet.canvas.debug.folded." + id);
+  }
+
+  // The overlay fields of the folded panels, which the server leaves out.
+  function debugFoldedPanels() {
+    const folded = [];
+    if (debugPanelFolded("debug-registers")) folded.push("registers");
+    if (debugPanelFolded("debug-disassembly")) folded.push("disassembly");
+    return folded;
+  }
+
+  // The reads a request carries: the Memory panel's page, unless it is
+  // folded or read at this stop already, and the disassembly asked for. A
+  // request that runs commands moves the stop, and another session has
+  // its own, so what was read is dropped.
+  function debugMachineReads(commands) {
+    if (commands.length || debugMachine.session !== debugSessionId) {
+      debugMachine.session = debugSessionId;
+      debugMachine.pages = [];
+      debugMachine.before = [];
+      debugMachine.after = [];
+    }
+    const reads = debugMachine.listing.splice(0);
+    if (debugMachine.where && !debugPanelFolded("debug-memory") && !debugMemoryPage()) {
+      const size = DEBUG_MEMORY_TYPES[debugMachine.type] || 1;
+      reads.push({ kind: "memory", where: debugMachine.where, type: debugMachine.type, count: DEBUG_MEMORY_PAGE / size });
+    }
+    return reads;
+  }
+
+  // Keep the answers to a request's reads.
+  function debugMachineAnswer(reads) {
+    for (const read of reads) {
+      if (read.kind === "disassembly") {
+        if (read.skip < 0) debugMachine.before = read.rows.concat(debugMachine.before).slice(0, DEBUG_LISTING_KEPT);
+        else debugMachine.after = debugMachine.after.concat(read.rows).slice(0, DEBUG_LISTING_KEPT);
+        continue;
+      }
+      const key = read.where + "|" + read.type;
+      debugMachine.pages = debugMachine.pages.filter((page) => page.key !== key);
+      debugMachine.pages.push({ key, read });
+      if (debugMachine.pages.length > DEBUG_MEMORY_PAGES) debugMachine.pages.shift();
+    }
+  }
+
+  function debugMemoryPage() {
+    const key = debugMachine.where + "|" + debugMachine.type;
+    const page = debugMachine.pages.find((known) => known.key === key);
+    return page ? page.read : null;
+  }
+
+  // Show memory at `where` as `type` ("" for bytes); the place shown before
+  // is kept for Back unless `remember` is false.
+  function debugMemoryOpen(where, type, remember = true) {
+    if (!where) return;
+    if (remember && debugMachine.where && debugMachine.where !== where) {
+      debugMachine.back.push({ where: debugMachine.where, type: debugMachine.type });
+      if (debugMachine.back.length > DEBUG_MEMORY_PAGES) debugMachine.back.shift();
+    }
+    debugMachine.where = where;
+    debugMachine.type = type in DEBUG_MEMORY_TYPES ? type : "";
+    const input = debugViewElement("debug-memory-where");
+    if (input) input.value = where;
+    const select = debugViewElement("debug-memory-type");
+    if (select) select.value = debugMachine.type;
+    if (debugSessionId && !debugMemoryPage()) runDebug([]);
+    else renderDebugMachine();
+  }
+
+  // A local's name shows its memory: a List's buffer as its item type when
+  // that is a number type, any other value's own bytes.
+  function debugLocalRow(local) {
+    const row = debugViewRow([[local.name, "key memory-link"], [local.value, ""], [local.type, "type"]]);
+    const item = /^\[(\w+)\]$/.exec(local.type || "");
+    const numeric = item && item[1] in DEBUG_MEMORY_TYPES;
+    const name = row.firstChild;
+    name.title = "Show memory: the bytes of " + local.name;
+    name.addEventListener("click", () => debugMemoryOpen(numeric ? local.name + "[0]" : local.name, numeric && item[1] !== "U8" ? item[1] : ""));
+    return row;
+  }
+
+  // The 0x address the 8 little-endian bytes from `offset` of a read hold.
+  function debugMemoryWord(read, offset) {
+    const pairs = read.bytes.slice(offset * 2, offset * 2 + 16).match(/../g) || [];
+    return "0x" + pairs.reverse().join("");
+  }
+
+  function renderDebugMachine() {
+    if (typeof viewMode === "undefined" || viewMode !== "debug") return;
+    const overlay = debugOverlay;
+    const paused = !!(overlay && overlay.runtime_state === "live");
+    // Registers: the selected frame's, a value changed since the frame's
+    // previous stop marked; a click shows memory where it points.
+    const registers = paused && Array.isArray(overlay.registers) ? overlay.registers : [];
+    debugViewFill("debug-registers-rows", registers.map((register) => {
+      const parts = register.known
+        ? [[register.name, "key"], [register.value, "value"], [register.decimal, ""], [register.label, "type"]]
+        : [[register.name, "key"], ["not saved", "type"]];
+      const row = debugViewRow(parts, register.changed ? "is-changed" : "");
+      if (register.known) {
+        row.title = "Show memory at $" + register.name;
+        row.addEventListener("click", () => debugMemoryOpen("$" + register.name, ""));
+      }
+      return row;
+    }), paused ? "No registers: the selected task has not run" : "Not paused");
+    // Disassembly: the rows around the pc, and those asked for before and
+    // after them.
+    const listed = paused && Array.isArray(overlay.disassembly) ? debugMachine.before.concat(overlay.disassembly, debugMachine.after) : [];
+    debugViewFill("debug-disassembly-rows", listed.map((row) => {
+      if (!row.valid) return debugViewRow([[row.address, "gutter"], ["(no code here)", "type"]]);
+      const where = row.file && row.line ? row.file + ":" + row.line : "";
+      return debugViewRow([[row.address, "gutter"], [row.symbol, "key"], [row.text, ""], [where, "type"]], row.here ? "is-active" : "");
+    }), paused ? "No code at this stop" : "Not paused");
+    renderDebugMemory(paused);
+  }
+
+  function renderDebugMemory(paused) {
+    const back = debugViewElement("debug-memory-back");
+    if (back) back.disabled = !debugMachine.back.length;
+    const read = paused ? debugMemoryPage() : null;
+    if (!read) {
+      const empty = !paused ? "Not paused" : debugMachine.where ? "Reading " + debugMachine.where : "Show memory on a local or register, or type where";
+      debugViewFill("debug-memory-rows", [], empty);
+      return;
+    }
+    if (!read.ok) {
+      debugViewFill("debug-memory-rows", [debugViewRow([[read.message, ""]])], "");
+      return;
+    }
+    const rows = [debugViewRow([[read.address, "gutter"], [read.heading, "key"]])];
+    const pointers = new Set(read.pointers);
+    const labels = new Map(read.labels.map((label) => [label.offset, label.text]));
+    const size = DEBUG_MEMORY_TYPES[read.type] || 1;
+    const count = read.bytes.length / 2;
+    const base = BigInt(read.address);
+    const skew = Number(base % 8n);
+    const marks = { "?": "??", "#": "##", d: "--" };
+    for (let start = 0; start < count; start += DEBUG_MEMORY_ROW) {
+      const row = debugViewRow([["0x" + (base + BigInt(start)).toString(16).padStart(16, "0"), "gutter"]]);
+      const end = Math.min(count, start + DEBUG_MEMORY_ROW);
+      // One cell a value (a byte when untyped). Each cell of an aligned word
+      // that points into mapped memory is underlined, and a click follows it.
+      for (let at = start; at + size <= end; at += size) {
+        const cell = document.createElement("span");
+        const states = read.state.slice(at, at + size);
+        if (read.values.length) cell.textContent = read.values[at / size];
+        else cell.textContent = marks[states] || read.bytes.slice(at * 2, at * 2 + 2);
+        if (/[?#d]/.test(states)) cell.className = "unmapped";
+        const word = size === 1 ? at - (at + skew) % 8 : size === 8 ? at : -1;
+        if (word >= 0 && pointers.has(word)) {
+          const target = debugMemoryWord(read, word);
+          cell.className = "ptr";
+          cell.title = "Follow " + target;
+          cell.addEventListener("click", () => debugMemoryOpen(target, debugMachine.type));
+        }
+        row.appendChild(cell);
+      }
+      if (!read.values.length) {
+        let text = "";
+        for (let at = start; at < end; at++) {
+          const code = parseInt(read.bytes.slice(at * 2, at * 2 + 2), 16);
+          text += read.state[at] !== "." ? "." : code >= 32 && code < 127 ? String.fromCharCode(code) : ".";
+        }
+        const shown = document.createElement("span");
+        shown.className = "type";
+        shown.textContent = text;
+        row.appendChild(shown);
+      }
+      if (labels.has(start)) {
+        const label = document.createElement("span");
+        label.className = "key";
+        label.textContent = labels.get(start);
+        row.appendChild(label);
+      }
+      rows.push(row);
+    }
+    if (read.note) rows.push(debugViewRow([[read.note, "type"]]));
+    debugViewFill("debug-memory-rows", rows, "");
+  }
+
+  // Ask for DEBUG_LISTING_MORE instructions before the first row shown, or
+  // after the last.
+  function debugListingMore(earlier) {
+    if (!debugSessionId || !debugOverlay || !Array.isArray(debugOverlay.disassembly)) return;
+    const rows = debugMachine.before.concat(debugOverlay.disassembly, debugMachine.after);
+    if (!rows.length) return;
+    const edge = earlier ? rows[0] : rows[rows.length - 1];
+    debugMachine.listing.push({ kind: "disassembly", from: edge.address, skip: earlier ? -DEBUG_LISTING_MORE : 1, count: DEBUG_LISTING_MORE });
+    runDebug([]);
+  }
+
+  // A column of panels shares its height among the open ones; a folded
+  // panel keeps its header.
+  function debugPanelLayout(column) {
+    if (!column || (column.id !== "debug-side" && column.id !== "debug-machine")) return;
+    column.style.gridTemplateRows = Array.from(column.children).map((panel) => panel.classList.contains("is-folded") ? "auto" : "minmax(0, 1fr)").join(" ");
+  }
+
+  function debugPanelFold(panel) {
+    const folded = !panel.classList.contains("is-folded");
+    panel.classList.toggle("is-folded", folded);
+    storeFlag("jet.canvas.debug.folded." + panel.id, folded);
+    debugPanelLayout(panel.parentNode);
+    if (!folded && debugSessionId && ["debug-registers", "debug-memory", "debug-disassembly"].includes(panel.id)) runDebug([]);
+  }
+
+  // Add the machine panels as a third column beside the others, and make
+  // each panel's header fold it.
+  function bindDebugMachine() {
+    const grid = debugViewElement("debug-grid");
+    const side = debugViewElement("debug-side");
+    if (!grid || !side || debugViewElement("debug-machine")) return;
+    const style = document.createElement("style");
+    style.textContent = [
+      "#debug-grid { grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr) minmax(300px, 2fr); }",
+      "#debug-console { grid-column: 1 / -1; }",
+      "#debug-machine { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 1px; background: #263b55; min-height: 0; }",
+      ".debug-panel h2 { cursor: pointer; }",
+      ".debug-panel.is-folded > :not(h2) { display: none !important; }",
+      ".debug-panel.is-folded h2::before { content: \"+ \"; }",
+      ".debug-panel .row.is-changed .value { color: #fbbf24; }",
+      ".debug-panel .row.is-active { background: #1e3a5f; }",
+      ".debug-panel .row .gutter { color: #475569; }",
+      ".debug-panel .row .ptr { text-decoration: underline; color: #7dd3fc; cursor: pointer; }",
+      ".debug-panel .row .unmapped { color: #475569; }",
+      ".debug-panel .row .memory-link, #debug-registers-rows .row { cursor: pointer; }",
+      ".debug-panel .row .memory-link:hover { text-decoration: underline; }",
+      ".debug-panel .tools { display: flex; gap: 6px; padding: 3px 8px; }",
+      ".debug-panel .tools input { flex: 1; min-width: 0; }",
+      ".debug-panel .tools input, .debug-panel .tools select { background: #07101a; color: #dbeafe; border: 1px solid #263b55; border-radius: 4px; font: 12px ui-monospace, monospace; }"
+    ].join("\n");
+    document.head.appendChild(style);
+    const column = document.createElement("div");
+    column.id = "debug-machine";
+    const panel = (id, label, tools) => {
+      const section = document.createElement("section");
+      section.id = id;
+      section.className = "debug-panel";
+      section.setAttribute("aria-label", label);
+      const head = document.createElement("h2");
+      head.textContent = label;
+      section.appendChild(head);
+      if (tools) section.appendChild(tools);
+      const rows = document.createElement("div");
+      rows.id = id + "-rows";
+      section.appendChild(rows);
+      column.appendChild(section);
+    };
+    const tool = (tag, id, text, title) => {
+      const element = document.createElement(tag);
+      element.id = id;
+      if (tag === "input") element.placeholder = text;
+      else element.textContent = text;
+      element.title = title;
+      element.setAttribute("aria-label", title);
+      return element;
+    };
+    const memoryTools = document.createElement("div");
+    memoryTools.className = "tools";
+    const where = tool("input", "debug-memory-where", "where: a local, 0x address, $register or .section", "Memory to show");
+    const type = tool("select", "debug-memory-type", "", "Show memory as");
+    for (const name of Object.keys(DEBUG_MEMORY_TYPES)) {
+      if (name === "U8") continue;
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name || "bytes";
+      type.appendChild(option);
+    }
+    const back = tool("button", "debug-memory-back", "Back", "Back to the memory shown before");
+    memoryTools.append(where, type, back);
+    const listingTools = document.createElement("div");
+    listingTools.className = "tools";
+    listingTools.append(tool("button", "debug-disassembly-earlier", "Earlier", "List the instructions before these"), tool("button", "debug-disassembly-later", "Later", "List the instructions after these"));
+    panel("debug-registers", "Registers", null);
+    panel("debug-memory", "Memory", memoryTools);
+    panel("debug-disassembly", "Disassembly", listingTools);
+    grid.insertBefore(column, side.nextSibling);
+    where.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && where.value.trim()) debugMemoryOpen(where.value.trim(), debugMachine.type);
+    });
+    type.addEventListener("change", () => {
+      debugMachine.type = type.value;
+      debugMemoryOpen(debugMachine.where, type.value, false);
+    });
+    back.addEventListener("click", () => {
+      const before = debugMachine.back.pop();
+      if (before) debugMemoryOpen(before.where, before.type, false);
+    });
+    debugViewElement("debug-disassembly-earlier").addEventListener("click", () => debugListingMore(true));
+    debugViewElement("debug-disassembly-later").addEventListener("click", () => debugListingMore(false));
+    for (const section of document.querySelectorAll("#debug-view .debug-panel")) {
+      const head = section.querySelector(":scope > h2");
+      if (!head) continue;
+      if (debugPanelFolded(section.id)) section.classList.add("is-folded");
+      head.title = "Fold or open " + head.textContent;
+      head.addEventListener("click", () => debugPanelFold(section));
+    }
+    debugPanelLayout(side);
+    debugPanelLayout(column);
   }
 
   function debugViewCommand(commands) {
@@ -317,6 +634,7 @@
   }
 
   function bindDebugProfileViews() {
+    bindDebugMachine();
     const bind = (id, handler) => {
       const element = debugViewElement(id);
       if (element) element.addEventListener("click", handler);

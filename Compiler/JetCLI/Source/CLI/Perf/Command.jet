@@ -291,6 +291,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
+    loop line in jet_cli_perf_counts_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_zone_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_task_phase_lines(trace) -> out = "{out}{line}\n"
@@ -649,20 +650,20 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
 // value as its canonical JSON, but the allocations, the heap snapshots, the
 // causal predictions, the topdown lens's, the zones, the tasks, the
 // threads, the functions an outside attach sampled, the host calls, the
-// helpers and the code, which jet_cli_perf_allocation_lines,
-// jet_cli_perf_heap_lines,
+// helpers, the code and a counted command's totals, which
+// jet_cli_perf_allocation_lines, jet_cli_perf_heap_lines,
 // jet_cli_perf_causal_lines, jet_cli_perf_topdown_lines,
 // jet_cli_perf_zone_lines, jet_cli_perf_task_summary with
 // jet_cli_perf_task_phase_lines, jet_cli_perf_thread_lines,
 // jet_cli_perf_function_lines, jet_cli_perf_syscall_lines, the per-line
-// table (jet_cli_perf_line_table) and jet_cli_perf_instructions_summary
-// show, and the causal lens's tasks' timings, a row per task, which only the
-// trace keeps.
+// table (jet_cli_perf_line_table), jet_cli_perf_instructions_summary and
+// jet_cli_perf_counts_lines show, and the causal lens's tasks' timings, a
+// row per task, which only the trace keeps.
 jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
     lines := [String]{}
     // The sections their own lines show, or none does.
-    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "functions", "syscalls", "helpers", "instructions"}
+    shown: [String]{"allocations", "heap", "causal", "causal_tasks", "topdown", "zones", "tasks", "threads", "functions", "syscalls", "helpers", "instructions", "counts"}
     loop item in items {
         section: trace_receipt_section_from_json(item) ?? next
         if shown.contains(section.name) -> next

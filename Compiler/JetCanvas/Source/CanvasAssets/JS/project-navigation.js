@@ -1893,7 +1893,11 @@
       breakpoint_spans: (debugState.breakpoints || [])
         .map((b) => b.anchor + "@" + b.revision),
       // Each watch names the revision it was drawn on, like a breakpoint.
-      watches: (debugState.watches || []).map((watch) => watch.name + "@" + watch.revision)
+      watches: (debugState.watches || []).map((watch) => watch.name + "@" + watch.revision),
+      // The machine panels: the folded ones aren't sent, and the Memory and
+      // Disassembly panels' reads stay out of the console.
+      folded: debugFoldedPanels(),
+      reads: debugMachineReads(commands)
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
     if (requestedSession) {
@@ -1951,6 +1955,7 @@
         debugSessionId = debugSessionInfo && debugSessionInfo.state === "running" ? debugSessionInfo.id : null;
         rememberDebugSession(debugSessionInfo);
         debugOverlay = result.json.overlay || null;
+        debugMachineAnswer(result.json.reads || []);
         debugConnectionState = debugOverlay && debugOverlay.runtime_state === "live"
           ? "live"
           : debugOverlay && debugOverlay.runtime_state === "finished"

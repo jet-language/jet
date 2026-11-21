@@ -8141,6 +8141,17 @@ PERF_CAUSAL_ROW_COUNT: I64{186872}
 
 PERF_CAUSAL_ROW_HEAD: I64{186880}
 
+// Past the record's three words: for each row of the idle table, its
+// body's pause tax (perf_causal_tax) as two running medians of a task's
+// run time less its pauses, each an estimate and a count: its baselines'
+// tasks', then its pausing tasks' in other experiments. A median counts
+// toward the tax once PERF_CAUSAL_TAX_FROM tasks have moved it.
+PERF_CAUSAL_TAX_AT: I64{186904}
+
+PERF_CAUSAL_TAX_BYTES: I64{32}
+
+PERF_CAUSAL_TAX_FROM: I64{16}
+
 PERF_CAUSAL_BYTES: I64{188416}
 
 // The tasks whose timings the lens keeps, and the words of each one's
@@ -8343,7 +8354,9 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // on the way (perf_causal_hold). Both reuse the clock
 // read their mark takes: with the lens on, a task costs a few stores, a
 // row lookup and three atomic adds more, and for its timing
-// (perf_causal_row) a CPU clock read at each end and a getcpu at its start;
+// (perf_causal_row) a CPU clock read at each end and a getcpu at its start,
+// and for its pause tax (perf_causal_tax) a clock read and a row lookup at
+// its end and a median's two atomic adds;
 // with it off, nothing past the state's test. They run outside the handler,
 // so they read the clocks sync_now_ns and sync_thread_cpu_ns read, whose
 // words no handler writes: a sample landing in a read of the handler's
@@ -8396,6 +8409,9 @@ perf_causal_task_end: fn(task: I64, outer: I64) {
         return
     }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    if (rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK)) == task) {
+        perf_causal_tax(state, thread, delay)
+    }
     perf_causal_settle(state, thread, delay)
     now: sync_now_ns()
     perf_causal_mark(thread, now)
@@ -8590,8 +8606,8 @@ perf_causal_rows_write: fn(fd: I64) {
 }
 
 // The idle table's cell for a task of body `body` begun after an idle gap
-// of `gap` nanoseconds: its body's row (claimed when new) and the octave of
-// the gap in microseconds; 0 when every row is another body's.
+// of `gap` nanoseconds: its body's row (perf_causal_kind) and the octave
+// of the gap in microseconds; 0 when every row is another body's.
 perf_causal_idle_cell: fn(state: I64, body: I64, gap: I64) -> I64 {
     octave := I64{0}
     micros := gap / I64{1000}
@@ -8599,16 +8615,89 @@ perf_causal_idle_cell: fn(state: I64, body: I64, gap: I64) -> I64 {
         micros = micros >> I64{1}
         octave = wrapping(octave + I64{1})
     }
+    row: perf_causal_kind(state, body)
+    if (row == I64{0}) { return I64{0} }
+    wrapping(wrapping(row + I64{8}) + wrapping(octave * I64{24}))
+}
+
+// The idle table's row of body `body`, claimed when new; 0 when every row
+// is another body's.
+perf_causal_kind: fn(state: I64, body: I64) -> I64 {
     index := I64{0}
     loop index < PERF_CAUSAL_KINDS {
         row: wrapping(wrapping(state + wrapping(PERF_CAUSAL_IDLE_AT + I64{8})) + wrapping(index * PERF_CAUSAL_KIND_BYTES))
         held: sync_load(row)
         if (held == body || (held == I64{0} && sync_cas(row, I64{0}, body) == I64{0})) {
-            return wrapping(wrapping(row + I64{8}) + wrapping(octave * I64{24}))
+            return row
         }
         index = wrapping(index + I64{1})
     }
     I64{0}
+}
+
+// Charge the pause tax of the task this thread ends, before its end pays
+// what it owes (perf_causal_settle) from the global delay `delay`. A task
+// that pauses runs slower than its pauses account for: measured against
+// the same body's tasks in baselines, its run time less its pauses is a
+// few microseconds longer, for reasons the lens need not name. Left in,
+// that tax would make every experiment that pauses
+// the tasks slower than its delay says, and every line's gain would read
+// low, the more the more of its experiment's tasks pause. The run measures
+// it itself, per body, from its own tasks: the running median of a
+// baseline's task's run time less its pauses, and of a task's that paused
+// in another experiment; their difference is the tax. A task that paused
+// in one experiment counts it as paid, so its end pauses that much less.
+// A task that ran across experiments, or was held on its way, counts
+// toward neither median, nor pays the tax; a baseline's task counts only
+// if no delay was inserted while it ran, and one that paused in a
+// baseline, paying an earlier experiment's delay, counts toward neither.
+perf_causal_tax: fn(state: I64, thread: I64, delay: I64) {
+    if (rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_ORDINAL)) != sync_load(wrapping(state + PERF_CAUSAL_ORDINAL))) {
+        return
+    }
+    row: perf_causal_kind(state, rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_BODY)))
+    if (row == I64{0}) {
+        return
+    }
+    index: wrapping(row - wrapping(state + wrapping(PERF_CAUSAL_IDLE_AT + I64{8}))) / PERF_CAUSAL_KIND_BYTES
+    base: wrapping(wrapping(state + PERF_CAUSAL_TAX_AT) + wrapping(index * PERF_CAUSAL_TAX_BYTES))
+    paused: wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED)) - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSED)))
+    work: wrapping(wrapping(sync_now_ns() - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM))) - paused)
+    baseline: sync_load(wrapping(state + PERF_CAUSAL_SPEED)) == I64{0}
+    if (paused == I64{0}) {
+        if (baseline && rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_DELAY)) == delay) {
+            perf_causal_median(base, work)
+        }
+        return
+    }
+    if (baseline) {
+        return
+    }
+    pausing: wrapping(base + I64{16})
+    perf_causal_median(pausing, work)
+    if (sync_load(wrapping(base + I64{8})) < PERF_CAUSAL_TAX_FROM || sync_load(wrapping(pausing + I64{8})) < PERF_CAUSAL_TAX_FROM) {
+        return
+    }
+    tax: wrapping(sync_load(pausing) - sync_load(base))
+    rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + tax))
+}
+
+// Move the running median at `at` (its estimate, then its count) toward
+// `value`: set to the first value, then a step toward each by the
+// estimate over its count and PERF_CAUSAL_TAX_FROM, so it moves fast from
+// a first value far from the median and settles as values come
+// (Robbins-Monro). Threads that move it at once can lose a step.
+perf_causal_median: fn(at: I64, value: I64) {
+    count: sync_add(wrapping(at + I64{8}), I64{1})
+    estimate: sync_load(at)
+    if (count == I64{0}) {
+        sync_store(at, value)
+        return
+    }
+    step := estimate / wrapping(count + PERF_CAUSAL_TAX_FROM)
+    if (step < I64{1}) { step = I64{1} }
+    if (value > estimate) { _ := sync_add(at, step) }
+    if (value < estimate) { _ := sync_add(at, wrapping(I64{0} - step)) }
 }
 
 // Write the idle table, as a PERF_SAMPLES_CAUSAL record with 2 in its low

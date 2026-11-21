@@ -1,0 +1,86 @@
+# `registers` reads the selected frame's registers, and `memory` the
+# program's bytes, at every native tier. Stopped on line 8, `sum` holds
+# `total` in r13, as `disas` says: the register's row shows 63 in hex and
+# in decimal and names `total`. At -O1 and -O2 a register holds the List's
+# buffer, and its row points at `items[0]`. rip's row names the code
+# `disas` marks. `memory` reads a local's bytes through its header, a List
+# item as Ints, a register's target and an address no mapping holds. The
+# bytes under a breakpoint read as the program's own. A local held in a
+# register has no address, and `memory` says which register holds it. A
+# bad count, local, register or type is refused, and gdb's words answer
+# with Jet's. In run's frame a register the call didn't save reads `not
+# saved`. The fixture must stay in jet fmt form: line 8 is sum's `if
+# depth`. No other debugger is on PATH.
+requires: os-name:linux
+fixture: RegistersAndMemoryAtAStop.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: registers_and_memory_at_a_stop.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:8  in sum()\n" # the stop the readouts read
+stdout: ~ "  at the pc: items through [rbp-0x40], depth at [rbp-0x48], total in r13\n" # where disas says total lives
+stdout: ~ "\nr13    0x000000000000003f  63          total\n" # its register's row: hex, decimal and the local it holds
+stdout: ~ "              -> items[0]\n" # a register holds the List's buffer, at its first item
+capture: here2 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
+capture: pc2 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc2}  " # rip is the stop's pc
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here2}\n" # named as disas marks its row
+stdout.filter(^= "rflags 0x").line(0): ~ " IF" # rflags names its set flags, interrupts on in user code
+stdout: ~ "  items: len=3 cap=" # a List's header: length, capacity and buffer
+stdout: ~ "  11  21  31  items[0..2]\n" # its items as Ints, each named
+stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n" # a register has no bytes to read
+stdout: ~ "  $rip = 0x{cap:pc2}\n0x{cap:pc2}  48 8b 45 b8 " # the breakpoint's bytes are the program's own: the stop's `mov rax, [rbp-0x48]`
+stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n" # no mapping holds address 0
+stdout: ~ "`0` is no count: COUNT is a positive number of values, as `memory items 16`\n" # a count is positive
+stdout: ~ "`nope` is not a local of this frame; memory reads WHERE [COUNT] [as TYPE]: " # a local the frame lacks, with memory's shape
+stdout: ~ "No register `$rq`; memory reads $rax, " # a register x86-64 lacks
+stdout: ~ "`String` is not a number type; memory reads as U8, Int, " # memory reads number types
+stdout: ~ "`info registers` is gdb's; Jet's word is `registers`\n" # gdb's words answer with Jet's
+stdout: ~ "`x/16xb $rsp` is gdb's; Jet's word is `memory $rsp 16`\n" # an examine is a memory read
+stdout: ~ "#1  run()  at prog.jet:16" # run's frame
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n" # its caller-saved registers are lost
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrbx    0x" # its callee-saved ones are known
+stdout.filter(^= "rip    0x").line(1): ~ "  run+" # and its pc is in run
+stdout: ~ "63\nProgram finished\n" # the program runs to its end
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: registers_and_memory_at_a_stop.stdin
+exit: 0
+stdout: ~ "  at the pc: items through [rbp-0x40], depth at [rbp-0x48], total in r13\n" # -O1 keeps total where -O2 does
+stdout: ~ "\nr13    0x000000000000003f  63          total\n"
+stdout: ~ "              -> items[0]\n"
+capture: here1 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
+capture: pc1 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc1}  "
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here1}\n"
+stdout: ~ "  items: len=3 cap="
+stdout: ~ "  11  21  31  items[0..2]\n"
+stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n"
+stdout: ~ "  $rip = 0x{cap:pc1}\n0x{cap:pc1}  48 8b 45 b8 "
+stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n"
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n"
+stdout: ~ "63\nProgram finished\n"
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: registers_and_memory_at_a_stop.stdin
+exit: 0
+stdout: ~ "  at the pc: items at [rbx], depth at [rbp-0x40], total in r13\n" # -O0 keeps total in r13 too
+stdout: ~ "\nr13    0x000000000000003f  63          total\n" # and its row names it
+capture: here0 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
+capture: pc0 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc0}  "
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here0}\n"
+stdout: ~ "  items: len=3 cap="
+stdout: ~ "  11  21  31  items[0..2]\n"
+stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n"
+stdout: ~ "  $rip = 0x{cap:pc0}\n0x{cap:pc0}  48 8b 45 c0 " # the stop's `mov rax, [rbp-0x40]`
+stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n"
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n"
+stdout: ~ "63\nProgram finished\n"

@@ -63,8 +63,9 @@
 //             disposition names its owning card. A disposition that tracks no row is a WARN row.
 //   speed     the train speed gate (#5479 c5): Tools/Perf/CompileThroughput/Throughput.jet
 //             --against the chain's seed, s2 and the seed each compiling COMMIT's compiler
-//             corpus 3 rounds at the default level under `perf stat` (the dev shell's
-//             pkgs.perf). A rise over 10% in CPU, instructions:u or a top-level phase's process
+//             corpus 3 rounds at the default level, each compile counted by the
+//             candidate's `jet perf attach --lens=counts`. A rise over 10% in CPU,
+//             instructions:u or a top-level phase's process
 //             CPU fails, and so does an INCONCLUSIVE verdict, unless a
 //             `speed<TAB>gate<TAB>*<TAB>#card<TAB>reason` disposition records the owner's
 //             acceptance: the row is then a WARN naming the card. No verdict always fails.
@@ -2259,11 +2260,6 @@ speed_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     status: if waiver == None -> measured else -> "WARN"
     accepted: if waiver == .Val(entry) -> "accepted by {entry.card}: {entry.reason}; " else -> ""
     timed: if gate.timed_out -> " (timed out)" else -> ""
-    if said.verdict == "" && text.contains("cannot run --perf") {
-        row(ctx, "speed", "FAIL", "no `perf` in the dev shell: the gate counts each compile's instructions:u with `perf stat`, and runs in COMMIT's dev shell (Tools/Agent/JetEnv.jet), whose flake.nix default shell must list pkgs.perf; enter it (`nix develop`) and check `perf --version`, then rerun admit; log {log}")
-        remove_tree(work)
-        return
-    }
     row(ctx, "speed", status, "{accepted}s2 against {ctx.release.name}, {SPEED_GATE_MODES} level, {SPEED_RUNS} rounds: {if said.verdict == "" -> "no verdict, rc={gate.rc}{timed}: {tail_of(log, 3)}" else -> said.detail}; log {log}")
     cell_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--modes", SPEED_CELL_MODES, "--runs", "1", "--work", files.join(work, "cell")}
     cell_args.extend(shared.copy())

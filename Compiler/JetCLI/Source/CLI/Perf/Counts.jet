@@ -1,0 +1,154 @@
+// `jet perf attach --lens=counts -- <command>`: jet starts the command with
+// the kernel's user-mode instruction and cycle counters opened on it before
+// it runs (x64_counted_run), so every thread and child process it starts
+// adds into them, and keeps their totals, the CPU time and peak memory its
+// reap reports and its wall time as the trace's `counts` receipt section.
+// The command shares jet's terminal, and its exit code is the attach's.
+use {
+    perf_files: core.files
+    perf_process: core.process
+    perf_time: core.time
+    jet_backend.[X64Counted, x64_counted_run]
+    jet_driver.[JetDriverVerbOutput]
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        SourceIdentity,
+        TraceReceiptSection,
+        canonical_json_sha256,
+        jettrace_object_view,
+        trace_profile_unsupported,
+        trace_receipt_section_from_json,
+    ]
+}
+
+// Count `command` (its program's name or path, then its arguments) and
+// write the trace to `out`, or where any attach writes it.
+jet_cli_perf_attach_command: fn(command: [String], out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+    name: command[0]
+    path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
+    started: perf_time.instant()
+    counted: x64_counted_run(path, command, None)
+    wall: started.elapsed().ns
+    if counted.failure != "" {
+        return jet_cli_perf_failed("Jet can't run `{name}`: {counted.failure}", color)
+    }
+    capture := jet_cli_perf_counts_capture(counted, wall, jet_cli_perf_counts_paranoid())
+    capture.policy.allowlist = allowlist
+    argv := [String]{"attach", "--lens=counts"}
+    if allowlist.len() > 0 {
+        argv.push("--capture")
+        argv.push(allowlist.join(","))
+    }
+    argv.push("--")
+    // copy: the counted run kept the command's words; the trace's recorded argv owns its own.
+    loop word in command -> argv.push(word.copy())
+    line: jet_cli_perf_counts_text(capture.receipts[0].value)
+    written: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_failed(err.message, color)
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{line}\nTrace: {written}\n", exit_code: jet_cli_perf_counts_exit(counted.status)}
+}
+
+// The shell's exit code of wait status `status`: the command's own, or 128
+// plus the signal that ended it.
+jet_cli_perf_counts_exit: fn(status: Int) -> Int Never! {
+    signal: status & 0x7f
+    if signal == 0 -> return (status >> 8) & 0xff
+    128 + signal
+}
+
+// The kernel's perf_event_paranoid, None where it has none.
+jet_cli_perf_counts_paranoid: fn() -[FS]> Int? Never! {
+    text: perf_files.read("/proc/sys/kernel/perf_event_paranoid") ?? return None
+    level: Int.parse(text.trim()) ?? return None
+    Val(level)
+}
+
+// A counted command's capture: no samples, its run window the command's
+// whole run, and its `counts` receipt section, the trace's only one
+// (jet_cli_perf_counts_section).
+jet_cli_perf_counts_capture: fn(counted: X64Counted, wall_ns: Int, paranoid: Int?) -> JetCLIPerfCapture Never! {
+    capture := jet_cli_perf_capture_new(trace_profile_unsupported("a counted command keeps totals, not samples: its `counts` receipt section"), [SourceIdentity]{})
+    jet_cli_perf_window(capture.profile, JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall_ns}, cpu_ns: Val(U64{counted.cpu_ns}), exit: true})
+    capture.profile.window_reason = "the command's whole run, from jet starting it to jet reaping it, on jet's monotonic clock; its CPU is the user and system time the reap reported, every child it waited for included"
+    capture.receipts.push(jet_cli_perf_counts_section(counted, wall_ns, paranoid))
+    capture
+}
+
+// The trace's `counts` receipt section (type `JetPerfCounts`): the
+// command's user-mode `instructions_u` and `cycles_u` (null where the
+// kernel couldn't count one), `cpu_ns`, `peak_rss_bytes` (the largest any
+// one of its processes reached) and `wall_ns`. `status` is `counted`, or
+// `unavailable` with the kernel's `errno` (null when it took the counters
+// but never ran them), the `paranoid` level and the `reason`; `scaled` says
+// the kernel shared the counters with other events and the counts are
+// scaled from the time they ran.
+jet_cli_perf_counts_section: fn(counted: X64Counted, wall_ns: Int, paranoid: Int?) -> TraceReceiptSection Never! {
+    available: counted.instructions != None && counted.cycles != None
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "cpu_ns", value: CanonicalJSON.Integer("{counted.cpu_ns}")},
+            {key: "cycles_u", value: jet_cli_perf_counts_number(counted.cycles)},
+            {key: "errno", value: if available || counted.errno == 0 -> CanonicalJSON.Null else -> CanonicalJSON.Integer("{counted.errno}")},
+            {key: "instructions_u", value: jet_cli_perf_counts_number(counted.instructions)},
+            {key: "paranoid", value: jet_cli_perf_counts_number(paranoid)},
+            {key: "peak_rss_bytes", value: CanonicalJSON.Integer("{counted.peak_rss_bytes}")},
+            {key: "reason", value: if available -> CanonicalJSON.Null else -> CanonicalJSON.String(jet_cli_perf_counts_refusal(counted.errno, paranoid))},
+            {key: "scaled", value: CanonicalJSON.Bool(counted.scaled)},
+            {key: "status", value: CanonicalJSON.String(if available -> "counted" else -> "unavailable")},
+            {key: "wall_ns", value: CanonicalJSON.Integer("{wall_ns}")},
+        },
+    )
+    TraceReceiptSection{name: "counts", type_name: "JetPerfCounts", digest: canonical_json_sha256(value), value: value}
+}
+
+// `number` as JSON, null for none.
+jet_cli_perf_counts_number: fn(number: Int?) -> CanonicalJSON Never! {
+    if number == .Val(value) -> return CanonicalJSON.Integer("{value}")
+    CanonicalJSON.Null
+}
+
+// Why the kernel didn't count a command: it refused the counters with
+// `errno` (0 when it took them but never ran them) under
+// perf_event_paranoid `paranoid`, and what to change.
+jet_cli_perf_counts_refusal: fn(errno: Int, paranoid: Int?) -> String Never! {
+    if {
+        errno == 0 -> "the kernel took the counters but never ran them: other events held the CPU's counters for the whole command"
+        errno == 1 || errno == 13 -> "the kernel refused this user the counters; set the sysctl kernel.perf_event_paranoid to 2 or lower"
+        errno == 2 || errno == 19 || errno == 95 -> "this machine has no user-mode instruction and cycle counters, as a virtual machine without them"
+        paranoid == None -> "the kernel has no perf events"
+        else -> "the kernel refused the counters"
+    }
+}
+
+// The `counts` line of a `counts` section's `value`:
+// `counts instructions:u=81204417733 cycles:u=29511803012 cpu_ns=31877000000 peak_rss_bytes=5120000000`,
+// then ` scaled` for counts scaled from part of the run. Uncounted, it is
+// `counts unavailable errno=13 perf_event_paranoid=3 cpu_ns=… peak_rss_bytes=… · <reason>`.
+jet_cli_perf_counts_text: fn(value: CanonicalJSON) -> String Never! {
+    cpu: jet_cli_perf_member_integer(value, "cpu_ns") ?? "?"
+    peak: jet_cli_perf_member_integer(value, "peak_rss_bytes") ?? "?"
+    if (jet_cli_perf_member_text(value, "status") ?? "") == "counted" {
+        instructions: jet_cli_perf_member_integer(value, "instructions_u") ?? "?"
+        cycles: jet_cli_perf_member_integer(value, "cycles_u") ?? "?"
+        fields: jettrace_object_view(value, "receipt counts") ?? return "counts instructions:u={instructions} cycles:u={cycles} cpu_ns={cpu} peak_rss_bytes={peak}"
+        at: jet_cli_perf_key(fields, "scaled") ?? -1
+        scaled: if at >= 0 && fields[at].value == .Bool(true) -> " scaled" else -> ""
+        return "counts instructions:u={instructions} cycles:u={cycles} cpu_ns={cpu} peak_rss_bytes={peak}{scaled}"
+    }
+    errno: jet_cli_perf_member_integer(value, "errno") ?? "none"
+    paranoid: jet_cli_perf_member_integer(value, "paranoid") ?? "none"
+    reason: jet_cli_perf_member_text(value, "reason") ?? "the kernel didn't count it"
+    "counts unavailable errno={errno} perf_event_paranoid={paranoid} cpu_ns={cpu} peak_rss_bytes={peak} · {reason}"
+}
+
+// The `counts` line of each `counts` receipt section of `trace`.
+jet_cli_perf_counts_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    lines := [String]{}
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "counts" -> next
+        lines.push(jet_cli_perf_counts_text(section.value))
+    }
+    lines
+}

@@ -3,14 +3,13 @@
 // Tests/CLI/debug_stale_reference_e2238.txt records it; the error the
 // adapter sends carries its first line's text as its `format`. A request
 // the session can't answer faithfully is E2237, which the console prints
-// as Tests/CLI/debug_request_refused_e2237.txt records it. A `disassemble`
-// request's `memoryReference` is an address as a frame's
-// `instructionPointerReference` gives it, or in decimal.
+// as Tests/CLI/debug_request_refused_e2237.txt records it. A register shows
+// as the console's `registers` row shows it.
 use {
     dap_files: core.files
     core.encoding.[Dyn]
-    jet_cli.[JET_CLI_DAP_STALE, jet_cli_dap_address, jet_cli_dap_offset]
-    jet_debug.[native_debug_refused, native_debug_report]
+    jet_cli.[JET_CLI_DAP_STALE, jet_cli_dap_offset, jet_cli_dap_register_value]
+    jet_debug.[NativeRegisterRow, native_debug_refused, native_debug_report]
     jet_foundation.[Diagnostic, diagnostic_render_all]
 }
 
@@ -25,14 +24,11 @@ use {
     assert_eq(native_debug_refused("going back needs a replay: start the session with `jet debug --replay=NAME`"), expected)
 }
 
-#Test("a memory reference is a hex or decimal address, and nothing else") {
-    assert_eq(jet_cli_dap_address("0x401000"), Val(0x401000))
-    assert_eq(jet_cli_dap_address("0X7fFf"), Val(0x7fff))
-    assert_eq(jet_cli_dap_address("4198400"), Val(4198400))
-    assert_eq(jet_cli_dap_address("0x"), None)
-    assert_eq(jet_cli_dap_address("0x40g000"), None)
-    assert_eq(jet_cli_dap_address("0x1000000000000000"), None)
-    assert_eq(jet_cli_dap_address("nope"), None)
+#Test("a register's value is its hex, a small value's decimal and what it holds") {
+    assert_eq(jet_cli_dap_register_value(NativeRegisterRow{name: "rbx", known: true, value: 41, label: "total"}), "0x0000000000000029  41  total")
+    assert_eq(jet_cli_dap_register_value(NativeRegisterRow{name: "r12", known: true, value: 0x7f3a1c002010, label: "-> items[0]"}), "0x00007f3a1c002010  -> items[0]")
+    assert_eq(jet_cli_dap_register_value(NativeRegisterRow{name: "rax", known: true, value: -1}), "0xffffffffffffffff  -1")
+    assert_eq(jet_cli_dap_register_value(NativeRegisterRow{name: "r8", known: false, value: 0}), "not saved")
 }
 
 #Test("an absent offset is 0") {

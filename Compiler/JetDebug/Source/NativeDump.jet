@@ -102,7 +102,7 @@ NATIVE_DUMP_REDACTED: "<redacted>"
 // The ring records `events` lists without `--last`.
 NATIVE_DUMP_EVENTS: 20
 
-NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, sections [NAME...] [--bytes], tasks, task N, events [--last N], help (h), quit (q)"
+NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, task N, events [--last N], help (h), quit (q)"
 
 // A dump's tasks, the stopped one first, its memory, with the image's, the
 // address of its task registry's root (0: none), and the file that holds
@@ -424,11 +424,12 @@ native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
 // PerfSamples.jet perf_flight_redacted); the readout says what they were.
 native_dump_redact: fn(locals: &[NativeLocal]) Never! {
     loop index in 0..<locals.len() {
-        if locals[index].type_name == "Secret" || locals[index].type_name.ends_with(".Secret") {
-            locals[index].value = NATIVE_DUMP_REDACTED
-        }
+        if native_dump_secret(locals[index].type_name) -> locals[index].value = NATIVE_DUMP_REDACTED
     }
 }
+
+// Whether the type named `name` is #Secret's, whose bytes a dump redacts.
+native_dump_secret: fn(name: String) -[]> Bool { name == "Secret" || name.ends_with(".Secret") }
 
 // The flight ring's records, one line each, oldest first; `routines` (the
 // image's sized functions) name where a sample with no Jet frame is.
@@ -662,6 +663,14 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
             answer: native_image_sections_answer(native_image_of(session), operand, whole: session.scripted) ?? return Err(err)
             return Ok(answer)
         }
+        "registers" -> {
+            return native_registers_answer(session, operand)
+        }
+        "memory" -> {
+            ask: native_memory_ask(operand)
+            path: native_memory_dump_path(ask)
+            return native_memory_answer(session, ask, path)
+        }
         "task" -> {
             wanted: Int.parse(operand) ?? -1
             index: native_dump_task_index(session, wanted) ?? return Ok(NativeAnswer{text: "No task {operand}; `tasks` lists them\n"})
@@ -684,6 +693,9 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
         "h" | "help" -> "{NATIVE_DUMP_HELP}\n"
         "" -> ""
         else -> {
+            if native_gdb_answer(command) == .Val(answer) {
+                return Ok(NativeAnswer{text: answer, refused: true})
+            }
             return Ok(NativeAnswer{text: "Unknown command `{word}`. {NATIVE_DUMP_HELP}\n", refused: true})
         }
     }
@@ -695,6 +707,17 @@ native_dump_locals: fn(session: &NativeSession) -> [NativeLocal] NativeDebugErro
     locals := session.locals() ?? return Err(err)
     native_dump_redact(locals)
     Ok(locals)
+}
+
+// The place `name` names in a dump, as NativeSession.watch_path reads a
+// live program's; a dump runs no code, so an index is a number.
+native_dump_watch_path: fn(name: String) -> NativeWatchPath Never! {
+    if name == "" -> return native_watch_path_refusal("")
+    place: debug_place(name) ?? return native_watch_path_refusal(err.message)
+    if place.index != "" && place.literal < 0 {
+        return native_watch_path_refusal("a dump runs no code, so an index is a number, as `memory xs[2]`")
+    }
+    NativeWatchPath{root: place.root, fields: place.fields, index: place.literal, refusal: ""}
 }
 
 // Each task of the dump, one line each, the selected one marked `*`: its

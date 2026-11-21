@@ -22,8 +22,8 @@
 // starting, before any code of its own, runs on to the start of its entry
 // and stops there, so the stop has a Jet frame; `disconnect` ends the session;
 // `restart` starts the program again; a request about a stop (a stack, a
-// scope, variables, `evaluate`, `disassemble`) or a run command waits for
-// the next stop;
+// scope, variables, `evaluate`, `disassemble`, `readMemory`) or a run
+// command waits for the next stop;
 // any other request is answered with the program stopped, which then runs
 // on. `restart` takes the launch
 // configuration's `stopOnEntry`, `args` and `stdin` again; an attached program does
@@ -32,18 +32,26 @@
 // `stopped` event names the task the stop is in, which a step steps and
 // `evaluate` answers in. A task's frames are its Jet frames: a running
 // task's its thread's, a parked task's those its fiber saved when it
-// parked; a queued task has none yet. A frame's one scope holds its locals
-// as the console shows them, each with its Jet type. Each Jet frame carries
-// its pc as its `instructionPointerReference`. `showRawFrames` adds
-// the machine frames, each named `[raw]` with its instruction pointer, and
-// each its one scope, `[raw] Locals`, of its pc and canonical frame address.
+// parked; a queued task has none yet. A frame's Locals scope holds its
+// locals as the console shows them, each with its Jet type, and a local
+// with bytes of its own its address as its `memoryReference`. Each Jet
+// frame carries its pc as its `instructionPointerReference`. `showRawFrames`
+// adds the machine frames, each named `[raw]` with its instruction pointer,
+// and each with its `[raw] Locals` scope, of its pc and canonical frame
+// address. Every frame has a Registers scope, the console's `registers`
+// rows (jet_debug's NativePanels.jet): each register's value, a small one
+// in decimal too, and what it holds; `not saved` for one the frame doesn't
+// hold. `readMemory` answers the program's bytes from a `memoryReference`
+// up to the first it cannot read, as `memory` reads them, and how many
+// after that it cannot read. Nothing writes a register or a byte.
 // A frame in Core names its source by a `sourceReference`, and the `source`
 // request answers that source's text as the program's Core holds it.
 // `disassemble` answers the program's code around a `memoryReference`, as
 // jet_debug's NativeListing.jet lists it: each instruction's address, bytes,
 // text, the code it is in (`fib+14`; `[debugger]` for the debugger's own,
 // a placed condition's or the evaluation room's) and its source line. An
-// address no code is known at answers `presentationHint` `invalid`.
+// address no code is known at answers `presentationHint` `invalid`. A
+// `memoryReference` is an address in hex, as the adapter gives one.
 // Stepping by instruction and instruction breakpoints are not offered, so
 // an editor steps by line from its disassembly view.
 // A frame id or variable reference names the stop it was made at; once the
@@ -86,10 +94,11 @@
 // next stop or its end, which is reported, and the requests that wait for a
 // stop are answered there; then the session ends.
 use {
+    dap_base64: core.encoding.base64
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeListedRow, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_listing_bytes, native_listing_window, native_lookup]
+    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeListedRow, NativeLocal, NativeMemorySpan, NativePanelFrame, NativeRegisterRow, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_listing_bytes, native_listing_window, native_lookup, native_memory_address, native_memory_spans, native_memory_view, native_panel_frame, native_panel_hex, native_panel_machine, native_register_decimal, native_registers_at]
     jet_foundation.[DeepChecks, Diagnostic, MODULE_CORE_PREFIX, diagnostic_from_registry, foundation_json_integer, foundation_json_quote]
 }
 
@@ -128,7 +137,7 @@ JET_CLI_DAP_STALE: "E2238"
 // A frame id is its stop's number (JetCLIDap.stops) above its row among the
 // frames this stop's `stackTrace` answers listed (JetCLIDap.frames), in the
 // low JET_CLI_DAP_FRAME_BITS bits. Stop numbers wrap at JET_CLI_DAP_STOPS,
-// which keeps every variable reference (twice a frame id, plus 1 or 2)
+// which keeps every variable reference (four times a frame id, plus 1 to 3)
 // below 2^31, as DAP asks.
 JET_CLI_DAP_FRAME_BITS: 16
 
@@ -140,6 +149,17 @@ JET_CLI_DAP_STOPS: 8192
 
 // The most instructions one `disassemble` answers.
 JET_CLI_DAP_MOST_INSTRUCTIONS: 65536
+
+// The most bytes one `readMemory` answers.
+JET_CLI_DAP_MOST_BYTES: 65536
+
+// A scope's variable reference is four times its frame's id plus its kind:
+// Locals, `[raw] Locals` or Registers.
+JET_CLI_DAP_LOCALS: 1
+
+JET_CLI_DAP_RAW_LOCALS: 2
+
+JET_CLI_DAP_REGISTERS: 3
 
 // The adapter's state across requests.
 JetCLIDap: struct {
@@ -188,7 +208,7 @@ JetCLIDap: struct {
         if request.command == {
             "initialize" -> {
                 back: if session.replaying() -> ",\"supportsStepBack\":true" else -> ""
-                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true,\"supportsDisassembleRequest\":true{back}}}")
+                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true,\"supportsDisassembleRequest\":true,\"supportsReadMemoryRequest\":true{back}}}")
             }
             "launch" -> {
                 session.input_path = self.stdin_of(request, request.arguments) ?? return
@@ -286,8 +306,9 @@ JetCLIDap: struct {
                 }
                 id: jet_cli_dap_int(request.arguments, "frameId")
                 frame: self.frame_of(id) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {id} expired when execution resumed")
-                scope: if frame.index >= JET_CLI_DAP_RAW -> "{{\"name\":\"[raw] Locals\",\"presentationHint\":\"registers\",\"variablesReference\":{id * 2 + 2},\"expensive\":false}}" else -> "{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{id * 2 + 1},\"expensive\":false}}"
-                self.respond(request, "{{\"scopes\":[{scope}]}}")
+                locals: if frame.index >= JET_CLI_DAP_RAW -> "{{\"name\":\"[raw] Locals\",\"presentationHint\":\"registers\",\"variablesReference\":{id * 4 + JET_CLI_DAP_RAW_LOCALS},\"expensive\":false}}" else -> "{{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":{id * 4 + JET_CLI_DAP_LOCALS},\"expensive\":false}}"
+                registers: "{{\"name\":\"Registers\",\"presentationHint\":\"registers\",\"variablesReference\":{id * 4 + JET_CLI_DAP_REGISTERS},\"expensive\":false}}"
+                self.respond(request, "{{\"scopes\":[{locals},{registers}]}}")
             }
             "variables" -> {
                 if !self.launched || !session.alive() {
@@ -295,9 +316,9 @@ JetCLIDap: struct {
                 }
                 reference: jet_cli_dap_int(request.arguments, "variablesReference")
                 if reference <= 0 -> return self.respond(request, "{{\"variables\":[]}}")
-                // A scope's reference is twice its frame's id, plus 1 for
-                // Locals and 2 for `[raw] Locals`.
-                frame: self.frame_of((reference - 1) >> 1) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {reference} expired when execution resumed")
+                // A scope's reference is four times its frame's id plus its
+                // kind (JET_CLI_DAP_LOCALS).
+                frame: self.frame_of((reference - 1) >> 2) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {reference} expired when execution resumed")
                 if self.focus(session, frame.task) == {
                     .Ok(found) -> {
                         if !found {
@@ -306,7 +327,7 @@ JetCLIDap: struct {
                     }
                     .Err(failure) -> return self.fail(request, failure.detail)
                 }
-                if jet_cli_dap_variables(session, frame.index) == {
+                if jet_cli_dap_variables(session, frame.index, registers: (reference - 1) & 3 == JET_CLI_DAP_REGISTERS) == {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
@@ -436,7 +457,10 @@ JetCLIDap: struct {
                 // A scope's reference names its frame (`variables`); with
                 // neither it nor a frame id, the stopped task's innermost.
                 reference: jet_cli_dap_int(request.arguments, "variablesReference")
-                id: if reference > 0 -> (reference - 1) >> 1 else -> jet_cli_dap_int(request.arguments, "frameId")
+                if reference > 0 && (reference - 1) & 3 == JET_CLI_DAP_REGISTERS {
+                    return self.respond(request, jet_cli_dap_no_data("a register is no Jet place to watch; choose a local in Locals"))
+                }
+                id: if reference > 0 -> (reference - 1) >> 2 else -> jet_cli_dap_int(request.arguments, "frameId")
                 index := 0
                 if id >= 0 {
                     named: if reference > 0 -> reference else -> id
@@ -480,7 +504,7 @@ JetCLIDap: struct {
                     return self.fail(request, "the program is not paused")
                 }
                 reference: jet_cli_dap_string(request.arguments, "memoryReference")
-                address: jet_cli_dap_address(reference) ?? return self.refuse(request, NATIVE_ATTACH_INVALID, "field memoryReference must be an address, as 0x401000")
+                address: native_memory_address(reference) ?? return self.refuse(request, NATIVE_ATTACH_INVALID, "field memoryReference must be an address, as 0x401000")
                 count: jet_cli_dap_int(request.arguments, "instructionCount")
                 if count < 0 || count > JET_CLI_DAP_MOST_INSTRUCTIONS {
                     return self.refuse(request, NATIVE_ATTACH_INVALID, "field instructionCount must be from 0 to {JET_CLI_DAP_MOST_INSTRUCTIONS}")
@@ -491,6 +515,18 @@ JetCLIDap: struct {
                     rows.push(self.instruction(session, row))
                 }
                 self.respond(request, "{{\"instructions\":[{rows.join(",")}]}}")
+            }
+            "readMemory" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                reference: jet_cli_dap_string(request.arguments, "memoryReference")
+                address: native_memory_address(reference) ?? return self.refuse(request, NATIVE_ATTACH_INVALID, "field memoryReference must be an address, as 0x401000")
+                count: jet_cli_dap_int(request.arguments, "count")
+                if count < 0 || count > JET_CLI_DAP_MOST_BYTES {
+                    return self.refuse(request, NATIVE_ATTACH_INVALID, "field count must be from 0 to {JET_CLI_DAP_MOST_BYTES}")
+                }
+                self.respond(request, jet_cli_dap_memory(session, address + jet_cli_dap_offset(request.arguments, "offset"), count))
             }
             "fix" -> {
                 if !self.launched || !session.alive() {
@@ -738,7 +774,7 @@ JetCLIDap: struct {
                         return
                     }
                 }
-                "stackTrace" | "scopes" | "variables" | "evaluate" | "disassemble" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "jump" | "back" | "events" -> {
+                "stackTrace" | "scopes" | "variables" | "evaluate" | "disassemble" | "readMemory" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "jump" | "back" | "events" -> {
                     self.waiting.push(request.move())
                 }
                 else -> self.handle(session, request.move(), entry, deep_checks)
@@ -1173,31 +1209,6 @@ jet_cli_dap_offset: fn(members: [{key: String, value: Dyn}], name: String) -> In
     0
 }
 
-// The address a `memoryReference` names, as `instructionPointerReference`
-// gives it (`0x401000`) or in decimal; None for any other text, or one
-// past 15 hex digits.
-jet_cli_dap_address: fn(text: String) -> Int? Never! {
-    if !text.starts_with("0x") && !text.starts_with("0X") {
-        return Val(Int.parse(text) ?? return None)
-    }
-    digits: text.slice(2, text.len())
-    if digits.len() == 0 || digits.len() > 15 -> return None
-    value := 0
-    loop byte in digits.bytes() {
-        digit: Int{byte}
-        nibble: if {
-            digit >= 48 && digit <= 57 -> digit - 48
-            digit >= 97 && digit <= 102 -> digit - 87
-            digit >= 65 && digit <= 70 -> digit - 55
-            else -> {
-                return None
-            }
-        }
-        value = (value << 4) | nibble
-    }
-    Val(value)
-}
-
 // `threads`: each task of the stopped program by its id, named by its
 // label, its id and its state, with what it waits on.
 jet_cli_dap_threads: fn(session: &NativeSession) -> String NativeDebugError! {
@@ -1251,21 +1262,94 @@ jet_cli_dap_frame_locals: fn(session: &NativeSession, frame: Int) -> [NativeLoca
     Ok(locals)
 }
 
-// `variables` of frame `frame`'s scope: its locals by name, with their Jet
-// types; for a machine frame (from JET_CLI_DAP_RAW), its `[raw] Locals`.
-jet_cli_dap_variables: fn(session: &NativeSession, frame: Int) -> String NativeDebugError! {
+// Frame `frame` (an index in the session's backtrace, a machine frame's from
+// JET_CLI_DAP_RAW) as `registers` and `memory` read it; None past the
+// outermost. The innermost frame stays selected, as stepping needs.
+jet_cli_dap_panel_frame: fn(session: &NativeSession, frame: Int) -> NativePanelFrame? NativeDebugError! {
+    if frame >= JET_CLI_DAP_RAW -> return native_panel_machine(session, frame - JET_CLI_DAP_RAW)
+    if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
+    at := NativePanelFrame?{None}
+    if native_panel_frame(session) == {
+        .Ok(found) -> { at = found }
+        .Err(error) -> return Err(error)
+    }
+    if frame > 0 -> _: session.select_frame(0) ?? return Err(err)
+    Ok(at)
+}
+
+// `variables` of frame `frame`'s scope: with `registers`, its Registers;
+// else its locals by name, with their Jet types, each with bytes of its own
+// with their address as its `memoryReference`; for a machine frame (from
+// JET_CLI_DAP_RAW), its `[raw] Locals`.
+jet_cli_dap_variables: fn(session: &NativeSession, frame: Int, registers: Bool{false}) -> String NativeDebugError! {
     if frame < 0 -> return Ok("{{\"variables\":[]}}")
+    if registers -> return jet_cli_dap_registers(session, frame)
     if frame >= JET_CLI_DAP_RAW {
         raw: jet_cli_dap_raw_variables(session, frame - JET_CLI_DAP_RAW) ?? return Err(err)
         return Ok(raw)
     }
     locals := jet_cli_dap_frame_locals(session, frame) ?? return Err(err)
     locals.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
+    at := NativePanelFrame?{None}
+    if jet_cli_dap_panel_frame(session, frame) == {
+        .Ok(found) -> { at = found }
+        .Err(error) -> return Err(error)
+    }
+    spans: if at == .Val(shown) -> native_memory_spans(session, shown) else -> [NativeMemorySpan]{}
     rows := [String]{}
     loop local in locals {
-        rows.push("{{\"name\":{foundation_json_quote(local.name)},\"value\":{foundation_json_quote(local.value)},\"type\":{foundation_json_quote(local.type_name)},\"variablesReference\":0}}")
+        memory := ""
+        loop span in spans {
+            if span.stride == 0 && span.name == local.name {
+                memory = ",\"memoryReference\":\"{native_debug_hex(span.address)}\""
+                break
+            }
+        }
+        rows.push("{{\"name\":{foundation_json_quote(local.name)},\"value\":{foundation_json_quote(local.value)},\"type\":{foundation_json_quote(local.type_name)},\"variablesReference\":0{memory}}}")
     }
     Ok("{{\"variables\":[{rows.join(",")}]}}")
+}
+
+// `variables` of frame `frame`'s Registers scope: the console's `registers`
+// rows (native_registers_at), each register's value as
+// jet_cli_dap_register_value gives it.
+jet_cli_dap_registers: fn(session: &NativeSession, frame: Int) -> String NativeDebugError! {
+    at := NativePanelFrame?{None}
+    if jet_cli_dap_panel_frame(session, frame) == {
+        .Ok(found) -> { at = found }
+        .Err(error) -> return Err(error)
+    }
+    shown: at ?? return Ok("{{\"variables\":[]}}")
+    rows := [String]{}
+    loop row in native_registers_at(session, shown) {
+        rows.push("{{\"name\":{foundation_json_quote(row.name)},\"value\":{foundation_json_quote(jet_cli_dap_register_value(row))},\"variablesReference\":0}}")
+    }
+    Ok("{{\"variables\":[{rows.join(",")}]}}")
+}
+
+// A register's value as the Registers scope shows it: in hex, a small one
+// in decimal too, then what it holds, as `registers` prints them; `not
+// saved` for a register the frame doesn't hold.
+jet_cli_dap_register_value: fn(row: NativeRegisterRow) -> String Never! {
+    if !row.known -> return "not saved"
+    parts := [String]{"0x{native_panel_hex(row.value)}"}
+    decimal: native_register_decimal(row)
+    if decimal != "" -> parts.push(decimal)
+    if row.label != "" -> parts.push(row.label)
+    parts.join("  ")
+}
+
+// `readMemory` of `count` bytes from `address`: those up to the first that
+// can't be read, as `memory` reads them (native_memory_view: the program's
+// own bytes under the debugger's traps), in base64, and how many after them
+// can't be read, which an editor skips before it reads on.
+jet_cli_dap_memory: fn(session: &NativeSession, address: Int, count: Int) -> String Never! {
+    view: native_memory_view(session, None, address, count)
+    read := 0
+    loop read < count && view.mapped[read] -> read += 1
+    unreadable := 0
+    loop read + unreadable < count && !view.mapped[read + unreadable] -> unreadable += 1
+    "{{\"address\":\"{native_debug_hex(address)}\",\"unreadableBytes\":{unreadable},\"data\":\"{dap_base64.encode(view.bytes[0..<read])}\"}}"
 }
 
 // `evaluate`: `text` in frame `frame` (the innermost when the request names

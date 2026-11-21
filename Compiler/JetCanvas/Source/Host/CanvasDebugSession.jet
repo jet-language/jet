@@ -15,9 +15,10 @@
 // jet.canvas.debug document.
 use {
     session_files: core.files
+    session_hex: core.encoding.hex
     session_process: core.process
     core.encoding.[Dyn]
-    jet_debug.[DebugSnapshot, NativeDebugError, NativeDebugStep, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_sources, native_dump_task_list]
+    jet_debug.[DebugSnapshot, NativeDebugError, NativeDebugStep, NativeListedRow, NativePanelFrame, NativeRegisterRow, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_sources, native_dump_task_list, native_listing_window, native_memory_address, native_memory_ask, native_memory_path, native_memory_pointers, native_memory_read, native_memory_row_labels, native_memory_shown, native_panel_frame, native_panel_hex, native_register_decimal, native_registers_at]
     jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
 }
 
@@ -66,6 +67,21 @@ CANVAS_DEBUG_SOURCE_CONTEXT: 12
 // (CANVAS_DEBUG_MAX_WIRE_PATH) of one wire a step.
 CANVAS_DEBUG_MAX_TRAIL: 65
 
+// The most reads one request asks of its stop, and the
+// most instructions one disassembly read lists.
+CANVAS_DEBUG_MAX_READS: 8
+
+CANVAS_DEBUG_MAX_LISTED: 64
+
+// The instructions the overlay's disassembly lists: this many, the one at
+// the frame's pc the CANVAS_DEBUG_LISTED_BEFORE + 1st.
+CANVAS_DEBUG_LISTED: 16
+
+CANVAS_DEBUG_LISTED_BEFORE: 6
+
+// The bytes of one row of a memory read, which its labels name.
+CANVAS_DEBUG_MEMORY_ROW: 16
+
 // A refused debug request: its jet.canvas.debug error kind and message.
 #Error
 CanvasDebugError: struct {
@@ -100,7 +116,8 @@ CanvasDebugHost: trait {
 // (canvas_debug_tier_name). `trail` is the lines of the stops the run
 // stepped through to its stop, oldest first and the stop's last, at most
 // CANVAS_DEBUG_MAX_TRAIL, all in one frame `trail_depth` Jet frames deep (-1:
-// not known).
+// not known). `seen_frame` keys the frame the Registers panel last showed
+// (canvas_debug_panels; "": none), and `seen_registers` its known values.
 CanvasDebugSession: struct {
     source_id: String,
     revision: String,
@@ -117,6 +134,8 @@ CanvasDebugSession: struct {
     transcript: String,
     trail: [Int]{[Int]{}},
     trail_depth: Int{-1},
+    seen_frame: String{""},
+    seen_registers: [String:Int]{[String:Int]{}},
 }
 
 // The tier a request asks for: its `name`, whether the request named it,
@@ -131,9 +150,9 @@ CanvasDebugTier: struct {
 // runs ("" for a dump), the console's transcript, the stop's facts (None
 // outside Jet code), the `tasks` list's lines, whether the program is still
 // paused in the session, whether it ended disconnected (killed out from
-// under the debugger), and the lines the run stepped through to the
+// under the debugger), the lines the run stepped through to the
 // snapshot's stop (the session's trail; empty when the snapshot shows
-// another frame).
+// another frame), and the machine panels at a stop (canvas_debug_panels).
 CanvasDebugRun: struct {
     id: String,
     tier: String,
@@ -144,6 +163,31 @@ CanvasDebugRun: struct {
     running: Bool,
     disconnected: Bool,
     trail: [Int],
+    panels: CanvasDebugPanels{CanvasDebugPanels{}},
+}
+
+// The machine panels of a paused stop, as JSON items:
+// the selected frame's registers and the instructions around its pc, each
+// None when its panel is folded, and the answer to each of the request's
+// reads, which never reach the transcript.
+CanvasDebugPanels: struct {
+    registers: String?{None},
+    disassembly: String?{None},
+    reads: String{""},
+}
+
+// One read a request asks of its stop: `memory` reads `count` values (-1:
+// the console's default) of the number type `type_name` ("": bytes) at
+// `where`, as the console's `memory` does; `disassembly` lists `count`
+// instructions from the `skip`th after the one holding the address `from`,
+// as the editor adapter's disassemble does.
+CanvasDebugRead: struct {
+    kind: String,
+    where: String,
+    count: Int,
+    type_name: String,
+    from: String,
+    skip: Int,
 }
 
 // One bounded list of a debug document, as JSON items.
@@ -173,11 +217,12 @@ CanvasDebugSessions: struct {
 
     // Run `commands` in the session `requested` names (a new one on `tier`
     // when None, with `host`'s evaluator), with breakpoints on `breakpoints`
-    // first. A program that ends ends its session; one killed out from under
+    // first, then read the panels `folded` leaves open and `reads` at the
+    // stop. A program that ends ends its session; one killed out from under
     // the debugger (SIGKILL, which nothing it runs can catch) ends it
     // disconnected; one that fails otherwise ends it and answers its
     // transcript.
-    run: fn(&self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int]) -> CanvasDebugRun CanvasDebugError! {
+    run: fn(&self, host: CanvasDebugHost, file: String, source_id: String, revision: String, requested: String?, tier: CanvasDebugTier, commands: [String], breakpoints: [Int], folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugRun CanvasDebugError! {
         if requested == None -> self.evict()
         id: if requested == {
             .Val(wanted) -> wanted
@@ -233,6 +278,14 @@ CanvasDebugSessions: struct {
                 return Err(canvas_debug_unavailable(failure))
             }
         }
+        panels := CanvasDebugPanels{}
+        if canvas_debug_panels(session, folded, reads) == {
+            .Ok(found) -> { panels = found }
+            .Err(failure) -> {
+                canvas_debug_close(session)
+                return Err(canvas_debug_unavailable(failure))
+            }
+        }
         // The task list is the console's `tasks`; a program whose registry
         // can't be read shows none.
         listed := ""
@@ -250,7 +303,7 @@ CanvasDebugSessions: struct {
         }
         image: session.image
         self.sessions[id] = session
-        Ok(CanvasDebugRun{id: id, tier: on, image: image, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, disconnected: false, trail: trail})
+        Ok(CanvasDebugRun{id: id, tier: on, image: image, transcript: transcript, snapshot: snapshot, tasks: tasks, running: true, disconnected: false, trail: trail, panels: panels})
     }
 
     // Take the session `id` out to run `count` more commands in it. One
@@ -619,7 +672,8 @@ canvas_debug_payload: fn(debugs: &CanvasDebugSessions, host: CanvasDebugHost, st
     }
     commands: request.commands.move()
     canvas_debug_limits(commands, breakpoints, request.watches) ?? return Err(err)
-    ran: debugs.run(host, file, source_id, revision, session_id, tier, commands, breakpoints) ?? return Err(err)
+    canvas_debug_read_limits(request.folded, request.reads) ?? return Err(err)
+    ran: debugs.run(host, file, source_id, revision, session_id, tier, commands, breakpoints, request.folded.move(), request.reads.move()) ?? return Err(err)
     after: read_source_without_symlinks(file) ?? {
         debugs.release(ran.id)
         return Err(canvas_debug_error("io", "couldn't read the debug source again: {err.message}"))
@@ -704,6 +758,40 @@ canvas_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [String
     Ok()
 }
 
+// The request's folded panels and reads within their bounds: a folded
+// panel is one the overlay carries, `registers` or `disassembly`; a read
+// is a `memory` read of a WHERE, or a `disassembly` read of 1 to
+// CANVAS_DEBUG_MAX_LISTED instructions from a `0x` address.
+canvas_debug_read_limits: fn(folded: [String], reads: [CanvasDebugRead]) CanvasDebugError! {
+    loop panel in folded {
+        if panel != "registers" && panel != "disassembly" {
+            return Err(canvas_debug_error("bad_request", "Canvas debug `folded` names the panels the overlay carries, `registers` and `disassembly`"))
+        }
+    }
+    if reads.len() > CANVAS_DEBUG_MAX_READS {
+        return Err(canvas_debug_error("limit", "Canvas debug accepts at most 8 reads per request"))
+    }
+    loop read in reads {
+        if read.kind == {
+            "memory" -> {
+                if read.where.trim() == "" || read.where.len() > CANVAS_DEBUG_MAX_WORD_BYTES || read.type_name.len() > CANVAS_DEBUG_MAX_WORD_BYTES {
+                    return Err(canvas_debug_error("bad_request", "a Canvas debug memory read names `where`, at most 256 bytes, as the console's `memory` does"))
+                }
+            }
+            "disassembly" -> {
+                if native_memory_address(read.from) == None {
+                    return Err(canvas_debug_error("bad_request", "a Canvas debug disassembly read starts `from` a `0x` address"))
+                }
+                if read.count < 1 || read.count > CANVAS_DEBUG_MAX_LISTED || read.skip < -CANVAS_DEBUG_MAX_LISTED || read.skip > CANVAS_DEBUG_MAX_LISTED {
+                    return Err(canvas_debug_error("limit", "a Canvas debug disassembly read lists 1 to 64 instructions, skipping at most 64 either way"))
+                }
+            }
+            else -> return Err(canvas_debug_error("bad_request", "a Canvas debug read is of kind `memory` or `disassembly`"))
+        }
+    }
+    Ok()
+}
+
 // The members of a debug request this tier reads; a member of the wrong
 // type reads as absent.
 CanvasDebugRequest: struct {
@@ -719,12 +807,14 @@ CanvasDebugRequest: struct {
     breakpoints: [Int],
     anchors: [String],
     watches: [String],
+    folded: [String],
+    reads: [CanvasDebugRead],
 }
 
 // The request `value` is, taken out of it; anything but an object reads as
 // one with no members.
 canvas_debug_request: fn(value: &&Dyn) -> CanvasDebugRequest Never! {
-    request := CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}}
+    request := CanvasDebugRequest{schema_version: -1, revision: None, source_id: None, tier: None, session_id: None, recording: None, dump: None, stop: false, commands: [String]{}, breakpoints: [Int]{}, anchors: [String]{}, watches: [String]{}, folded: [String]{}, reads: [CanvasDebugRead]{}}
     if value.move() == .Object(members) {
         fields := members
         fields.reverse()
@@ -745,6 +835,8 @@ canvas_debug_request: fn(value: &&Dyn) -> CanvasDebugRequest Never! {
                 "breakpoint_spans" -> request.anchors = canvas_debug_texts(field.value.move())
                 "watches" -> request.watches = canvas_debug_texts(field.value.move())
                 "breakpoints" -> request.breakpoints = canvas_debug_ints(field.value)
+                "folded" -> request.folded = canvas_debug_texts(field.value.move())
+                "reads" -> request.reads = canvas_debug_reads(field.value.move())
                 else -> {}
             }
         }
@@ -770,6 +862,39 @@ canvas_debug_texts: fn(value: &&Dyn) -> [String] Never! {
         if item.move() == .Text(text) -> texts.push(text)
     }
     texts
+}
+
+// The reads of a request's `reads` array, in order; an item that is not an
+// object reads as one with no members, which names no kind.
+canvas_debug_reads: fn(value: &&Dyn) -> [CanvasDebugRead] Never! {
+    items := if value.move() == {
+        .Array(list) -> list
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [Dyn]{}
+    }
+    items.reverse()
+    reads := [CanvasDebugRead]{}
+    loop items.len() > 0 {
+        item: items.pop() ?? break
+        read := CanvasDebugRead{kind: "", where: "", count: -1, type_name: "", from: "", skip: 0}
+        if item.move() == .Object(members) {
+            fields := members
+            fields.reverse()
+            loop fields.len() > 0 {
+                field: fields.pop() ?? break
+                if field.key == {
+                    "kind" -> read.kind = canvas_debug_text(field.value.move()) ?? ""
+                    "where" -> read.where = canvas_debug_text(field.value.move()) ?? ""
+                    "type" -> read.type_name = canvas_debug_text(field.value.move()) ?? ""
+                    "from" -> read.from = canvas_debug_text(field.value.move()) ?? ""
+                    "count" -> read.count = foundation_json_integer(field.value) ?? -1
+                    "skip" -> read.skip = foundation_json_integer(field.value) ?? 0
+                    else -> {}
+                }
+            }
+        }
+        reads.push(read)
+    }
+    reads
 }
 
 // The integers of an array, in order.
@@ -983,8 +1108,12 @@ canvas_debug_document: fn(state: Shared<CanvasHostState>, src: String, source_id
     source_json: foundation_json_quote(source_id)
     revision_json: foundation_json_quote(revision)
     limits: "{{\"locals_truncated\":{locals.truncated},\"watches_truncated\":{watch_values.truncated},\"call_stack_truncated\":{call_stack.truncated},\"trace_truncated\":{trace.truncated},\"tasks_truncated\":{tasks.truncated},\"source_truncated\":{source.truncated},\"wire_path_truncated\":{place.wires_truncated}}}"
-    overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"source\":{{\"first_line\":{first_line},\"lines\":[{source.json}]}},\"trace\":[{trace.json}],\"tasks\":[{tasks.json}],\"limits\":{limits}}}"
-    "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{source_json},\"revision\":{revision_json},\"session\":{canvas_debug_session_json(ran.id, phase, ran.tier, source_id, revision)},\"overlay\":{overlay}}}"
+    // A folded panel's field is not sent.
+    machine := ""
+    if ran.panels.registers == .Val(rows) -> machine = "{machine}\"registers\":[{rows}],"
+    if ran.panels.disassembly == .Val(rows) -> machine = "{machine}\"disassembly\":[{rows}],"
+    overlay: "{{\"debug_overlay\":{foundation_json_quote(phase)},\"runtime_state\":{foundation_json_quote(runtime_state)},\"source_id\":{source_json},\"revision\":{revision_json},\"active_line\":{line_json},\"active_span\":{canvas_debug_span_json(active_span)},\"active_graph_id\":{foundation_json_quote(place.graph_id)},\"active_node_id\":{foundation_json_quote(place.node_id)},\"active_wire_id\":{foundation_json_quote(active_wire)},\"wire_path\":[{wires.join(",")}],\"breakpoints\":[{marks.join(",")}],\"locals\":[{locals.json}],\"watches\":[{watch_values.json}],\"call_stack\":[{call_stack.json}],\"source\":{{\"first_line\":{first_line},\"lines\":[{source.json}]}},\"trace\":[{trace.json}],\"tasks\":[{tasks.json}],{machine}\"limits\":{limits}}}"
+    "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{CANVAS_DEBUG_SCHEMA},\"ok\":true,\"source_id\":{source_json},\"revision\":{revision_json},\"session\":{canvas_debug_session_json(ran.id, phase, ran.tier, source_id, revision)},\"overlay\":{overlay},\"reads\":[{ran.panels.reads}]}}"
 }
 
 canvas_debug_span_json: fn(span: Span) -> String Never! {
@@ -1055,4 +1184,141 @@ canvas_debug_newest: fn(lines: [String]) -> CanvasDebugList Never! {
     }
     kept.reverse()
     CanvasDebugList{json: kept.join(","), truncated: truncated}
+}
+
+// The machine panels of `session`'s stop (CanvasDebugPanels): the ones
+// `folded` leaves open, and the answer to each of `reads`, in order.
+canvas_debug_panels: fn(session: &CanvasDebugSession, folded: [String], reads: [CanvasDebugRead]) -> CanvasDebugPanels NativeDebugError! {
+    at := NativePanelFrame?{None}
+    if native_panel_frame(session.live) == {
+        .Ok(found) -> { at = found }
+        .Err(error) -> return Err(error)
+    }
+    // The address the frame's facts are looked up at: its pc, or for an
+    // outer frame the call it returns from (-1: no frame).
+    pc: if at == .Val(frame) -> frame.lookup else -> -1
+    panels := CanvasDebugPanels{}
+    // A folded Registers panel marks nothing changed when it opens again.
+    if folded.contains("registers") -> session.seen_frame = ""
+    if !folded.contains("registers") -> panels.registers = Val(canvas_debug_registers(session, at))
+    if !folded.contains("disassembly") {
+        rows := [String]{}
+        if pc >= 0 {
+            loop row in native_listing_window(session.live, pc, -CANVAS_DEBUG_LISTED_BEFORE, CANVAS_DEBUG_LISTED) {
+                rows.push(canvas_debug_listed_json(row, pc))
+            }
+        }
+        panels.disassembly = Val(rows.join(","))
+    }
+    answered := [String]{}
+    loop read in reads {
+        answered.push(canvas_debug_read_json(session, read, pc) ?? return Err(err))
+    }
+    panels.reads = answered.join(",")
+    Ok(panels)
+}
+
+// The registers of the stop's frame `at` as JSON items ("" for no frame,
+// as for a task that has not run), each `changed` when the panel showed
+// the same frame at the previous stop and its value then differed. A
+// frame is keyed by its canonical frame address and inlined run, which
+// another task's frames and the task's other frames don't share.
+canvas_debug_registers: fn(session: &CanvasDebugSession, at: NativePanelFrame?) -> String Never! {
+    frame: at ?? {
+        session.seen_frame = ""
+        return ""
+    }
+    key: "{frame.frame.cfa}:{frame.site}"
+    same: key == session.seen_frame
+    seen := [String:Int]{}
+    rows := [String]{}
+    loop row in native_registers_at(session.live, frame) {
+        before: session.seen_registers.get(row.name)
+        changed: same && row.known && before != None && before != Int?{Val(row.value)}
+        if row.known -> seen[row.name] = row.value
+        rows.push(canvas_debug_register_json(row, changed: changed))
+    }
+    session.seen_frame = key
+    session.seen_registers = seen
+    rows.join(",")
+}
+
+// One register row: its name, and when the frame holds it, its value in
+// hex, a small value in decimal, its label and whether it changed.
+canvas_debug_register_json: fn(row: NativeRegisterRow, changed: Bool{false}) -> String Never! {
+    name: foundation_json_quote(row.name)
+    if !row.known -> return "{{\"name\":{name},\"known\":false,\"changed\":false}}"
+    "{{\"name\":{name},\"known\":true,\"value\":\"0x{native_panel_hex(row.value)}\",\"decimal\":{foundation_json_quote(native_register_decimal(row))},\"label\":{foundation_json_quote(row.label)},\"changed\":{changed}}}"
+}
+
+// One instruction row of a disassembly: its address, bytes, text, the code
+// it is in, its source line, and whether it holds `pc`; an address no code
+// is known at is `valid` false.
+canvas_debug_listed_json: fn(row: NativeListedRow, pc: Int) -> String Never! {
+    address: "\"0x{native_panel_hex(row.address)}\""
+    if !row.valid -> return "{{\"address\":{address},\"valid\":false}}"
+    here: pc >= row.address && pc < row.address + row.bytes.len()
+    "{{\"address\":{address},\"valid\":true,\"bytes\":{foundation_json_quote(session_hex.encode(row.bytes))},\"text\":{foundation_json_quote(row.text)},\"symbol\":{foundation_json_quote(row.symbol)},\"file\":{foundation_json_quote(row.file)},\"line\":{row.line},\"here\":{here}}}"
+}
+
+// The answer to one read at the stop, whose frame's facts are looked up at
+// `pc`. A disassembly read lists its rows. A memory read is the console's
+// `memory` (native_memory_read): a WHERE it can't read answers `ok` false
+// with the console's words; else the address and heading, each byte in
+// hex with its `state` (`.` mapped, `?` unmapped, `#` redacted by a dump,
+// `d` the debugger's own), the offsets of the words that point into mapped
+// memory, the locals each row of CANVAS_DEBUG_MEMORY_ROW bytes starts,
+// the values `as` a number type, and where it stopped short.
+canvas_debug_read_json: fn(session: &CanvasDebugSession, read: CanvasDebugRead, pc: Int) -> String NativeDebugError! {
+    if read.kind == "disassembly" {
+        rows := [String]{}
+        loop row in native_listing_window(session.live, native_memory_address(read.from) ?? 0, read.skip, read.count) {
+            rows.push(canvas_debug_listed_json(row, pc))
+        }
+        return Ok("{{\"kind\":\"disassembly\",\"from\":{foundation_json_quote(read.from)},\"skip\":{read.skip},\"rows\":[{rows.join(",")}]}}")
+    }
+    count: if read.count == -1 -> "" else -> " {read.count}"
+    typed: if read.type_name == "" -> "" else -> " as {read.type_name}"
+    ask: native_memory_ask("{read.where}{count}{typed}")
+    path: native_memory_path(session.live, ask)
+    found: native_memory_read(session.live, ask, path) ?? return Err(err)
+    head: "\"kind\":\"memory\",\"where\":{foundation_json_quote(read.where)},\"type\":{foundation_json_quote(read.type_name)}"
+    if found.aim.answer != "" {
+        return Ok("{{{head},\"ok\":false,\"refused\":{found.aim.refused},\"message\":{foundation_json_quote(found.aim.answer.trim())}}}")
+    }
+    bytes := [U8]{}
+    state := [U8]{}
+    pointers := [String]{}
+    labels := [String]{}
+    values := [String]{}
+    if found.view == .Val(view) {
+        bytes = view.bytes
+        loop k in 0..<view.bytes.len() {
+            state.push(
+                if {
+                    view.debugger[k] -> U8{0x64}
+                    view.secret[k] -> U8{0x23}
+                    !view.mapped[k] -> U8{0x3f}
+                    else -> U8{0x2e}
+                },
+            )
+        }
+        loop offset in native_memory_pointers(session.live, view) -> pointers.push("{offset}")
+        start := 0
+        loop start < view.bytes.len() {
+            end: if start + CANVAS_DEBUG_MEMORY_ROW < view.bytes.len() -> start + CANVAS_DEBUG_MEMORY_ROW else -> view.bytes.len()
+            named: native_memory_row_labels(session.live, view, view.address + start, view.address + end)
+            if named != "" {
+                labels.push("{{\"offset\":{start},\"text\":{foundation_json_quote(named)}}}")
+            }
+            start = end
+        }
+        if ask.typed {
+            loop value in 0..<view.bytes.len().div_euclid(ask.size) {
+                values.push(foundation_json_quote(native_memory_shown(view, value * ask.size, ask.type_name, ask.size)))
+            }
+        }
+    }
+    shown: String.from_bytes(state) ?? ""
+    Ok("{{{head},\"ok\":true,\"address\":\"0x{native_panel_hex(found.aim.address)}\",\"heading\":{foundation_json_quote(found.aim.heading)},\"bytes\":{foundation_json_quote(session_hex.encode(bytes))},\"state\":{foundation_json_quote(shown)},\"pointers\":[{pointers.join(",")}],\"labels\":[{labels.join(",")}],\"values\":[{values.join(",")}],\"note\":{foundation_json_quote(found.after.trim())}}}")
 }

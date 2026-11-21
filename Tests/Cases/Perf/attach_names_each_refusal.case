@@ -2,9 +2,11 @@
 # with the others is Jet.InvalidCommandInput (exit 2); a process that isn't
 # running, or runs without publishing what the attach reads, is
 # Jet.AttachTargetNotObserved (exit 1); a command line that names no one
-# process (none, two, or a word that isn't a pid) is Jet.AttachWhichProcess
-# (exit 2). Each report is a CLI snapshot. The running process runs under
-# the authorizer, so jet may trace it and the refusal is its own.
+# process (none, two, a word that isn't a pid, or a pid and a command) is
+# Jet.AttachWhichProcess (exit 2); a command that can't be started is
+# Jet.DriverOperationFailed (exit 1). Each report is a CLI snapshot. The
+# running process runs under the authorizer, so jet may trace it and the
+# refusal is its own.
 requires: os-name:linux
 requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
@@ -56,3 +58,24 @@ stderr: ~ "Error: Jet.AttachWhichProcess: `jet perf attach` names no process" # 
 step: jet perf attach soon --source live.jet
 exit: 2
 stderr: ~ "Error: Jet.AttachWhichProcess: `soon` isn't a process id, so jet can't tell which process to attach to" # nor is a word that isn't a pid
+step: jet perf attach 4242 --lens=counts
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `--lens=counts` counts a command from its start, and a running process has started already" # a count missing the start would mislead
+stderr: ~ "Fix: Run `jet perf attach --lens=counts -- <command>`" # the command form is the fix
+step: jet perf attach -- true
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `jet perf attach -- <command>` takes `--lens=counts`" # a command is counted, not sampled
+step: jet perf attach --lens=counts --for=3s --out timed.jettrace -- true
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process" # a window on a running process
+file: timed.jettrace absent # refused before it ran the command
+step: jet perf attach 4242 --lens=counts -- true
+exit: 2
+stderr: ~ "Error: Jet.AttachWhichProcess: `jet perf attach` was given process `4242` and a command after `--`" # a pid and a command
+step: jet perf attach --lens=counts --
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `jet perf attach --` names no command" # nothing after `--`
+step: jet perf attach --lens=counts --out none.jettrace -- no-such-program-c14
+exit: 1
+stderr: ~ "Error: Jet.DriverOperationFailed: Jet can't run `no-such-program-c14`: no such program file on PATH" # a program PATH lacks
+file: none.jettrace absent # nothing ran, so no trace

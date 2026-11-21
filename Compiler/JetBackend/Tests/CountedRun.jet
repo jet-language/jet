@@ -1,0 +1,23 @@
+// A counted run (Image/Loader.jet x64_counted_run) starts a command with
+// the kernel's user-mode instruction and cycle counters on it, and gives
+// its wait status, the CPU and peak memory its reap reported, and its
+// counts, or why the kernel didn't count it. A program that can't be
+// started gives why, and no status.
+use jet_backend.[x64_counted_run]
+
+#Test("a counted run gives the command's exit status, its reap's CPU and memory, and its counts or why not") {
+    counted: x64_counted_run("/bin/sh", [String]{"sh", "-c", "i=0; while [ $i -lt 2000 ]; do i=$((i+1)); done; exit 3"}, None)
+    assert_eq(counted.failure, "")
+    assert_eq((counted.status >> 8) & 0xff, 3)
+    assert(counted.peak_rss_bytes > 0, "the reap reports the shell's resident set")
+    if counted.instructions == .Val(instructions) {
+        assert(instructions > 0, "a counted shell retired instructions")
+        assert_eq(counted.errno, 0)
+    } else { assert(counted.errno != 0, "a run the kernel didn't count says why") }
+}
+
+#Test("a counted run of a program that can't be started gives the execve's error") {
+    missing: x64_counted_run("/nonexistent/counted-run-program", [String]{"counted-run-program"}, None)
+    assert_eq(missing.failure, "execve of /nonexistent/counted-run-program failed (errno 2)")
+    assert_eq(missing.status, -1)
+}
