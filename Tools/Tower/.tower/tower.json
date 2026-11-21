@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112712,
+    "rev": 112713,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24136,11 +24136,11 @@
         {
           "n": 12,
           "text": "The change adds no runtime compiler service, AST mutation, third-party dependency or optional Core library. Proof: the landing diff adds no package.jet dependency and no new module outside the files named in the plan.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:22:08.296Z"
+          "evidence": "The origin change landed as 8bd644f00e (Compiler diagnostics name the source they came from) and 9fcd6ed3ec (a cause with no location). Checked on dev: neither commit touches a package.jet, Core/ or Jetpack/ file. The only files they add are the units Compiler/JetSema/Tests/DiagnosticDigestOnce.jet and DiagnosticCausePlaces.jet plus case fixtures (CompilerAPI diagnostic_origin_*, LSP lsp_diagnostics_follow_their_origin); there is no new Source module. The edited sources are the plan homes or their Jet successors: Sema Diagnostics, SemanticIndex, Calls/CompilerServices, JetEval CompilerServices, JetDriver CompilerQueries/ComptimeCompiler, JetFoundation CoreRecordRows/RuntimeHandles (the successors of the plan core_types field table; CompilerDiagnosticOrigin is a row in the existing core.compiler registry, not a Core library), and CLI Inspect/InspectCompiler. The added lines hold no AST writes, and `use` in checked text resolves among sources the compile already holds, with no runtime service. Outside the origin plan, two later #3202 criteria each added one Source module under their own criteria, neither a service, dependency or Core library: JetParser Parser/Habits.jet (9ca8b39b6a, c28) and Compiler/Migrations/DiagnosticNames1.jet (4830b3da7e, c33).",
+          "at": "2026-11-21T01:50:00.991Z"
         },
         {
           "n": 13,
@@ -24366,8 +24366,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T01:37:39.436Z",
-      "updatedBy": "Errors3202",
+      "updated": "2026-11-21T01:50:00.991Z",
+      "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 35
     },
@@ -64412,193 +64412,6 @@
       "updated": "2026-11-17T01:49:51.462Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
-    },
-    {
-      "id": "c0rn7rnu",
-      "num": 6918,
-      "title": "Debug info tells the truth: lldb, gdb and perf show Jet names, real values and inlined frames, and no local before its binding",
-      "body": "Destination: the DWARF and symbol tables the native backend emits let any debugger show what the Jet program holds:\n- Jet function names.\n- Bignum Int, String, struct, list and Decimal locals by value.\n- No local before its binding runs: each location range starts at the binding.\n- Inlined frames and live locals in O2 builds.\n- O2 split debug files found through the debug link.\n\nWhy it matters: release a0_041's `jet debug Examples/Tooling/Debugging/Debug.jet` printed `a = 4262344   s = <unavailable>` at its first stop, which is uninitialized memory shown as a Jet value.\n\nG5DevX-2 found on 2026-11-13, with lldb on PATH: debug/ 13 PASS, 11 KF, 6 FAIL; the debugger stops, but locals read `<Unavailable>`.\n\nSource: #6730 c1, c2, c5, c6, c8, c9, c26, c27 (from #6738, #6739, #6742, #6745, #6271, Docs/audits/2026-11-14-debugging-profiling-review.md).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e20",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "Owner 2026-11-18: merged into #6841, one card for the cohesive native debugger and profiler. All nine criteria moved there as c23-c31."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "OWNER ORDER 2026-11-15 ~13:10: one goal agent slot does Jet's native debugger, profiler and perf (G5: #6730 jet debug, #4632 jet perf, #6918 debug info, #6841, #6919), native only with no lldb, gdb or Linux perf dependency. The G9 slot (GoalsB-5-2) takes it after its returned fixes; G9 is unstaffed until an agent snowballs past G6. Owner: GoalsB-5-2 (Pareto order 6730, 4632, 6918, 6841, 6919)."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "Owner direction (2026-11-15, chat): debugging and profiling are native Jet. jet debug and jet perf do the work themselves and depend on no external tool such as lldb, gdb or Linux perf. External tools serve only as comparators (as in #6730 c29) or as optional interop for users who bring them. Each value this card wants lldb to show (bignum, String, struct, list, Decimal locals, binding ranges, inlined frames, Jet names) must first show truthfully in jet debug and jet perf, from Jet's own debug facts. The lldb/gdb/perf proofs here are interop checks only, and must not be the only proof of a criterion. When this card is worked, the criteria get a native jet debug proof beside or in place of the lldb one."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A bignum Int local shows its value, not its tagged pointer word. Proof: `jet test Compiler --profile cases --filter Debug/bignum_local_shows_value` with lldb on PATH.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c23",
-          "at": "2026-11-18T01:47:51.903Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 23
-          }
-        },
-        {
-          "n": 2,
-          "text": "String, struct, list and Decimal locals render their values, because the DWARF types them as what they are, not Opaque, Aggregate or void*. Proof: `jet test Compiler --profile cases --filter Debug/locals_render_string_struct_list_decimal` with lldb on PATH.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c24",
-          "at": "2026-11-18T01:47:59.715Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 24
-          }
-        },
-        {
-          "n": 3,
-          "text": "lldb finds an O2 build's split debug file under .jet/symbols through the binary's debug link.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c25",
-          "at": "2026-11-18T01:48:01.644Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "Debug/o2_split_debug_link_found"
-          },
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 25
-          }
-        },
-        {
-          "n": 4,
-          "text": "Bounds stops (E3010) name the faulting function and show its locals, like every other stop report.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c26",
-          "at": "2026-11-18T01:48:02.996Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "RuntimeStops/bounds_stop_names_function_and_locals"
-          },
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 26
-          }
-        },
-        {
-          "n": 5,
-          "text": "No local is shown before its binding runs: each local's DWARF range starts at its binding, not at function entry. The stale 'generated Rust' comments in Examples/Tooling/Debugging (Debug.jet, DebugNative.jet, PanicReport.jet) are corrected. Proof: `jet test Compiler --profile cases --filter Debug/local_not_shown_before_binding`, and `git grep -n -i 'generated Rust' -- Examples/Tooling/Debugging` prints nothing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c27",
-          "at": "2026-11-18T01:48:04.367Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 27
-          }
-        },
-        {
-          "n": 6,
-          "text": "lldb on an -O2 jet build shows inlined frames and prints at least the live locals of a probe. Proof: `jet test Compiler --profile cases --filter Debug/o2_inlined_frames_and_live_locals` (SKIP-HOST without lldb).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c28",
-          "at": "2026-11-18T01:48:05.748Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 28
-          }
-        },
-        {
-          "n": 7,
-          "text": "The case gate runs with the dev shell's lldb on PATH, so debug/ rows are not SKIP-HOST, and break_then_continue_stops_at_breakpoint, native_breakpoint_reads_a_jet_local, next_line_takes_a_breakpoint and loop_next_edges_are_line_mapped pass. Proof: `jet test Compiler --profile cases --filter Debug/` with lldb on PATH has no FAIL outside named known-failing rows.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c29",
-          "at": "2026-11-18T01:48:07.023Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 29
-          }
-        },
-        {
-          "n": 8,
-          "text": "The symbol table carries Jet names for functions, so lldb, perf and gdb show Jet names.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c30",
-          "at": "2026-11-18T01:48:08.437Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "Debug/symbols_carry_jet_names"
-          },
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 30
-          }
-        },
-        {
-          "n": 9,
-          "text": "Breakpoints, frames and values refer to the accepted revision. Inspection never changes the guest or grants authority, and the script and library_loadable guest matrix runs with lldb present, without skip. Proof: `jet test Compiler --profile cases --filter Debug/` with lldb on PATH. (was #6730 c21)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved to #6841 c31",
-          "at": "2026-11-18T01:48:09.785Z",
-          "closure": "duplicate",
-          "movedTo": {
-            "card": 6841,
-            "n": 31
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "debug",
-        "dwarf"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T04:09:15.712Z",
-      "updated": "2026-11-18T01:48:11.878Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-18T01:48:11.878Z"
     },
     {
       "id": "c06lmp17",
@@ -130322,6 +130135,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T01:50:00.991Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#12"
+    },
     {
       "at": "2026-11-21T01:44:34.863Z",
       "by": "Main",
