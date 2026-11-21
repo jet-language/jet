@@ -3451,6 +3451,7 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     }
     loop slot in f.splits -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
     loop slot in f.binds -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
+    loop slot in f.scattered -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
     renamed := [Int]{}
     kept := 0
     loop slot in 0..<count {
@@ -3477,6 +3478,9 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     }
     loop k in 0..<f.binds.len() {
         f.binds[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.binds[k])
+    }
+    loop k in 0..<f.scattered.len() {
+        f.scattered[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.scattered[k])
     }
     types := [Int]{}
     kinds := [IRSlotKind]{}

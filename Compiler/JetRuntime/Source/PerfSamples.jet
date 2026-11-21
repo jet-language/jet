@@ -7785,9 +7785,10 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // since its thread last ended a task, when it runs none now: a carrier
 // parks between tasks, and a CPU that idled clocks down, so a task begun
 // after a long gap runs slower. A task is counted when the global delay
-// stayed put while it ran, so no pause is in its run time, and when it
-// ends on the thread that started it; one started inside another task's
-// run (a join that runs it) had no gap and is not. Both reuse the clock
+// stayed put while it ran, so no pause is in its run time, and when its
+// thread ran it from its start to its end; one started inside another
+// task's run (a join that runs it) had no gap and is not, nor is one held
+// on the way (perf_causal_hold). Both reuse the clock
 // read their mark takes: with the lens on, a task costs a few stores, a
 // row lookup and three atomic adds more, and for its timing
 // (perf_causal_row) a CPU clock read at each end and a getcpu at its start;
@@ -7795,15 +7796,15 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // so they read the clocks sync_now_ns and sync_thread_cpu_ns read, whose
 // words no handler writes: a sample landing in a read of the handler's
 // words (perf_samples_clock) would leave it half the handler's.
-perf_causal_task_start: fn(task: I64, body: I64) {
+//
+// Every task gets its row. A task started inside another's run holds the
+// outer one's timing: the start returns the block that holds it, which
+// perf_causal_task_end takes, puts back and frees; 0 when it held none.
+perf_causal_task_start: fn(task: I64, body: I64) -> I64 {
     state: perf_causal_state
-    if (state == I64{0}) {
-        return
-    }
+    if (state == I64{0}) { return I64{0} }
     thread: perf_causal_thread(state)
-    if (thread == I64{0}) {
-        return
-    }
+    if (thread == I64{0}) { return I64{0} }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
     // What a pause paid past its request still counts (perf_causal_pay).
     if (rt_text_word(wrapping(thread + I64{8})) < delay) {
@@ -7813,6 +7814,11 @@ perf_causal_task_start: fn(task: I64, body: I64) {
     perf_causal_mark(thread, now)
     idle_from: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM))
     running: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK))
+    outer := I64{0}
+    if (running != I64{0}) {
+        outer = jet_rt_alloc(PERF_CAUSAL_HOLD_BYTES, I64{8})
+        perf_causal_hold(thread, outer, now)
+    }
     gap: wrapping(now - idle_from)
     cell: if (idle_from == I64{0} || running != I64{0} || gap < I64{0}) -> I64{0} else -> perf_causal_idle_cell(state, body, gap)
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), task)
@@ -7827,15 +7833,14 @@ perf_causal_task_start: fn(task: I64, body: I64) {
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_TICKS), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TICKS)))
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CORE), perf_causal_core(thread))
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CPU), sync_thread_cpu_ns())
+    outer
 }
 
-perf_causal_task_end: fn(task: I64) {
+perf_causal_task_end: fn(task: I64, outer: I64) {
     state: perf_causal_state
-    if (state == I64{0}) {
-        return
-    }
-    thread: perf_causal_thread(state)
+    thread: if (state == I64{0}) -> I64{0} else -> perf_causal_thread(state)
     if (thread == I64{0}) {
+        if (outer != I64{0}) { jet_rt_free(outer, PERF_CAUSAL_HOLD_BYTES, I64{8}) }
         return
     }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
@@ -7856,6 +7861,94 @@ perf_causal_task_end: fn(task: I64) {
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), I64{0})
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_CELL), I64{0})
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM), now)
+    if (outer != I64{0}) {
+        perf_causal_unhold(thread, outer)
+        jet_rt_free(outer, PERF_CAUSAL_HOLD_BYTES, I64{8})
+    }
+}
+
+// A task's timing while its thread runs something else: the task its fiber
+// switches out of (a park, a yield, a turn given), which can go on on
+// another carrier, and the task a join runs another inside. The block, of
+// PERF_CAUSAL_HOLD_BYTES, holds the task (0: none) and its start's words
+// (from, delay, gap, body, ordinal, core), and in place of its thread's
+// counters at its start (TASK_CPU, TASK_PAUSED, TASK_PAUSE_CPU,
+// TASK_TICKS) what they had counted by the hold: whichever thread goes on
+// with it counts on from there (perf_causal_unhold), so its row's CPU time,
+// pauses and samples are its own. Its idle table's cell is dropped: its run
+// time has the time it was held in it. Its thread runs no task from `now`.
+PERF_CAUSAL_HOLD_BYTES: I64{88}
+
+perf_causal_hold: fn(thread: I64, held: I64, now: I64) {
+    task: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK))
+    rt_text_store(held, task)
+    if (task == I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(held + I64{8}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM)))
+    rt_text_store(wrapping(held + I64{16}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_DELAY)))
+    rt_text_store(wrapping(held + I64{24}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_GAP)))
+    rt_text_store(wrapping(held + I64{32}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_BODY)))
+    rt_text_store(wrapping(held + I64{40}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_ORDINAL)))
+    rt_text_store(wrapping(held + I64{48}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CORE)))
+    rt_text_store(wrapping(held + I64{56}), wrapping(sync_thread_cpu_ns() - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CPU))))
+    rt_text_store(wrapping(held + I64{64}), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED)) - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSED))))
+    rt_text_store(wrapping(held + I64{72}), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSE_CPU)) - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSE_CPU))))
+    rt_text_store(wrapping(held + I64{80}), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TICKS)) - rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_TICKS))))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), I64{0})
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_CELL), I64{0})
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM), now)
+}
+
+// The task `held` holds (perf_causal_hold) goes on on this thread; the
+// block then holds none.
+perf_causal_unhold: fn(thread: I64, held: I64) {
+    task: rt_text_word(held)
+    if (task == I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK), task)
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM), rt_text_word(wrapping(held + I64{8})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_DELAY), rt_text_word(wrapping(held + I64{16})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_GAP), rt_text_word(wrapping(held + I64{24})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_CELL), I64{0})
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_BODY), rt_text_word(wrapping(held + I64{32})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_ORDINAL), rt_text_word(wrapping(held + I64{40})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CORE), rt_text_word(wrapping(held + I64{48})))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CPU), wrapping(sync_thread_cpu_ns() - rt_text_word(wrapping(held + I64{56}))))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSED), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED)) - rt_text_word(wrapping(held + I64{64}))))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSE_CPU), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSE_CPU)) - rt_text_word(wrapping(held + I64{72}))))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_TICKS), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TICKS)) - rt_text_word(wrapping(held + I64{80}))))
+    rt_text_store(held, I64{0})
+}
+
+// A fiber switching out (Fiber.jet fiber_switch_out) holds the task its
+// thread runs in its block `held`, and the thread that resumes it goes on
+// with it (perf_causal_fiber_resume). With the lens off, nothing past the
+// state's test.
+perf_causal_fiber_leave: fn(held: I64) {
+    state: perf_causal_state
+    if (state == I64{0}) {
+        return
+    }
+    thread: perf_causal_thread(state)
+    if (thread == I64{0}) {
+        rt_text_store(held, I64{0})
+        return
+    }
+    perf_causal_hold(thread, held, sync_now_ns())
+}
+
+perf_causal_fiber_resume: fn(held: I64) {
+    if (perf_causal_state == I64{0} || rt_text_word(held) == I64{0}) {
+        return
+    }
+    thread: perf_causal_thread(perf_causal_state)
+    if (thread == I64{0}) {
+        rt_text_store(held, I64{0})
+        return
+    }
+    perf_causal_unhold(thread, held)
 }
 
 // The CPU this thread runs on (getcpu), read into its entry's word for it;

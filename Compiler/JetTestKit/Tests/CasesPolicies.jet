@@ -40,6 +40,24 @@ use {
     files.remove_all(root) ?? panic("remove limit scratch")
 }
 
+#Test("a death by signal N passes only a step whose own exit is 128 + N") {
+    segv: KitRun{stdout: "", stderr: "", code: -1, signal: Val(11), timed_out: false, error: ""}
+    expected: kit_steps_parse_case("step: printf x\nexit: 139\n").steps[0]
+    assert(kit_steps_failure(expected, segv) == None)
+    assert_eq(kit_steps_exit_status(expected.exit, kit_steps_status(segv)).status, "PASS")
+    loop source in ["step: printf x\nexit: 134\n", "step: printf x\nexit: any\n", "step: printf x\n"] {
+        step: kit_steps_parse_case(source).steps[0]
+        failure: kit_steps_failure(step, segv) ?? panic("signal failure")
+        assert_eq(failure.status, "ERROR")
+        assert_eq(failure.detail, "child terminated by signal")
+    }
+    killed: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: false, error: "", limit_hit: "memory"}
+    assert_eq((kit_steps_failure(kit_steps_parse_case("step: printf x\nexit: 137\n").steps[0], killed) ?? panic("memory kill")).status, "ERROR")
+    exited: KitRun{stdout: "", stderr: "", code: 139, signal: None, timed_out: false, error: ""}
+    assert(kit_steps_failure(expected, exited) == None)
+    assert_eq(kit_steps_exit_status(expected.exit, kit_steps_status(exited)).status, "PASS")
+}
+
 #Test("a cpu limit bounds the step tree's CPU time, not its wall time, and fails the step") {
     plan: kit_steps_parse_case("step: printf x\nlimit: cpu=2 time=30\n")
     assert_eq(plan.error, "")

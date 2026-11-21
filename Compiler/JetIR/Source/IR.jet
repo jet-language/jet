@@ -427,6 +427,13 @@ IRFunction: struct {
     // renames it here too. The named slot's variable is located in the
     // second slot's place (X64Select.jet ir_x64_variables).
     binds: [Int]{[Int]{}},
+    // The slots holding the address of frame storage that scalar
+    // replacement (OptScalar.jet) split into field slots but kept for its
+    // loans: its bytes hold the fields only around each loan, so a variable
+    // located in one of these slots' places has no location there
+    // (X64Select.jet ir_x64_variables). A pass that renames slots renames
+    // them here too.
+    scattered: [Int]{[Int]{}},
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into

@@ -10,8 +10,8 @@
 use {
     perf_files: core.files
     perf_time: core.time
-    jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction, X64Samples, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_read, x64_sampler_close, x64_sampler_drain, x64_sampler_open]
-    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
+    jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction, X64SampledThread, X64Samples, x64_image_function_find, x64_image_functions, x64_jetline_find, x64_jetline_read, x64_sampler_close, x64_sampler_drain, x64_sampler_open]
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jet_live_stat_ticks, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
     jet_ir.[ir_runtime_intrinsic_specs]
 }
 
@@ -148,6 +148,14 @@ JetCLIPerfOutsidePackage: struct {
     samples: Int,
 }
 
+// What an outside attach sampled (jet_cli_perf_outside_sample): its
+// `functions` section, and the window its samplers were open, with the CPU
+// the threads they sampled ran in it (jet_cli_perf_outside_cpu).
+JetCLIPerfOutsideTaken: struct {
+    section: TraceReceiptSection,
+    window: JetCLIPerfAttachWindow,
+}
+
 // Sample process `pid`, and the processes it started, for `window_ms` and
 // say where their CPU went, as the trace's `functions` receipt section
 // (type `JetPerfFunctions`): the `samples` taken of the `threads` of its
@@ -165,9 +173,12 @@ JetCLIPerfOutsidePackage: struct {
 // sample's stack was unwound: `unwound` to JET_CLI_PERF_OUTSIDE_MAIN or a
 // function of JET_CLI_PERF_OUTSIDE_ENTRIES, `cut` at the kernel's frame limit
 // (jet_cli_perf_outside_depth), or `broken` anywhere else, where a frame
-// pointer was lost. Err says why the kernel won't sample it or its
-// executable can't name the frames.
-jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.Asm]> TraceReceiptSection JetCLIReadError! {
+// pointer was lost. With it comes the window the samplers were open: its
+// wall time and the CPU the sampled threads ran in it, which the samples
+// stand for, so a count low because the threads got little CPU is told
+// from one low because samples were missed. Err says why the kernel won't
+// sample it or its executable can't name the frames.
+jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.Asm]> JetCLIPerfOutsideTaken JetCLIReadError! {
     family: jet_cli_perf_outside_family(pid)
     threads := [Int]{}
     // The process, by its index in `family`, each thread is of.
@@ -191,11 +202,20 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         return Err(jet_cli_read_error(why))
     }
     taken := X64Samples{words: [Int]{}, samples: 0, lost: 0}
+    // The window opens once the samplers are open and closes before they
+    // are closed, so the CPU the sampled threads ran in it is the CPU the
+    // samples stand for. Its last drain follows its close, so no sample
+    // taken in it is left in a ring.
+    before: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
+    started: perf_time.instant()
     // The rings are drained every 20 ms, well before one fills.
     loop _ in 0..<(window_ms + 19) /% 20 {
         perf_time.sleep(20ms)
         x64_sampler_drain(sampler, taken)
     }
+    after: jet_cli_perf_outside_cpu(sampler.threads, family, owner)
+    window: jet_cli_perf_attach_closed(U64{started.elapsed().ns}, before, after)
+    x64_sampler_drain(sampler, taken)
     x64_sampler_close(sampler)
     images := [JetCLIPerfOutsideImage]{}
     // Where each process's code is mapped, none when its executable can't
@@ -326,7 +346,29 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
             {key: "window_ms", value: CanonicalJSON.Integer("{window_ms}")},
         },
     )
-    Ok(TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value})
+    section: TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value}
+    Ok(JetCLIPerfOutsideTaken{section: section, window: window})
+}
+
+// The CPU the threads `sampled` have run, each of process
+// `family[owner[thread]]`: each one's schedstat run time
+// (/proc/<pid>/task/<tid>/schedstat's first field), to the nanosecond, as
+// jet_cli_perf_attach_cpu counts a program's. A thread that exited has no
+// file left and no time. None when the kernel keeps no schedstat.
+jet_cli_perf_outside_cpu: fn(sampled: [X64SampledThread], family: [Int], owner: [Int:Int]) -[FS.Read]> JetCLIPerfAttachCPU? Never! {
+    threads := [Int:U64]{}
+    total := U64{0}
+    loop each in sampled {
+        process: family[owner[each.thread, or: 0]]
+        text: perf_files.read("/proc/{process}/task/{each.thread}/schedstat") ?? next
+        words: jet_cli_find_words(text)
+        if words.len() == 0 -> next
+        ns: jet_live_stat_ticks(words[0]) ?? next
+        threads[each.thread] = ns
+        total += ns
+    }
+    if threads.len() == 0 -> return None
+    Val(JetCLIPerfAttachCPU{ns: total, resolution_ns: U64{1}, threads: threads})
 }
 
 // The `functions` section's object of function `row`, its keys in the

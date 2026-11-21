@@ -991,7 +991,13 @@ resolution after it (`run_cpu=30000000ns run_cpu_resolution=10ms`). The
 trace's `window` receipt section (type `JetPerfAttachWindow`) records the
 CPU's clock (`schedstat` or `ticks`), its resolution in nanoseconds and the
 threads that exited. The `native` row `process_cpu` keeps the program's CPU
-since its run started.
+since its run started. An outside sample's window is its samplers' own: it
+opens once the kernel's samplers are open and closes before they are
+closed, and its CPU is the schedstat run time of the threads they sampled,
+the named process's and its children's, so the CPU its samples stand for
+is in the trace. A second of wall time is a second of a busy thread's CPU
+only when the machine has a CPU free for it; under load the same window
+holds fewer samples and as much less CPU.
 
 No record is lost silently. The runtime counts each record a write refused,
 and whenever the count grew the writer keeps a tally record in the ring (a

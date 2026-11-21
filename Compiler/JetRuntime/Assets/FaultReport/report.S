@@ -22,7 +22,9 @@
 # (.debug_jetline as the linker writes it, Image/DebugPrune.jet) of the
 # image's section headers; a frame outside Jet source before the first Jet
 # one (the runtime routine that faulted, every frame of a runtime thread)
-# is named by its function symbol in .symtab. Every byte goes through one
+# is named by its function symbol in a SHT_SYMTAB section: each one in
+# turn, since a program run from memory has two, its own and its runtime
+# image's (Image/Loader.jet loader_view). Every byte goes through one
 # 4 KiB buffer on the stack, from templates with seven field codes: no
 # allocation, no unwinder.
     .intel_syntax noprefix
@@ -54,9 +56,8 @@
     .set V_LOW, -184            # the function find matched: its link-time
     .set V_HIGH, -192           # start and end
     .set V_JET, -200            # 1 once a Jet frame is written
-    .set V_SYM, -208            # .symtab: start (0: none) and end, and the
-    .set V_SYMEND, -216         # names its symbols point into
-    .set V_STR, -224
+    .set V_IMAGE, -208          # the image argument (0: none); -216 and
+                                # -224 are spare
     .set WORDS, 224
     .set OUT_SIZE, 4096
     .set PATH, OUT_SIZE
@@ -101,18 +102,16 @@
     mov [rbp + V_IP], rax
     mov [rbp + V_HEX], rax
 
-    # The location table: the image's section named .debug_jetline; and
-    # its symbols: the SHT_SYMTAB section and the names its sh_link names.
+    # The location table: the image's section named .debug_jetline.
     xor eax, eax
     mov [rbp + V_TAB], rax
     mov [rbp + V_TABEND], rax
     mov [rbp + V_JET], rax
-    mov [rbp + V_SYM], rax
+    mov [rbp + V_IMAGE], r8
     test r8, r8
     jz 3f
     mov r10, r8
     add r10, [r8 + 40]          # e_shoff
-    mov rbx, r10
     movzx r9d, word ptr [r8 + 58]   # e_shentsize
     movzx edx, word ptr [r8 + 60]   # e_shnum
     movzx eax, word ptr [r8 + 62]   # e_shstrndx
@@ -121,19 +120,7 @@
     add r11, r8
 1:  test edx, edx
     jz 3f
-    cmp dword ptr [r10 + 4], 2  # sh_type SHT_SYMTAB
-    jne 4f
-    mov rax, [r10 + 24]         # sh_offset, sh_size
-    add rax, r8
-    mov [rbp + V_SYM], rax
-    add rax, [r10 + 32]
-    mov [rbp + V_SYMEND], rax
-    mov eax, [r10 + 40]         # sh_link: the names' section
-    imul eax, r9d
-    mov rax, [rbx + rax + 24]
-    add rax, r8
-    mov [rbp + V_STR], rax
-4:  mov eax, [r10]              # sh_name
+    mov eax, [r10]              # sh_name
     lea rsi, [r11 + rax]
     lea rdi, [rip + jetline]
     push 15
@@ -359,16 +346,29 @@ frame_at:
 3:  pop rbx
     ret
 
-# The function symbol of .symtab holding run-time pc rax: eax 1 and its
-# name in [V_NAME], else eax 0. Clobbers rcx, rdx and rsi.
+# The function symbol holding run-time pc rax, from each SHT_SYMTAB section
+# of the image in turn: eax 1 and its name in [V_NAME], else eax 0.
+# Clobbers rcx, rdx, rsi, rdi, r8, r9, r10 and r11.
 symbol:
     sub rax, [rbp + V_BIAS]
-    mov rsi, [rbp + V_SYM]
-    test rsi, rsi
+    mov r8, [rbp + V_IMAGE]
+    test r8, r8
     jz 3f
+    mov r9, r8
+    add r9, [r8 + 40]           # e_shoff: the section headers
+    movzx r10d, word ptr [r8 + 60]  # e_shnum
+    mov r11, r9                 # the section at hand
+4:  test r10d, r10d
+    jz 3f
+    cmp dword ptr [r11 + 4], 2  # sh_type SHT_SYMTAB
+    jne 5f
+    mov rsi, [r11 + 24]         # sh_offset, sh_size: its symbols
+    add rsi, r8
+    mov rdi, rsi
+    add rdi, [r11 + 32]
 1:  lea rdx, [rsi + 24]
-    cmp rdx, [rbp + V_SYMEND]
-    ja 3f
+    cmp rdx, rdi
+    ja 5f
     mov cl, [rsi + 4]           # st_info: STT_FUNC
     and cl, 15
     cmp cl, 2
@@ -377,14 +377,23 @@ symbol:
     sub rcx, [rsi + 8]
     cmp rcx, [rsi + 16]
     jae 2f
-    mov ecx, [rsi]              # st_name
-    add rcx, [rbp + V_STR]
+    mov ecx, [r11 + 40]         # sh_link: the names' section
+    movzx edx, word ptr [r8 + 58]   # e_shentsize
+    imul ecx, edx
+    mov rcx, [r9 + rcx + 24]    # its sh_offset
+    add rcx, r8
+    mov edx, [rsi]              # st_name
+    add rcx, rdx
     mov [rbp + V_NAME], rcx
     push 1
     pop rax
     ret
 2:  mov rsi, rdx
     jmp 1b
+5:  movzx edx, word ptr [r8 + 58]   # e_shentsize
+    add r11, rdx
+    dec r10d
+    jmp 4b
 3:  xor eax, eax
     ret
 

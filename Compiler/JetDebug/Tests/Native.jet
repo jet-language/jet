@@ -582,6 +582,30 @@ native_test_frame_end: fn(session: NativeSession, pc: Int) -> String {
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
+// A list scalar replacement splits into field slots: early(5)'s list,
+// passed to later, which O1 and O2 inline into run. The list's frame
+// storage stays for its loans but holds the fields only around them, so
+// `items` is either the true list or unavailable at a stop in later, never
+// the stale bytes there (an empty list).
+NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n    loop k in 0..<n -> items.push(k * 3)\n    items\n}}\n\nlater: fn(items: [Int]) -> Int {{\n    total := 0\n    loop v in items -> total += v\n    total\n}}\n\nrun: fn() {{\n    xs: early(5)\n    print(later(xs))\n}}\n"
+
+#Test("an_optimized_stop_never_shows_a_scattered_list_as_empty") {
+    lines: NATIVE_TEST_SCATTERED.split("\n").to_list()
+    levels: [String]{"-O1", "-O2"}
+    loop level in levels {
+        scratch: native_test_files.temp_dir("jet-debug-scattered") ?? panic("scratch: {err}")
+        root: scratch.path
+        session := native_test_session(root, NATIVE_TEST_SCATTERED, [String]{level})
+        stop: session.run_to([NativeBreak]{{file: "prog.jet", line: 8}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+        assert(stop.text.contains("Breakpoint hit  prog.jet:8  in later()"), "{level}: {stop.text}")
+        shown: session.command("print items", stop.stop, "prog.jet", lines) ?? panic("print: {err.detail}")
+        assert(!shown.text.contains("items = []"), "{level}: {shown.text}")
+        assert(shown.text.contains("items = [0, 3, 6, 9, 12]") || shown.text.contains("<Unavailable>") || shown.text.contains("no readable value"), "{level}: {shown.text}")
+        session.close()
+        native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    }
+}
+
 // `break` and `disas` by name reach a function the optimizer inlined: -O2
 // inlines sum_squares into run, which calls it on line 14.
 #Test("an_o2_session_breaks_in_and_lists_an_inlined_function_by_name") {

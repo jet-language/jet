@@ -15,7 +15,9 @@
 // timerKind88 timerTarget96 lotNext104 lotAddress112 lotResult120
 // lotLinked128 timerFiring136 lotSequence144 timerSequence152
 // heapChild160 heapSibling168 heapPrevious176 cpuNs184 sliceStart192
-// pool200, and the fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the
+// pool200 causal208 (the causal lens's hold of the task it switched out
+// of, PerfSamples.jet perf_causal_hold, PERF_CAUSAL_HOLD_BYTES), and the
+// fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the
 // fiber is switching out to park), PARKED (its carrier saw the switch
 // complete), NOTIFIED (woken while PARKING: the carrier resumes it at once)
 // and RUNNABLE (queued). next links the root's ready FIFO and its pool of
@@ -34,7 +36,9 @@
 // blocks have one owner, lends the carrier's exact-Int hazard record
 // (IntHazard.jet int_hazard_lend), and points GS at the fiber's TCB: a fiber
 // keeps its TLS, park slot, context and world words across carriers.
-FIBER_TCB: I64{256}
+FIBER_TCB: I64{320}
+
+FIBER_CAUSAL: I64{208}
 
 fiber_header_bytes: fn() -> I64 { (FIBER_TCB + context_tcb_bytes() + I64{63}) & I64{-64} }
 
@@ -124,9 +128,12 @@ fiber_teardown: fn(fiber: I64) {
 
 fiber_switch_out: fn(fiber: I64) {
     carrier: sync_load(wrapping(fiber + I64{16}))
+    held: wrapping(fiber + FIBER_CAUSAL)
+    perf_causal_fiber_leave(held)
     #Unsafe("the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it") {
         os_fiber_switch_i64(wrapping(fiber + I64{8}), sync_load(wrapping(carrier + I64{16})))
     }
+    perf_causal_fiber_resume(held)
 }
 
 // Parks the running fiber, whose state is PARKING and whose waker is already

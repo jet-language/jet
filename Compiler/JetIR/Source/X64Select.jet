@@ -4927,7 +4927,9 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // A local belongs to the inline site of its slot (IRFunction.slot_site: a
 // callee's local or parameter inlined here, OptInline.jet ir_opt_splice). A
 // named slot a pass folded into another (IRFunction.binds) is located in
-// that slot's place, or is that slot's constant from its write on.
+// that slot's place, or is that slot's constant from its write on. One in
+// the place of storage scalar replacement scattered (IRFunction.scattered)
+// has no location.
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     entries: ir_x64_entry_registers(m, f, al)
     // Per slot: the slot its value is in. A bind holds only into a slot
@@ -4952,6 +4954,13 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         once: if held < f.param_count -> writes[held] == 0 else -> writes[held] == 1
         if once -> held_in[named] = held
     }
+    // Per slot: whether it holds the address of storage scalar replacement
+    // scattered into fields (IRFunction.scattered), whose bytes are stale
+    // between its loans: a variable there has no location.
+    scattered := loop _ in 0..<f.slot_type.len() -> false
+    loop slot in f.scattered {
+        if slot >= 0 && slot < scattered.len() -> scattered[slot] = true
+    }
     // Per variable: the slot its value is in.
     places := [Int]{}
     first: variables.len()
@@ -4964,6 +4973,7 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         variables.push(X64DebugVariable{name: m.names[name], ty: f.slot_type[slot], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: f.slot_site[slot]})
         place: held_in[slot]
         places.push(place)
+        if scattered[place] -> next
         entry: if slot < entries.len() -> entries[slot] else -> -1
         // From the body on: the frame-free prefix keeps its values in
         // registers of its own (ir_x64_wrap).
@@ -5025,7 +5035,7 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, positions:
         if stop <= start -> next
         location: if al.regs[split] >= 0 -> X64DebugLocation.Register{reg: al.regs[split]} else -> X64DebugLocation.Frame{offset: al.homes[split]}
         loop (k, place) in places {
-            if place != home -> next
+            if place != home || scattered[place] -> next
             ir_x64_cut_ranges(ranges, first + k, start, stop)
             ranges.push(X64VariableRange{variable: first + k, start: start, end: stop, location: location})
         }

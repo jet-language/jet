@@ -294,7 +294,7 @@ task_run: fn(child: I64) {
     // shared by every body that returns it.
     env: sync_load(wrapping(child + I64{64}))
     code: if (env == I64{0}) -> sync_load(wrapping(child + I64{72})) else -> sync_load(wrapping(env + I64{8}))
-    perf_causal_task_start(child, code)
+    causal_outer: perf_causal_task_start(child, code)
     // A paused task waits here before its body starts, and a cancel posted
     // before the start wins: the body never runs. A shield the body opens
     // holds only the cancels that come once it is inside.
@@ -338,7 +338,7 @@ task_run: fn(child: I64) {
     }
     jet_rt_session_cleanup_leave(cleanup)
     jet_rt_observe_task_finish(sync_load(wrapping(control + I64{56})))
-    perf_causal_task_end(child)
+    perf_causal_task_end(child, causal_outer)
     // A finished task is a progress point of the causal lens.
     perf_causal_progress(rt_static_text("task"))
     if (world != I64{0}) {

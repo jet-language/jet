@@ -237,9 +237,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1634,
+  "total": 1635,
   "counts": {
-    "Compiler": 795,
+    "Compiler": 796,
     "Core": 179,
     "Docs": 13,
     "Examples": 45,
@@ -251,539 +251,546 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 268,
+      "line": 270,
       "column": 5,
       "reason": "`address` is the fresh mapping just made, page-rounded past the NUL"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 282,
+      "line": 284,
       "column": 5,
       "reason": "memfd_create reads the NUL-terminated name at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 296,
+      "line": 298,
       "column": 5,
       "reason": "the caller owns `fd` and nothing uses it any more"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 306,
+      "line": 308,
       "column": 9,
       "reason": "the caller mapped `count` writable bytes at `address`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 542,
+      "line": 544,
       "column": 9,
       "reason": "a private read-only view of the memfd aliases nothing writable"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 612,
+      "line": 614,
       "column": 17,
       "reason": "loader_map_file mapped this segment private and writable at its vaddr above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 634,
+      "line": 636,
       "column": 5,
       "reason": "MAP_FIXED_NOREPLACE never replaces an existing mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 677,
+      "line": 679,
       "column": 5,
       "reason": "MAP_FIXED replaces only the image's own reserved pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 682,
+      "line": 684,
       "column": 9,
       "reason": "the bytes lie in the segment's last file page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 692,
+      "line": 694,
       "column": 1,
       "reason": "the caller mapped [from, to) + delta private and writable"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 713,
+      "line": 756,
       "column": 5,
       "reason": "MAP_FIXED replaces only the view's own fresh pages"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 717,
+      "line": 760,
       "column": 5,
       "reason": "the bytes lie in the view's last image page, mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 720,
+      "line": 763,
       "column": 5,
       "reason": "the view's image pages are mapped private and writable above"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 724,
+      "line": 767,
       "column": 9,
       "reason": "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1144,
+      "line": 773,
+      "column": 9,
+      "reason": "MAP_FIXED replaces only the view's own fresh pages past the program part; the table goes to more of them, the ELF header to the view's first page, mapped private and writable above"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/Loader.jet",
+      "line": 1241,
       "column": 5,
       "reason": "openat reads the NUL-terminated path at `name`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1172,
+      "line": 1269,
       "column": 5,
       "reason": "the timespec lies in the fresh zeroed page; nanosleep only reads it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1180,
+      "line": 1277,
       "column": 1,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1190,
+      "line": 1287,
       "column": 1,
       "reason": "the caller owns the stack bytes below `at`"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1313,
+      "line": 1410,
       "column": 1,
       "reason": "the map's 104 bytes lie in the caller's data page, in its mm-map room; brk(0) only reports the current break"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1405,
+      "line": 1502,
       "column": 1,
       "reason": "the caller's executor page is its own fresh read+write mapping of one page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1452,
+      "line": 1549,
       "column": 5,
       "reason": "the data page is this plan's own fresh mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1465,
+      "line": 1562,
       "column": 5,
       "reason": "`executor` is the one-page read+write mapping just made for it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1479,
+      "line": 1576,
       "column": 13,
       "reason": "F_GETFD only reads the descriptor's flags"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1491,
+      "line": 1588,
       "column": 9,
       "reason": "rt_sigaction with no new action writes the old one (32 bytes) to the scratch"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1509,
+      "line": 1606,
       "column": 5,
       "reason": "a fresh anonymous reservation aliases nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1531,
+      "line": 1628,
       "column": 5,
       "reason": "getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1595,
+      "line": 1692,
       "column": 5,
       "reason": "the words lie in the stack mapping, above its guard page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1598,
+      "line": 1695,
       "column": 5,
       "reason": "the data page's mm-map room is this plan's own"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1621,
+      "line": 1718,
       "column": 5,
       "reason": "the block is this plan's own fresh mapping of plan_size bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1643,
+      "line": 1740,
       "column": 5,
       "reason": "the executor's records only reset process state; it then enters the loaded image on its own stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1723,
+      "line": 1820,
       "column": 5,
       "reason": "`executor` is the one-page read+write mapping just made for it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1739,
+      "line": 1836,
       "column": 5,
       "reason": "the block is this plan's own fresh mapping of plan_size bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1771,
+      "line": 1868,
       "column": 5,
       "reason": "the record block holds its count, then that many records of eight words; madvise only marks whether a fork copies the mappings the child unmaps; the executor's first record forks, and the child runs only the executor and enters the image, whose pages and the plan's it keeps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1810,
+      "line": 1907,
       "column": 5,
       "reason": "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1820,
+      "line": 1917,
       "column": 9,
       "reason": "`page` is this function's fresh scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1825,
+      "line": 1922,
       "column": 5,
       "reason": "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1844,
+      "line": 1941,
       "column": 1,
       "reason": "landlock_add_rule reads the packed 12-byte rule this writes at the start of the caller's scratch `page`; openat reads the NUL-terminated path at `name`, and the O_PATH fd is this function's"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1871,
+      "line": 1968,
       "column": 5,
       "reason": "wait4 writes one int status to the fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1881,
+      "line": 1978,
       "column": 5,
       "reason": "SIGKILL to a child this process started and has not reaped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1892,
+      "line": 1989,
       "column": 9,
       "reason": "a kernel sigaction with handler SIG_IGN on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1910,
+      "line": 2007,
       "column": 9,
       "reason": "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1931,
+      "line": 2028,
       "column": 5,
       "reason": "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 1971,
+      "line": 2068,
       "column": 5,
       "reason": "the bytes below `at` and the two arrays lie in the fresh block mapped above, sized for every string and word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2228,
+      "line": 2325,
       "column": 5,
       "reason": "socketpair writes its two int descriptors to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2249,
+      "line": 2346,
       "column": 9,
       "reason": "fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2319,
+      "line": 2416,
       "column": 5,
       "reason": "PTRACE_SETOPTIONS on the helper's own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2329,
+      "line": 2426,
       "column": 1,
       "reason": "`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2352,
+      "line": 2449,
       "column": 1,
       "reason": "prctl, getppid and exit_group of the helper itself, each on words alone"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2375,
+      "line": 2472,
       "column": 5,
       "reason": "socketpair writes its two int descriptors to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2390,
+      "line": 2487,
       "column": 9,
       "reason": "fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2443,
+      "line": 2540,
       "column": 5,
       "reason": "the helper's PTRACE_SEIZE and PTRACE_INTERRUPT of a thread of the program it is to trace"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2457,
+      "line": 2554,
       "column": 5,
       "reason": "the helper's PTRACE_DETACH of its own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2466,
+      "line": 2563,
       "column": 1,
       "reason": "the helper makes the system call as given; an argument that points into memory points into the trace's scratch page, the only memory it shares with this process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2471,
+      "line": 2568,
       "column": 5,
       "reason": "the call's number and arguments fill the first seven words of the trace's call; sendto reads its signal byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2493,
+      "line": 2590,
       "column": 5,
       "reason": "read writes one byte to the trace's call signal byte; the helper stored the result before it answered"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2509,
+      "line": 2606,
       "column": 5,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2530,
+      "line": 2627,
       "column": 9,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2552,
+      "line": 2649,
       "column": 5,
       "reason": "tgkill of one thread of our own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2566,
+      "line": 2663,
       "column": 5,
       "reason": "PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2599,
+      "line": 2696,
       "column": 5,
       "reason": "the helper's PTRACE_CONT, PTRACE_SINGLESTEP or PTRACE_SYSCALL on its own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2608,
+      "line": 2705,
       "column": 5,
       "reason": "the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2619,
+      "line": 2716,
       "column": 5,
       "reason": "the helper's PTRACE_POKEDATA writes one word of its own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2635,
+      "line": 2732,
       "column": 9,
       "reason": "process_vm_readv reads the two iovecs at LOADER_TRACE_IOV and writes at most `want` bytes from LOADER_TRACE_BYTES, inside the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2667,
+      "line": 2764,
       "column": 9,
       "reason": "the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2685,
+      "line": 2782,
       "column": 5,
       "reason": "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2698,
+      "line": 2795,
       "column": 5,
       "reason": "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2710,
+      "line": 2807,
       "column": 5,
       "reason": "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2723,
+      "line": 2820,
       "column": 5,
       "reason": "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2741,
+      "line": 2838,
       "column": 5,
       "reason": "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2754,
+      "line": 2851,
       "column": 5,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2777,
+      "line": 2874,
       "column": 9,
       "reason": "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2801,
+      "line": 2898,
       "column": 5,
       "reason": "tgkill of one thread of the helper's own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2811,
+      "line": 2908,
       "column": 9,
       "reason": "SIGKILL to the helper's own tracee"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2822,
+      "line": 2919,
       "column": 17,
       "reason": "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2837,
+      "line": 2934,
       "column": 9,
       "reason": "wait4 of our own child, the helper, keeping no status"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2926,
+      "line": 3023,
       "column": 5,
       "reason": "`attr` is the fresh zeroed page just mapped, which perf_event_open only reads; each ring is a fresh shared mapping of its own event's descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/Loader.jet",
-      "line": 2962,
+      "line": 3059,
       "column": 9,
       "reason": "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again"
     },
@@ -2792,63 +2799,63 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 127,
+      "line": 133,
       "column": 5,
       "reason": "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 153,
+      "line": 160,
       "column": 5,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 223,
+      "line": 230,
       "column": 9,
       "reason": "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 259,
+      "line": 266,
       "column": 9,
       "reason": "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 341,
+      "line": 348,
       "column": 9,
       "reason": "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 468,
+      "line": 475,
       "column": 13,
       "reason": "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 519,
+      "line": 526,
       "column": 9,
       "reason": "a fresh private anonymous stack mapping, unreserved until touched"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 531,
+      "line": 538,
       "column": 5,
       "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 686,
+      "line": 693,
       "column": 9,
       "reason": "sched_yield retains no memory; the firing carrier clears the word right after its wake"
     },
@@ -4136,7 +4143,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
-      "line": 7867,
+      "line": 7960,
       "column": 5,
       "reason": "getcpu writes the CPU's 32-bit number into this thread's own entry"
     },
@@ -11694,96 +11701,97 @@ file in a `Tests/` tree. The ratchet refuses either.
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 795 |
+| Compiler | 796 |
 | Core | 179 |
 | Docs | 13 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 566 |
 | Tools | 28 |
-| **total** | **1634** |
+| **total** | **1635** |
 
 ### Regions
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 268:5 | "`address` is the fresh mapping just made, page-rounded past the NUL" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 282:5 | "memfd_create reads the NUL-terminated name at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 296:5 | "the caller owns `fd` and nothing uses it any more" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 306:9 | "the caller mapped `count` writable bytes at `address`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 542:9 | "a private read-only view of the memfd aliases nothing writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 612:17 | "loader_map_file mapped this segment private and writable at its vaddr above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 634:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 677:5 | "MAP_FIXED replaces only the image's own reserved pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 682:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 692:1 | "the caller mapped [from, to) + delta private and writable" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 713:5 | "MAP_FIXED replaces only the view's own fresh pages" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 717:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 720:5 | "the view's image pages are mapped private and writable above" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 724:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1144:5 | "openat reads the NUL-terminated path at `name`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1172:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1180:1 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1190:1 | "the caller owns the stack bytes below `at`" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1313:1 | "the map's 104 bytes lie in the caller's data page, in its mm-map room; brk(0) only reports the current break" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1405:1 | "the caller's executor page is its own fresh read+write mapping of one page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1452:5 | "the data page is this plan's own fresh mapping" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1465:5 | "`executor` is the one-page read+write mapping just made for it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1479:13 | "F_GETFD only reads the descriptor's flags" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1491:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1509:5 | "a fresh anonymous reservation aliases nothing" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1531:5 | "getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1595:5 | "the words lie in the stack mapping, above its guard page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1598:5 | "the data page's mm-map room is this plan's own" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1621:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1643:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1723:5 | "`executor` is the one-page read+write mapping just made for it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1739:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1771:5 | "the record block holds its count, then that many records of eight words; madvise only marks whether a fork copies the mappings the child unmaps; the executor's first record forks, and the child runs only the executor and enters the image, whose pages and the plan's it keeps" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1810:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1820:9 | "`page` is this function's fresh scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1825:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1844:1 | "landlock_add_rule reads the packed 12-byte rule this writes at the start of the caller's scratch `page`; openat reads the NUL-terminated path at `name`, and the O_PATH fd is this function's" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1871:5 | "wait4 writes one int status to the fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1881:5 | "SIGKILL to a child this process started and has not reaped" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1892:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1910:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1931:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1971:5 | "the bytes below `at` and the two arrays lie in the fresh block mapped above, sized for every string and word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2228:5 | "socketpair writes its two int descriptors to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2249:9 | "fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2319:5 | "PTRACE_SETOPTIONS on the helper's own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2329:1 | "`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2352:1 | "prctl, getppid and exit_group of the helper itself, each on words alone" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2375:5 | "socketpair writes its two int descriptors to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2390:9 | "fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2443:5 | "the helper's PTRACE_SEIZE and PTRACE_INTERRUPT of a thread of the program it is to trace" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2457:5 | "the helper's PTRACE_DETACH of its own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2466:1 | "the helper makes the system call as given; an argument that points into memory points into the trace's scratch page, the only memory it shares with this process" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2471:5 | "the call's number and arguments fill the first seven words of the trace's call; sendto reads its signal byte" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2493:5 | "read writes one byte to the trace's call signal byte; the helper stored the result before it answered" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2509:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2530:9 | "the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2552:5 | "tgkill of one thread of our own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2566:5 | "PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2599:5 | "the helper's PTRACE_CONT, PTRACE_SINGLESTEP or PTRACE_SYSCALL on its own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2608:5 | "the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2619:5 | "the helper's PTRACE_POKEDATA writes one word of its own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2635:9 | "process_vm_readv reads the two iovecs at LOADER_TRACE_IOV and writes at most `want` bytes from LOADER_TRACE_BYTES, inside the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2667:9 | "the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2685:5 | "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2698:5 | "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2710:5 | "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2723:5 | "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2741:5 | "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2754:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2777:9 | "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2801:5 | "tgkill of one thread of the helper's own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2811:9 | "SIGKILL to the helper's own tracee" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2822:17 | "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2837:9 | "wait4 of our own child, the helper, keeping no status" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2926:5 | "`attr` is the fresh zeroed page just mapped, which perf_event_open only reads; each ring is a fresh shared mapping of its own event's descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2962:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 270:5 | "`address` is the fresh mapping just made, page-rounded past the NUL" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 284:5 | "memfd_create reads the NUL-terminated name at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 298:5 | "the caller owns `fd` and nothing uses it any more" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 308:9 | "the caller mapped `count` writable bytes at `address`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 544:9 | "a private read-only view of the memfd aliases nothing writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 614:17 | "loader_map_file mapped this segment private and writable at its vaddr above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 636:5 | "MAP_FIXED_NOREPLACE never replaces an existing mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 679:5 | "MAP_FIXED replaces only the image's own reserved pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 684:9 | "the bytes lie in the segment's last file page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 694:1 | "the caller mapped [from, to) + delta private and writable" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 756:5 | "MAP_FIXED replaces only the view's own fresh pages" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 760:5 | "the bytes lie in the view's last image page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 763:5 | "the view's image pages are mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 767:9 | "MAP_FIXED replaces only the view's own fresh pages; the memfd is never written again" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 773:9 | "MAP_FIXED replaces only the view's own fresh pages past the program part; the table goes to more of them, the ELF header to the view's first page, mapped private and writable above" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1241:5 | "openat reads the NUL-terminated path at `name`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1269:5 | "the timespec lies in the fresh zeroed page; nanosleep only reads it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1277:1 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1287:1 | "the caller owns the stack bytes below `at`" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1410:1 | "the map's 104 bytes lie in the caller's data page, in its mm-map room; brk(0) only reports the current break" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1502:1 | "the caller's executor page is its own fresh read+write mapping of one page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1549:5 | "the data page is this plan's own fresh mapping" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1562:5 | "`executor` is the one-page read+write mapping just made for it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1576:13 | "F_GETFD only reads the descriptor's flags" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1588:9 | "rt_sigaction with no new action writes the old one (32 bytes) to the scratch" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1606:5 | "a fresh anonymous reservation aliases nothing" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1628:5 | "getrandom fills the 16 stack bytes at `random`, and each string goes below them, in the fresh main stack this plan owns" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1692:5 | "the words lie in the stack mapping, above its guard page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1695:5 | "the data page's mm-map room is this plan's own" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1718:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1740:5 | "the executor's records only reset process state; it then enters the loaded image on its own stack" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1820:5 | "`executor` is the one-page read+write mapping just made for it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1836:5 | "the block is this plan's own fresh mapping of plan_size bytes" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1868:5 | "the record block holds its count, then that many records of eight words; madvise only marks whether a fork copies the mappings the child unmaps; the executor's first record forks, and the child runs only the executor and enters the image, whose pages and the plan's it keeps" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1907:5 | "landlock_create_ruleset reads the 8-byte handled-access word at the start of the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1917:9 | "`page` is this function's fresh scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1922:5 | "no_new_privs and landlock_restrict_self change only this thread's own rights; the ruleset fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1941:1 | "landlock_add_rule reads the packed 12-byte rule this writes at the start of the caller's scratch `page`; openat reads the NUL-terminated path at `name`, and the O_PATH fd is this function's" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1968:5 | "wait4 writes one int status to the fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1978:5 | "SIGKILL to a child this process started and has not reaped" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1989:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2007:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2028:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2068:5 | "the bytes below `at` and the two arrays lie in the fresh block mapped above, sized for every string and word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2325:5 | "socketpair writes its two int descriptors to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2346:9 | "fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2416:5 | "PTRACE_SETOPTIONS on the helper's own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2426:1 | "`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2449:1 | "prctl, getppid and exit_group of the helper itself, each on words alone" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2472:5 | "socketpair writes its two int descriptors to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2487:9 | "fork copies this thread alone; the helper makes only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop it" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2540:5 | "the helper's PTRACE_SEIZE and PTRACE_INTERRUPT of a thread of the program it is to trace" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2554:5 | "the helper's PTRACE_DETACH of its own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2563:1 | "the helper makes the system call as given; an argument that points into memory points into the trace's scratch page, the only memory it shares with this process" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2568:5 | "the call's number and arguments fill the first seven words of the trace's call; sendto reads its signal byte" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2590:5 | "read writes one byte to the trace's call signal byte; the helper stored the result before it answered" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2606:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2627:9 | "the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2649:5 | "tgkill of one thread of our own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2663:5 | "PTRACE_SETOPTIONS on a stopped thread of the helper's own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2696:5 | "the helper's PTRACE_CONT, PTRACE_SINGLESTEP or PTRACE_SYSCALL on its own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2705:5 | "the helper's PTRACE_PEEKDATA stores the tracee's word to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2716:5 | "the helper's PTRACE_POKEDATA writes one word of its own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2732:9 | "process_vm_readv reads the two iovecs at LOADER_TRACE_IOV and writes at most `want` bytes from LOADER_TRACE_BYTES, inside the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2764:9 | "the `want` bytes are copied to LOADER_TRACE_BYTES of the trace's scratch page, inside it, and pwrite64 reads them there" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2782:5 | "the helper's PTRACE_GETREGS writes the register block at the start of the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2795:5 | "the helper's PTRACE_SETREGS reads the register block written at the start of the trace's scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2807:5 | "the helper's PTRACE_PEEKUSER stores one word of its own stopped tracee's user area to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2820:5 | "the helper's PTRACE_POKEUSER writes one debug register of its own stopped tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2838:5 | "the helper's PTRACE_GETEVENTMSG stores the message to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2851:5 | "the helper's wait4 writes one int status to the trace's scratch word" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2874:9 | "the helper's wait4 writes one int status to the trace's scratch word; nanosleep reads the timespec at LOADER_TRACE_SLEEP, in the scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2898:5 | "tgkill of one thread of the helper's own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2908:9 | "SIGKILL to the helper's own tracee" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2919:17 | "the helper's PTRACE_CONT of a stopped thread of its own tracee, which the kill ends" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 2934:9 | "wait4 of our own child, the helper, keeping no status" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3023:5 | "`attr` is the fresh zeroed page just mapped, which perf_event_open only reads; each ring is a fresh shared mapping of its own event's descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 3059:9 | "the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 67:9 | "the scratch mapping is the child's own, made above" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 144:9 | "getrandom fills the first word of our scratch page" |
 | Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 151:9 | "getrandom wrote the scratch page's first word" |
@@ -12070,15 +12078,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 724:5 | "at lies in a mapping the trace reads: the executable's read-only ELF header, program or section table, notes or location table, or the page the host's frames were written to" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 34:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 127:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 153:5 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 223:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 259:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 341:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 468:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 519:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 531:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 686:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 133:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 160:5 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 230:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 266:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 348:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 475:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 526:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 538:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 693:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 38:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 46:5 | "runtime-init runs before any other thread exists" |
@@ -12262,7 +12270,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 6738:5 | "the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7238:9 | "openat reads the dump's NUL-terminated path in the state's text page" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7768:5 | "getrusage writes the struct rusage in this thread's own entry" |
-| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7867:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 7960:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 28:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 38:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 61:9 | "written under the scheduler root mutex" |

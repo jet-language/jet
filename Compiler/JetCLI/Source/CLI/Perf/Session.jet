@@ -451,8 +451,11 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     target: jet_cli_perf_session_target()
     // The attach's window on the program opens before its first read of it
     // and closes after its last (jet_cli_perf_attach_watch); the header's
-    // run window is that window, whatever the attach read in it.
+    // run window is that window, whatever the attach read in it. An outside
+    // sample's window is its samplers' own (`sampled`), the CPU in it that
+    // of the threads they sampled, which its samples stand for.
     watch: jet_cli_perf_attach_watch(target_pid)
+    sampled := JetCLIPerfAttachWindow?{None}
     read := [String]{"its live snapshot"}
     observed := false
     // Attach is a point capture: the trace session's origin is now.
@@ -560,16 +563,18 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     } else {
         // A process that publishes nothing about itself: the kernel samples
         // its threads' CPU from outside it.
-        section: jet_cli_perf_outside_sample(target_pid, JET_CLI_PERF_OUTSIDE_WINDOW_MS) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
-        loop line in jet_cli_perf_outside_lines(section.value) -> hot = "{hot}{line}\n"
-        capture.receipts.push(section)
+        taken: jet_cli_perf_outside_sample(target_pid, JET_CLI_PERF_OUTSIDE_WINDOW_MS) ?? return jet_cli_perf_attach_unobserved(target_pid, err.message, "start the program with `jet run --observe`, then attach with `--source <file.jet>`", color)
+        loop line in jet_cli_perf_outside_lines(taken.section.value) -> hot = "{hot}{line}\n"
+        capture.receipts.push(taken.section)
+        sampled = Val(taken.window)
         read = [String]{"the CPU of its threads and its children's, sampled from outside for {JET_CLI_PERF_OUTSIDE_WINDOW_MS} ms"}
         observed = true
     }
     // A trace of a program the attach observed, through a browser relay, its
     // own runtime or the kernel's samples of it.
     if observed {
-        jet_cli_perf_attach_keep_window(capture, target_pid, jet_cli_perf_attach_watched(target_pid, watch), read)
+        closed: sampled ?? jet_cli_perf_attach_watched(target_pid, watch)
+        jet_cli_perf_attach_keep_window(capture, target_pid, closed, read)
     }
     argv := [String]{"attach", "{target_pid}"}
     // The attach request's last use of its source: the recorded argv owns it.

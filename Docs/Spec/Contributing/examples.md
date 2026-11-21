@@ -139,6 +139,7 @@ outgoing connect is handed it, and it holds that port's same flock until the
 case ends; a draw another run holds is probed again. `normalize: argv0`
 pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
 `stdin:`, `exit:`, exact `stdout:` / `stderr:`, and `file:` assertions.
+A step that dies by signal N is an ERROR unless its own `exit:` is 128 + N.
 `step: build` invokes the selected tier; `step: built [args…]` runs its artifact
 (and inserts a build if necessary). Ordinary setup commands can precede build.
 The artifact is `.jet/build/<entry-stem>` (dots in the stem become underscores)
