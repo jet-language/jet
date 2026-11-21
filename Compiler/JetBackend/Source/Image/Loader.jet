@@ -2183,6 +2183,30 @@ LOADER_PTRACE_O_TRACEEXIT: 0x40
 // The event of a thread stopped as it exits (LOADER_PTRACE_O_TRACEEXIT).
 X64_TRACE_EVENT_EXIT: 6
 
+// A command's whole trace (x64_trace_command): a system call's stops carry
+// SIGTRAP | 0x80 (PTRACE_O_TRACESYSGOOD), so they read apart from a
+// SIGTRAP the program takes; each process the program forks (fork, vfork,
+// or a clone without CLONE_THREAD) is traced from its first instruction,
+// stopped by a SIGSTOP, as a thread is; and an execve that replaces the
+// program stops it with an exec event (X64_TRACE_EVENT_EXEC) instead of a
+// SIGTRAP.
+LOADER_PTRACE_O_TRACESYSGOOD: 0x1
+
+LOADER_PTRACE_O_TRACEFORK: 0x2
+
+LOADER_PTRACE_O_TRACEVFORK: 0x4
+
+LOADER_PTRACE_O_TRACEEXEC: 0x10
+
+// The stopping signal of a system call's entry and exit under
+// LOADER_PTRACE_O_TRACESYSGOOD.
+X64_TRACE_SYSCALL_STOP: 0x85
+
+// The event of a thread whose execve replaced its program; its event
+// message is the thread's id before the execve, which another thread of the
+// program than its first one had.
+X64_TRACE_EVENT_EXEC: 4
+
 // The signal that stops one thread of the program (x64_trace_stop).
 LOADER_SIGSTOP: 19
 
@@ -2266,7 +2290,10 @@ X64_TRACE_RAX: 10
 // LOADER_TRACE_WORD, the call the helper makes at LOADER_TRACE_CALL (its
 // number and six arguments, then the words at LOADER_TRACE_RESULT,
 // LOADER_TRACE_SIGNAL and LOADER_TRACE_MASK), process_vm_readv's two iovecs
-// at LOADER_TRACE_IOV and the bytes it reads from LOADER_TRACE_BYTES.
+// at LOADER_TRACE_IOV, the rusage of a step's wait at LOADER_TRACE_RUSAGE,
+// the zeroed sigaction at LOADER_TRACE_DEFAULT_ACTION, the refused
+// PTRACE_TRACEME's error at LOADER_TRACE_REFUSED and the bytes
+// process_vm_readv reads from LOADER_TRACE_BYTES.
 LOADER_TRACE_WORD: 256
 
 // The timespec x64_trace_wait_within sleeps on, in this process.
@@ -2292,6 +2319,23 @@ LOADER_TRACE_SIGNAL: 64
 LOADER_TRACE_MASK: 72
 
 LOADER_TRACE_IOV: 512
+
+// The rusage (struct rusage: ru_utime, ru_stime, then ru_maxrss in KiB) of
+// the thread a step's wait reaped (x64_trace_syscall_step), every child it
+// waited for included.
+LOADER_TRACE_RUSAGE: 544
+
+// 32 zeroed bytes nothing writes: a kernel sigaction with handler SIG_DFL,
+// which the program a trace starts takes for SIGPIPE before its execve.
+LOADER_TRACE_DEFAULT_ACTION: 704
+
+// The error the kernel refused the program's PTRACE_TRACEME with, stored by
+// the program before it exits unrun; 0 while none.
+LOADER_TRACE_REFUSED: 736
+
+// The call number of a step of a command's trace (loader_trace_step), which
+// no system call has.
+LOADER_TRACE_STEP: -1
 
 LOADER_TRACE_BYTES: 1024
 
@@ -2339,8 +2383,9 @@ LOADER_ESRCH: 3
 // pid, until the caller picks another), the scratch page this process
 // shares with the trace's helper, the helper's pid, this end of the
 // channel to it and the write end of its lifeline (loader_trace_hold; -1
-// before they exist); `failure` says why the program didn't start.
-// x64_trace_close ends them all.
+// before they exist); `failure` says why the program didn't start, and
+// `refused` is the error the kernel refused its PTRACE_TRACEME with (0 for
+// none), which left it unrun. x64_trace_close ends them all.
 X64Trace: struct {
     pid: Int,
     scratch: Int,
@@ -2349,6 +2394,7 @@ X64Trace: struct {
     helper: Int{-1},
     channel: Int{-1},
     lifeline: Int{-1},
+    refused: Int{0},
 }
 
 // One wait for the traced program: the thread that stopped or ended and
@@ -2356,6 +2402,19 @@ X64Trace: struct {
 X64TraceStop: struct {
     thread: Int,
     status: Int,
+}
+
+// One step of a command's trace (x64_trace_syscall_step): the thread that
+// stopped or ended and its wait status, as X64TraceStop; a stopped
+// thread's registers (as x64_trace_registers gives them; none when the
+// kernel refused them), and an ended thread's user and system time and its
+// largest resident set, every child it waited for included.
+X64TraceStep: struct {
+    thread: Int,
+    status: Int,
+    registers: [Int],
+    cpu_ns: Int,
+    peak_rss_bytes: Int,
 }
 
 // Start the image file at `path` with `argv` (argv[0] included) and the
@@ -2373,6 +2432,61 @@ X64TraceStop: struct {
 // heap at the same addresses: `why` follows a place's address from one run
 // to the next.
 x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String, env: [String]?) -> X64Trace {
+    out: loader_open_as(output, OS_O_APPEND_CLOEXEC)
+    if os_failed(out) {
+        return X64Trace{pid: -1, scratch: 0, failure: "can't open the program's output `{output}` (errno {-out})"}
+    }
+    source: loader_open(input)
+    if os_failed(source) {
+        loader_close(out)
+        return X64Trace{pid: -1, scratch: 0, failure: "can't open the program's input `{input}` (errno {-source})"}
+    }
+    trace: loader_trace_start(path, argv, env, source, out, out, true)
+    loader_close(out)
+    loader_close(source)
+    if trace.pid > 0 {
+        #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
+            _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, trace.pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
+        }
+    }
+    trace
+}
+
+// Start the image file at `path` with `argv` (argv[0] included) and the
+// environment `env` (as X64Launch.env), as any shell runs a command: its
+// standard input, output and errors are this process's, and its addresses
+// are randomized as any run's are. Unlike x64_trace_spawn's program, the
+// whole command is traced: each system call stops it as it enters and as it
+// returns (x64_trace_syscall_step), and each thread and process it starts,
+// and each execve, is traced too (LOADER_PTRACE_O_TRACESYSGOOD, _TRACEFORK,
+// _TRACEVFORK, _TRACECLONE and _TRACEEXEC). The kernel kills the command
+// when the helper ends (LOADER_PTRACE_O_EXITKILL). This process ignores
+// SIGINT and SIGQUIT from here on, as x64_counted_run does, so the
+// terminal's Ctrl-C reaches the command, which decides.
+x64_trace_command: fn(path: String, argv: [String], env: [String]?) -> X64Trace {
+    trace := loader_trace_start(path, argv, env, 0, 1, 2, false)
+    if trace.pid <= 0 -> return trace
+    options: LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACESYSGOOD | LOADER_PTRACE_O_TRACEFORK | LOADER_PTRACE_O_TRACEVFORK | LOADER_PTRACE_O_TRACECLONE | LOADER_PTRACE_O_TRACEEXEC
+    set := 0
+    #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
+        set = x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, trace.pid, 0, options, 0, 0)
+    }
+    if os_failed(set) {
+        // The program stopped before its first instruction, so it never ran.
+        x64_trace_close(trace)
+        trace.failure = "the kernel refused the trace's options (errno {-set})"
+        return trace
+    }
+    loader_foreground()
+    trace
+}
+
+// The helper and the program it starts, stopped at its first instruction
+// (x64_trace_spawn, x64_trace_command): the program's standard input,
+// output and errors are this process's descriptors `input`, `output` and
+// `errors`, its SIGPIPE is the default again (a Jet process ignores it),
+// and `fixed` turns its address randomization off.
+loader_trace_start: fn(path: String, argv: [String], env: [String]?, input: Int, output: Int, errors: Int, fixed: Bool) -> X64Trace {
     trace := X64Trace{pid: -1, scratch: 0, failure: ""}
     scratch: os_map_with(0, OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED_ANONYMOUS, -1, 0)
     if os_failed(scratch) {
@@ -2388,16 +2502,18 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
     ends: loader_trace_ends(trace)
     theirs: ends.channel
     life: ends.lifeline
-    out: loader_open_as(output, OS_O_APPEND_CLOEXEC)
-    source: loader_open(input)
     helper := -1
-    if !os_failed(theirs) && !os_failed(life) && !os_failed(out) && !os_failed(source) {
+    if !os_failed(theirs) && !os_failed(life) {
         // The words the helper and the program use, made before the fork.
         call: I64{scratch + LOADER_TRACE_CALL}
         channel: I64{theirs}
         lifeline: I64{life}
-        input_fd: I64{source}
-        output_fd: I64{out}
+        input_fd: I64{input}
+        output_fd: I64{output}
+        errors_fd: I64{errors}
+        default_action: I64{scratch + LOADER_TRACE_DEFAULT_ACTION}
+        refused: I64{scratch + LOADER_TRACE_REFUSED}
+        unrandomized: fixed
         program_path: I64{exec.path}
         program_argv: I64{exec.argv}
         program_envp: I64{exec.envp}
@@ -2405,16 +2521,23 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
         #Unsafe("fork copies this thread alone; the helper and the program it starts make only system calls on words computed before the fork and on the shared scratch page, allocating nothing, so no lock another thread held at the fork can stop them; execve reads the argument block") {
             helper = os_syscall(OS_SYS_FORK, 0, 0, 0, 0, 0, 0)
             if helper == 0 {
-                // The helper: the program's input and output move to 0, 1
-                // and 2.
-                loader_trace_hold(lifeline, channel, input_fd, output_fd, output_fd, call)
+                // The helper: the program's input, output and errors move to
+                // 0, 1 and 2.
+                loader_trace_hold(lifeline, channel, input_fd, output_fd, errors_fd, call)
                 program: os_syscall_i64(I64{OS_SYS_FORK}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                 if program == 0 {
-                    _ := os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_TRACEME}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-                    persona: os_syscall_i64(I64{OS_SYS_PERSONALITY}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-                    if persona >= 0 {
-                        _ := os_syscall_i64(I64{OS_SYS_PERSONALITY}, persona | I64{LOADER_ADDR_NO_RANDOMIZE}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                    traced: os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_TRACEME}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                    if traced < 0 {
+                        os_store_i64(refused, traced)
+                        _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
                     }
+                    if unrandomized {
+                        persona: os_syscall_i64(I64{OS_SYS_PERSONALITY}, I64{0xffffffff}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                        if persona >= 0 {
+                            _ := os_syscall_i64(I64{OS_SYS_PERSONALITY}, persona | I64{LOADER_ADDR_NO_RANDOMIZE}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+                        }
+                    }
+                    _ := os_syscall_i64(I64{OS_SYS_RT_SIGACTION}, I64{13}, default_action, I64{0}, I64{8}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, I64{2}, program_mask, I64{0}, I64{8}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_EXECVE}, program_path, program_argv, program_envp, I64{0}, I64{0}, I64{0})
                     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -2425,8 +2548,6 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
     }
     if !os_failed(theirs) -> loader_close(theirs)
     if !os_failed(life) -> loader_close(life)
-    if !os_failed(out) -> loader_close(out)
-    if !os_failed(source) -> loader_close(source)
     _ := os_unmap(exec.block, exec.size)
     if os_failed(theirs) {
         trace.failure = "making the tracer's channel failed (errno {-theirs})"
@@ -2434,14 +2555,6 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
     }
     if os_failed(life) {
         trace.failure = "making the tracer's lifeline failed (errno {-life})"
-        return trace
-    }
-    if os_failed(out) {
-        trace.failure = "can't open the program's output `{output}` (errno {-out})"
-        return trace
-    }
-    if os_failed(source) {
-        trace.failure = "can't open the program's input `{input}` (errno {-source})"
         return trace
     }
     if os_failed(helper) {
@@ -2460,19 +2573,26 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String, input: String,
     status: x64_trace_wait(trace).status
     if status & 0xff != 0x7f || (status >> 8) & 0xff != 5 {
         trace.pid = -1
-        trace.failure = if status & 0x7f == 0 && (status >> 8) & 0xff == 127 -> "execve of {path} failed" else -> "the program ended before it started (wait status {status})"
+        refusal := 0
+        #Unsafe("the program stored its refused PTRACE_TRACEME's result in the shared scratch page before it exited") {
+            refusal = Int{os_load_i64(I64{scratch + LOADER_TRACE_REFUSED})}
+        }
+        trace.refused = -refusal
+        trace.failure = if {
+            refusal < 0 -> "the kernel refused to let the program be traced (errno {-refusal})"
+            status & 0x7f == 0 && (status >> 8) & 0xff == 127 -> "execve of {path} failed"
+            else -> "the program ended before it started (wait status {status})"
+        }
         return trace
-    }
-    #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
-        _ := x64_trace_call(trace, OS_SYS_PTRACE, LOADER_PTRACE_SETOPTIONS, pid, 0, LOADER_PTRACE_O_EXITKILL | LOADER_PTRACE_O_TRACECLONE, 0, 0)
     }
     trace
 }
 
 // The trace's helper once its channel end is at LOADER_TRACE_FD: its first
 // answer is the program's pid, `program`; each later one, the result of the
-// call this process sent through the trace's `call` words. It ends when the
-// channel closes. It allocates nothing, so it may run in a fork.
+// call this process sent through the trace's `call` words, or of a step
+// (LOADER_TRACE_STEP, loader_trace_step). It ends when the channel closes.
+// It allocates nothing, so it may run in a fork.
 #Unsafe("`call` is the call words of the trace's scratch page, which the helper shares with this process; the helper makes the system calls the words name")
 loader_trace_serve: fn(call: I64, program: I64) {
     os_store_i64(call + I64{LOADER_TRACE_RESULT}, program)
@@ -2481,11 +2601,59 @@ loader_trace_serve: fn(call: I64, program: I64) {
         got: os_syscall_i64(I64{OS_SYS_READ}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0})
         if got == (I64{-OS_EINTR}) -> next
         if got != 1 -> break
-        result: os_syscall_i64(os_load_i64(call), os_load_i64(call + I64{8}), os_load_i64(call + I64{16}), os_load_i64(call + I64{24}), os_load_i64(call + I64{32}), os_load_i64(call + I64{40}), os_load_i64(call + I64{48}))
+        result: if os_load_i64(call) == (I64{LOADER_TRACE_STEP}) -> loader_trace_step(call) else -> os_syscall_i64(os_load_i64(call), os_load_i64(call + I64{8}), os_load_i64(call + I64{16}), os_load_i64(call + I64{24}), os_load_i64(call + I64{32}), os_load_i64(call + I64{40}), os_load_i64(call + I64{48}))
         os_store_i64(call + I64{LOADER_TRACE_RESULT}, result)
         served = os_syscall_i64(I64{OS_SYS_WRITE}, I64{LOADER_TRACE_FD}, call + I64{LOADER_TRACE_SIGNAL}, I64{1}, I64{0}, I64{0}, I64{0}) == I64{1}
     }
     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+}
+
+// One step of a command's trace, made by its helper in one round trip
+// (x64_trace_syscall_step): PTRACE_SYSCALL lets the stopped thread the
+// call's first argument names (none when 0) go on, delivering the signal its
+// second names, to its next system call's entry or exit; then a wait for
+// any traced thread writes its status to the scratch word and its rusage to
+// LOADER_TRACE_RUSAGE, and PTRACE_GETREGS writes a stopped one's registers
+// to the start of the scratch page. The waited thread, or -errno.
+#Unsafe("`call` is the call words of the trace's scratch page, which the helper shares with this process; wait4 and PTRACE_GETREGS write only the scratch page's status word, rusage and register block")
+loader_trace_step: fn(call: I64) -> I64 {
+    page: call - I64{LOADER_TRACE_CALL}
+    thread: os_load_i64(call + I64{8})
+    if thread > (I64{0}) {
+        _ := os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_SYSCALL}, thread, I64{0}, os_load_i64(call + I64{16}), I64{0}, I64{0})
+    }
+    waited := I64{-OS_EINTR}
+    loop waited == (I64{-OS_EINTR}) {
+        waited = os_syscall_i64(I64{OS_SYS_WAIT4}, I64{-1}, page + I64{LOADER_TRACE_WORD}, I64{LOADER_WAIT_ALL}, page + I64{LOADER_TRACE_RUSAGE}, I64{0}, I64{0})
+    }
+    stopped: (os_load_i64(page + I64{LOADER_TRACE_WORD}) & (I64{0xff})) == (I64{0x7f})
+    if waited > (I64{0}) && stopped {
+        _ := os_syscall_i64(I64{OS_SYS_PTRACE}, I64{LOADER_PTRACE_GETREGS}, waited, I64{0}, page, I64{0}, I64{0})
+    }
+    waited
+}
+
+// Let the command's stopped thread `thread` (none when 0) go on to its next
+// system call's entry or exit, delivering `signal` (0: none), then wait for
+// any thread of the command to stop or end (x64_trace_command): one round
+// trip to the helper (loader_trace_step). The step's thread is -errno when
+// the wait failed (-ECHILD once nothing traced is left).
+x64_trace_syscall_step: fn(trace: X64Trace, thread: Int, signal: Int) -> X64TraceStep {
+    step := X64TraceStep{thread: 0, status: 0, registers: [Int]{}, cpu_ns: 0, peak_rss_bytes: 0}
+    #Unsafe("the helper's step writes the status word, the rusage and the register block of the trace's scratch page, which are read once it answers") {
+        step.thread = x64_trace_call(trace, LOADER_TRACE_STEP, thread, signal, 0, 0, 0, 0)
+        if step.thread > 0 {
+            step.status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
+            if step.status & 0xff == 0x7f {
+                step.registers = loop k in 0..<X64_TRACE_REGISTERS -> Int{os_load_i64(I64{trace.scratch + 8 * k})}
+            } else {
+                rusage: trace.scratch + LOADER_TRACE_RUSAGE
+                step.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
+                step.peak_rss_bytes = os_load_word(rusage + 32) * 1024
+            }
+        }
+    }
+    step
 }
 
 // The helper's ends of a trace's channel and lifeline: each its descriptor,
@@ -3091,10 +3259,12 @@ x64_trace_close: fn(trace: &X64Trace) {
 
 // perf_event_open(2), and the attributes x64_sampler_open asks it for: the
 // kernel's task clock of one thread, sampled every period of its CPU time,
-// each sample its user instruction pointer, thread and frame-pointer call
-// chain (PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_CALLCHAIN), the
-// kernel's own frames left out (exclude_kernel, exclude_hv,
-// exclude_callchain_kernel). The attribute block is PERF_ATTR_SIZE_VER5.
+// each sample its user instruction pointer, process and thread, time on the
+// monotonic clock and frame-pointer call chain (PERF_SAMPLE_IP |
+// PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_CALLCHAIN, `use_clockid`
+// with CLOCK_MONOTONIC), the kernel's own frames left out (exclude_kernel,
+// exclude_hv, exclude_callchain_kernel). The attribute block is
+// PERF_ATTR_SIZE_VER5.
 LOADER_SYS_PERF_EVENT_OPEN: 298
 
 LOADER_PERF_ATTR_SIZE: 112
@@ -3103,18 +3273,36 @@ LOADER_PERF_TYPE_SOFTWARE: 1
 
 LOADER_PERF_COUNT_SW_TASK_CLOCK: 1
 
-LOADER_PERF_SAMPLE_TYPE: 35
+LOADER_PERF_SAMPLE_TYPE: 39
 
-LOADER_PERF_ATTR_FLAGS: 0x200060
+LOADER_PERF_ATTR_FLAGS: 0x2200060
+
+// The attributes x64_sampled_start asks for: the same samples of a command
+// and of every thread and process it starts (`inherit`), one event a CPU,
+// since the kernel maps no ring of an inherited event that follows its
+// tasks across CPUs. Each is opened disabled and enabled at the command's
+// execve (`disabled`, `enable_on_exec`), and each execve of its processes is
+// a timed COMM record (`comm`, `comm_exec`, `sample_id_all`).
+LOADER_PERF_COMMAND_FLAGS: 0x3241263
 
 LOADER_PERF_FLAG_FD_CLOEXEC: 8
+
+// clock_gettime(2), the clock every sample is timed on, and the wall clock.
+LOADER_SYS_CLOCK_GETTIME: 228
+
+LOADER_CLOCK_MONOTONIC: 1
+
+LOADER_CLOCK_REALTIME: 0
+
+// A CPU perf_event_open names that isn't online.
+LOADER_ENODEV: 19
 
 // MAP_SHARED: the ring the kernel writes samples into.
 LOADER_MAP_SHARED: 0x01
 
-// The data pages of each sampled thread's ring, a power of two, after its
-// header page: 256 KiB, the samples of over a second of a busy thread at a
-// millisecond period, drained far more often than that.
+// The data pages of each ring, a power of two, after its header page:
+// 256 KiB, the samples of over a second of a busy thread at a millisecond
+// period, drained far more often than that.
 LOADER_PERF_RING_PAGES: 64
 
 // The ring header's data_head and data_tail words (struct
@@ -3123,33 +3311,48 @@ LOADER_PERF_DATA_HEAD: 1024
 
 LOADER_PERF_DATA_TAIL: 1032
 
-// The record types the ring holds that the sampler reads.
+// The record types the ring holds that the sampler reads, and the COMM
+// record's flag for one an execve wrote (PERF_RECORD_MISC_COMM_EXEC).
 LOADER_PERF_RECORD_LOST: 2
+
+LOADER_PERF_RECORD_COMM: 3
 
 LOADER_PERF_RECORD_SAMPLE: 9
 
-// One sampled thread of another process: its event's descriptor and the
-// ring the kernel writes its samples into.
-X64SampledThread: struct {
+LOADER_PERF_MISC_COMM_EXEC: 0x2000
+
+// One sampling event and the ring the kernel writes its samples into: of
+// one `thread` of another process on any CPU (`cpu` -1), or of every
+// thread of a command on one `cpu` (`thread` -1).
+X64SampleRing: struct {
     thread: Int,
+    cpu: Int,
     fd: Int,
     ring: Int,
 }
 
 // Threads of another process sampled from outside it by the kernel's task
-// clock (x64_sampler_open): no ptrace, no help from the process, so a
-// program started with no flag at all can be profiled. `failure` names why
-// a thread could not be sampled, "" when every one is.
+// clock (x64_sampler_open, x64_sampled_start): no ptrace, no help from the
+// process, so a program started with no flag at all can be profiled.
+// `origin_ns` is the monotonic time the sampling began, on the clock its
+// samples are timed on, and `origin_unix_ns` the wall clock's time then.
+// `failure` names why a thread or CPU could not be sampled, "" when every
+// one is.
 X64Sampler: struct {
-    threads: [X64SampledThread],
+    rings: [X64SampleRing],
+    origin_ns: Int,
+    origin_unix_ns: Int,
     failure: String,
 }
 
-// What x64_sampler_drain read: each sample as its thread, its frame count
-// and then its frames, innermost first (`words`), and the samples the
-// rings lost when they were full.
+// What x64_sampler_drain read: each sample as its process, its thread, its
+// monotonic time in nanoseconds, its frame count and then its frames,
+// innermost first (`words`); each execve of a sampled process as its pid
+// and the time it replaced the process's image (`execs`); and the samples
+// the rings lost when they were full.
 X64Samples: struct {
     words: [Int],
+    execs: [Int],
     samples: Int,
     lost: Int,
 }
@@ -3158,48 +3361,78 @@ X64Samples: struct {
 // of its CPU time until x64_sampler_close. A thread that ended since it was
 // listed is left out; one the kernel refuses names the sampler's failure.
 x64_sampler_open: fn(threads: [Int], period_ns: Int) -> X64Sampler {
-    sampler := X64Sampler{threads: [X64SampledThread]{}, failure: ""}
+    sampler := X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}
     attr: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(attr) {
         sampler.failure = "mapping the sampling event's attributes failed (errno {-attr})"
         return sampler
     }
-    ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
-    #Unsafe("`attr` is the fresh zeroed page just mapped, which perf_event_open only reads; each ring is a fresh shared mapping of its own event's descriptor") {
-        os_store_word(attr, LOADER_PERF_TYPE_SOFTWARE | LOADER_PERF_ATTR_SIZE << 32)
-        os_store_word(attr + 8, LOADER_PERF_COUNT_SW_TASK_CLOCK)
-        os_store_word(attr + 16, period_ns)
-        os_store_word(attr + 24, LOADER_PERF_SAMPLE_TYPE)
-        os_store_word(attr + 40, LOADER_PERF_ATTR_FLAGS)
-        loop thread in threads {
-            fd: os_syscall(LOADER_SYS_PERF_EVENT_OPEN, attr, thread, -1, -1, LOADER_PERF_FLAG_FD_CLOEXEC, 0)
-            if fd == -LOADER_ESRCH -> next
-            if os_failed(fd) {
-                if sampler.failure == "" {
-                    sampler.failure = "the kernel refused to sample thread {thread} (errno {-fd})"
-                }
-                next
-            }
-            ring: os_map_with(0, ring_size, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED, fd, 0)
-            if os_failed(ring) {
-                loader_close(fd)
-                if sampler.failure == "" {
-                    sampler.failure = "mapping thread {thread}'s sample ring failed (errno {-ring})"
-                }
-                next
-            }
-            sampler.threads.push(X64SampledThread{thread: thread, fd: fd, ring: ring})
-        }
+    #Unsafe("`attr` is the fresh zeroed page just mapped: the attribute block at its start, the clock's two words at its middle") {
+        loader_sampler_origin(sampler, attr + 2048)
+        loader_sampler_attr(attr, period_ns, LOADER_PERF_ATTR_FLAGS)
+        loop thread in threads { loader_sampler_add(sampler, attr, thread, -1) }
     }
     _ := os_unmap(attr, OS_PAGE_SIZE)
     sampler
 }
 
-// Move the samples each thread's ring holds into `into`, freeing the rings
+// The attribute block at `attr` of a sampling event: the task clock every
+// `period_ns` of CPU time, with the attribute flags `flags`, each sample
+// timed on the monotonic clock.
+#Unsafe("the caller's zeroed attribute block `attr`, LOADER_PERF_ATTR_SIZE bytes")
+loader_sampler_attr: fn(attr: Int, period_ns: Int, flags: Int) {
+    os_store_word(attr, LOADER_PERF_TYPE_SOFTWARE | LOADER_PERF_ATTR_SIZE << 32)
+    os_store_word(attr + 8, LOADER_PERF_COUNT_SW_TASK_CLOCK)
+    os_store_word(attr + 16, period_ns)
+    os_store_word(attr + 24, LOADER_PERF_SAMPLE_TYPE)
+    os_store_word(attr + 40, flags)
+    // sample_stack_user, then clockid.
+    os_store_word(attr + 88, LOADER_CLOCK_MONOTONIC << 32)
+}
+
+// Open the sampling event the block `attr` describes on `pid`, a thread
+// (`cpu` -1, any CPU) or with `inherit` a process (on CPU `cpu`), and add
+// it and its ring to `sampler`. A thread that ended or a CPU that isn't
+// online is left out; a refusal names the sampler's failure.
+#Unsafe("`attr` is the caller's attribute block, which perf_event_open only reads; the ring is a fresh shared mapping of the event's own descriptor")
+loader_sampler_add: fn(sampler: &X64Sampler, attr: Int, pid: Int, cpu: Int) {
+    what: if cpu < 0 -> "thread {pid}" else -> "CPU {cpu}"
+    fd: os_syscall(LOADER_SYS_PERF_EVENT_OPEN, attr, pid, cpu, -1, LOADER_PERF_FLAG_FD_CLOEXEC, 0)
+    if (cpu < 0 && fd == -LOADER_ESRCH) || (cpu >= 0 && fd == -LOADER_ENODEV) {
+        return
+    }
+    if os_failed(fd) {
+        if sampler.failure == "" {
+            sampler.failure = "the kernel refused to sample {what} (errno {-fd})"
+        }
+        return
+    }
+    ring: os_map_with(0, (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE, LOADER_MAP_SHARED, fd, 0)
+    if os_failed(ring) {
+        loader_close(fd)
+        if sampler.failure == "" {
+            sampler.failure = "mapping {what}'s sample ring failed (errno {-ring})"
+        }
+        return
+    }
+    sampler.rings.push(X64SampleRing{thread: if cpu < 0 -> pid else -> -1, cpu: cpu, fd: fd, ring: ring})
+}
+
+// The sampler's origin: now on the monotonic clock (CLOCK_MONOTONIC, the
+// samples' clock) and on the wall clock (CLOCK_REALTIME), in nanoseconds.
+#Unsafe("clock_gettime writes two words at the caller's `scratch`, read before the next")
+loader_sampler_origin: fn(sampler: &X64Sampler, scratch: Int) {
+    _ := os_syscall(LOADER_SYS_CLOCK_GETTIME, LOADER_CLOCK_MONOTONIC, scratch, 0, 0, 0, 0)
+    sampler.origin_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
+    _ := os_syscall(LOADER_SYS_CLOCK_GETTIME, LOADER_CLOCK_REALTIME, scratch, 0, 0, 0, 0)
+    sampler.origin_unix_ns = os_load_word(scratch) * 1000000000 + os_load_word(scratch + 8)
+}
+
+// Move the samples and execs each ring holds into `into`, freeing the rings
 // for more.
 x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
     size: LOADER_PERF_RING_PAGES * OS_PAGE_SIZE
-    loop sampled in sampler.threads {
+    loop sampled in sampler.rings {
         data: sampled.ring + OS_PAGE_SIZE
         #Unsafe("the ring is this sampler's live shared mapping: its header page, then `size` data bytes the kernel wrote up to data_head, read before data_tail lets it write there again") {
             head: os_load_word(sampled.ring + LOADER_PERF_DATA_HEAD)
@@ -3207,22 +3440,26 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
             loop at < head {
                 header: os_load_word(data + at % size)
                 kind: header & 0xffffffff
+                misc: (header >> 32) & 0xffff
                 length: (header >> 48) & 0xffff
                 if length < 8 -> break
                 if kind == LOADER_PERF_RECORD_SAMPLE {
                     ip: os_load_word(data + (at + 8) % size)
-                    thread: (os_load_word(data + (at + 16) % size) >> 32) & 0xffffffff
-                    listed: os_load_word(data + (at + 24) % size)
+                    ids: os_load_word(data + (at + 16) % size)
+                    time: os_load_word(data + (at + 24) % size)
+                    listed: os_load_word(data + (at + 32) % size)
                     // A chain the record's length can't hold is none.
-                    count: if listed < 0 || 32 + 8 * listed > length -> 0 else -> listed
-                    into.words.push(thread)
+                    count: if listed < 0 || 40 + 8 * listed > length -> 0 else -> listed
+                    into.words.push(ids & 0xffffffff)
+                    into.words.push((ids >> 32) & 0xffffffff)
+                    into.words.push(time)
                     counted: into.words.len()
                     into.words.push(0)
                     frames := 0
                     loop k in 0..<count {
                         // Kernel addresses and the kernel's context markers
                         // (PERF_CONTEXT_USER and its kin) are negative.
-                        frame: os_load_word(data + (at + 32 + 8 * k) % size)
+                        frame: os_load_word(data + (at + 40 + 8 * k) % size)
                         if frame <= 0 -> next
                         into.words.push(frame)
                         frames += 1
@@ -3235,6 +3472,10 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
                     into.samples += 1
                 } else if kind == LOADER_PERF_RECORD_LOST {
                     into.lost += os_load_word(data + (at + 16) % size)
+                } else if kind == LOADER_PERF_RECORD_COMM && (misc & LOADER_PERF_MISC_COMM_EXEC) != 0 && length >= 32 {
+                    // Its pid, then its sample_id's time, the record's last word.
+                    into.execs.push(os_load_word(data + (at + 8) % size) & 0xffffffff)
+                    into.execs.push(os_load_word(data + (at + length - 8) % size))
                 }
                 at += length
             }
@@ -3243,14 +3484,91 @@ x64_sampler_drain: fn(sampler: X64Sampler, into: &X64Samples) {
     }
 }
 
-// Stop sampling: each thread's ring and event go.
+// Stop sampling: each ring and event go.
 x64_sampler_close: fn(sampler: &X64Sampler) {
     ring_size: (1 + LOADER_PERF_RING_PAGES) * OS_PAGE_SIZE
-    loop sampled in sampler.threads {
+    loop sampled in sampler.rings {
         _ := os_unmap(sampled.ring, ring_size)
         loader_close(sampled.fd)
     }
-    sampler.threads = [X64SampledThread]{}
+    sampler.rings = [X64SampleRing]{}
+}
+
+// A command sampled from its start (x64_sampled_start): the command, its
+// sampler, one ring a CPU, whose origin is when the command was let run,
+// and once it is reaped (x64_sampled_reaped) its wait status, -1 when it
+// never ran, and the CPU and peak memory its reap reports, as
+// x64_counted_run's. `failure` says why it didn't run or wasn't reaped.
+X64SampledRun: struct {
+    command: LoaderCommand,
+    sampler: X64Sampler,
+    status: Int,
+    failure: String,
+    cpu_ns: Int,
+    peak_rss_bytes: Int,
+}
+
+// Run the image file `path` with `argv` and `env` (as x64_counted_run),
+// sampled every `period_ns` of CPU time from its first instruction: a
+// forked child waits on a pipe while this process opens the sampling event
+// on its pid on each of `cpus`, with `inherit`, so every thread and
+// process it starts is sampled too, then execs. The command shares this
+// process's standard files, and this process ignores SIGINT and SIGQUIT
+// while it runs. Drain the rings (x64_sampler_drain of `sampler`) until
+// x64_sampled_reaped, then x64_sampled_close. When the kernel samples no
+// CPU, the command never runs.
+x64_sampled_start: fn(path: String, argv: [String], env: [String]?, cpus: [Int], period_ns: Int) -> X64SampledRun {
+    run := X64SampledRun{command: loader_command_fork(path, argv, env), sampler: X64Sampler{rings: [X64SampleRing]{}, origin_ns: 0, origin_unix_ns: 0, failure: ""}, status: -1, failure: "", cpu_ns: 0, peak_rss_bytes: 0}
+    if run.command.failure != "" {
+        run.failure = run.command.failure
+        return run
+    }
+    attr: run.command.page + LOADER_COUNTED_ATTR
+    #Unsafe("the attribute block goes to the command's fresh page's attribute words") {
+        loader_sampler_attr(attr, period_ns, LOADER_PERF_COMMAND_FLAGS)
+        loop cpu in cpus { loader_sampler_add(run.sampler, attr, run.command.child, cpu) }
+    }
+    if run.sampler.rings.len() == 0 {
+        // The child reads its go pipe's end and exits unrun.
+        loader_close(run.command.go)
+        loader_close(run.command.report)
+        _ := loader_command_reap(run.command, 0)
+        run.command.child = -1
+        run.failure = if run.sampler.failure != "" -> "the kernel won't sample it: {run.sampler.failure}" else -> "no CPU is online to sample it on"
+        return run
+    }
+    #Unsafe("clock_gettime writes the command's page's read words") {
+        loader_sampler_origin(run.sampler, run.command.page + LOADER_COUNTED_READ)
+    }
+    run.failure = loader_command_go(run.command, path)
+    run
+}
+
+// Whether the sampled command has ended and been reaped, not waiting for
+// it: once reaped, its wait status, CPU and peak memory are the run's. A
+// wait that fails names the run's failure, and counts as reaped.
+x64_sampled_reaped: fn(run: &X64SampledRun) -> Bool {
+    if run.command.child < 0 -> return true
+    reaped: loader_command_reap(run.command, LOADER_WNOHANG)
+    if reaped == 0 -> return false
+    if reaped == run.command.child {
+        ended: loader_command_reaped(run.command)
+        run.status = ended.status
+        run.cpu_ns = ended.cpu_ns
+        run.peak_rss_bytes = ended.peak_rss_bytes
+    } else if run.failure == "" { run.failure = "waiting for the command failed (errno {-reaped})" }
+    if run.failure != "" -> run.status = -1
+    run.command.child = -1
+    true
+}
+
+// Stop sampling the reaped command: its rings, events and page go.
+x64_sampled_close: fn(run: &X64SampledRun) {
+    x64_sampler_close(run.sampler)
+    if run.command.page != 0 {
+        _ := os_unmap(run.command.page, OS_PAGE_SIZE)
+        run.command.page = 0
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3269,12 +3587,17 @@ LOADER_PERF_COUNT_HW_INSTRUCTIONS: 1
 
 LOADER_PERF_COUNT_FLAGS: 0x1063
 
+// The same counters opened enabled on a traced command stopped before its
+// first instruction (x64_counters_open): `inherit`, exclude_kernel and
+// exclude_hv alone.
+LOADER_PERF_COUNT_TRACED_FLAGS: 0x62
+
 LOADER_PERF_COUNT_READ_FORMAT: 3
 
-// The words of a counted run's page: a zeroed kernel sigaction (SIG_DFL)
-// at its start, the failed execve's result, the go byte, the wait status,
-// the rusage (struct rusage: ru_utime, ru_stime, then ru_maxrss in KiB), a
-// counter's read, then the counters' attributes.
+// The words of a command's page (loader_command_fork): a zeroed kernel
+// sigaction (SIG_DFL) at its start, the failed execve's result, the go
+// byte, the wait status, the rusage (struct rusage: ru_utime, ru_stime,
+// then ru_maxrss in KiB), a counter's read, then the events' attributes.
 LOADER_COUNTED_ERRNO: 32
 
 LOADER_COUNTED_GO: 40
@@ -3312,25 +3635,43 @@ LoaderCount: struct {
     scaled: Bool,
 }
 
-// Run the image file `path` with `argv` (argv[0] included) and the
-// environment `env` (as X64Launch.env), counted from its first
-// instruction: a forked child waits on a pipe while this process opens the
-// counters on its pid, then execs. The command shares this process's
-// standard files, and this process ignores SIGINT and SIGQUIT while it
-// runs, as x64_process_wait_foreground does. The counters are read once the
-// command is reaped.
-x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted {
-    counted := X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0}
+// A command forked to wait for its go byte (loader_command_fork): the
+// child's pid, its page (LOADER_COUNTED_*), the write end of its go pipe
+// and the read end of its report pipe. `failure` says why there is no
+// child ("" when there is one).
+LoaderCommand: struct {
+    child: Int,
+    page: Int,
+    go: Int,
+    report: Int,
+    failure: String,
+}
+
+// What the command's reap reported: its wait status, the user and system
+// time and the maximum resident set, both folding in every child it
+// waited for.
+LoaderReaped: struct {
+    status: Int,
+    cpu_ns: Int,
+    peak_rss_bytes: Int,
+}
+
+// Fork a child that runs the image file `path` with `argv` (argv[0]
+// included) and the environment `env` (as X64Launch.env) once
+// loader_command_go sends it the go byte, and until then waits on a pipe,
+// so this process can open events on its pid before its first instruction.
+loader_command_fork: fn(path: String, argv: [String], env: [String]?) -> LoaderCommand {
+    command := LoaderCommand{child: -1, page: 0, go: -1, report: -1, failure: ""}
     exec: loader_exec_block(path, argv, env)
     if exec.failure != "" {
-        counted.failure = exec.failure
-        return counted
+        command.failure = exec.failure
+        return command
     }
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(page) {
         _ := os_unmap(exec.block, exec.size)
-        counted.failure = "mapping the counted run's page failed (errno {-page})"
-        return counted
+        command.failure = "mapping the command's page failed (errno {-page})"
+        return command
     }
     go := 0
     report := 0
@@ -3364,62 +3705,116 @@ x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted 
         if !os_failed(go) -> loader_close((go >> 32) & 0xffffffff)
         if !os_failed(report) -> loader_close(report & 0xffffffff)
         _ := os_unmap(page, OS_PAGE_SIZE)
-        counted.failure = "fork failed (errno {-child})"
+        command.failure = "fork failed (errno {-child})"
         if os_failed(report) {
-            counted.failure = "making the counted run's pipe failed (errno {-report})"
+            command.failure = "making the command's pipe failed (errno {-report})"
         }
-        if os_failed(go) -> counted.failure = "making the counted run's pipe failed (errno {-go})"
+        if os_failed(go) -> command.failure = "making the command's pipe failed (errno {-go})"
+        return command
+    }
+    command.child = child
+    command.page = page
+    command.go = (go >> 32) & 0xffffffff
+    command.report = report & 0xffffffff
+    command
+}
+
+// Send the forked command its go byte and wait for its execve: "" once it
+// runs, else why it doesn't. A child that never gets the byte reads the
+// pipe's end and exits 127 unrun. Its pipes close, and this process
+// ignores SIGINT and SIGQUIT from here on, as x64_process_wait_foreground
+// does while a child runs.
+loader_command_go: fn(command: LoaderCommand, path: String) -> String {
+    failure := ""
+    sent := 0
+    #Unsafe("the go byte of the command's page to the child's pipe") {
+        sent = os_syscall(OS_SYS_WRITE, command.go, command.page + LOADER_COUNTED_GO, 1, 0, 0, 0)
+    }
+    loader_close(command.go)
+    if sent != 1 -> failure = "starting the command failed (errno {-sent})"
+    // The report pipe closes at the child's execve; a failed execve sends
+    // its result first.
+    got := -OS_EINTR
+    #Unsafe("read fills the failed execve's word of the command's page") {
+        loop got == -OS_EINTR {
+            got = os_syscall(OS_SYS_READ, command.report, command.page + LOADER_COUNTED_ERRNO, 8, 0, 0, 0)
+        }
+        if got == 8 {
+            failure = "execve of {path} failed (errno {-os_load_word(command.page + LOADER_COUNTED_ERRNO)})"
+        }
+    }
+    loader_close(command.report)
+    loader_foreground()
+    failure
+}
+
+// Reap the forked command with wait4's `options` (0 waits for it,
+// LOADER_WNOHANG doesn't): its pid once reaped, its wait status and rusage
+// then in its page (loader_command_reaped), 0 while it runs, or the failed
+// call's result.
+loader_command_reap: fn(command: LoaderCommand, options: Int) -> Int {
+    reaped := -OS_EINTR
+    #Unsafe("wait4 writes the int status and the rusage to the command's page") {
+        loop reaped == -OS_EINTR {
+            reaped = os_syscall(OS_SYS_WAIT4, command.child, command.page + LOADER_COUNTED_STATUS, options, command.page + LOADER_COUNTED_RUSAGE, 0, 0)
+        }
+    }
+    reaped
+}
+
+// What the reap of the command (loader_command_reap) wrote to its page.
+loader_command_reaped: fn(command: LoaderCommand) -> LoaderReaped {
+    reaped := LoaderReaped{status: -1, cpu_ns: 0, peak_rss_bytes: 0}
+    #Unsafe("the command's page holds the wait status and rusage its reap wrote") {
+        rusage: command.page + LOADER_COUNTED_RUSAGE
+        reaped.status = os_load_word(command.page + LOADER_COUNTED_STATUS) & 0xffffffff
+        reaped.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
+        reaped.peak_rss_bytes = os_load_word(rusage + 32) * 1024
+    }
+    reaped
+}
+
+// wait4's option to return at once while the child runs.
+LOADER_WNOHANG: 1
+
+// Run the image file `path` with `argv` (argv[0] included) and the
+// environment `env` (as X64Launch.env), counted from its first
+// instruction: a forked child waits on a pipe while this process opens the
+// counters on its pid (loader_command_fork), then execs. The command shares
+// this process's standard files, and this process ignores SIGINT and
+// SIGQUIT while it runs, as x64_process_wait_foreground does. The counters
+// are read once the command is reaped.
+x64_counted_run: fn(path: String, argv: [String], env: [String]?) -> X64Counted {
+    counted := X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0}
+    command: loader_command_fork(path, argv, env)
+    if command.failure != "" {
+        counted.failure = command.failure
         return counted
     }
+    page: command.page
     instructions_fd := 0
     cycles_fd := 0
-    #Unsafe("the attributes go to the fresh page's attribute words") {
-        instructions_fd = loader_counter_open(page, child, LOADER_PERF_COUNT_HW_INSTRUCTIONS)
-        cycles_fd = loader_counter_open(page, child, LOADER_PERF_COUNT_HW_CPU_CYCLES)
+    #Unsafe("the attributes go to the command's fresh page's attribute words") {
+        instructions_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_INSTRUCTIONS, LOADER_PERF_COUNT_FLAGS)
+        cycles_fd = loader_counter_open(page, command.child, LOADER_PERF_COUNT_HW_CPU_CYCLES, LOADER_PERF_COUNT_FLAGS)
     }
     if os_failed(instructions_fd) -> counted.errno = -instructions_fd else if os_failed(cycles_fd) {
         counted.errno = -cycles_fd
     }
-    // The go byte; a child that never gets it reads the pipe's end and
-    // exits 127 unrun.
-    sent := 0
-    #Unsafe("the go byte of this process's page to the child's pipe") {
-        sent = os_syscall(OS_SYS_WRITE, (go >> 32) & 0xffffffff, page + LOADER_COUNTED_GO, 1, 0, 0, 0)
-    }
-    loader_close((go >> 32) & 0xffffffff)
-    if sent != 1 -> counted.failure = "starting the command failed (errno {-sent})"
-    // The report pipe closes at the child's execve; a failed execve sends
-    // its result first.
-    got := -OS_EINTR
-    #Unsafe("read fills the failed execve's word of this process's page") {
-        loop got == -OS_EINTR {
-            got = os_syscall(OS_SYS_READ, report & 0xffffffff, page + LOADER_COUNTED_ERRNO, 8, 0, 0, 0)
-        }
-        if got == 8 {
-            counted.failure = "execve of {path} failed (errno {-os_load_word(page + LOADER_COUNTED_ERRNO)})"
-        }
-    }
-    loader_close(report & 0xffffffff)
-    loader_foreground()
-    reaped := -OS_EINTR
-    #Unsafe("wait4 writes the int status and the rusage to this process's page") {
-        loop reaped == -OS_EINTR {
-            reaped = os_syscall(OS_SYS_WAIT4, child, page + LOADER_COUNTED_STATUS, 0, page + LOADER_COUNTED_RUSAGE, 0, 0)
-        }
-        if reaped == child {
-            counted.status = os_load_word(page + LOADER_COUNTED_STATUS) & 0xffffffff
-            rusage: page + LOADER_COUNTED_RUSAGE
-            counted.cpu_ns = (os_load_word(rusage) + os_load_word(rusage + 16)) * 1000000000 + (os_load_word(rusage + 8) + os_load_word(rusage + 24)) * 1000
-            counted.peak_rss_bytes = os_load_word(rusage + 32) * 1024
-        }
-    }
-    if reaped != child && counted.failure == "" {
+    counted.failure = loader_command_go(command, path)
+    reaped: loader_command_reap(command, 0)
+    if reaped == command.child {
+        ended: loader_command_reaped(command)
+        counted.status = ended.status
+        counted.cpu_ns = ended.cpu_ns
+        counted.peak_rss_bytes = ended.peak_rss_bytes
+    } else if counted.failure == "" {
         counted.failure = "waiting for the command failed (errno {-reaped})"
     }
     if counted.failure != "" -> counted.status = -1
     instructions := LoaderCount{value: None, scaled: false}
     cycles := LoaderCount{value: None, scaled: false}
-    #Unsafe("each read goes to the fresh page's read words") {
+    #Unsafe("each read goes to the command's page's read words") {
         instructions = loader_counter_read(page, instructions_fd)
         cycles = loader_counter_read(page, cycles_fd)
     }
@@ -3467,17 +3862,68 @@ loader_counted_child: fn(go_read: I64, go_write: I64, report_read: I64, report_w
     _ := os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
-// Open the counter `config` (PERF_TYPE_HARDWARE) on the stopped child
-// `pid`, its attributes in the counted run's `page`: its descriptor, or the
-// failed call's result.
+// Open the counter `config` (PERF_TYPE_HARDWARE) with the attribute flags
+// `flags` on the stopped child `pid`, its attributes in the counted run's
+// `page`: its descriptor, or the failed call's result.
 #Unsafe("the attributes go to the caller's zeroed counted-run page `page`, which perf_event_open only reads")
-loader_counter_open: fn(page: Int, pid: Int, config: Int) -> Int {
+loader_counter_open: fn(page: Int, pid: Int, config: Int, flags: Int) -> Int {
     attr: page + LOADER_COUNTED_ATTR
     os_store_word(attr, LOADER_PERF_TYPE_HARDWARE | LOADER_PERF_ATTR_SIZE << 32)
     os_store_word(attr + 8, config)
     os_store_word(attr + 32, LOADER_PERF_COUNT_READ_FORMAT)
-    os_store_word(attr + 40, LOADER_PERF_COUNT_FLAGS)
+    os_store_word(attr + 40, flags)
     os_syscall(LOADER_SYS_PERF_EVENT_OPEN, attr, pid, -1, -1, LOADER_PERF_FLAG_FD_CLOEXEC, 0)
+}
+
+// A traced command's user-mode instruction and cycle counters
+// (x64_counters_open): the page their attributes and reads use, each
+// counter's descriptor or the failed call's result, and the error the
+// kernel refused one with (0 when it took both).
+X64Counters: struct {
+    page: Int,
+    instructions: Int,
+    cycles: Int,
+    errno: Int,
+}
+
+// Open the user-mode instruction and cycle counters on the traced command
+// `pid`, stopped before its first instruction (x64_trace_command), counting
+// from there: every thread and process it starts adds into them, as into
+// x64_counted_run's.
+x64_counters_open: fn(pid: Int) -> X64Counters {
+    page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
+    counters := X64Counters{page: page, instructions: -1, cycles: -1, errno: 0}
+    if os_failed(page) {
+        counters.errno = -page
+        return counters
+    }
+    #Unsafe("the attributes go to the fresh page's attribute words") {
+        counters.instructions = loader_counter_open(page, pid, LOADER_PERF_COUNT_HW_INSTRUCTIONS, LOADER_PERF_COUNT_TRACED_FLAGS)
+        counters.cycles = loader_counter_open(page, pid, LOADER_PERF_COUNT_HW_CPU_CYCLES, LOADER_PERF_COUNT_TRACED_FLAGS)
+    }
+    if os_failed(counters.instructions) -> counters.errno = -counters.instructions else if os_failed(counters.cycles) {
+        counters.errno = -counters.cycles
+    }
+    counters
+}
+
+// Read the traced command's counters (x64_counters_open) into `counted`:
+// its instructions, cycles, `scaled` and `errno`. They close.
+x64_counters_close: fn(counters: X64Counters, counted: &X64Counted) {
+    counted.errno = counters.errno
+    if os_failed(counters.page) {
+        return
+    }
+    instructions := LoaderCount{value: None, scaled: false}
+    cycles := LoaderCount{value: None, scaled: false}
+    #Unsafe("each read goes to the counters' own page's read words") {
+        instructions = loader_counter_read(counters.page, counters.instructions)
+        cycles = loader_counter_read(counters.page, counters.cycles)
+    }
+    counted.instructions = instructions.value
+    counted.cycles = cycles.value
+    counted.scaled = instructions.scaled || cycles.scaled
+    _ := os_unmap(counters.page, OS_PAGE_SIZE)
 }
 
 // The total of the counter `fd` (loader_counter_open), which closes: its

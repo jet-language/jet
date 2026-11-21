@@ -93,7 +93,7 @@ impl ConfigFacts {
             .Val(declared) -> Val(declared)
             .None -> if facts.name == "" -> None else -> Val(facts.name)
         }
-        Ok(ConfigFacts{name: name, version: facts.version, source: facts.source, deps: facts.deps, services: facts.services, outputs: facts.outputs, environments: facts.environments, defaults: facts.defaults, origin: facts.origin})
+        Ok(ConfigFacts{name: name, version: facts.version, source: facts.source, deps: facts.deps, dep_settings: facts.dep_settings, services: facts.services, outputs: facts.outputs, environments: facts.environments, defaults: facts.defaults, origin: facts.origin})
     }
 }
 
@@ -225,7 +225,11 @@ impl PackageFacts {
                 raw: pkg_scalar(value)
                 self.layer = Val(jet_ring_parse_manifest_layer(raw) ?? return Err(PackageParseError.InvalidValue{field: "runtime", value: raw}))
             }
-            MANIFEST_BLOCK_DEPS -> self.deps = pkg_parse_deps(pkg_record_body(value, MANIFEST_BLOCK_DEPS))
+            MANIFEST_BLOCK_DEPS -> {
+                parsed: pkg_parse_deps(pkg_record_body(value, MANIFEST_BLOCK_DEPS))
+                self.deps = parsed.sources.move()
+                self.dep_settings = parsed.settings.move()
+            }
             MANIFEST_BLOCK_BOUNDARIES -> self.boundaries = pkg_parse_boundaries(pkg_record_body(value, MANIFEST_BLOCK_BOUNDARIES))
             "packages" -> self.packages = pkg_parse_packages(pkg_record_body(value, "packages"))
             "dev" -> self.dev = pkg_parse_dev(value)

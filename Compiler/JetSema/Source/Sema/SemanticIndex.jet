@@ -283,7 +283,7 @@ sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegist
         .Local -> return "local"
         .Type -> {
             loop registered_module_index in 0..<registration.modules.len() {
-                if registration.modules[registered_module_index].module_name != module_text(registration.module_table, symbol.module_identity) {
+                if registration.modules[registered_module_index].module_identity != symbol.module_identity {
                     next
                 }
                 loop nominal_index in 0..<registration.modules[registered_module_index].nominals.len() {
@@ -1744,6 +1744,8 @@ sema_compiler_index_function_signature: fn(function: SemaRegistrationFunction) -
     "function"
 }
 
+// A function's signature is its own: a module function's, a foreign one's
+// type, or a method's of the nominal or the impl that declares it.
 sema_compiler_index_definition_signature: fn(symbol: Symbol, registered_module: SemaRegistrationModule, registration: SemaRegistrationGraph) -> String Never! {
     if symbol.kind == SymbolKind.Function {
         loop function in registered_module.functions {
@@ -1754,6 +1756,20 @@ sema_compiler_index_definition_signature: fn(symbol: Symbol, registered_module: 
         loop function in registered_module.foreign_functions {
             if function.symbol.id == symbol.id {
                 if function.symbol.ty == .Val(ty) -> return type_name(ty)
+            }
+        }
+        loop nominal in registered_module.nominals {
+            loop method in nominal.methods {
+                if method.symbol.id == symbol.id {
+                    return sema_compiler_index_function_signature(method)
+                }
+            }
+        }
+        loop implementation in registered_module.impls {
+            loop method in implementation.methods {
+                if method.symbol.id == symbol.id {
+                    return sema_compiler_index_function_signature(method)
+                }
             }
         }
     }

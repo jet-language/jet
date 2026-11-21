@@ -1,0 +1,34 @@
+# `jet perf attach -- <command>` samples a command's CPU from outside it,
+# from its first instruction to its end, with no profiler but jet: jet
+# starts the command with the kernel's task clock opened on it on each CPU,
+# with `inherit`, so every thread and process it starts is sampled too.
+# The command is a `jet check` whose constant's compile-time work spins in
+# a process of its own, so the samples are of two processes, each named by
+# the functions of the images of its executable: the jet's own, and the
+# runtime image the compile-time process runs. The attach prints the
+# functions the CPU was in, the hot one first. The trace holds them as the
+# `functions` section, and as the `timeline` section when each sample was
+# taken and in which call stack, timed from the sampling's start. The
+# check's exit code, 0, is the attach's, and the run window is its whole run.
+requires: os-name:linux
+requires: arch:x86_64
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may sample its own processes
+fixture: AttachSamplesACommand.fixture
+env: NO_COLOR=1
+step: jet perf attach --out spin.jettrace -- {jet} check spin.jet
+exit: 0 # the check's own exit code
+stderr: ~ "functions samples=" # the samples the kernel took of it
+stderr: ~ "% total · unit.rt_text_append_owner" # the hot function by its name: the runtime's text append the work spins in
+stderr: ~ "stacks unwound=" # how far its stacks unwound
+stderr: ~ "Trace: " # then the trace
+json: file spin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # the kernel sampled its CPU
+json: file spin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.processes >= 2 # the jet check and the process its compile-time work runs in
+json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].type_name = "JetPerfTimeline"
+json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.samples #>= 2 # a sample's time and its node
+json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.nodes #>= 2 # the call tree the nodes name
+json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.functions[?name~="rt_text_append_owner"] #>= 1 # the hot function among its functions
+json: file spin.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+step: jet perf view spin.jettrace
+exit: 0
+stdout: ~ "functions samples=" # the view shows the section's lines
+stdout: ~ "% total · unit.rt_text_append_owner" # with the hot function

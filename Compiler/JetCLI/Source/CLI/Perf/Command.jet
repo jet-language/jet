@@ -32,7 +32,7 @@ JET_CLI_PERF_FIX: "correct the named flag, or run `jet help` to see the flags"
 
 // `jet perf <action> …`: `argv` starts at `perf`. The front door answers the
 // group's help and refuses an unknown or unbuilt action before this runs.
-jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, IO, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     action: argv[1]
     rest := [String]{}
     help := false
@@ -1680,7 +1680,8 @@ JetCLIPerfSyscallSum: struct {
 // runtime's table had no row for, then each, the most time first, at most
 // 32: `  pipe2 count=3 time_ns=6123 · at unit.spawn_pipe from main.jet:4
 // run` (jet_cli_perf_sites_text). A call that never returned,
-// as a successful execve, counts with no time.
+// as a successful execve, counts with no time. A traced command's section,
+// which has a `status`, shows each call (jet_cli_perf_traced_lines).
 jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     items: jet_cli_perf_rows(trace, "receipt_sections") ?? return lines
@@ -1688,6 +1689,10 @@ jet_cli_perf_syscall_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         section: trace_receipt_section_from_json(item) ?? next
         if section.name != "syscalls" -> next
         fields: jettrace_object_view(section.value, "receipt syscalls") ?? next
+        if jet_cli_perf_key(fields, "status") != None {
+            loop line in jet_cli_perf_traced_lines(section.value) -> lines.push(line)
+            next
+        }
         at: jet_cli_perf_key(fields, "syscalls") ?? next
         rows: jettrace_array(fields[at].value, "receipt syscalls.syscalls") ?? next
         found := [JetCLIPerfSyscallSum]{}

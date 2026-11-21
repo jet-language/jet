@@ -247,7 +247,7 @@ async function measure(config, compiler, built, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   // Keep only receipts/traces/logs in the evidence tree. Projects, stores,
-  // emitted Rust, executable outputs and perf.data live on the scratch drive.
+  // emitted Rust, executable outputs and profile traces live on the scratch drive.
   const buildDir = path.join(config.buildRoot, createHash('sha256').update(path.resolve(dir)).digest('hex'));
   fs.rmSync(buildDir, { recursive: true, force: true });
   const run = { dir: buildDir, project: path.join(buildDir, 'project'), store: path.join(buildDir, 'store'),
@@ -420,8 +420,9 @@ export async function run(config) {
   return receipt;
 }
 
-// Re-run the largest passing rung under perf and attribute samples to the
-// failing phases (profile.mjs): the responsible functions with their source.
+// Re-run the largest passing rung under `jet perf attach` and attribute its
+// samples to the failing phases (profile.mjs): the responsible functions
+// with their source.
 async function profileTop(config, compiler, shape, layout, point, series, save) {
   const dir = path.join(config.workDir, compiler.label, `${shape}-${layout}`, `${point.n}-profile`);
   const phases = [...new Set(series.failures.filter(f => f.kind === 'growth').map(f => f.phase))];
@@ -429,7 +430,7 @@ async function profileTop(config, compiler, shape, layout, point, series, save) 
     series.profilePoint = await measure({ ...config, profile: { wrap: d => profileRun.wrap(d) } }, compiler, corpus(shape, point.n, config.seed, layout), dir);
     save();
   }
-  return profileRun.attribute(series.profilePoint.build_dir, phases, { repo: REPO, top: 12, ok: series.profilePoint.ok, traceFile: path.join(dir, 'trace.json') });
+  return profileRun.attribute(series.profilePoint.build_dir, phases, { top: 12, ok: series.profilePoint.ok, traceFile: path.join(dir, 'trace.json') });
 }
 
 function summary(point) {
@@ -452,10 +453,10 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --ladder SHAPE=A,B,..  explicit ladder for one shape
   --domain-ladder A,B,.. domain ladder in code lines (default ${DOMAIN_LADDER.join(',')})
   --memory-max 20G  --timeout 1800  --stop-after SECONDS (skip larger rungs after a slower one)
-  --profile              perf-profile the top rung of every failing series (profile.mjs)
+  --profile              CPU-profile the top rung of every failing series with jet perf (profile.mjs)
   --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
-  --build-root DIR       projects/stores/compiler outputs/perf.data (default $JET_SCRATCH_ROOT/scaling-gate)
+  --build-root DIR       projects/stores/compiler outputs/profile.jettrace (default $JET_SCRATCH_ROOT/scaling-gate)
   --mode timing|counters counter-only mode gates deterministic work, not time/RSS/floors
   --jobs N              parallel counter-mode compiles (default 1); timing stays serial
 Receipts checkpoint every baseline, rung and profile compile; rerunning the same

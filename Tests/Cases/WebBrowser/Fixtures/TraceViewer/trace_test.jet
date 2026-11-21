@@ -23,6 +23,19 @@ use {
         }
     })
     report = browser.report_add_case(report, notes)
+    // A failure names only the last attempt's error; print every attempt's
+    // error, duration and commands so a failing run shows where it stopped.
+    // An attempt with no commands failed before its page opened.
+    if report.failures().len() > 0 {
+        loop entry in report.cases {
+            loop tried in entry.attempts {
+                print("attempt {tried.attempt}: \"{tried.error}\" after {tried.duration_ms} ms")
+                loop action in tried.actions {
+                    print("  {action.sequence} {action.kind} {action.fact}")
+                }
+            }
+        }
+    }
     server.stop()
     browser.write_report(report, config.report_path()) ?? panic("the report: {err}")
     assert_eq(report.failures(), [String]{})

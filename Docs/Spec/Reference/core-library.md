@@ -5049,7 +5049,7 @@ sendability rules. The implementation is in
 | `cpu_ns() -[Time]> Int` | nanoseconds | The CPU time the running task has used. |
 | `timeout(delay: Duration) -[Time.Wait]>` | — | Wait for a duration before returning. |
 | `sleep(ms: Int) -[Time.Wait]>` | — | Wait for `ms` milliseconds (none when negative) before returning. |
-| `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. A task whose join has returned is not pending, so a quiesce right after a group joins succeeds. A deadline in force that has not passed has a timer pending. The threads start again on the next use. |
+| `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. A task whose join has returned is not pending, so a quiesce right after a group joins succeeds. A deadline in force that has not passed has a timer pending. Carriers that retired earlier are joined too, and each joined thread has left the process when it returns, so a thread count read next sees none of them. The threads start again on the next use. |
 | `Once.new() -> Once` | once | Work that runs at most once across the tasks sharing it (`pthread_once`, `call_once`). |
 | `once.call(work: fn() E!) -> Bool E!` | ran | Run `work` unless this Once already ran it; `true` when this call ran it. A caller arriving while it runs waits for it. A failure of `work` is the call's, and leaves the work not yet run. |
 | `once.is_done() -> Bool` | done | Whether the work has run. |

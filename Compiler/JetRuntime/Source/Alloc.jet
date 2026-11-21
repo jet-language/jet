@@ -273,6 +273,18 @@ alloc_map_shared: fn(bytes: I64, descriptor: I64) -> I64 {
     }
 }
 
+// The open `descriptor`'s first `bytes`, mapped read/write and shared over
+// the caller's own reservation at `address` (MAP_SHARED|MAP_FIXED), which
+// it replaces; `address`, or the kernel's negative errno, after which the
+// reservation may be gone. Untracked: only the runtime's live-file code
+// (PerfSamples.jet perf_live_open) reads and writes it, within the
+// descriptor's size.
+alloc_map_shared_at: fn(address: I64, bytes: I64, descriptor: I64) -> I64 {
+    #Unsafe("the caller owns the reservation the fixed mapping replaces, and a shared mapping of the descriptor aliases no heap block") {
+        return os_map_untracked_i64(address, bytes, I64{3}, I64{17}, descriptor, I64{0})
+    }
+}
+
 // Makes `bytes` at the page-aligned `address` of a mapping the caller owns
 // inaccessible, as a stack guard.
 alloc_guard: fn(address: I64, bytes: I64) {

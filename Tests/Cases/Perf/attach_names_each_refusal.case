@@ -11,6 +11,9 @@ requires: os-name:linux
 requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 tmp
+exit: 0
 copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
 step: cc authorizer.c -o authorizer
 exit: 0
@@ -45,6 +48,12 @@ stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # a
 stderr: ~ ": it publishes no live snapshot jet can read (no live observation is available at " # and says what it lacks
 stderr: ~ "Fix: Start the program with `jet run --observe`, then attach to the pid it runs as" # and how to start it observed
 file: plain.jettrace absent # refused before it traced anything
+step: jet perf attach {pid:sleeper} --follow --out followed.jettrace
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # a follow of a process jet doesn't observe is refused by that cause
+stderr: ~ "so it has no zones to follow" # and says what it lacks
+file: followed.jettrace absent # refused before it traced anything
 signal sleeper: KILL
 wait: sleeper
 exit: any # the case's KILL ends the process
@@ -62,9 +71,17 @@ step: jet perf attach 4242 --lens=counts
 exit: 2
 stderr: ~ "Error: Jet.InvalidCommandInput: `--lens=counts` counts a command from its start, and a running process has started already" # a count missing the start would mislead
 stderr: ~ "Fix: Run `jet perf attach --lens=counts -- <command>`" # the command form is the fix
-step: jet perf attach -- true
+step: jet perf attach 4242 --lens=syscalls
 exit: 2
-stderr: ~ "Error: Jet.InvalidCommandInput: `jet perf attach -- <command>` takes `--lens=counts`" # a command is counted, not sampled
+stderr: ~ "Error: Jet.UnknownFlag: `--lens=syscalls` traces a command from its start, and a running process has started already" # a trace missing the start would mislead
+stderr: ~ "Fix: Run `jet perf attach --lens=syscalls -- <command>`" # the command form is the fix
+step: jet perf attach --lens=counts,stacks -- true
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `--lens=counts,stacks` names a lens attach doesn't take" # each lens of the list is checked
+step: jet perf attach --out unsampled.jettrace -- no-such-program-c14
+exit: 1
+stderr: ~ "Error: Jet.DriverOperationFailed: Jet can't run `no-such-program-c14`: no such program file on PATH" # a command sampled from outside is looked up first too
+file: unsampled.jettrace absent # nothing ran, so no trace
 step: jet perf attach --lens=counts --for=3s --out timed.jettrace -- true
 exit: 2
 stderr: ~ "Error: Jet.InvalidCommandInput: `--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process" # a window on a running process

@@ -36,6 +36,10 @@ mkdir -p "$work/returns"
 cp "$here/returns.jet" "$work/returns/main.jet"
 cd "$work/returns" || exit 1
 {
+    # The checkout the probe ran from, and the identity of the compiler under
+    # test: the build's IDENTITY beside `jet`, or JET_COMPILER_IDENTITY.
+    step git -C "$here" rev-parse --short HEAD
+    printf '\n$ jet identity\n%s\n' "${JET_COMPILER_IDENTITY:-$(cat "$(dirname "$(command -v jet)")/IDENTITY" 2>&1)}"
     step jet --version
     step node --version
     uptime

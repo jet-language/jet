@@ -3,15 +3,19 @@
 // fifth release also spawns a task that parks the same way, released after
 // the first wave. Each finished fiber past the pool leaves the live thread
 // registry, so its rows are removed in an order unrelated to how they were
-// added. Every task returns the value it was sent, and the thread count is
-// back where it was.
+// added. Every task returns the value it was sent. Once the tasks are joined,
+// tasks.quiesce() joins every scheduler thread, carriers that retired past
+// the pool included, each until it has left the process. So the thread count
+// is then exactly the one read before any task started: no thread is left
+// behind, under any load or pool size.
 package: {
     name: "fiber_teardown"
-    authority: { allow: [FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
+    authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
 }
 
 use {
     files: core.files
+    tasks: core.tasks
     time: core.time
 }
 
@@ -46,6 +50,7 @@ shuffled: fn(count: Int) -> [Int] {
 }
 
 run: fn() {
+    before: threads()
     senders := [Sender<Int>]{}
     parked := [Task<Int>]{}
     loop _ in 0..<TASKS {
@@ -53,8 +58,9 @@ run: fn() {
         senders.push(tx)
         parked.push(task waiter(rx))
     }
+    // Lets the tasks park before their releases; the count below does not
+    // depend on it.
     time.sleep(50ms)
-    before: threads()
     late_senders := [Sender<Int>]{}
     late := [Task<Int>]{}
     order: shuffled(TASKS)
@@ -83,7 +89,10 @@ run: fn() {
         if got == TASKS + at -> late_right += 1
         at += 1
     }
-    time.sleep(100ms)
+    quiesced: tasks.quiesce()
+    after: threads()
     print("{right} of {TASKS} and {late_right} of {late_count} returned what they were sent")
-    print("threads unchanged {threads() == before}")
+    if quiesced && after == before -> print("threads unchanged true") else {
+        print("threads unchanged false: quiesced {quiesced}, {before} before, {after} after")
+    }
 }

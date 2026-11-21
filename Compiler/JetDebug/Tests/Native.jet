@@ -5,7 +5,7 @@ use {
     native_test_process: core.process
     native_test_files: core.files
     native_test_hex: core.encoding.hex
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_build_id, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses, native_listing_call_line, native_listing_caller]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NATIVE_DEBUG_UNAVAILABLE, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_build_id, native_cfi_row, native_debug_backtrace, native_debug_backtrace_count, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_debug_unbound, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling, native_line_addresses, native_listing_call_line, native_listing_caller]
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64TraceResume, X64_TRACE_RIP, X64_TRACE_RSP, x64_executable_debug_apart, x64_jetline_find, x64_jetline_sleb]
     jet_foundation.[DeepChecks, compiler_threads_single]
 }
@@ -46,6 +46,23 @@ use {
     assert_eq(native_inline_chain(function, 0x90), [Int]{})
     frames: [NativeFrame]{NativeFrame{function: "sum_squares", file: "prog.jet", line: 6, inlined: true}, NativeFrame{function: "run", file: "prog.jet", line: 14, inlined: false}}
     assert_eq(native_debug_backtrace(frames), "#0  sum_squares()  at prog.jet:6  [inlined]\n#1  run()  at prog.jet:14\n")
+}
+
+// `bt N` shows the first N frames, then how many more there are; a count
+// at or past the frames shows them all with no more-line.
+#Test("a_backtrace_count_shows_the_first_frames_and_how_many_more") {
+    frames: [NativeFrame]{
+        NativeFrame{function: "inner", file: "calls.jet", line: 2, inlined: false},
+        NativeFrame{function: "middle", file: "calls.jet", line: 7, inlined: false},
+        NativeFrame{function: "outer", file: "calls.jet", line: 12, inlined: false},
+        NativeFrame{function: "run", file: "calls.jet", line: 17, inlined: false},
+    }
+    assert_eq(native_debug_backtrace(frames, count: Val(2)), "#0  inner()  at calls.jet:2\n#1  middle()  at calls.jet:7\n(2 more frames; `bt` shows them all)\n")
+    assert_eq(native_debug_backtrace(frames, count: Val(3)), "#0  inner()  at calls.jet:2\n#1  middle()  at calls.jet:7\n#2  outer()  at calls.jet:12\n(1 more frame; `bt` shows them all)\n")
+    assert_eq(native_debug_backtrace(frames, count: Val(4)), native_debug_backtrace(frames))
+    assert_eq(native_debug_backtrace_count(""), Int?{None})
+    assert_eq(native_debug_backtrace_count("2"), Val(2))
+    assert_eq(native_debug_backtrace_count("two"), Val(0))
 }
 
 // The little-endian bytes of `words`, `size` bytes each.

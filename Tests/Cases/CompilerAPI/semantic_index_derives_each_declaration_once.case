@@ -1,9 +1,14 @@
-# The semantic index derives each written declaration once, credited to it: the struct, each of its three methods and `run` have one record apiece, read from their own text, so no two records share a subject or a source. The codecs and derives the compiler makes at the struct's name have no text of their own and no record.
+# The semantic index derives each written declaration once, credited to it: the struct, each of its three methods and `run` have one record apiece, read from their own text, so no two records share an id, a subject or a source. The codecs and derives the compiler makes at the struct's name have no text of their own and no record. A struct's record is built from its kind and fields, and a method's from its own signature.
+# Typed code reading `compiler.check` gets the same records: typed.jet prints them in the CLI's JSON shape, and each of the text's records is compared whole. `jet inspect semindex` derives the same records from the same text: each declaration's source and the struct's and run's build ids are equal on both sides. The two producers spell a definition's identity differently (`core_compiler.` against `main.`, `fn:` against `method:` for a method), so subjects and claims differ by producer.
 fixture: SemanticIndexDerivesEachDeclarationOnce.fixture
 env: NO_COLOR=1
+step typed: jet run typed.jet
+exit: 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 5 # typed code reads the five records
 step: jet inspect compiler check main.jet
 exit: 0
 json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] == typed # each record whole, as typed code read it
 json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"] #= 5 # the struct, its three methods and run
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Counter"] #= 1 # the struct's own record, none for what the compiler made at its name
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.start"] #= 1
@@ -11,6 +16,35 @@ json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_com
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.value"] #= 1
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.run"] #= 1
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim ^= "fn:core_compiler.Counter."] #= 3 # the written methods only: no codec method
-json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].subject #distinct= 5 # each record has its own stable id
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].id #distinct= 5 # each record has its own id
+json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].subject #distinct= 5 # and its own stable id
 json: stdout doc $.compiler.value.semantic_index.derivations[?identity.target="core.compiler"][*].identity.source #distinct= 5 # and its own declaration's text
 json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"][0].premises[0] == $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"][0].identity.source # the content premise is the source the record names
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Counter"][0].identity.source = "sha256:43d25bdc83e7b0854ff8204d94f2a26ffb4d7c3f592201bb6aaad0d065fcffb9" # the whole struct's text
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.start"][0].identity.source = "sha256:ee2c8e1d1a0004653fed759ab136c86452604435459e53ce5b8e1d055ae064f2" # start's text alone
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.next"][0].identity.source = "sha256:d5b2719c940edb41c37d0daaf96b02bda9feea586c3cdb0b2496bdcb12a5b8f0"
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.value"][0].identity.source = "sha256:035d53a94d254e7026fe5781532e0c038893d5e8b903e21543efc96024fb6e0f"
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.run"][0].identity.source = "sha256:a320c6f8a08fbdc784a5e7cbb464121c66ff6f31c59f1aa1d0bdff63b6b4e6dd"
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="type:core_compiler.Counter"][0].identity.build = "sig:7789f24337ce0b2b" # built as a struct of one Int field
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.run"][0].identity.build = "sig:a3409f5af476785f"
+json: stdout doc $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.start"][0].identity.build != $.compiler.value.semantic_index.derivations[?claim="fn:core_compiler.Counter.value"][0].identity.build # start and value have different signatures, so different build ids
+step: jet inspect semindex main.jet --json
+exit: 0
+json: stdout doc $.semindex.derivations #= 5 # the struct, its three methods and run
+json: stdout doc $.semindex.derivations[?claim="type:main.Counter"] #= 1 # the struct's own record, none for what the compiler made at its name
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.start"] #= 1
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.next"] #= 1
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.value"] #= 1
+json: stdout doc $.semindex.derivations[?claim="fn:main.run"] #= 1
+json: stdout doc $.semindex.derivations[*].id #distinct= 5
+json: stdout doc $.semindex.derivations[*].subject #distinct= 5
+json: stdout doc $.semindex.derivations[*].identity.source #distinct= 5
+json: stdout doc $.semindex.definition_facts #= 5 # one fact per declaration, each its own text
+json: stdout doc $.semindex.derivations[?claim="type:main.Counter"][0].identity.source = "sha256:43d25bdc83e7b0854ff8204d94f2a26ffb4d7c3f592201bb6aaad0d065fcffb9"
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.start"][0].identity.source = "sha256:ee2c8e1d1a0004653fed759ab136c86452604435459e53ce5b8e1d055ae064f2"
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.next"][0].identity.source = "sha256:d5b2719c940edb41c37d0daaf96b02bda9feea586c3cdb0b2496bdcb12a5b8f0"
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.value"][0].identity.source = "sha256:035d53a94d254e7026fe5781532e0c038893d5e8b903e21543efc96024fb6e0f"
+json: stdout doc $.semindex.derivations[?claim="fn:main.run"][0].identity.source = "sha256:a320c6f8a08fbdc784a5e7cbb464121c66ff6f31c59f1aa1d0bdff63b6b4e6dd"
+json: stdout doc $.semindex.derivations[?claim="type:main.Counter"][0].identity.build = "sig:7789f24337ce0b2b"
+json: stdout doc $.semindex.derivations[?claim="fn:main.run"][0].identity.build = "sig:a3409f5af476785f"
+json: stdout doc $.semindex.derivations[?claim="method:main.Counter.start"][0].identity.build != $.semindex.derivations[?claim="method:main.Counter.value"][0].identity.build # start and value have different signatures, so different build ids

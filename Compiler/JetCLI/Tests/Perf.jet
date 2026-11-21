@@ -25,6 +25,7 @@ use {
         JetCLIPerfLineTotal,
         JetCLIPerfLineTotals,
         JetCLIPerfObservation,
+        JetCLIPerfOutsideMoment,
         JetCLIPerfOutsideRow,
         JetCLIPerfOutsideTree,
         JetCLIPerfPlotTotal,
@@ -70,9 +71,11 @@ use {
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
         jet_cli_perf_outside_flame,
+        jet_cli_perf_outside_fold,
         jet_cli_perf_outside_folded,
         jet_cli_perf_outside_function,
         jet_cli_perf_outside_lines,
+        jet_cli_perf_outside_timeline,
         jet_cli_perf_outside_tree_add,
         jet_cli_perf_pc_json,
         jet_cli_perf_pc_words,
@@ -1611,15 +1614,33 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     names: [String]{"main", "work", "rare"}
     rows: loop name in names -> JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: false}
     tree := JetCLIPerfOutsideTree{rows: [Int]{}, parents: [Int]{}, totals: [Int]{}, children: [Int:Int]{}}
-    loop _ in 0..<150 -> jet_cli_perf_outside_tree_add(tree, [Int]{1, 0})
-    loop _ in 0..<49 -> jet_cli_perf_outside_tree_add(tree, [Int]{0})
-    jet_cli_perf_outside_tree_add(tree, [Int]{2, 1, 0})
+    loop _ in 0..<150 -> _ := jet_cli_perf_outside_tree_add(tree, [Int]{1, 0})
+    loop _ in 0..<49 -> _ := jet_cli_perf_outside_tree_add(tree, [Int]{0})
+    _ := jet_cli_perf_outside_tree_add(tree, [Int]{2, 1, 0})
     stacks: jet_cli_perf_outside_folded(tree, rows, 200)
     assert_eq(stacks.len(), 2)
     assert_eq(stacks[0].stack, "main")
     assert_eq(stacks[0].samples, 49)
     assert_eq(stacks[1].stack, "main;work")
     assert_eq(stacks[1].samples, 151)
+}
+
+// The timeline keeps each sample's time and innermost node, the earliest
+// first, and the call tree its nodes name, a parent before its children.
+#Test("an outside attach's timeline orders its samples by time and names their nodes") {
+    fold := jet_cli_perf_outside_fold()
+    names: [String]{"main", "work"}
+    loop name in names {
+        fold.rows.push(JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: false})
+    }
+    deep: jet_cli_perf_outside_tree_add(fold.tree, [Int]{1, 0})
+    shallow: jet_cli_perf_outside_tree_add(fold.tree, [Int]{0})
+    fold.timeline.push(JetCLIPerfOutsideMoment{us: 2000, node: shallow})
+    fold.timeline.push(JetCLIPerfOutsideMoment{us: 1000, node: deep})
+    fold.timeline.push(JetCLIPerfOutsideMoment{us: 1500, node: -1})
+    section: jet_cli_perf_outside_timeline(fold, 1700000000000000000)
+    assert_eq(section.type_name, "JetPerfTimeline")
+    assert_eq(String.from_bytes(canonical_json_bytes(section.value)) ?? "", "{{\"dropped\":0,\"functions\":[{{\"name\":\"main\",\"self\":0,\"total\":0}},{{\"name\":\"work\",\"self\":0,\"total\":0}}],\"nodes\":[0,-1,1,0],\"origin_unix_ns\":1700000000000000000,\"period_ns\":1000000,\"samples\":[1000,1,1500,-1,2000,0]}}\n")
 }
 
 // Past the task row limit, the tasks with the fewest CPU-time samples have

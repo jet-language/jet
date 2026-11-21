@@ -1472,14 +1472,21 @@ jet_cli_codemod_same_anchor: fn(left: SemAnchor, right: SemAnchor) -> Bool Never
     left.module_path == right.module_path && left.kind == right.kind && left.def_span.start == right.def_span.start && left.def_span.end == right.def_span.end && left.semantic_identity == right.semantic_identity
 }
 
-// Rust definition_fact.
+// Rust definition_fact: the innermost fact whose text holds the definition,
+// so a method's is its own, not its type's.
 jet_cli_codemod_definition_fact: fn(index: SemIndex, def: SemDef) -> SemDefinitionFact? Never! {
-    loop fact in index.definition_facts {
-        if fact.module_path == def.module_path && fact.span.start <= def.def_span.start && def.def_span.end <= fact.span.end {
-            return Val(fact.copy())
+    found := Int?{None}
+    loop (at, fact) in index.definition_facts {
+        if fact.module_path != def.module_path || fact.span.start > def.def_span.start || def.def_span.end > fact.span.end {
+            next
         }
+        if found == .Val(best) && index.definition_facts[best].span.end - index.definition_facts[best].span.start <= fact.span.end - fact.span.start {
+            next
+        }
+        found = Val(at)
     }
-    None
+    at: found ?? return None
+    Val(index.definition_facts[at].copy())
 }
 
 // Rust renamed_identity.

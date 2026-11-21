@@ -2305,20 +2305,112 @@ SemDefinitionAt: struct {
     index: Int,
 }
 
-// `build_definition_facts`: one fact per top-level item, for the first non-local
-// definition it declares. Each module's source bytes are read once, and the
-// item's definition is found by binary search over the non-local definitions
-// sorted by (module, start, listing order): the first one inside the item is the
-// earliest-starting, first-listed one.
-semindex_definition_facts: fn(definitions: [SemDefinition], nodes: [SemNode], modules: [JetDriverDocModule]) -> [SemDefinitionFact] {
-    output := [SemDefinitionFact]{}
-    source_slot := [String:Int]{}
-    sources := [[U8]]{}
-    loop doc_module in modules {
-        if source_slot.has_key(doc_module.path) -> next
-        source_slot[doc_module.path] = sources.len()
-        sources.push(doc_module.source.bytes())
+// One written declaration that carries a definition fact: its text, and the
+// kind of definition it declares ("" lets any non-local definition name it).
+SemDeclarationAt: struct {
+    span: Span,
+    kind: String,
+}
+
+// The methods of `methods` written in the source; a compiler-made method has
+// no text of its own.
+semindex_written_methods: fn(methods: [Func], output: &[SemDeclarationAt]) Never! {
+    loop method in methods {
+        if method.compiler_generated -> next
+        output.push(SemDeclarationAt{span: method.span, kind: "function"})
     }
+}
+
+// A struct's or an enum's written methods: its own, then those of each trait
+// block it writes.
+semindex_nominal_methods: fn(methods: [Func], blocks: [TraitImplBlock], output: &[SemDeclarationAt]) Never! {
+    semindex_written_methods(methods, output)
+    loop block in blocks {
+        if block.compiler_generated -> next
+        semindex_written_methods(block.methods, output)
+    }
+}
+
+// The declarations of a module's top-level `items` that carry a fact: each
+// item but an impl, credited to a definition of its own kind (a function for
+// a fn, the type for a struct or an enum; any kind for the rest), each method
+// a struct or an enum writes, and each method of a written impl. A
+// compiler-made impl (the serde codecs; a derive's or a template's, whose
+// span is its type's name) has no text of its own, nor has a catalog family
+// the units prelude injected.
+semindex_written_declarations: fn(items: [Item]) -> [SemDeclarationAt] Never! {
+    output := [SemDeclarationAt]{}
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                made: implementation.is_generated_serde || (implementation.span.start == implementation.type_span.start && implementation.span.end == implementation.type_span.end)
+                if !made -> semindex_written_methods(implementation.methods, output)
+            }
+            .UnitFamily(family) -> {
+                if family.resolved_owner != Val("core.units") {
+                    output.push(SemDeclarationAt{span: family.span, kind: ""})
+                }
+            }
+            .Func(function) -> {
+                output.push(SemDeclarationAt{span: function.span, kind: "function"})
+            }
+            .Struct(value) -> {
+                output.push(SemDeclarationAt{span: value.span, kind: "struct"})
+                semindex_nominal_methods(value.methods, value.trait_impls, output)
+            }
+            .Enum(value) -> {
+                output.push(SemDeclarationAt{span: value.span, kind: "enum"})
+                semindex_nominal_methods(value.methods, value.trait_impls, output)
+            }
+            .EffectDecl(_) | .MarkerDecl(_) | .FactDecl(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) -> {
+                output.push(SemDeclarationAt{span: semindex_item_head(item).span, kind: ""})
+            }
+        }
+    }
+    output
+}
+
+// The definition `declaration` declares in module `module_path`: the
+// earliest-starting, first-listed one of its kind inside its text, found by
+// binary search over `candidates`, the non-local definitions sorted by
+// (module, start, listing order). A catalog family's symbol is never it: its
+// span indexes the prelude text.
+semindex_declared_definition: fn(definitions: [SemDefinition], candidates: [SemDefinitionAt], module_path: String, declaration: SemDeclarationAt, catalog: [NamedSpan]) -> Int? Never! {
+    first := 0
+    high := candidates.len()
+    loop first < high {
+        middle: first + (high - first) /% 2
+        if {
+            (candidates[middle].module_path <=> module_path).then(candidates[middle].start <=> declaration.span.start) == Ordering.Less -> {
+                first = middle + 1
+            }
+            else -> high = middle
+        }
+    }
+    loop at in first..<candidates.len() {
+        if candidates[at].module_path != module_path || candidates[at].start > declaration.span.end {
+            break
+        }
+        if candidates[at].end > declaration.span.end -> next
+        definition: definitions[candidates[at].index]
+        if declaration.kind != "" && semindex_definition_kind(definition.def.kind) != declaration.kind {
+            next
+        }
+        if catalog.any(fn(named) { named.name == definition.def.name && named.span.start == definition.def.def_span.start && named.span.end == definition.def.def_span.end }) {
+            next
+        }
+        return Val(candidates[at].index)
+    }
+    None
+}
+
+// `build_definition_facts`: one fact per written declaration
+// (semindex_written_declarations), credited to the definition it declares
+// and read from its own text, so its stable, signature and content ids are
+// that definition's. A definition gets at most one fact, and a text outside
+// its module's source none.
+semindex_definition_facts: fn(definitions: [SemDefinition], modules: [JetDriverDocModule]) -> [SemDefinitionFact] {
+    output := [SemDefinitionFact]{}
     candidates := [SemDefinitionAt]{}
     loop (index, definition) in definitions {
         if definition.def.kind == {
@@ -2328,46 +2420,43 @@ semindex_definition_facts: fn(definitions: [SemDefinition], nodes: [SemNode], mo
         candidates.push(SemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
     }
     candidates.sort_by(fn(left: SemDefinitionAt, right: SemDefinitionAt) { (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index) })
-    loop node in nodes {
-        if node.parent != None || node.class != "item" -> next
-        slot: source_slot.get(node.module_path) ?? next
-        first := 0
-        high := candidates.len()
-        loop first < high {
-            middle: first + (high - first) /% 2
-            if (candidates[middle].module_path <=> node.module_path).then(candidates[middle].start <=> node.span.start) == Ordering.Less {
-                first = middle + 1
-            } else { high = middle }
-        }
-        chosen := Int?{None}
-        loop at in first..<candidates.len() {
-            if candidates[at].module_path != node.module_path || candidates[at].start > node.span.end {
-                break
+    walked := [String:Bool]{}
+    credited := [Int:Bool]{}
+    loop doc_module in modules {
+        if walked.has_key(doc_module.path) -> next
+        walked[doc_module.path] = true
+        source: doc_module.source.bytes()
+        catalog := [NamedSpan]{}
+        loop item in doc_module.items {
+            if item == .UnitFamily(family) && family.resolved_owner == Val("core.units") {
+                catalog.push(NamedSpan{name: family.family, span: family.family_span})
             }
-            if candidates[at].end > node.span.end -> next
-            chosen = Val(candidates[at].index)
-            break
         }
-        position: chosen ?? next
-        definition: definitions[position]
-        kind: semindex_definition_kind(definition.def.kind)
-        structural: "{kind}|{definition.def.identity}"
-        signature: "{kind}|{semindex_definition_signature(definition)}"
-        text: if node.span.end > sources[slot].len() -> "" else -> semindex_doc_text(sources[slot], node.span.start, node.span.end)
-        output.push(
-            SemDefinitionFact{
-                stable_id: "def:{sha256_hex(structural).slice(0, 16)}",
-                signature_id: "sig:{sha256_hex(signature).slice(0, 16)}",
-                content_id: "sha256:{sha256_hex(semindex_normalize_definition(text))}",
-                human_identity: definition.def.identity,
-                name: definition.def.qualified_name,
-                kind: kind,
-                module_path: definition.def.module_path,
-                span: node.span,
-            },
-        )
+        loop declaration in semindex_written_declarations(doc_module.items) {
+            if declaration.span.end > source.len() -> next
+            position: semindex_declared_definition(definitions, candidates, doc_module.path, declaration, catalog) ?? next
+            if credited.has_key(position) -> next
+            credited[position] = true
+            definition: definitions[position]
+            kind: semindex_definition_kind(definition.def.kind)
+            structural: "{kind}|{definition.def.identity}"
+            signature: "{kind}|{semindex_definition_signature(definition)}"
+            text: semindex_doc_text(source, declaration.span.start, declaration.span.end)
+            output.push(
+                SemDefinitionFact{
+                    stable_id: "def:{sha256_hex(structural).slice(0, 16)}",
+                    signature_id: "sig:{sha256_hex(signature).slice(0, 16)}",
+                    content_id: "sha256:{sha256_hex(semindex_normalize_definition(text))}",
+                    human_identity: definition.def.identity,
+                    name: definition.def.qualified_name,
+                    kind: kind,
+                    module_path: definition.def.module_path,
+                    span: declaration.span,
+                },
+            )
+        }
     }
-    // Stable: equal (stable_id, human_identity) rows keep their item order.
+    // Stable: equal (stable_id, human_identity) rows keep their declaration order.
     output.sort_by(fn(left: SemDefinitionFact, right: SemDefinitionFact) { (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity) })
     output
 }
@@ -2720,7 +2809,7 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
     semindex_call_targets(db, modules)
     semindex_align_reference_targets(db)
     definitions: semindex_convert_defs(db, modules)
-    definition_facts: semindex_definition_facts(definitions, db.nodes, modules)
+    definition_facts: semindex_definition_facts(definitions, modules)
     derivations: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := db.arithmetic.move()
     arithmetic = loop fresh_item in arithmetic -> fresh_item

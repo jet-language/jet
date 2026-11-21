@@ -1,7 +1,7 @@
 {
   "name": "scaling-profile",
   "mode": "tool",
-  "description": "The compiler scaling gate's responsible-code profiler profile.mjs and its Jet twin profile/run.jet, #5072 c7, with a fake perf (PERF=./fake-perf prints BUILD_DIR/perf-script.txt): perf script samples attributed to the trace's phase spans (the latest-starting wanted span wins; spans pair per thread and kind, a numeric and a text tid alike; an end without a begin is ignored, an unclosed span runs to infinity, item spans and complete events are no phases, unparsable trace lines are skipped), samples before the trace origin or outside every wanted phase dropped, an empty sample counted as `?`, symbols demangled (offset, dso, Rust hash), the top 12 self symbols by count with first-seen ties, inclusive compiler functions counted once per sample and dropped at 95% of a phase, sources resolved (a Rust crate absent from the repo resolves to nothing; the `real` case's check.jet verifies Compiler/<file>:<line> declarations), phases deduplicated in JavaScript key order (integer-like first) including phases without samples, and the refusals: missing arguments or an empty BUILD_DIR (usage, exit 2) and an unreadable trace (exit 1).",
+  "description": "The compiler scaling gate's responsible-code profiler profile.mjs and its Jet twin profile/run.jet, #5072 c7, over a planted `jet perf attach` trace (BUILD_DIR/profile.jettrace): the `timeline` section's samples, each one's time from the section's origin and its frames from its node's chain, attributed to the trace's phase spans (the latest-starting wanted span wins; spans pair per thread and kind, a numeric and a text tid alike; an end without a begin is ignored, an unclosed span runs to infinity, item spans and complete events are no phases, unparsable trace lines are skipped), samples before the trace origin or outside every wanted phase dropped, a sample with no named frame counted as `?`, the top 12 self functions by count with first-seen ties, inclusive compiler functions (declared under `Compiler/`, a relative or an absolute path) counted once per sample and dropped at 95% of a phase, each function's source its declaration's file and line with its bare name (none without a declaration), phases deduplicated in JavaScript key order (integer-like first) including phases without samples, a trace without a timeline or no trace at all giving no samples, and the refusals: missing arguments or an empty BUILD_DIR (usage, exit 2) and an unreadable phase trace (exit 1).",
   "tool": {
     "original": "Tools/Perf/Scaling/Profile.mjs",
     "jet": "Tools/Perf/Scaling/Profile/run.jet",
@@ -21,9 +21,6 @@
           "emit",
           "absent"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
         "expected": "Expected/phases.out"
       },
       {
@@ -33,31 +30,21 @@
           "sema",
           "build"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
         "expected": "Expected/quiet.out"
       },
       {
         "args": [
-          "real",
+          "nodir",
           "trace.json",
-          "build"
+          "sema"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
-        "check": "check.jet",
-        "expected": "Expected/real.out"
+        "expected": "Expected/nodir.out"
       },
       {
         "args": [
           "phases",
           "trace.json"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
         "exit": 2,
         "expected": "Expected/empty.out"
       },
@@ -67,9 +54,6 @@
           "trace.json",
           "sema"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
         "exit": 2,
         "expected": "Expected/empty.out"
       },
@@ -79,9 +63,6 @@
           "missing.json",
           "sema"
         ],
-        "env": {
-          "PERF": "./fake-perf"
-        },
         "exit": 1,
         "expected": "Expected/empty.out"
       }

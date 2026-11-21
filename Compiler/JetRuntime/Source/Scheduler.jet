@@ -1305,8 +1305,11 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // carriers, linked through next88: a wake sent after the claim's unlock may
 // reach a record whose carrier retired meanwhile, so a record is reused by
 // the next start and freed only by the shutdown, which joins every thread
-// that can wake one. watch is the deadline the one idle carrier watching the
-// fiber timers sleeps to (0: none watches).
+// that can wake one. A spare record keeps its retired carrier's handle@8
+// until then: the next start joins that thread before it reuses the record,
+// and the shutdown joins it before it frees the record, so no carrier
+// outlives a quiesce. watch is the deadline the one idle carrier watching
+// the fiber timers sleeps to (0: none watches).
 //
 // A carrier blocked in the kernel (a foreign call, a raw read of a FIFO or
 // pipe, any system call that waits) holds its OS thread: no fiber park frees
@@ -1439,9 +1442,10 @@ scheduler_carrier_list: fn(root: I64) -> I64 {
     list
 }
 
-// Joins every carrier of a list taken out from under the root lock, then
-// frees the records and the list: every carrier is joined before any record
-// is freed, since a carrier's wake reaches another's record after its unlock
+// Joins every carrier of a list taken out from under the root lock, each
+// until it has left the process (thread_join_gone), then frees the records
+// and the list: every carrier is joined before any record is freed, since a
+// carrier's wake reaches another's record after its unlock
 // (scheduler_kick_idle). Returns the number of joined threads.
 scheduler_carrier_list_join: fn(list: I64) -> I64 {
     if (list == I64{0}) { return I64{0} }
@@ -1449,7 +1453,7 @@ scheduler_carrier_list_join: fn(list: I64) -> I64 {
     data: sync_load(wrapping(list + I64{16}))
     at := I64{0}
     loop at < length {
-        _ := thread_join(sync_load(wrapping(sync_load(wrapping(data + at * I64{8})) + I64{8})), I64{0})
+        _ := thread_join_gone(sync_load(wrapping(sync_load(wrapping(data + at * I64{8})) + I64{8})))
         at += I64{1}
     }
     at = I64{0}
@@ -1489,7 +1493,8 @@ scheduler_carrier_free_index: fn(list: I64) -> I64 {
 // The spawn and the handle's publication share one critical section, so a
 // carrier (which locks the root before it reads its handle) and shutdown
 // both see a complete record, and two starts never take one index. The
-// record is a retired carrier's when one is spare.
+// record is a retired carrier's when one is spare; that carrier's thread,
+// which returned at its retirement, is joined first.
 scheduler_start_worker: fn(root: I64) {
     sync_thread_lock(root)
     record := sync_load(wrapping(root + I64{272}))
@@ -1497,7 +1502,10 @@ scheduler_start_worker: fn(root: I64) {
         sync_store(wrapping(root + I64{272}), sync_load(wrapping(record + SCHEDULER_CARRIER_NEXT)))
     }
     sync_thread_unlock(root)
-    if (record == I64{0}) { record = jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8}) }
+    if (record == I64{0}) { record = jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8}) } else {
+        retired: sync_load(wrapping(record + I64{8}))
+        if (retired != I64{0}) { _ := thread_join(retired, I64{0}) }
+    }
     thread_zero(record, SCHEDULER_CARRIER_BYTES)
     sync_store(record, root)
     sync_thread_lock(root)
@@ -2136,9 +2144,9 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
 }
 
 // An idle carrier past the pool size plus the blocked ones leaves: off the
-// carrier list (shutdown joins only listed carriers), detached, its record
-// spare (scheduler_carrier_spare). The root lock is held on entry and
-// released.
+// carrier list, its record spare with its handle (scheduler_carrier_spare),
+// which the next start or the shutdown joins. The root lock is held on entry
+// and released.
 scheduler_carrier_retire: fn(root: I64, record: I64) {
     list: sync_load(wrapping(root + I64{128}))
     length: sync_load(list)
@@ -2153,10 +2161,8 @@ scheduler_carrier_retire: fn(root: I64, record: I64) {
         } else { at += I64{1} }
     }
     sync_store(wrapping(root + I64{152}), wrapping(sync_load(wrapping(root + I64{152})) - I64{1}))
-    handle: sync_load(wrapping(record + I64{8}))
     scheduler_carrier_spare(root, record)
     sync_thread_unlock(root)
-    _ := thread_detach(handle)
 }
 
 // A queued job: a task state, or a parallel walk's worker (Parallel.jet),
@@ -2348,8 +2354,9 @@ scheduler_timer_cancel: fn(node: I64) {
     }
 }
 
-// Stops and joins the timer thread of an idle wheel. Returns the joined
-// thread count, or -1 (nothing stopped) while a timer is pending.
+// Stops and joins the timer thread of an idle wheel, until it has left the
+// process (thread_join_gone). Returns the joined thread count, or -1
+// (nothing stopped) while a timer is pending.
 scheduler_timer_shutdown: fn(root: I64) -> I64 {
     wheel: sync_load(wrapping(root + I64{104}))
     if (wheel == I64{0}) { return I64{0} }
@@ -2367,22 +2374,24 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
             _ := host_syscall(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
-    _ := thread_join(sync_load(wrapping(wheel + I64{40})), I64{0})
+    _ := thread_join_gone(sync_load(wrapping(wheel + I64{40})))
     sync_store(wrapping(root + I64{104}), I64{0})
     jet_rt_free(wheel, I64{48}, I64{8})
     I64{1}
 }
 
 // Quiesce for a userland exec (JetBackend Image/Loader.jet): stop and join
-// every scheduler thread this process started (the carriers, the timer and
-// monitor threads), so the caller is the process's only scheduler thread. 0
-// when none was ever started; otherwise the joined thread count. -1, with
-// nothing stopped, while a task is queued or still running its body, or a
-// timer is pending. A job that has run to its end (settled280) is waited
-// for, not refused: its join may return before its carrier, back on its own
-// stack, counts it off live, and that last step needs only the lock this
-// wait releases between its checks. So a quiesce right after a group joined
-// its tasks succeeds, under any load.
+// every scheduler thread this process started (the carriers, retired ones
+// included, the timer and monitor threads), so the caller is the process's
+// only scheduler thread. Each join waits until its thread has left the
+// process (thread_join_gone), so a thread count read next counts none of
+// them. 0 when none was ever started; otherwise the joined thread count.
+// -1, with nothing stopped, while a task is queued or still running its
+// body, or a timer is pending. A job that has run to its end (settled280)
+// is waited for, not refused: its join may return before its carrier, back
+// on its own stack, counts it off live, and that last step needs only the
+// lock this wait releases between its checks. So a quiesce right after a
+// group joined its tasks succeeds, under any load.
 // The caller guarantees no other thread submits work concurrently. The pool,
 // the timer and the monitor restart lazily on the next use; pooled fibers
 // stay for it.
@@ -2430,7 +2439,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     }
     monitor: sync_load(wrapping(root + I64{224}))
     if (monitor > I64{0}) {
-        _ := thread_join(monitor, I64{0})
+        _ := thread_join_gone(monitor)
         joined += I64{1}
     }
     sync_thread_lock(root)
@@ -2449,6 +2458,11 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     loop spare != (I64{0}) {
         record: spare
         spare = sync_load(wrapping(record + SCHEDULER_CARRIER_NEXT))
+        retired: sync_load(wrapping(record + I64{8}))
+        if (retired != I64{0}) {
+            _ := thread_join_gone(retired)
+            joined += I64{1}
+        }
         jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
     }
     jet_rt_observe_pool(I64{0}, I64{0})

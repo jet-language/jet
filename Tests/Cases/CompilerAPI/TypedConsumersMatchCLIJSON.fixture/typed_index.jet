@@ -1,0 +1,28 @@
+use compiler: core.compiler
+
+// machine.jet's state graphs, fact registry and derivations as typed code
+// reads them, printed in the shape `jet inspect compiler check machine.jet`
+// gives them, so the case compares the two documents value by value. A
+// state's span is printed without its file.
+CHECKED: #run { compiler.check(compiler.parse(embed_file("machine.jet")) ?? panic("parse")) ?? panic("check") }
+
+INDEX: #run { CHECKED.semantic_index() ?? panic("a check with only lints has an index") }
+
+quoted: fn(text: String) -> String {
+    escaped: text.replace("\\", "\\\\").replace("\"", "\\\"")
+    "\"{escaped}\""
+}
+
+listed: fn(values: [String]) -> String { "[{(loop value in values -> quoted(value)).join(",")}]" }
+
+optional: fn(value: String?) -> String { if value == .Val(text) -> quoted(text) else -> "null" }
+
+STATE_GRAPHS: #run (loop graph in INDEX.state_graphs -> "{{\"owner\":{quoted(graph.owner)},\"module\":{quoted(graph.module)},\"states\":[{(loop state in graph.states -> "{{\"name\":{quoted(state.name)},\"terminal\":{state.terminal},\"reachable\":{(if state.reachable == .Val(reachable) -> "{reachable}" else -> "null")},\"span\":{{\"start\":{state.span.start},\"end\":{state.span.end}}}}}").join(",")}],\"transitions\":[{(loop transition in graph.transitions -> "{{\"operation\":{quoted(transition.operation)},\"from\":{optional(transition.from)},\"to\":{quoted(transition.to)}}}").join(",")}]}}").join(",")
+
+FACT_REGISTRY: #run (loop fact in INDEX.fact_registry -> "{{\"kind\":{quoted(fact.kind)},\"name\":{quoted(fact.name)},\"members\":{listed(fact.members)},\"deny\":{listed(fact.deny)},\"from\":{listed(fact.from)}}}").join(",")
+
+DERIVATIONS: #run (loop record in INDEX.derivations -> "{{\"id\":{quoted(record.id)},\"subject\":{quoted(record.subject)},\"claim\":{quoted(record.claim)},\"producer\":{quoted(record.producer)},\"method\":{quoted(record.method)},\"rule\":{quoted(record.rule)},\"premises\":{listed(record.premises)},\"identity\":{{\"source\":{quoted(record.identity.source)},\"build\":{quoted(record.identity.build)},\"run\":{quoted(record.identity.run)},\"target\":{quoted(record.identity.target)}}},\"assumptions\":{listed(record.assumptions)},\"disposition\":{quoted(record.disposition)},\"observation\":{(if record.observation == .Val(observation) -> "{{\"counterexample\":{optional(observation.counterexample)},\"event\":{optional(observation.event)}}}" else -> "null")},\"payload\":{(if record.payload == .Val(payload) -> "{{\"kind\":{quoted(payload.kind)},\"json\":{quoted(payload.json)}}}" else -> "null")}}}").join(",")
+
+run: fn() {
+    print("{{\"compiler\":{{\"value\":{{\"semantic_index\":{{\"state_graphs\":[{STATE_GRAPHS}],\"fact_registry\":[{FACT_REGISTRY}],\"derivations\":[{DERIVATIONS}]}}}}}}}}")
+}

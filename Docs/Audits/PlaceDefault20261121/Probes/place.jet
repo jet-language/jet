@@ -11,7 +11,11 @@
 // - `place`: one body, no test. The list's header is storage the caller
 //   names, so each growth asks the runtime's place lookup (JetRuntime
 //   Alloc.jet alloc_owner) which allocator owns that storage: here the
-//   caller's frame, so the heap.
+//   caller's frame, so the heap. It returns only the length.
+// - `local`: `place`'s call and caller, but the callee builds its own list
+//   (growth place 0, no lookup) and returns its length. So `place` less
+//   `local` is the lookup alone, and `plain` less `local` is returning the
+//   list's header instead of a length.
 // - `arena`: the same body and the same calls, made inside the caller's
 //   `#Context(allocator: arena)` block. The lookup now finds the arena's
 //   carrier, so the list grows in the arena and rewinds with the block: the
@@ -19,7 +23,7 @@
 //   would be served.
 // Call forms: `direct` names the function; `value` and `closure` call a
 // function value and a capturing lambda, picked at run time.
-// Run: place <plain|arg|arm|place|arena> <direct|value|closure> <items> <rounds> 0
+// Run: place <plain|arg|arm|local|place|arena> <direct|value|closure> <items> <rounds> 0
 use {
     mem: core.mem
     process: core.process
@@ -65,6 +69,15 @@ build_into: fn(i: Int, items: Int, into: &[Int]) -> Int {
     into.len()
 }
 
+// `build_into`'s shape and caller, but the list is the callee's own, so its
+// growth never asks the place lookup.
+build_local: fn(i: Int, items: Int, into: &[Int]) -> Int {
+    out := [Int]{}
+    out.push(i)
+    loop k in 1..<items -> out.push(i + k)
+    out.len() + into.len()
+}
+
 direct: fn(conv: String, items: Int, dest: Int) -> Int {
     total := 0
     if conv == {
@@ -80,6 +93,12 @@ direct: fn(conv: String, items: Int, dest: Int) -> Int {
                 total += build_into(i, items, made)
             }
         }
+        "local" -> {
+            loop i in 0..<CALLS {
+                made := [Int]{}
+                total += build_local(i, items, made)
+            }
+        }
         else -> {
             loop i in 0..<CALLS -> total += build(i, items).len()
         }
@@ -87,7 +106,7 @@ direct: fn(conv: String, items: Int, dest: Int) -> Int {
     total
 }
 
-through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [Int], to: fn(Int, Int, Int) -> [Int], arm: fn(Int, Int, Int) -> [Int], into: fn(Int, Int, &[Int]) -> Int) -> Int {
+through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [Int], to: fn(Int, Int, Int) -> [Int], arm: fn(Int, Int, Int) -> [Int], into: fn(Int, Int, &[Int]) -> Int, local: fn(Int, Int, &[Int]) -> Int) -> Int {
     total := 0
     if conv == {
         "arg" -> {
@@ -102,6 +121,12 @@ through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [
                 total += into(i, items, made)
             }
         }
+        "local" -> {
+            loop i in 0..<CALLS {
+                made := [Int]{}
+                total += local(i, items, made)
+            }
+        }
         else -> {
             loop i in 0..<CALLS -> total += plain(i, items).len()
         }
@@ -111,7 +136,7 @@ through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [
 
 round: fn(conv: String, form: String, items: Int, dest: Int, pick: Int) -> Int {
     if form == {
-        "value" -> through_values(conv, items, dest, build, build_to, build_arm, build_into)
+        "value" -> through_values(conv, items, dest, build, build_to, build_arm, build_into, build_local)
         "closure" -> {
             through_values(
                 conv,
@@ -121,6 +146,7 @@ round: fn(conv: String, form: String, items: Int, dest: Int, pick: Int) -> Int {
                 fn(i, n, d) { build_to(i + pick, n, d) },
                 fn(i, n, d) { build_arm(i + pick, n, d) },
                 fn(i, n, into) { build_into(i + pick, n, into) },
+                fn(i, n, into) { build_local(i + pick, n, into) },
             )
         }
         else -> direct(conv, items, dest)

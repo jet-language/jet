@@ -1,14 +1,16 @@
 # Claim: `jet run` of a small program checks it (its few Core body records and its small taint walk included), builds its IR, merges it, selects it, writes its object and its debug sections and reads the runtime image on the calling thread; none of those steps starts a thread of its own, cold or warm, and the run prints what it always did
 requires: os-name:linux
-requires: tool:strace
+requires: arch:x86_64
 fixture: JetRunOfASmallProgramStartsOnlyTheCompileThread.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/store
-step: strace -f -qq -e trace=clone,clone3 -o {work}/run.trace {jet} run main.jet
+step: jet perf attach --lens=syscalls --out run.jettrace -- {jet} run main.jet
 exit: 0
 stdout: = "hello\n"
-file.filter(where ~ "CLONE_THREAD"): run.trace lines = 0 # only thread starts count; the compile task runs on the calling thread and a small object builds its debug sections there too
-step: strace -f -qq -e trace=clone,clone3 -o {work}/warm.trace {jet} run main.jet
+json: file run.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the run
+json: file run.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name~="clone"][?args~="CLONE_THREAD"] #= 0 # only thread starts count; the compile task runs on the calling thread and a small object builds its debug sections there too
+step: jet perf attach --lens=syscalls --out warm.jettrace -- {jet} run main.jet
 exit: 0
 stdout: = "hello\n"
-file.filter(where ~ "CLONE_THREAD"): warm.trace lines = 0 # the warm run, with the store the first run filled, starts none either
+json: file warm.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the warm run
+json: file warm.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name~="clone"][?args~="CLONE_THREAD"] #= 0 # the warm run, with the store the first run filled, starts none either

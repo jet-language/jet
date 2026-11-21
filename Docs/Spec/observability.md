@@ -1021,10 +1021,16 @@ An attach that can't run is refused by its cause. A process that isn't
 running, or runs without publishing what the attach reads (no live snapshot,
 no flight ring, or no live list for `--lens=alloc`), is E2124
 (`Jet.AttachTargetNotObserved`, exit 1), with the command that starts it
-observed. A command line that names no one process (no pid, two pids, or a
-word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
-that conflicts with the others, such as `--lens=alloc` without `--source`,
-is `Jet.InvalidCommandInput` (exit 2).
+observed. With no pid, the attach takes the one observed program of this
+user's that runs: one whose live snapshot in the temporary directory is its
+own and fresh. A command line that names no one process (no pid and no
+observed program, no pid and several, two pids, or a word that isn't a pid)
+is E2125 (`Jet.AttachWhichProcess`, exit 2); with several, it lists each
+pid and source. Without `--source`, the attach names the program's rows in
+the source its run published, read from the program's working directory.
+A flag that conflicts with the others, such as `--lens=alloc` without
+`--source`, or `--follow` with `--zones=`, `--for=` or `--lens=alloc`, is
+`Jet.InvalidCommandInput` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
 
 A process that publishes nothing about itself, as the jet CLI does and as a
@@ -1073,6 +1079,37 @@ Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
 attaches to a busy `jet check` for 3 seconds.
 
+The trace also keeps when each sample was taken, as the `timeline` receipt
+section (type `JetPerfTimeline`): `functions`, every function the samples
+were in, each as a `functions` row; `nodes`, their call tree, two numbers a
+node, its function's index and its parent's (-1 for a stack's outermost
+frame); and `samples`, two numbers a sample, the earliest first, its
+microseconds since `origin_unix_ns` and its innermost node (-1 for a stack
+with no named frame). The samples' clock is the monotonic one, read with
+the wall clock when the sampling starts, so a sample's wall time is
+`origin_unix_ns` plus its offset, and a tool lines the samples up with the
+phases of a `--trace-out` trace. Past 1,048,576 samples the timeline drops
+the rest, counted in `dropped`, and the `functions` section still counts
+them.
+
+`jet perf attach -- <command>` samples a command the same way, from outside
+it, from its first instruction to its end (D-PERF-TARGET1): jet starts the
+command with the kernel's task clock opened on it on each online CPU, with
+`inherit`, so every thread and process it starts is sampled too, and an
+`execve` names its later samples by the new executable. The command keeps
+jet's terminal; a word without a `/` is looked up on `PATH`. After it ends
+the attach prints the `functions` lines and the trace's path, the trace
+holds the `functions` and `timeline` sections, its run window is the
+command's whole run, and it exits with the command's exit code. A process
+names its frames when its first sample is read, every 20 ms, so a process
+that ends sooner may leave its samples `unnamed`. When the kernel won't
+sample it, the attach is `Jet.DriverOperationFailed` (exit 1) and the
+command doesn't run. `jet perf attach --quiet --out
+profile.jettrace -- jet check Compiler` profiles the compiler compiling
+itself, its timeline split by the phases of its `--trace-out` trace, as
+Tools/Perf/Scaling/Profile.mjs does.
+Tests/Cases/Perf/attach_samples_a_command.case is the worked example.
+
 `jet perf attach --lens=counts -- <command>` counts a command's work from
 its start (D-PERF-TARGET1): jet starts the command, opens two of the
 kernel's counters on it before it runs, user-mode instructions and cycles,
@@ -1100,10 +1137,43 @@ refused this user the counters; set the sysctl kernel.perf_event_paranoid
 to 2 or lower`. A count missing the start would mislead, so `--lens=counts`
 on a pid is refused (`Jet.UnknownFlag`, exit 2) with the `--` form as its
 fix; so are `--for=`, `--zones=`, `--source` and `--lens=alloc` with a
-command, a command without `--lens=counts`, and a pid with a command
-(`Jet.AttachWhichProcess`). A program that can't be started is
-`Jet.DriverOperationFailed` (exit 1).
+command, and a pid with a command (`Jet.AttachWhichProcess`). A program
+that can't be started is `Jet.DriverOperationFailed` (exit 1).
 Tests/Cases/Perf/attach_counts_a_command.case is the worked example.
+
+`jet perf attach --lens=syscalls -- <command>` traces each system call of a
+command, and of every thread and process it starts, from its start to its
+end (D-PERF-TARGET1), with no tracer but jet. jet starts the command traced
+as a whole: each call stops it twice, as it enters and as it returns, and
+jet's trace helper reads the call's registers at each stop. Its arguments
+are decoded as strace shows them: a path or buffer it reads is quoted,
+and flags (open, `AT_`, clone, mmap, socket families and types) are named.
+A `stat`, `statx`, pipe or socket pair the kernel filled shows what it
+holds, as `{st_mode=S_IFDIR|0700, st_size=4096, ...}`, and a failure shows
+its error by name (`-1 ENOENT`). A thread or process the command starts
+is traced from its first instruction; when the command itself ends, each
+process it left running is let go, untraced, and counted as `left`. The
+command keeps jet's terminal and its signals, and the attach exits with
+its exit code. After it ends the attach prints `syscalls calls=412
+processes=2`, then the trace's path. The trace holds every call as the
+`syscalls` receipt section (type `JetPerfSyscalls`), `status` `traced`:
+`calls` lists each in the order it returned, with its `pid`, `tid`,
+`number`, `name`, decoded `args` as one text and `result` (`?` for one
+that never returned, as `exit_group`), and `syscalls` sums them by process
+and name, with each row's `count` and `errors`. `jet perf view` prints the
+line, then each call after its process, as `  4251 openat(AT_FDCWD,
+"main.jet", O_RDONLY|O_CLOEXEC) = 3`. Where the kernel refuses the trace
+(Yama's `ptrace_scope` 2 or 3, a seccomp filter, or a tracer already on
+jet) the command still runs, untraced: `status` is `unavailable`, with the
+kernel's `errno`, the `ptrace_scope` and the `reason`, and the line reads
+`syscalls unavailable errno=1 ptrace_scope=3 · <reason>`. Each stop costs
+the command a round trip to jet's trace helper, so a traced command runs
+slower the more calls it makes; `--lens=counts,syscalls` counts it too,
+and the counts then include that cost. A trace missing the start would
+mislead, so `--lens=syscalls` on a pid is refused (`Jet.UnknownFlag`,
+exit 2) with the `--` form as its fix.
+Tests/Cases/Perf/attach_traces_a_commands_syscalls.case is the worked
+example.
 
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the
@@ -1192,6 +1262,40 @@ Tests/Cases/Perf/zones_request_lapses_unrenewed.case and
 Tests/Cases/Perf/overlapping_zones_attaches_share_the_window.case are the
 worked examples.
 
+While a zones window is open the program also keeps a live file,
+`jet-flight-<pid>.samples.live`, owner-only. It stands beside the ring when
+the private directory is a memory file system, else in `/dev/shm/jet-<euid>`,
+made and checked as the private directory is. Where neither is, no live
+file is made. Each thread that closes a zone claims a slot in it at its
+first record of the window. Its zones, frame marks, plots and log spans
+then go to its slot rather than its zone ring, with no lock, allocation or
+system call. A slot keeps the newest 256 KiB of records; each record
+carries a sequence number, so a reader counts the ones it missed. The
+header names the pid, the layout, the zones' clock as a pair that each
+turn refreshes, and how the window ended. At each turn the writer copies
+the slots' new records into `.samples.spans`, so a point attach reads the
+same rows as before. As the window closes, or at the exit, it copies the
+last of them, marks the end in the header and removes the file. A reader
+that holds it open keeps reading until it closes it.
+
+`jet perf attach [<pid>] --follow` holds a zones window open until Ctrl-C
+or the program's end. It leaves its lease and the trigger as `--zones=`
+does, then links the live file under its own name,
+`jet-perf-attach-<its pid>-<pid>-<ns>.live`, so it reads on after the
+program removes its own. Every millisecond it reads the slots' new
+records and prints each on stdout as it arrives, a line each, as `jet perf
+view`'s timeline shows them: `[<since>..<since>] app.jet#name`, timed from
+the window's opening, a plot as `name = value`. A slot that wrapped past
+the records it had not read yet prints `Lost <n> records of thread <t>:
+this follow fell behind`; a damaged one prints that it skipped to the
+newest. At the end it says how the program ended, `Process <pid> ended` or
+`Process <pid> ended without an exit (killed)`, and writes the trace: the
+rows it read, with the window's records while the program still runs.
+Ctrl-C ends it with exit 0. Where no live file stands (no memory file
+system), it says so and prints the rows each 100 ms turn adds to
+`.samples.spans`. Tests/Cases/Perf/attach_follow_draws_zone_before_exit.case
+is the worked example.
+
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
 rows: a program that closes more zones, log spans, frame marks and plots
@@ -1203,11 +1307,11 @@ writes the counts in a last row. The `zones` section keeps them as
 zones, 2 log spans`, naming each kind that lost any. A zone's `count`
 is the zones the file kept. Zones turning on in a flight-recorded run empty
 the flight ring's file first. At a normal exit the program removes its ring, the ring's image, its
-`.spans` and its `.window`. A killed program can't, so the next `jet perf run` or
-`jet perf attach` removes, from the temporary directory and the user's
-private directory, each file of this user's named for a process
+`.spans`, its `.window` and its live file. A killed program can't, so the next `jet perf run` or
+`jet perf attach` removes, from the temporary directory, the user's
+private directory and `/dev/shm/jet-<euid>`, each file of this user's named for a process
 (`jet-flight-<pid>.…`, `jet-perf-<pid>-…`, `jet-perf-attach-<pid>-…`, an
-attach's copies under the attach's own pid) when that process is gone or
+attach's copies and a follow's link under the attach's own pid) when that process is gone or
 started after the file was last written, a later process under the same
 pid. Tests/Cases/Perf/profiling_leaves_no_files.case and
 Tests/Cases/Perf/spans_file_is_bounded.case are the worked examples.
@@ -1486,6 +1590,11 @@ D-DBG-VERBS1=A names the commands:
   lists its function's parameters at -O1 and -O2 too: each with the value
   passed where the code still holds it, else `<Unavailable>` with why,
   never a stale value.
+- `backtrace <n>` (`bt <n>`) shows the first n frames, then how many more
+  there are, as `(2 more frames; `bt` shows them all)`; plain `bt` shows
+  them all, and a count under 1 is refused. A dump's `bt` takes it too.
+  Tests/Cases/Debug/backtrace_count_shows_the_first_frames.case is the
+  worked example.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by

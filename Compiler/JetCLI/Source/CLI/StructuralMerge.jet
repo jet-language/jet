@@ -90,20 +90,26 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 return JetCLIStructLoaded.Failed{output: jet_cli_ice(problem)}
             }
             index: jet_cli_checked_semindex(result)
-            units := [JetCLIStructUnit]{}
             absolute: jet_cli_report_path(jet_cli_report_cwd(), path)
-            loop fact in index.definition_facts {
+            facts := [Int]{}
+            loop (at, fact) in index.definition_facts {
                 if jet_cli_report_path(jet_cli_report_cwd(), fact.module_path) != absolute -> next
                 if fact.span.start < 0 || fact.span.start > fact.span.end || fact.span.end > source.bytes().len() {
                     return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug")}
                 }
-                units.push(JetCLIStructUnit{fact: fact.copy(), source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
+                facts.push(at)
             }
-            units.sort_by(fn(left: JetCLIStructUnit, right: JetCLIStructUnit) { left.fact.span.start <=> right.fact.span.start })
+            // Outermost first: a fact that starts with another sorts after the wider one.
+            facts.sort_by(fn(left: Int, right: Int) { (index.definition_facts[left].span.start <=> index.definition_facts[right].span.start).then(index.definition_facts[right].span.end <=> index.definition_facts[left].span.end) })
+            // A unit is a top-level declaration: a method's fact lies inside its
+            // type's, whose text carries it.
+            units := [JetCLIStructUnit]{}
             cursor := 0
-            loop row in 0..<units.len() {
-                units[row].leading = if cursor <= units[row].fact.span.start -> semindex_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
-                cursor = units[row].fact.span.end
+            loop at in facts {
+                fact: index.definition_facts[at]
+                if fact.span.start < cursor -> next
+                units.push(JetCLIStructUnit{fact: fact.copy(), source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: semindex_doc_text(source.bytes(), cursor, fact.span.start)})
+                cursor = fact.span.end
             }
             hash: sha256_hex(source)
             return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_modules, jet_cli_sem_normalize(path))}}

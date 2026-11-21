@@ -439,6 +439,7 @@ ConfigFacts: struct {
     version: String?,
     source: String?,
     deps: [String:DepSource],
+    dep_settings: [String:[ManifestEntry]],
     services: [String:ServiceFact],
     outputs: [String:OutputFact],
     environments: [String:EnvironmentFact],
@@ -465,6 +466,10 @@ PackageFacts: struct {
     // Optional runtime ceiling.
     layer: RuntimeLayer?,
     deps: [String:DepSource],
+    // The settings a record entry gives each dependency
+    // (`tool: { path: ../tool, settings: { loud: true } }`), by dependency
+    // name, values as written; no row for an entry without `settings:`.
+    dep_settings: [String:[ManifestEntry]]{[String:[ManifestEntry]]{}},
     // Package-level development mode.
     dev: DevPolicy,
     boundaries: [ImportBoundary],

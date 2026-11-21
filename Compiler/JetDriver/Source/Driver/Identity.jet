@@ -695,6 +695,9 @@ JetDriverSourceUnit: struct {
     in_namespace: Bool,
 }
 
+// One `deps:` entry. A record entry (`tool: { path: ../tool }`) carries the
+// source its short form spells (`../tool`, `^2`, or the git record), so
+// resolution reads every entry alike.
 JetDriverPackageDependency: struct {
     name: String,
     source: String,
@@ -702,6 +705,17 @@ JetDriverPackageDependency: struct {
     span: Span?,
     target_root_index: Int,
     script_version: String?{None},
+    // The settings a record entry gives the dependency
+    // (`settings: { loud: true }`), in written order.
+    settings: [JetDriverDependencySetting]{[JetDriverDependencySetting]{}},
+}
+
+// One setting a dependency entry gives: its name, its value as written (a
+// string's decoded text), and the `name: value` span in the manifest.
+JetDriverDependencySetting: struct {
+    name: String,
+    value: String,
+    span: Span,
 }
 
 JetDriverPackageEntry: struct {

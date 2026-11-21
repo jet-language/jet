@@ -1,0 +1,12 @@
+# A dependency entry in record form, `tool: { path: ../tool, settings: { … } }`, binds the same package the bare `tool: ../tool` does. A record that names two sources is refused as a manifest shape error.
+fixture: DependencyEntryRecord.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run app/main.jet
+exit: 0
+stdout: = "hello from tool\n"
+step: jet run twosource/main.jet
+exit: 1
+stderr: ~ "Jet.InvalidPackageManifest" # the record's shape
+stderr: ~ "needs exactly one of `path`, `git`, `version`" # names the rule it broke
+stderr: ~ "package.jet:4:5" # at the entry's own line

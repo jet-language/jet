@@ -90,31 +90,46 @@ pkg_ref_error_debug: fn(error: RefError) -> String Never! {
     }
 }
 
-pkg_parse_deps: fn(body: String) -> [String:DepSource] PackageParseError! {
+// One `deps: { … }` block: each entry's source, and the settings a record
+// entry gives the dependency (`tool: { path: ../tool, settings: { loud: true } }`),
+// by dependency name. An entry without `settings:` has no row.
+ParsedDeps: struct {
+    sources: [String:DepSource],
+    settings: [String:[ManifestEntry]],
+}
+
+// One record entry: its source and the settings it gives the dependency.
+DepRecord: struct {
+    source: DepSource,
+    settings: [ManifestEntry],
+}
+
+pkg_parse_deps: fn(body: String) -> ParsedDeps PackageParseError! {
     deps := [String:DepSource]{}
+    settings := [String:[ManifestEntry]]{}
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
         if !pkg_validate_dependency_name(name) {
             return Err(PackageParseError.Composition("dependency name `{name}` must be one safe path component"))
         }
-        trimmed: entry.value.trim()
-        source: pkg_parse_dep_value(name, trimmed)
         if deps.has_key(name) {
             return Err(PackageParseError.Composition("dependency `{name}` is declared more than once"))
         }
-        deps[name] = source
+        trimmed: entry.value.trim()
+        if trimmed.starts_with("{{") {
+            record: pkg_parse_dep_record(name, pkg_record_body(trimmed, "deps.{name}"))
+            deps[name] = record.source
+            if record.settings.len() > 0 -> settings[name] = record.settings
+            next
+        }
+        deps[name] = pkg_parse_dep_value(name, trimmed)
     }
-    Ok(deps)
+    Ok(ParsedDeps{sources: deps, settings: settings})
 }
 
-// Classify one dependency value: inline git record, native C link, foreign
+// Classify one non-record dependency value: native C link, foreign
 // namespace, source ref or bare path, `name#selector`, or quoted selector.
 pkg_parse_dep_value: fn(name: String, trimmed: String) -> DepSource PackageParseError! {
-    if trimmed.starts_with("{{") {
-        inner: trimmed.removeprefix("{{")
-        body: if inner.ends_with("}}") -> inner.removesuffix("}}") else -> inner
-        return pkg_parse_git_dep(name, body)
-    }
     if pkg_parse_c_lib_ref(trimmed) == {
         .Val(target) -> return Ok(DepSource.CLib{target: target})
         .None -> {}
@@ -176,34 +191,89 @@ pkg_parse_foreign_ref: fn(name: String, value: String) -> DepSource? PackagePars
     Ok(Val(DepSource.Foreign{language: language, reference: unquoted}))
 }
 
-// `git: "<url>", tag/branch/rev: "<value>"` with exactly one selector.
-pkg_parse_git_dep: fn(name: String, body: String) -> DepSource PackageParseError! {
+// A record entry: exactly one source, `path: ../tool`, `git: "<url>"` with
+// exactly one of `tag`/`branch`/`rev`, or `version: "^2"`, and an optional
+// `settings: { name: value }` giving the dependency's declared settings
+// values. Any other field is refused, so a misspelled one is never dropped.
+pkg_parse_dep_record: fn(name: String, body: String) -> DepRecord PackageParseError! {
+    path := String?{None}
     url := String?{None}
+    version := String?{None}
     tag_value := String?{None}
     branch_value := String?{None}
     rev_value := String?{None}
+    settings := [ManifestEntry]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) {
-            return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
+            return Err(PackageParseError.Composition("dependency `{name}.{entry.key}` is declared more than once"))
         }
         seen.push(entry.key)
         value: pkg_unquote(entry.value)
         if entry.key == {
+            "path" -> path = Val(value)
             "git" -> url = Val(value)
+            "version" -> version = Val(value)
             "tag" -> tag_value = Val(value)
             "branch" -> branch_value = Val(value)
             "rev" -> rev_value = Val(value)
-            else -> {}
+            "settings" -> settings = pkg_parse_dep_settings(name, entry.value)
+            else -> {
+                return Err(PackageParseError.Composition("dependency `{name}` has unknown field `{entry.key}`; a dependency record takes `path`, `git` with `tag`, `branch` or `rev`, `version`, and `settings`"))
+            }
         }
     }
-    found_url: url ?? return Err(PackageParseError.Composition("git dependency `{name}` is missing `git:`"))
+    sources: (if path == None -> 0 else -> 1) + (if url == None -> 0 else -> 1) + (if version == None -> 0 else -> 1)
+    if sources != 1 {
+        return Err(PackageParseError.Composition("dependency `{name}` needs exactly one of `path`, `git`, `version`"))
+    }
     selectors := [GitSelector]{}
     if tag_value == .Val(value) -> selectors.push(GitSelector.Tag(value))
     if branch_value == .Val(value) -> selectors.push(GitSelector.Branch(value))
     if rev_value == .Val(value) -> selectors.push(GitSelector.Rev(value))
-    if selectors.len() != 1 {
-        return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
+    if url == .Val(found_url) {
+        if selectors.len() != 1 {
+            return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
+        }
+        return Ok(DepRecord{source: DepSource.Git{url: found_url, selector: selectors[0]}, settings: settings})
     }
-    Ok(DepSource.Git{url: found_url, selector: selectors[0]})
+    if selectors.len() > 0 {
+        return Err(PackageParseError.Composition("dependency `{name}` gives `tag`, `branch` or `rev` without `git:`"))
+    }
+    if version == .Val(selector) {
+        if selector.trim() == "" {
+            return Err(PackageParseError.Composition("dependency `{name}` has an empty `version:`"))
+        }
+        return Ok(DepRecord{source: DepSource.Version(selector), settings: settings})
+    }
+    target: path ?? ""
+    if !pkg_is_bare_path(target) {
+        return Err(PackageParseError.Composition("dependency `{name}` has `path: {target}`, which must start with `./`, `../` or `/`"))
+    }
+    if ProviderRef.classify(target) == {
+        .Ok(parsed) -> Ok(DepRecord{source: DepSource.Provider{provider: parsed.provider, target: parsed.target}, settings: settings})
+        .Err(error) -> Err(pkg_dep_ref_error(name, error))
+    }
+}
+
+// `settings: { loud: true }` on a dependency entry: each setting's name and
+// its value as written. The compiler checks them against the settings the
+// dependency declares.
+pkg_parse_dep_settings: fn(name: String, value: String) -> [ManifestEntry] PackageParseError! {
+    settings := [ManifestEntry]{}
+    loop entry in pkg_key_value_entries(pkg_record_body(value, "deps.{name}.settings")) {
+        if !pkg_is_ascii_identifier(entry.key) {
+            return Err(PackageParseError.Composition("dependency `{name}` gives setting `{entry.key}`, which is not a setting name"))
+        }
+        if entry.value == "" {
+            return Err(PackageParseError.Composition("dependency `{name}`'s setting `{entry.key}` needs a value"))
+        }
+        loop known in settings {
+            if known.key == entry.key {
+                return Err(PackageParseError.Composition("dependency `{name}`'s setting `{entry.key}` is given more than once"))
+            }
+        }
+        settings.push(entry)
+    }
+    Ok(settings)
 }

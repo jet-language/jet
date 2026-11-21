@@ -1,0 +1,1355 @@
+// `jet perf attach --lens=syscalls -- <command>`: jet starts the command
+// traced as a whole (x64_trace_command), so each system call of the command
+// and of every thread and process it starts stops it as it enters and as it
+// returns. Each call is kept with its process and thread, its arguments
+// decoded (opened paths, open and clone flags, socket families, the stat a
+// call filled) and its result, as the trace's `syscalls` receipt section.
+// The command shares jet's terminal, and its exit code is the attach's.
+// With `--lens=counts,syscalls` the trace also counts it (x64_counters_open).
+// When the kernel refuses the trace, the command runs untraced and the
+// section says why.
+use {
+    perf_files: core.files
+    perf_process: core.process
+    perf_time: core.time
+    jet_backend.[
+        X64Counted,
+        X64Trace,
+        X64_TRACE_EVENT_EXEC,
+        X64_TRACE_ORIG_RAX,
+        X64_TRACE_R10,
+        X64_TRACE_R8,
+        X64_TRACE_R9,
+        X64_TRACE_RAX,
+        X64_TRACE_RDI,
+        X64_TRACE_RDX,
+        X64_TRACE_REGISTERS,
+        X64_TRACE_RSI,
+        X64_TRACE_SYSCALL_STOP,
+        x64_counted_run,
+        x64_counters_close,
+        x64_counters_open,
+        x64_trace_close,
+        x64_trace_command,
+        x64_trace_detach,
+        x64_trace_event_message,
+        x64_trace_of,
+        x64_trace_read,
+        x64_trace_stop,
+        x64_trace_syscall_step,
+    ]
+    jet_driver.[JetDriverVerbOutput]
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        TraceReceiptSection,
+        canonical_json_sha256,
+        jettrace_array,
+        jettrace_object_view,
+    ]
+}
+
+// The signal that stops a thread, which a thread or process the command
+// starts first stops with, and which jet sends a process it lets go.
+JET_CLI_PERF_SIGSTOP: 19
+
+// The longest path a call's argument shows, as the kernel's PATH_MAX.
+JET_CLI_PERF_PATH_MAX: 4096
+
+// The most bytes of a call's data buffer an argument shows.
+JET_CLI_PERF_BYTES_SHOWN: 32
+
+// A thread of a traced command: its id, its process's, whether its first
+// stop came (a thread or process the command starts begins stopped by a
+// SIGSTOP the trace swallows), whether jet asked it to stop so it can let
+// it go, and whether it has ended.
+JetCLIPerfTracee: struct {
+    tid: Int,
+    pid: Int,
+    started: Bool,
+    leaving: Bool,
+    gone: Bool,
+}
+
+// The system call a traced thread is inside: its number, its six arguments
+// and those decoded at its entry, one text per argument kind.
+JetCLIPerfCallEntry: struct {
+    number: Int,
+    args: [Int],
+    shown: [String],
+}
+
+// One system call a traced command made: its process, its thread, its
+// number and name, its decoded arguments as one text, its result (`?` for a
+// call that never returned, as exit_group) and whether it failed.
+JetCLIPerfTracedCall: struct {
+    pid: Int,
+    tid: Int,
+    number: Int,
+    name: String,
+    args: String,
+    result: String,
+    failed: Bool,
+}
+
+// What the trace of a command saw: the command's run (its wait status, the
+// CPU time and peak memory of its reap, and its counts under
+// `--lens=counts`), its calls in the order they returned, the processes it
+// had, those still running when it ended (each let go untraced), and the
+// error the kernel refused the trace with (0 when it traced).
+JetCLIPerfTracedRun: struct {
+    counted: X64Counted,
+    calls: [JetCLIPerfTracedCall],
+    processes: Int,
+    left: Int,
+    refused: Int,
+}
+
+// The calls of one name in one process (jet_cli_perf_traced_section).
+JetCLIPerfTracedSum: struct {
+    pid: Int,
+    number: Int,
+    name: String,
+    count: Int,
+    errors: Int,
+}
+
+// A system call's name and how each of its arguments reads, as space-separated
+// kinds (jet_cli_perf_call_arg).
+JetCLIPerfSyscallShape: struct {
+    name: String,
+    args: String,
+}
+
+// Trace `command` (its program's name or path, then its arguments), and
+// count it too when `counts`, and write the trace to `out`, or where any
+// attach writes it.
+jet_cli_perf_attach_syscalls: fn(command: &&[String], counts: Bool, out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+    name: command[0]
+    path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
+    started: perf_time.instant()
+    run := JetCLIPerfTracedRun{
+        counted: X64Counted{status: -1, failure: "", instructions: None, cycles: None, errno: 0, scaled: false, cpu_ns: 0, peak_rss_bytes: 0},
+        calls: [JetCLIPerfTracedCall]{},
+        processes: 0,
+        left: 0,
+        refused: 0,
+    }
+    trace := x64_trace_command(path, command, None)
+    if trace.refused != 0 {
+        // The program exited before its execve, so the command never ran:
+        // it runs now, untraced.
+        run.refused = trace.refused
+        x64_trace_close(trace)
+        run.counted = x64_counted_run(path, command, None)
+    } else if trace.failure != "" {
+        failure: "{trace.failure}"
+        x64_trace_close(trace)
+        return jet_cli_perf_failed("Jet can't run `{name}`: {failure}", color)
+    } else if counts {
+        counters: x64_counters_open(trace.pid)
+        jet_cli_perf_syscalls_follow(trace, run)
+        x64_counters_close(counters, run.counted)
+        x64_trace_close(trace)
+    } else {
+        jet_cli_perf_syscalls_follow(trace, run)
+        x64_trace_close(trace)
+    }
+    wall: started.elapsed().ns
+    if run.counted.failure != "" {
+        return jet_cli_perf_failed("Jet can't run `{name}`: {run.counted.failure}", color)
+    }
+    capture := jet_cli_perf_command_capture("a traced command keeps its system calls, not samples: its `syscalls` receipt section", run.counted.cpu_ns, wall)
+    capture.policy.allowlist = allowlist
+    scope: jet_cli_perf_ptrace_scope()
+    traced: jet_cli_perf_traced_section(run.calls, run.processes, run.left, run.refused, scope)
+    said := jet_cli_perf_traced_header(traced.value)
+    capture.receipts.push(traced)
+    if counts {
+        section: jet_cli_perf_counts_section(run.counted, wall, jet_cli_perf_counts_paranoid())
+        said = "{said}\n{jet_cli_perf_counts_text(section.value)}"
+        capture.receipts.push(section)
+    }
+    argv := [String]{"attach", if counts -> "--lens=counts,syscalls" else -> "--lens=syscalls"}
+    if allowlist.len() > 0 {
+        argv.push("--capture")
+        argv.push(allowlist.join(","))
+    }
+    argv.push("--")
+    argv.extend(command.move())
+    written: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_failed(err.message, color)
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{said}\nTrace: {written}\n", exit_code: jet_cli_perf_counts_exit(run.counted.status)}
+}
+
+// Follow the command `trace` started (x64_trace_command) to its end, each
+// system call of each of its threads into `run`. A thread or process it
+// starts is traced from its first stop, a SIGSTOP the trace swallows. A
+// signal for the command is delivered as it comes. Once the command ends,
+// each process it left running is stopped and let go, untraced.
+jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: &JetCLIPerfTracedRun) -[FS.Read, FFI.Asm]> Never! {
+    tracees := [JetCLIPerfTracee]{jet_cli_perf_tracee(trace.pid, trace.pid, true, false)}
+    // Each thread's latest place in `tracees`.
+    places := [Int:Int]{}
+    places[trace.pid] = 0
+    // The call each place's thread is inside, by its place.
+    open_calls := [Int:JetCLIPerfCallEntry]{}
+    pids := [Int]{trace.pid}
+    left := [Int]{}
+    live := 1
+    ended := false
+    resume := trace.pid
+    signal := 0
+    loop {
+        step: x64_trace_syscall_step(trace, resume, signal)
+        resume = 0
+        signal = 0
+        if step.thread <= 0 {
+            if !ended -> run.counted.failure = "the trace lost the command (errno {-step.thread})"
+            break
+        }
+        thread: step.thread
+        at := places.get(thread) ?? -1
+        if at >= 0 && tracees[at].gone -> at = -1
+        if step.status & 0xff != 0x7f {
+            // The thread ended.
+            if at >= 0 {
+                if open_calls.pop(at) == .Val(entry) {
+                    run.calls.push(jet_cli_perf_call_finish(trace, tracees[at], entry.move(), None))
+                }
+                tracees[at].gone = true
+                live -= 1
+            }
+            if thread == trace.pid {
+                ended = true
+                run.counted.status = step.status
+                run.counted.cpu_ns = step.cpu_ns
+                run.counted.peak_rss_bytes = step.peak_rss_bytes
+                loop index in 0..<tracees.len() {
+                    if tracees[index].gone || tracees[index].leaving -> next
+                    tracees[index].leaving = true
+                    _ := x64_trace_stop(x64_trace_of(trace, tracees[index].pid), tracees[index].tid)
+                }
+            }
+            if ended && live == 0 -> break
+            next
+        }
+        if at < 0 {
+            pid: jet_cli_perf_thread_process(thread)
+            if !pids.contains(pid) -> pids.push(pid)
+            at = tracees.len()
+            places[thread] = at
+            tracees.push(jet_cli_perf_tracee(thread, pid, false, ended))
+            live += 1
+        }
+        stop: (step.status >> 8) & 0xff
+        event: step.status >> 16
+        if stop == X64_TRACE_SYSCALL_STOP {
+            jet_cli_perf_syscall_stop(trace, tracees, at, step.registers, open_calls, run.calls)
+            resume = thread
+            next
+        }
+        if event != 0 {
+            if event == X64_TRACE_EVENT_EXEC {
+                // An execve by another thread than the program's first takes
+                // the first one's id: its call goes on under this one.
+                former: x64_trace_event_message(x64_trace_of(trace, thread)) ?? thread
+                was: if former == thread -> -1 else -> places.get(former) ?? -1
+                if was >= 0 && !tracees[was].gone {
+                    _ := open_calls.pop(at)
+                    if open_calls.pop(was) == .Val(entry) -> open_calls[at] = entry.move()
+                    tracees[was].gone = true
+                    live -= 1
+                }
+            }
+            resume = thread
+            next
+        }
+        if stop == JET_CLI_PERF_SIGSTOP && (!tracees[at].started || tracees[at].leaving) {
+            if tracees[at].leaving {
+                _ := x64_trace_detach(x64_trace_of(trace, thread), 0)
+                if !left.contains(tracees[at].pid) -> left.push(tracees[at].pid)
+                tracees[at].gone = true
+                live -= 1
+                if ended && live == 0 -> break
+                next
+            }
+            tracees[at].started = true
+            resume = thread
+            next
+        }
+        tracees[at].started = true
+        resume = thread
+        signal = stop
+    }
+    run.processes = pids.len()
+    run.left = left.len()
+}
+
+// A thread first seen stopped: `started` when its first stop has come,
+// `leaving` when jet lets it go at its next SIGSTOP.
+jet_cli_perf_tracee: fn(tid: Int, pid: Int, started: Bool, leaving: Bool) -> JetCLIPerfTracee Never! {
+    JetCLIPerfTracee{tid: tid, pid: pid, started: started, leaving: leaving, gone: false}
+}
+
+// The process thread `thread` belongs to (its `/proc` status's Tgid);
+// itself when that can't be read.
+jet_cli_perf_thread_process: fn(thread: Int) -[FS.Read]> Int Never! {
+    text: perf_files.read("/proc/{thread}/status") ?? return thread
+    loop line in text.lines() {
+        if line.starts_with("Tgid:") {
+            return Int.parse(line.slice(5..<line.len()).trim()) ?? thread
+        }
+    }
+    thread
+}
+
+// Yama's ptrace_scope, None where the kernel has no Yama.
+jet_cli_perf_ptrace_scope: fn() -[FS]> Int? Never! {
+    text: perf_files.read("/proc/sys/kernel/yama/ptrace_scope") ?? return None
+    level: Int.parse(text.trim()) ?? return None
+    Val(level)
+}
+
+// A system call's stop of `tracees[at]`, whose `registers` the step read:
+// at its entry the call's number and arguments open it in `open_calls`,
+// those read before the kernel runs it decoded; at its exit the call, its
+// result and the arguments the kernel filled join `calls`.
+jet_cli_perf_syscall_stop: fn(trace: X64Trace, tracees: [JetCLIPerfTracee], at: Int, registers: [Int], open_calls: &[Int:JetCLIPerfCallEntry], calls: &[JetCLIPerfTracedCall]) -[FFI.Asm]> Never! {
+    if registers.len() != X64_TRACE_REGISTERS {
+        return
+    }
+    if open_calls.pop(at) == .Val(entry) {
+        calls.push(jet_cli_perf_call_finish(trace, tracees[at], entry.move(), Val(registers[X64_TRACE_RAX])))
+        return
+    }
+    number: registers[X64_TRACE_ORIG_RAX]
+    args: [Int]{registers[X64_TRACE_RDI], registers[X64_TRACE_RSI], registers[X64_TRACE_RDX], registers[X64_TRACE_R10], registers[X64_TRACE_R8], registers[X64_TRACE_R9]}
+    shown: jet_cli_perf_call_entry(x64_trace_of(trace, tracees[at].tid), number, args)
+    open_calls[at] = JetCLIPerfCallEntry{number: number, args: args, shown: shown}
+}
+
+// The arguments of call `number` that read at its entry, decoded; "" for
+// each the kernel fills (jet_cli_perf_call_exit_kind).
+jet_cli_perf_call_entry: fn(view: X64Trace, number: Int, args: [Int]) -[FFI.Asm]> [String] Never! {
+    kinds: jet_cli_perf_call_kinds(jet_cli_perf_syscall_shape(number).args)
+    shown := [String]{}
+    loop (index, kind) in kinds {
+        if index >= args.len() || jet_cli_perf_call_exit_kind(kind) {
+            shown.push("")
+            next
+        }
+        after: if index + 1 < args.len() -> args[index + 1] else -> 0
+        shown.push(jet_cli_perf_call_arg(view, kind, args[index], after))
+    }
+    shown
+}
+
+// The kinds of a call's arguments, from its shape's `args`.
+jet_cli_perf_call_kinds: fn(args: String) -> [String] Never! {
+    if args == "" -> return [String]{}
+    args.split(" ").to_list()
+}
+
+// Whether an argument of kind `kind` is one the kernel fills, so it reads
+// at the call's exit.
+jet_cli_perf_call_exit_kind: fn(kind: String) -> Bool Never! {
+    kind == "out" || kind == "stat" || kind == "statx" || kind == "pair"
+}
+
+// The call `tracee` was inside, opened as `entry` (jet_cli_perf_syscall_stop),
+// returned with `result` (None for one that never returned): the arguments
+// decoded at its entry move into it, those the kernel filled are decoded
+// now, when it succeeded. Its entry decoded one text per argument kind.
+jet_cli_perf_call_finish: fn(trace: X64Trace, tracee: JetCLIPerfTracee, entry: &&JetCLIPerfCallEntry, result: Int?) -[FFI.Asm]> JetCLIPerfTracedCall Never! {
+    number: entry.number
+    args: entry.args
+    shape: jet_cli_perf_syscall_shape(number)
+    kinds: jet_cli_perf_call_kinds(shape.args)
+    view: x64_trace_of(trace, tracee.tid)
+    value: result ?? 0
+    failed: result != None && value < 0 && value >= -4095
+    parts := [String]{}
+    loop (index, shown) in entry.shown.move() {
+        if index >= args.len() || index >= kinds.len() -> break
+        kind: kinds[index]
+        arg: args[index]
+        // An open's mode counts only when it creates a file.
+        if kind == "mode" && index > 0 && kinds[index - 1] == "oflags" && args[index - 1] & 0x400040 == 0 {
+            next
+        }
+        if !jet_cli_perf_call_exit_kind(kind) {
+            parts.push(shown)
+            next
+        }
+        if result == None || failed {
+            parts.push(jet_cli_perf_call_hex(arg))
+            next
+        }
+        parts.push(jet_cli_perf_call_arg(view, kind, arg, value))
+    }
+    said: if result == .Val(returned) -> jet_cli_perf_call_result(number, returned) else -> "?"
+    JetCLIPerfTracedCall{pid: tracee.pid, tid: tracee.tid, number: number, name: shape.name, args: parts.join(", "), result: said, failed: failed}
+}
+
+// A call's result as strace shows one: `-1 ENOENT` for an error, an address
+// in hex for the calls that return one, otherwise in decimal.
+jet_cli_perf_call_result: fn(number: Int, value: Int) -> String Never! {
+    if value < 0 && value >= -4095 -> return "-1 {jet_cli_perf_errno_name(-value)}"
+    // mmap, brk, mremap and shmat return an address.
+    if number == 9 || number == 12 || number == 25 || number == 30 {
+        return jet_cli_perf_call_hex(value)
+    }
+    "{value}"
+}
+
+// Argument `value` of kind `kind`, read from the stopped thread `view`
+// where it points into it; `next` is the argument after it, or the call's
+// result for the kinds the kernel fills: a buffer's length.
+jet_cli_perf_call_arg: fn(view: X64Trace, kind: String, value: Int, next: Int) -[FFI.Asm]> String Never! {
+    if kind == {
+        "int" -> "{value}"
+        "uint" -> if value < 0 -> jet_cli_perf_call_hex(value) else -> "{value}"
+        "fd" -> "{jet_cli_perf_int32(value)}"
+        "dirfd" -> if jet_cli_perf_int32(value) == -100 -> "AT_FDCWD" else -> "{jet_cli_perf_int32(value)}"
+        "path" -> jet_cli_perf_call_string(view, value)
+        "in" -> jet_cli_perf_call_bytes(view, value, next)
+        "out" -> jet_cli_perf_call_bytes(view, value, next)
+        "oflags" -> jet_cli_perf_open_flags(value)
+        "mode" -> jet_cli_perf_call_mode(value)
+        "atflags" -> jet_cli_perf_flags(value, [Int]{0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000}, [String]{"AT_SYMLINK_NOFOLLOW", "AT_REMOVEDIR", "AT_SYMLINK_FOLLOW", "AT_NO_AUTOMOUNT", "AT_EMPTY_PATH", "AT_STATX_FORCE_SYNC", "AT_STATX_DONT_SYNC", "AT_RECURSIVE"}, "0")
+        "clone" -> jet_cli_perf_clone_flags(value)
+        "cloneargs" -> jet_cli_perf_clone_args(view, value)
+        "stat" -> jet_cli_perf_call_stat(view, value)
+        "statx" -> jet_cli_perf_call_statx(view, value)
+        "domain" -> jet_cli_perf_socket_domain(value)
+        "socktype" -> jet_cli_perf_socket_type(value)
+        "pair" -> jet_cli_perf_call_pair(view, value)
+        "prot" -> jet_cli_perf_flags(value, [Int]{1, 2, 4, 8, 0x1000000, 0x2000000}, [String]{"PROT_READ", "PROT_WRITE", "PROT_EXEC", "PROT_SEM", "PROT_GROWSDOWN", "PROT_GROWSUP"}, "PROT_NONE")
+        "mapflags" -> jet_cli_perf_map_flags(value)
+        "signal" -> jet_cli_perf_signal_name(value)
+        "argv" -> jet_cli_perf_call_strings(view, value)
+        else -> if value == 0 -> "NULL" else -> jet_cli_perf_call_hex(value)
+    }
+}
+
+// The low 32 bits of `value`, signed: a C int argument.
+jet_cli_perf_int32: fn(value: Int) -> Int Never! {
+    low: value & 0xffffffff
+    if low >= 0x80000000 -> low - 0x100000000 else -> low
+}
+
+// `value` in hex, its 64 bits unsigned.
+jet_cli_perf_call_hex: fn(value: Int) -> String Never! {
+    digits: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop k in 0..<16 {
+        nibble: (value >> (60 - 4 * k)) & 15
+        if out.len() == 0 && nibble == 0 && k < 15 -> next
+        out.push(digits[nibble])
+    }
+    "0x{String.from_bytes(out) ?? ""}"
+}
+
+// `value` in octal.
+jet_cli_perf_octal: fn(value: Int) -> String Never! {
+    reversed := [U8]{}
+    rest := value
+    loop {
+        reversed.push(U8{48 + rest % 8})
+        rest /%= 8
+        if rest <= 0 -> break
+    }
+    out := [U8]{}
+    index := reversed.len() - 1
+    loop index >= 0 {
+        out.push(reversed[index])
+        index -= 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// A permission mode as strace shows one: `0700`.
+jet_cli_perf_call_mode: fn(value: Int) -> String Never! {
+    digits: jet_cli_perf_octal(value & 0o7777)
+    padded := digits
+    loop padded.len() < 3 -> padded = "0{padded}"
+    "0{padded}"
+}
+
+// A file's type and mode (st_mode) as strace shows one: `S_IFDIR|0700`.
+jet_cli_perf_file_mode: fn(mode: Int) -> String Never! {
+    kind: if mode & 0o170000 == {
+        0o140000 -> "S_IFSOCK|"
+        0o120000 -> "S_IFLNK|"
+        0o100000 -> "S_IFREG|"
+        0o060000 -> "S_IFBLK|"
+        0o040000 -> "S_IFDIR|"
+        0o020000 -> "S_IFCHR|"
+        0o010000 -> "S_IFIFO|"
+        else -> ""
+    }
+    special := ""
+    if mode & 0o4000 != 0 -> special = "{special}S_ISUID|"
+    if mode & 0o2000 != 0 -> special = "{special}S_ISGID|"
+    if mode & 0o1000 != 0 -> special = "{special}S_ISVTX|"
+    "{kind}{special}{jet_cli_perf_call_mode(mode & 0o777)}"
+}
+
+// The flag names of `value`, `|`-joined: each mask in `masks` whose bits
+// are all set names itself (`names`), in order, and takes its bits; bits no
+// mask took follow in hex. `zero` for no bits at all.
+jet_cli_perf_flags: fn(value: Int, masks: [Int], names: &&[String], zero: &&String) -> String Never! {
+    rest := value & 0xffffffff
+    if rest == 0 -> return zero.move()
+    parts := [String]{}
+    loop (index, name) in names.move() {
+        mask: masks[index]
+        if rest & mask == mask {
+            parts.push(name)
+            rest -= mask
+        }
+    }
+    if rest != 0 -> parts.push(jet_cli_perf_call_hex(rest))
+    parts.join("|")
+}
+
+// An open's flags: its access mode, then the others (O_SYNC before the
+// O_DSYNC it holds, O_TMPFILE before the O_DIRECTORY it holds).
+jet_cli_perf_open_flags: fn(value: Int) -> String Never! {
+    access: if value & 3 == {
+        0 -> "O_RDONLY"
+        1 -> "O_WRONLY"
+        2 -> "O_RDWR"
+        else -> "O_ACCMODE"
+    }
+    rest: value & 0xfffffffc
+    if rest == 0 -> return access
+    "{access}|{jet_cli_perf_flags(rest, [Int]{0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x101000, 0x1000, 0x2000, 0x4000, 0x8000, 0x410000, 0x10000, 0x20000, 0x40000, 0x80000, 0x200000}, [String]{"O_CREAT", "O_EXCL", "O_NOCTTY", "O_TRUNC", "O_APPEND", "O_NONBLOCK", "O_SYNC", "O_DSYNC", "O_ASYNC", "O_DIRECT", "O_LARGEFILE", "O_TMPFILE", "O_DIRECTORY", "O_NOFOLLOW", "O_NOATIME", "O_CLOEXEC", "O_PATH"}, "0")}"
+}
+
+// clone's flags, the exit signal in its low byte last.
+jet_cli_perf_clone_flags: fn(value: Int) -> String Never! {
+    exit_signal: value & 0xff
+    flags: value & 0xffffff00
+    parts := [String]{}
+    if flags != 0 {
+        parts.push(jet_cli_perf_flags(flags, [Int]{0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000, 0x800000, 0x1000000, 0x2000000, 0x4000000, 0x8000000, 0x10000000, 0x20000000, 0x40000000, 0x80000000}, [String]{"CLONE_VM", "CLONE_FS", "CLONE_FILES", "CLONE_SIGHAND", "CLONE_PIDFD", "CLONE_PTRACE", "CLONE_VFORK", "CLONE_PARENT", "CLONE_THREAD", "CLONE_NEWNS", "CLONE_SYSVSEM", "CLONE_SETTLS", "CLONE_PARENT_SETTID", "CLONE_CHILD_CLEARTID", "CLONE_DETACHED", "CLONE_UNTRACED", "CLONE_CHILD_SETTID", "CLONE_NEWCGROUP", "CLONE_NEWUTS", "CLONE_NEWIPC", "CLONE_NEWUSER", "CLONE_NEWPID", "CLONE_NEWNET", "CLONE_IO"}, "0"))
+    }
+    if exit_signal != 0 -> parts.push(jet_cli_perf_signal_name(exit_signal))
+    if parts.len() == 0 -> return "0"
+    parts.join("|")
+}
+
+// clone3's argument block (struct clone_args): its flags, exit signal,
+// stack and stack size.
+jet_cli_perf_clone_args: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    if address == 0 -> return "NULL"
+    bytes: x64_trace_read(view, address, 56) ?? return jet_cli_perf_call_hex(address)
+    if bytes.len() < 56 -> return jet_cli_perf_call_hex(address)
+    flags: jet_cli_perf_word(bytes, 0)
+    exit_signal: jet_cli_perf_word(bytes, 32)
+    stack: jet_cli_perf_word(bytes, 40)
+    size: jet_cli_perf_word(bytes, 48)
+    signal: if exit_signal == 0 -> "0" else -> jet_cli_perf_signal_name(exit_signal)
+    "{{flags={jet_cli_perf_clone_flags(flags)}, exit_signal={signal}, stack={jet_cli_perf_call_hex(stack)}, stack_size={jet_cli_perf_call_hex(size)}}}"
+}
+
+// The little-endian word of `bytes` at `at`, its `width` bytes (8 unless
+// given).
+jet_cli_perf_word: fn(bytes: [U8], at: Int, width: Int{8}) -> Int Never! {
+    value := 0
+    loop k in 0..<width -> value = value | Int{bytes[at + k]} << (8 * k)
+    value
+}
+
+// The struct stat a call filled: its mode and size.
+jet_cli_perf_call_stat: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    bytes: x64_trace_read(view, address, 56) ?? return jet_cli_perf_call_hex(address)
+    if bytes.len() < 56 -> return jet_cli_perf_call_hex(address)
+    "{{st_mode={jet_cli_perf_file_mode(jet_cli_perf_word(bytes, 24, width: 4))}, st_size={jet_cli_perf_word(bytes, 48)}, ...}}"
+}
+
+// The struct statx a call filled: its mode and size.
+jet_cli_perf_call_statx: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    bytes: x64_trace_read(view, address, 48) ?? return jet_cli_perf_call_hex(address)
+    if bytes.len() < 48 -> return jet_cli_perf_call_hex(address)
+    "{{stx_mode={jet_cli_perf_file_mode(jet_cli_perf_word(bytes, 28, width: 2))}, stx_size={jet_cli_perf_word(bytes, 40)}, ...}}"
+}
+
+// The two descriptors a pipe or socketpair filled: `[3, 4]`.
+jet_cli_perf_call_pair: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    bytes: x64_trace_read(view, address, 8) ?? return jet_cli_perf_call_hex(address)
+    if bytes.len() < 8 -> return jet_cli_perf_call_hex(address)
+    "[{jet_cli_perf_int32(jet_cli_perf_word(bytes, 0, width: 4))}, {jet_cli_perf_int32(jet_cli_perf_word(bytes, 4, width: 4))}]"
+}
+
+// The NUL-ended string at `address`, quoted, up to
+// JET_CLI_PERF_PATH_MAX bytes; NULL for none, its address where none of
+// it can be read.
+jet_cli_perf_call_string: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    if address == 0 -> return "NULL"
+    held := [U8]{}
+    loop held.len() < JET_CLI_PERF_PATH_MAX {
+        chunk: x64_trace_read(view, address + held.len(), 256) ?? break
+        loop byte in chunk {
+            if byte == (U8{0}) -> return jet_cli_perf_call_quoted(held, false)
+            held.push(byte)
+        }
+        if chunk.len() < 256 -> break
+    }
+    if held.len() == 0 -> return jet_cli_perf_call_hex(address)
+    jet_cli_perf_call_quoted(held, true)
+}
+
+// The `length` bytes of a buffer at `address`, quoted, at most
+// JET_CLI_PERF_BYTES_SHOWN of them.
+jet_cli_perf_call_bytes: fn(view: X64Trace, address: Int, length: Int) -[FFI.Asm]> String Never! {
+    if length <= 0 -> return "\"\""
+    if address == 0 -> return "NULL"
+    want: if length < JET_CLI_PERF_BYTES_SHOWN -> length else -> JET_CLI_PERF_BYTES_SHOWN
+    bytes: x64_trace_read(view, address, want) ?? return jet_cli_perf_call_hex(address)
+    jet_cli_perf_call_quoted(bytes, length > bytes.len())
+}
+
+// The NULL-ended list of strings at `address` (an execve's argv), at most
+// 32 of them.
+jet_cli_perf_call_strings: fn(view: X64Trace, address: Int) -[FFI.Asm]> String Never! {
+    if address == 0 -> return "NULL"
+    words: x64_trace_read(view, address, 8 * 33) ?? return jet_cli_perf_call_hex(address)
+    parts := [String]{}
+    more := true
+    loop k in 0..<(words.len() /% 8) {
+        pointer: jet_cli_perf_word(words, 8 * k)
+        if pointer == 0 {
+            more = false
+            break
+        }
+        if k == 32 -> break
+        parts.push(jet_cli_perf_call_string(view, pointer))
+    }
+    tail: if more -> ", ..." else -> ""
+    "[{parts.join(", ")}{tail}]"
+}
+
+// `bytes` as a C string literal, as strace shows one: printable ASCII as
+// itself, `"` and `\` escaped, the usual control escapes, and any other
+// byte in octal; `more` adds `...` for bytes left out.
+jet_cli_perf_call_quoted: fn(bytes: [U8], more: Bool) -> String Never! {
+    out := [U8]{U8{34}}
+    loop (index, byte) in bytes {
+        code: Int{byte}
+        escape: if code == {
+            34 -> "\\\""
+            92 -> "\\\\"
+            9 -> "\\t"
+            10 -> "\\n"
+            11 -> "\\v"
+            12 -> "\\f"
+            13 -> "\\r"
+            else -> ""
+        }
+        if escape != "" {
+            loop piece in escape.bytes() -> out.push(piece)
+            next
+        }
+        if code >= 32 && code < 127 {
+            out.push(byte)
+            next
+        }
+        // A digit after the escape would read as part of it: three digits.
+        after: if index + 1 < bytes.len() -> Int{bytes[index + 1]} else -> 0
+        digits := jet_cli_perf_octal(code)
+        if after >= 48 && after <= 55 {
+            loop digits.len() < 3 -> digits = "0{digits}"
+        }
+        out.push(U8{92})
+        loop piece in digits.bytes() -> out.push(piece)
+    }
+    out.push(U8{34})
+    text: String.from_bytes(out) ?? "\"\""
+    if more -> "{text}..." else -> text
+}
+
+// A socket's address family.
+jet_cli_perf_socket_domain: fn(value: Int) -> String Never! {
+    if value == {
+        0 -> "AF_UNSPEC"
+        1 -> "AF_UNIX"
+        2 -> "AF_INET"
+        10 -> "AF_INET6"
+        16 -> "AF_NETLINK"
+        17 -> "AF_PACKET"
+        38 -> "AF_ALG"
+        40 -> "AF_VSOCK"
+        else -> "{value}"
+    }
+}
+
+// A socket's type, then its SOCK_NONBLOCK and SOCK_CLOEXEC.
+jet_cli_perf_socket_type: fn(value: Int) -> String Never! {
+    base: if value & 0xf == {
+        1 -> "SOCK_STREAM"
+        2 -> "SOCK_DGRAM"
+        3 -> "SOCK_RAW"
+        4 -> "SOCK_RDM"
+        5 -> "SOCK_SEQPACKET"
+        6 -> "SOCK_DCCP"
+        10 -> "SOCK_PACKET"
+        else -> "{value & 0xf}"
+    }
+    rest: value & 0xfffffff0
+    if rest == 0 -> return base
+    "{base}|{jet_cli_perf_flags(rest, [Int]{0x800, 0x80000}, [String]{"SOCK_NONBLOCK", "SOCK_CLOEXEC"}, "0")}"
+}
+
+// mmap's flags: its sharing type, then the others.
+jet_cli_perf_map_flags: fn(value: Int) -> String Never! {
+    base: if value & 0xf == {
+        1 -> "MAP_SHARED"
+        2 -> "MAP_PRIVATE"
+        3 -> "MAP_SHARED_VALIDATE"
+        else -> "{value & 0xf}"
+    }
+    rest: value & 0xfffffff0
+    if rest == 0 -> return base
+    "{base}|{jet_cli_perf_flags(rest, [Int]{0x10, 0x20, 0x40, 0x100, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000}, [String]{"MAP_FIXED", "MAP_ANONYMOUS", "MAP_32BIT", "MAP_GROWSDOWN", "MAP_DENYWRITE", "MAP_EXECUTABLE", "MAP_LOCKED", "MAP_NORESERVE", "MAP_POPULATE", "MAP_NONBLOCK", "MAP_STACK", "MAP_HUGETLB", "MAP_SYNC", "MAP_FIXED_NOREPLACE"}, "0")}"
+}
+
+// The x86-64 Linux name of signal `signal`.
+jet_cli_perf_signal_name: fn(signal: Int) -> String Never! {
+    if signal == {
+        1 -> "SIGHUP"
+        2 -> "SIGINT"
+        3 -> "SIGQUIT"
+        4 -> "SIGILL"
+        5 -> "SIGTRAP"
+        6 -> "SIGABRT"
+        7 -> "SIGBUS"
+        8 -> "SIGFPE"
+        9 -> "SIGKILL"
+        10 -> "SIGUSR1"
+        11 -> "SIGSEGV"
+        12 -> "SIGUSR2"
+        13 -> "SIGPIPE"
+        14 -> "SIGALRM"
+        15 -> "SIGTERM"
+        16 -> "SIGSTKFLT"
+        17 -> "SIGCHLD"
+        18 -> "SIGCONT"
+        19 -> "SIGSTOP"
+        20 -> "SIGTSTP"
+        21 -> "SIGTTIN"
+        22 -> "SIGTTOU"
+        23 -> "SIGURG"
+        24 -> "SIGXCPU"
+        25 -> "SIGXFSZ"
+        26 -> "SIGVTALRM"
+        27 -> "SIGPROF"
+        28 -> "SIGWINCH"
+        29 -> "SIGIO"
+        30 -> "SIGPWR"
+        31 -> "SIGSYS"
+        else -> if signal >= 34 && signal <= 64 -> "SIGRTMIN+{signal - 34}" else -> "{signal}"
+    }
+}
+
+// The x86-64 Linux name of error `errno`, the kernel's own restart codes
+// a tracer sees included.
+jet_cli_perf_errno_name: fn(errno: Int) -> String Never! {
+    if errno == {
+        1 -> "EPERM"
+        2 -> "ENOENT"
+        3 -> "ESRCH"
+        4 -> "EINTR"
+        5 -> "EIO"
+        6 -> "ENXIO"
+        7 -> "E2BIG"
+        8 -> "ENOEXEC"
+        9 -> "EBADF"
+        10 -> "ECHILD"
+        11 -> "EAGAIN"
+        12 -> "ENOMEM"
+        13 -> "EACCES"
+        14 -> "EFAULT"
+        15 -> "ENOTBLK"
+        16 -> "EBUSY"
+        17 -> "EEXIST"
+        18 -> "EXDEV"
+        19 -> "ENODEV"
+        20 -> "ENOTDIR"
+        21 -> "EISDIR"
+        22 -> "EINVAL"
+        23 -> "ENFILE"
+        24 -> "EMFILE"
+        25 -> "ENOTTY"
+        26 -> "ETXTBSY"
+        27 -> "EFBIG"
+        28 -> "ENOSPC"
+        29 -> "ESPIPE"
+        30 -> "EROFS"
+        31 -> "EMLINK"
+        32 -> "EPIPE"
+        33 -> "EDOM"
+        34 -> "ERANGE"
+        35 -> "EDEADLK"
+        36 -> "ENAMETOOLONG"
+        37 -> "ENOLCK"
+        38 -> "ENOSYS"
+        39 -> "ENOTEMPTY"
+        40 -> "ELOOP"
+        42 -> "ENOMSG"
+        43 -> "EIDRM"
+        61 -> "ENODATA"
+        62 -> "ETIME"
+        71 -> "EPROTO"
+        74 -> "EBADMSG"
+        75 -> "EOVERFLOW"
+        77 -> "EBADFD"
+        84 -> "EILSEQ"
+        88 -> "ENOTSOCK"
+        89 -> "EDESTADDRREQ"
+        90 -> "EMSGSIZE"
+        91 -> "EPROTOTYPE"
+        92 -> "ENOPROTOOPT"
+        93 -> "EPROTONOSUPPORT"
+        94 -> "ESOCKTNOSUPPORT"
+        95 -> "EOPNOTSUPP"
+        96 -> "EPFNOSUPPORT"
+        97 -> "EAFNOSUPPORT"
+        98 -> "EADDRINUSE"
+        99 -> "EADDRNOTAVAIL"
+        100 -> "ENETDOWN"
+        101 -> "ENETUNREACH"
+        102 -> "ENETRESET"
+        103 -> "ECONNABORTED"
+        104 -> "ECONNRESET"
+        105 -> "ENOBUFS"
+        106 -> "EISCONN"
+        107 -> "ENOTCONN"
+        108 -> "ESHUTDOWN"
+        109 -> "ETOOMANYREFS"
+        110 -> "ETIMEDOUT"
+        111 -> "ECONNREFUSED"
+        112 -> "EHOSTDOWN"
+        113 -> "EHOSTUNREACH"
+        114 -> "EALREADY"
+        115 -> "EINPROGRESS"
+        116 -> "ESTALE"
+        121 -> "EREMOTEIO"
+        122 -> "EDQUOT"
+        123 -> "ENOMEDIUM"
+        124 -> "EMEDIUMTYPE"
+        125 -> "ECANCELED"
+        126 -> "ENOKEY"
+        127 -> "EKEYEXPIRED"
+        128 -> "EKEYREVOKED"
+        129 -> "EKEYREJECTED"
+        130 -> "EOWNERDEAD"
+        131 -> "ENOTRECOVERABLE"
+        132 -> "ERFKILL"
+        133 -> "EHWPOISON"
+        512 -> "ERESTARTSYS"
+        513 -> "ERESTARTNOINTR"
+        514 -> "ERESTARTNOHAND"
+        515 -> "ENOIOCTLCMD"
+        516 -> "ERESTART_RESTARTBLOCK"
+        else -> "errno {errno}"
+    }
+}
+
+// The x86-64 Linux name of host call `number`, as the runtime's table and a
+// traced command's calls name it.
+jet_cli_perf_syscall_name: fn(number: U64) -> String Never! {
+    jet_cli_perf_syscall_shape(Int{number}).name
+}
+
+// A call's shape (jet_cli_perf_syscall_shape).
+jet_cli_perf_shape: fn(name: String, args: String) -> JetCLIPerfSyscallShape Never! {
+    JetCLIPerfSyscallShape{name: name, args: args}
+}
+
+// The name of x86-64 Linux system call `number` and the kinds of its
+// arguments (jet_cli_perf_call_arg): `syscall_<number>` with six addresses
+// for one this table doesn't know.
+jet_cli_perf_syscall_shape: fn(number: Int) -> JetCLIPerfSyscallShape Never! {
+    if number == {
+        0 -> jet_cli_perf_shape("read", "fd out uint")
+        1 -> jet_cli_perf_shape("write", "fd in uint")
+        2 -> jet_cli_perf_shape("open", "path oflags mode")
+        3 -> jet_cli_perf_shape("close", "fd")
+        4 -> jet_cli_perf_shape("stat", "path stat")
+        5 -> jet_cli_perf_shape("fstat", "fd stat")
+        6 -> jet_cli_perf_shape("lstat", "path stat")
+        7 -> jet_cli_perf_shape("poll", "addr uint int")
+        8 -> jet_cli_perf_shape("lseek", "fd int int")
+        9 -> jet_cli_perf_shape("mmap", "addr uint prot mapflags fd int")
+        10 -> jet_cli_perf_shape("mprotect", "addr uint prot")
+        11 -> jet_cli_perf_shape("munmap", "addr uint")
+        12 -> jet_cli_perf_shape("brk", "addr")
+        13 -> jet_cli_perf_shape("rt_sigaction", "signal addr addr uint")
+        14 -> jet_cli_perf_shape("rt_sigprocmask", "int addr addr uint")
+        15 -> jet_cli_perf_shape("rt_sigreturn", "")
+        16 -> jet_cli_perf_shape("ioctl", "fd addr addr")
+        17 -> jet_cli_perf_shape("pread64", "fd out uint int")
+        18 -> jet_cli_perf_shape("pwrite64", "fd in uint int")
+        19 -> jet_cli_perf_shape("readv", "fd addr int")
+        20 -> jet_cli_perf_shape("writev", "fd addr int")
+        21 -> jet_cli_perf_shape("access", "path int")
+        22 -> jet_cli_perf_shape("pipe", "pair")
+        23 -> jet_cli_perf_shape("select", "int addr addr addr addr")
+        24 -> jet_cli_perf_shape("sched_yield", "")
+        25 -> jet_cli_perf_shape("mremap", "addr uint uint int addr")
+        26 -> jet_cli_perf_shape("msync", "addr uint int")
+        27 -> jet_cli_perf_shape("mincore", "addr uint addr")
+        28 -> jet_cli_perf_shape("madvise", "addr uint int")
+        29 -> jet_cli_perf_shape("shmget", "int uint int")
+        30 -> jet_cli_perf_shape("shmat", "int addr int")
+        31 -> jet_cli_perf_shape("shmctl", "int int addr")
+        32 -> jet_cli_perf_shape("dup", "fd")
+        33 -> jet_cli_perf_shape("dup2", "fd fd")
+        34 -> jet_cli_perf_shape("pause", "")
+        35 -> jet_cli_perf_shape("nanosleep", "addr addr")
+        36 -> jet_cli_perf_shape("getitimer", "int addr")
+        37 -> jet_cli_perf_shape("alarm", "uint")
+        38 -> jet_cli_perf_shape("setitimer", "int addr addr")
+        39 -> jet_cli_perf_shape("getpid", "")
+        40 -> jet_cli_perf_shape("sendfile", "fd fd addr uint")
+        41 -> jet_cli_perf_shape("socket", "domain socktype int")
+        42 -> jet_cli_perf_shape("connect", "fd addr int")
+        43 -> jet_cli_perf_shape("accept", "fd addr addr")
+        44 -> jet_cli_perf_shape("sendto", "fd in uint int addr int")
+        45 -> jet_cli_perf_shape("recvfrom", "fd out uint int addr addr")
+        46 -> jet_cli_perf_shape("sendmsg", "fd addr int")
+        47 -> jet_cli_perf_shape("recvmsg", "fd addr int")
+        48 -> jet_cli_perf_shape("shutdown", "fd int")
+        49 -> jet_cli_perf_shape("bind", "fd addr int")
+        50 -> jet_cli_perf_shape("listen", "fd int")
+        51 -> jet_cli_perf_shape("getsockname", "fd addr addr")
+        52 -> jet_cli_perf_shape("getpeername", "fd addr addr")
+        53 -> jet_cli_perf_shape("socketpair", "domain socktype int pair")
+        54 -> jet_cli_perf_shape("setsockopt", "fd int int addr int")
+        55 -> jet_cli_perf_shape("getsockopt", "fd int int addr addr")
+        56 -> jet_cli_perf_shape("clone", "clone addr addr addr addr")
+        57 -> jet_cli_perf_shape("fork", "")
+        58 -> jet_cli_perf_shape("vfork", "")
+        59 -> jet_cli_perf_shape("execve", "path argv addr")
+        60 -> jet_cli_perf_shape("exit", "int")
+        61 -> jet_cli_perf_shape("wait4", "int addr int addr")
+        62 -> jet_cli_perf_shape("kill", "int signal")
+        63 -> jet_cli_perf_shape("uname", "addr")
+        64 -> jet_cli_perf_shape("semget", "int int int")
+        65 -> jet_cli_perf_shape("semop", "int addr uint")
+        66 -> jet_cli_perf_shape("semctl", "int int int addr")
+        67 -> jet_cli_perf_shape("shmdt", "addr")
+        68 -> jet_cli_perf_shape("msgget", "int int")
+        69 -> jet_cli_perf_shape("msgsnd", "int addr uint int")
+        70 -> jet_cli_perf_shape("msgrcv", "int addr uint int int")
+        71 -> jet_cli_perf_shape("msgctl", "int int addr")
+        72 -> jet_cli_perf_shape("fcntl", "fd int addr")
+        73 -> jet_cli_perf_shape("flock", "fd int")
+        74 -> jet_cli_perf_shape("fsync", "fd")
+        75 -> jet_cli_perf_shape("fdatasync", "fd")
+        76 -> jet_cli_perf_shape("truncate", "path int")
+        77 -> jet_cli_perf_shape("ftruncate", "fd int")
+        78 -> jet_cli_perf_shape("getdents", "fd addr uint")
+        79 -> jet_cli_perf_shape("getcwd", "addr uint")
+        80 -> jet_cli_perf_shape("chdir", "path")
+        81 -> jet_cli_perf_shape("fchdir", "fd")
+        82 -> jet_cli_perf_shape("rename", "path path")
+        83 -> jet_cli_perf_shape("mkdir", "path mode")
+        84 -> jet_cli_perf_shape("rmdir", "path")
+        85 -> jet_cli_perf_shape("creat", "path mode")
+        86 -> jet_cli_perf_shape("link", "path path")
+        87 -> jet_cli_perf_shape("unlink", "path")
+        88 -> jet_cli_perf_shape("symlink", "path path")
+        89 -> jet_cli_perf_shape("readlink", "path addr uint")
+        90 -> jet_cli_perf_shape("chmod", "path mode")
+        91 -> jet_cli_perf_shape("fchmod", "fd mode")
+        92 -> jet_cli_perf_shape("chown", "path int int")
+        93 -> jet_cli_perf_shape("fchown", "fd int int")
+        94 -> jet_cli_perf_shape("lchown", "path int int")
+        95 -> jet_cli_perf_shape("umask", "mode")
+        96 -> jet_cli_perf_shape("gettimeofday", "addr addr")
+        97 -> jet_cli_perf_shape("getrlimit", "int addr")
+        98 -> jet_cli_perf_shape("getrusage", "int addr")
+        99 -> jet_cli_perf_shape("sysinfo", "addr")
+        100 -> jet_cli_perf_shape("times", "addr")
+        101 -> jet_cli_perf_shape("ptrace", "int int addr addr")
+        102 -> jet_cli_perf_shape("getuid", "")
+        103 -> jet_cli_perf_shape("syslog", "int addr int")
+        104 -> jet_cli_perf_shape("getgid", "")
+        105 -> jet_cli_perf_shape("setuid", "int")
+        106 -> jet_cli_perf_shape("setgid", "int")
+        107 -> jet_cli_perf_shape("geteuid", "")
+        108 -> jet_cli_perf_shape("getegid", "")
+        109 -> jet_cli_perf_shape("setpgid", "int int")
+        110 -> jet_cli_perf_shape("getppid", "")
+        111 -> jet_cli_perf_shape("getpgrp", "")
+        112 -> jet_cli_perf_shape("setsid", "")
+        113 -> jet_cli_perf_shape("setreuid", "int int")
+        114 -> jet_cli_perf_shape("setregid", "int int")
+        115 -> jet_cli_perf_shape("getgroups", "int addr")
+        116 -> jet_cli_perf_shape("setgroups", "int addr")
+        117 -> jet_cli_perf_shape("setresuid", "int int int")
+        118 -> jet_cli_perf_shape("getresuid", "addr addr addr")
+        119 -> jet_cli_perf_shape("setresgid", "int int int")
+        120 -> jet_cli_perf_shape("getresgid", "addr addr addr")
+        121 -> jet_cli_perf_shape("getpgid", "int")
+        122 -> jet_cli_perf_shape("setfsuid", "int")
+        123 -> jet_cli_perf_shape("setfsgid", "int")
+        124 -> jet_cli_perf_shape("getsid", "int")
+        125 -> jet_cli_perf_shape("capget", "addr addr")
+        126 -> jet_cli_perf_shape("capset", "addr addr")
+        127 -> jet_cli_perf_shape("rt_sigpending", "addr uint")
+        128 -> jet_cli_perf_shape("rt_sigtimedwait", "addr addr addr uint")
+        129 -> jet_cli_perf_shape("rt_sigqueueinfo", "int signal addr")
+        130 -> jet_cli_perf_shape("rt_sigsuspend", "addr uint")
+        131 -> jet_cli_perf_shape("sigaltstack", "addr addr")
+        132 -> jet_cli_perf_shape("utime", "path addr")
+        133 -> jet_cli_perf_shape("mknod", "path mode uint")
+        134 -> jet_cli_perf_shape("uselib", "path")
+        135 -> jet_cli_perf_shape("personality", "addr")
+        136 -> jet_cli_perf_shape("ustat", "uint addr")
+        137 -> jet_cli_perf_shape("statfs", "path addr")
+        138 -> jet_cli_perf_shape("fstatfs", "fd addr")
+        139 -> jet_cli_perf_shape("sysfs", "int addr addr")
+        140 -> jet_cli_perf_shape("getpriority", "int int")
+        141 -> jet_cli_perf_shape("setpriority", "int int int")
+        142 -> jet_cli_perf_shape("sched_setparam", "int addr")
+        143 -> jet_cli_perf_shape("sched_getparam", "int addr")
+        144 -> jet_cli_perf_shape("sched_setscheduler", "int int addr")
+        145 -> jet_cli_perf_shape("sched_getscheduler", "int")
+        146 -> jet_cli_perf_shape("sched_get_priority_max", "int")
+        147 -> jet_cli_perf_shape("sched_get_priority_min", "int")
+        148 -> jet_cli_perf_shape("sched_rr_get_interval", "int addr")
+        149 -> jet_cli_perf_shape("mlock", "addr uint")
+        150 -> jet_cli_perf_shape("munlock", "addr uint")
+        151 -> jet_cli_perf_shape("mlockall", "int")
+        152 -> jet_cli_perf_shape("munlockall", "")
+        153 -> jet_cli_perf_shape("vhangup", "")
+        154 -> jet_cli_perf_shape("modify_ldt", "int addr uint")
+        155 -> jet_cli_perf_shape("pivot_root", "path path")
+        156 -> jet_cli_perf_shape("_sysctl", "addr")
+        157 -> jet_cli_perf_shape("prctl", "int addr addr addr addr")
+        158 -> jet_cli_perf_shape("arch_prctl", "int addr")
+        159 -> jet_cli_perf_shape("adjtimex", "addr")
+        160 -> jet_cli_perf_shape("setrlimit", "int addr")
+        161 -> jet_cli_perf_shape("chroot", "path")
+        162 -> jet_cli_perf_shape("sync", "")
+        163 -> jet_cli_perf_shape("acct", "path")
+        164 -> jet_cli_perf_shape("settimeofday", "addr addr")
+        165 -> jet_cli_perf_shape("mount", "path path path addr addr")
+        166 -> jet_cli_perf_shape("umount2", "path int")
+        167 -> jet_cli_perf_shape("swapon", "path int")
+        168 -> jet_cli_perf_shape("swapoff", "path")
+        169 -> jet_cli_perf_shape("reboot", "addr addr addr addr")
+        170 -> jet_cli_perf_shape("sethostname", "addr uint")
+        171 -> jet_cli_perf_shape("setdomainname", "addr uint")
+        172 -> jet_cli_perf_shape("iopl", "int")
+        173 -> jet_cli_perf_shape("ioperm", "addr addr int")
+        175 -> jet_cli_perf_shape("init_module", "addr uint addr")
+        176 -> jet_cli_perf_shape("delete_module", "path int")
+        179 -> jet_cli_perf_shape("quotactl", "int path int addr")
+        186 -> jet_cli_perf_shape("gettid", "")
+        187 -> jet_cli_perf_shape("readahead", "fd int uint")
+        188 -> jet_cli_perf_shape("setxattr", "path path addr uint int")
+        189 -> jet_cli_perf_shape("lsetxattr", "path path addr uint int")
+        190 -> jet_cli_perf_shape("fsetxattr", "fd path addr uint int")
+        191 -> jet_cli_perf_shape("getxattr", "path path addr uint")
+        192 -> jet_cli_perf_shape("lgetxattr", "path path addr uint")
+        193 -> jet_cli_perf_shape("fgetxattr", "fd path addr uint")
+        194 -> jet_cli_perf_shape("listxattr", "path addr uint")
+        195 -> jet_cli_perf_shape("llistxattr", "path addr uint")
+        196 -> jet_cli_perf_shape("flistxattr", "fd addr uint")
+        197 -> jet_cli_perf_shape("removexattr", "path path")
+        198 -> jet_cli_perf_shape("lremovexattr", "path path")
+        199 -> jet_cli_perf_shape("fremovexattr", "fd path")
+        200 -> jet_cli_perf_shape("tkill", "int signal")
+        201 -> jet_cli_perf_shape("time", "addr")
+        202 -> jet_cli_perf_shape("futex", "addr int int addr addr int")
+        203 -> jet_cli_perf_shape("sched_setaffinity", "int uint addr")
+        204 -> jet_cli_perf_shape("sched_getaffinity", "int uint addr")
+        205 -> jet_cli_perf_shape("set_thread_area", "addr")
+        206 -> jet_cli_perf_shape("io_setup", "uint addr")
+        207 -> jet_cli_perf_shape("io_destroy", "addr")
+        208 -> jet_cli_perf_shape("io_getevents", "addr int int addr addr")
+        209 -> jet_cli_perf_shape("io_submit", "addr int addr")
+        210 -> jet_cli_perf_shape("io_cancel", "addr addr addr")
+        211 -> jet_cli_perf_shape("get_thread_area", "addr")
+        212 -> jet_cli_perf_shape("lookup_dcookie", "addr addr uint")
+        213 -> jet_cli_perf_shape("epoll_create", "int")
+        216 -> jet_cli_perf_shape("remap_file_pages", "addr uint int int int")
+        217 -> jet_cli_perf_shape("getdents64", "fd addr uint")
+        218 -> jet_cli_perf_shape("set_tid_address", "addr")
+        219 -> jet_cli_perf_shape("restart_syscall", "")
+        220 -> jet_cli_perf_shape("semtimedop", "int addr uint addr")
+        221 -> jet_cli_perf_shape("fadvise64", "fd int int int")
+        222 -> jet_cli_perf_shape("timer_create", "int addr addr")
+        223 -> jet_cli_perf_shape("timer_settime", "int int addr addr")
+        224 -> jet_cli_perf_shape("timer_gettime", "int addr")
+        225 -> jet_cli_perf_shape("timer_getoverrun", "int")
+        226 -> jet_cli_perf_shape("timer_delete", "int")
+        227 -> jet_cli_perf_shape("clock_settime", "int addr")
+        228 -> jet_cli_perf_shape("clock_gettime", "int addr")
+        229 -> jet_cli_perf_shape("clock_getres", "int addr")
+        230 -> jet_cli_perf_shape("clock_nanosleep", "int int addr addr")
+        231 -> jet_cli_perf_shape("exit_group", "int")
+        232 -> jet_cli_perf_shape("epoll_wait", "fd addr int int")
+        233 -> jet_cli_perf_shape("epoll_ctl", "fd int fd addr")
+        234 -> jet_cli_perf_shape("tgkill", "int int signal")
+        235 -> jet_cli_perf_shape("utimes", "path addr")
+        237 -> jet_cli_perf_shape("mbind", "addr uint int addr uint uint")
+        238 -> jet_cli_perf_shape("set_mempolicy", "int addr uint")
+        239 -> jet_cli_perf_shape("get_mempolicy", "addr addr uint addr uint")
+        240 -> jet_cli_perf_shape("mq_open", "path oflags mode addr")
+        241 -> jet_cli_perf_shape("mq_unlink", "path")
+        242 -> jet_cli_perf_shape("mq_timedsend", "fd addr uint uint addr")
+        243 -> jet_cli_perf_shape("mq_timedreceive", "fd addr uint addr addr")
+        244 -> jet_cli_perf_shape("mq_notify", "fd addr")
+        245 -> jet_cli_perf_shape("mq_getsetattr", "fd addr addr")
+        246 -> jet_cli_perf_shape("kexec_load", "addr uint addr addr")
+        247 -> jet_cli_perf_shape("waitid", "int int addr int addr")
+        248 -> jet_cli_perf_shape("add_key", "path path addr uint int")
+        249 -> jet_cli_perf_shape("request_key", "path path path int")
+        250 -> jet_cli_perf_shape("keyctl", "int addr addr addr addr")
+        251 -> jet_cli_perf_shape("ioprio_set", "int int int")
+        252 -> jet_cli_perf_shape("ioprio_get", "int int")
+        253 -> jet_cli_perf_shape("inotify_init", "")
+        254 -> jet_cli_perf_shape("inotify_add_watch", "fd path addr")
+        255 -> jet_cli_perf_shape("inotify_rm_watch", "fd int")
+        256 -> jet_cli_perf_shape("migrate_pages", "int uint addr addr")
+        257 -> jet_cli_perf_shape("openat", "dirfd path oflags mode")
+        258 -> jet_cli_perf_shape("mkdirat", "dirfd path mode")
+        259 -> jet_cli_perf_shape("mknodat", "dirfd path mode uint")
+        260 -> jet_cli_perf_shape("fchownat", "dirfd path int int atflags")
+        261 -> jet_cli_perf_shape("futimesat", "dirfd path addr")
+        262 -> jet_cli_perf_shape("newfstatat", "dirfd path stat atflags")
+        263 -> jet_cli_perf_shape("unlinkat", "dirfd path atflags")
+        264 -> jet_cli_perf_shape("renameat", "dirfd path dirfd path")
+        265 -> jet_cli_perf_shape("linkat", "dirfd path dirfd path atflags")
+        266 -> jet_cli_perf_shape("symlinkat", "path dirfd path")
+        267 -> jet_cli_perf_shape("readlinkat", "dirfd path addr uint")
+        268 -> jet_cli_perf_shape("fchmodat", "dirfd path mode")
+        269 -> jet_cli_perf_shape("faccessat", "dirfd path int")
+        270 -> jet_cli_perf_shape("pselect6", "int addr addr addr addr addr")
+        271 -> jet_cli_perf_shape("ppoll", "addr uint addr addr uint")
+        272 -> jet_cli_perf_shape("unshare", "clone")
+        273 -> jet_cli_perf_shape("set_robust_list", "addr uint")
+        274 -> jet_cli_perf_shape("get_robust_list", "int addr addr")
+        275 -> jet_cli_perf_shape("splice", "fd addr fd addr uint int")
+        276 -> jet_cli_perf_shape("tee", "fd fd uint int")
+        277 -> jet_cli_perf_shape("sync_file_range", "fd int int int")
+        278 -> jet_cli_perf_shape("vmsplice", "fd addr uint int")
+        279 -> jet_cli_perf_shape("move_pages", "int uint addr addr addr int")
+        280 -> jet_cli_perf_shape("utimensat", "dirfd path addr atflags")
+        281 -> jet_cli_perf_shape("epoll_pwait", "fd addr int int addr uint")
+        282 -> jet_cli_perf_shape("signalfd", "fd addr uint")
+        283 -> jet_cli_perf_shape("timerfd_create", "int int")
+        284 -> jet_cli_perf_shape("eventfd", "uint")
+        285 -> jet_cli_perf_shape("fallocate", "fd int int int")
+        286 -> jet_cli_perf_shape("timerfd_settime", "fd int addr addr")
+        287 -> jet_cli_perf_shape("timerfd_gettime", "fd addr")
+        288 -> jet_cli_perf_shape("accept4", "fd addr addr int")
+        289 -> jet_cli_perf_shape("signalfd4", "fd addr uint int")
+        290 -> jet_cli_perf_shape("eventfd2", "uint int")
+        291 -> jet_cli_perf_shape("epoll_create1", "int")
+        292 -> jet_cli_perf_shape("dup3", "fd fd oflags")
+        293 -> jet_cli_perf_shape("pipe2", "pair oflags")
+        294 -> jet_cli_perf_shape("inotify_init1", "int")
+        295 -> jet_cli_perf_shape("preadv", "fd addr int int")
+        296 -> jet_cli_perf_shape("pwritev", "fd addr int int")
+        297 -> jet_cli_perf_shape("rt_tgsigqueueinfo", "int int signal addr")
+        298 -> jet_cli_perf_shape("perf_event_open", "addr int int int addr")
+        299 -> jet_cli_perf_shape("recvmmsg", "fd addr uint int addr")
+        300 -> jet_cli_perf_shape("fanotify_init", "addr addr")
+        301 -> jet_cli_perf_shape("fanotify_mark", "fd addr addr dirfd path")
+        302 -> jet_cli_perf_shape("prlimit64", "int int addr addr")
+        303 -> jet_cli_perf_shape("name_to_handle_at", "dirfd path addr addr atflags")
+        304 -> jet_cli_perf_shape("open_by_handle_at", "fd addr oflags")
+        305 -> jet_cli_perf_shape("clock_adjtime", "int addr")
+        306 -> jet_cli_perf_shape("syncfs", "fd")
+        307 -> jet_cli_perf_shape("sendmmsg", "fd addr uint int")
+        308 -> jet_cli_perf_shape("setns", "fd clone")
+        309 -> jet_cli_perf_shape("getcpu", "addr addr addr")
+        310 -> jet_cli_perf_shape("process_vm_readv", "int addr uint addr uint uint")
+        311 -> jet_cli_perf_shape("process_vm_writev", "int addr uint addr uint uint")
+        312 -> jet_cli_perf_shape("kcmp", "int int int addr addr")
+        313 -> jet_cli_perf_shape("finit_module", "fd path int")
+        314 -> jet_cli_perf_shape("sched_setattr", "int addr uint")
+        315 -> jet_cli_perf_shape("sched_getattr", "int addr uint uint")
+        316 -> jet_cli_perf_shape("renameat2", "dirfd path dirfd path addr")
+        317 -> jet_cli_perf_shape("seccomp", "int addr addr")
+        318 -> jet_cli_perf_shape("getrandom", "addr uint addr")
+        319 -> jet_cli_perf_shape("memfd_create", "path addr")
+        320 -> jet_cli_perf_shape("kexec_file_load", "fd fd uint path addr")
+        321 -> jet_cli_perf_shape("bpf", "int addr uint")
+        322 -> jet_cli_perf_shape("execveat", "dirfd path argv addr atflags")
+        323 -> jet_cli_perf_shape("userfaultfd", "addr")
+        324 -> jet_cli_perf_shape("membarrier", "int addr")
+        325 -> jet_cli_perf_shape("mlock2", "addr uint addr")
+        326 -> jet_cli_perf_shape("copy_file_range", "fd addr fd addr uint addr")
+        327 -> jet_cli_perf_shape("preadv2", "fd addr int int int addr")
+        328 -> jet_cli_perf_shape("pwritev2", "fd addr int int int addr")
+        329 -> jet_cli_perf_shape("pkey_mprotect", "addr uint prot int")
+        330 -> jet_cli_perf_shape("pkey_alloc", "addr addr")
+        331 -> jet_cli_perf_shape("pkey_free", "int")
+        332 -> jet_cli_perf_shape("statx", "dirfd path atflags addr statx")
+        333 -> jet_cli_perf_shape("io_pgetevents", "addr int int addr addr addr")
+        334 -> jet_cli_perf_shape("rseq", "addr uint addr addr")
+        424 -> jet_cli_perf_shape("pidfd_send_signal", "fd signal addr addr")
+        425 -> jet_cli_perf_shape("io_uring_setup", "uint addr")
+        426 -> jet_cli_perf_shape("io_uring_enter", "fd uint uint addr addr uint")
+        427 -> jet_cli_perf_shape("io_uring_register", "fd uint addr uint")
+        428 -> jet_cli_perf_shape("open_tree", "dirfd path addr")
+        429 -> jet_cli_perf_shape("move_mount", "dirfd path dirfd path addr")
+        430 -> jet_cli_perf_shape("fsopen", "path addr")
+        431 -> jet_cli_perf_shape("fsconfig", "fd uint path addr int")
+        432 -> jet_cli_perf_shape("fsmount", "fd addr addr")
+        433 -> jet_cli_perf_shape("fspick", "dirfd path addr")
+        434 -> jet_cli_perf_shape("pidfd_open", "int addr")
+        435 -> jet_cli_perf_shape("clone3", "cloneargs uint")
+        436 -> jet_cli_perf_shape("close_range", "fd fd addr")
+        437 -> jet_cli_perf_shape("openat2", "dirfd path addr uint")
+        438 -> jet_cli_perf_shape("pidfd_getfd", "fd fd addr")
+        439 -> jet_cli_perf_shape("faccessat2", "dirfd path int atflags")
+        440 -> jet_cli_perf_shape("process_madvise", "fd addr uint int addr")
+        441 -> jet_cli_perf_shape("epoll_pwait2", "fd addr int addr addr uint")
+        442 -> jet_cli_perf_shape("mount_setattr", "dirfd path addr addr uint")
+        443 -> jet_cli_perf_shape("quotactl_fd", "fd addr addr addr")
+        444 -> jet_cli_perf_shape("landlock_create_ruleset", "addr uint addr")
+        445 -> jet_cli_perf_shape("landlock_add_rule", "fd addr addr addr")
+        446 -> jet_cli_perf_shape("landlock_restrict_self", "fd addr")
+        447 -> jet_cli_perf_shape("memfd_secret", "addr")
+        448 -> jet_cli_perf_shape("process_mrelease", "fd addr")
+        449 -> jet_cli_perf_shape("futex_waitv", "addr uint addr addr int")
+        450 -> jet_cli_perf_shape("set_mempolicy_home_node", "addr uint uint addr")
+        451 -> jet_cli_perf_shape("cachestat", "fd addr addr addr")
+        452 -> jet_cli_perf_shape("fchmodat2", "dirfd path mode atflags")
+        453 -> jet_cli_perf_shape("map_shadow_stack", "addr uint addr")
+        454 -> jet_cli_perf_shape("futex_wake", "addr addr int addr")
+        455 -> jet_cli_perf_shape("futex_wait", "addr addr addr addr addr int")
+        456 -> jet_cli_perf_shape("futex_requeue", "addr addr int int")
+        457 -> jet_cli_perf_shape("statmount", "addr addr uint addr")
+        458 -> jet_cli_perf_shape("listmount", "addr addr uint addr")
+        462 -> jet_cli_perf_shape("mseal", "addr uint addr")
+        else -> jet_cli_perf_shape("syscall_{number}", "addr addr addr addr addr addr")
+    }
+}
+
+// A traced command's `syscalls` receipt section (type `JetPerfSyscalls`).
+// `status` is `traced`: `calls` holds each call in the order it returned,
+// each with its `pid`, `tid`, `number`, `name`, decoded `args` and `result`
+// (`?` for one that never returned); `syscalls` sums them by process and
+// name, each row's `count` and `errors`, the most first; `processes` counts
+// the command's processes and `left` those still running when it ended,
+// which were let go untraced. Or it is `unavailable`: the kernel refused
+// the trace with `errno` under Yama's `ptrace_scope` (null without Yama),
+// `reason` says why, and the command ran untraced.
+jet_cli_perf_traced_section: fn(calls: &&[JetCLIPerfTracedCall], processes: Int, left: Int, refused: Int, scope: Int?) -> TraceReceiptSection Never! {
+    sums := [JetCLIPerfTracedSum]{}
+    places := [String:Int]{}
+    rows := [CanonicalJSON]{}
+    loop call in calls.move() {
+        key: "{call.pid} {call.number}"
+        at := places.get(key) ?? -1
+        if at < 0 {
+            at = sums.len()
+            places[key] = at
+            sums.push(JetCLIPerfTracedSum{pid: call.pid, number: call.number, name: jet_cli_perf_syscall_shape(call.number).name, count: 0, errors: 0})
+        }
+        sums[at].count += 1
+        if call.failed -> sums[at].errors += 1
+        rows.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "args", value: CanonicalJSON.String(call.args.move())},
+                    {key: "name", value: CanonicalJSON.String(call.name.move())},
+                    {key: "number", value: CanonicalJSON.Integer("{call.number}")},
+                    {key: "pid", value: CanonicalJSON.Integer("{call.pid}")},
+                    {key: "result", value: CanonicalJSON.String(call.result.move())},
+                    {key: "tid", value: CanonicalJSON.Integer("{call.tid}")},
+                },
+            ),
+        )
+    }
+    sums.sort_by(fn(one: JetCLIPerfTracedSum, other: JetCLIPerfTracedSum) { (one.pid <=> other.pid).then(other.count <=> one.count).then(one.name <=> other.name) })
+    totals := [CanonicalJSON]{}
+    loop sum in sums.move() {
+        totals.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "count", value: CanonicalJSON.Integer("{sum.count}")},
+                    {key: "errors", value: CanonicalJSON.Integer("{sum.errors}")},
+                    {key: "name", value: CanonicalJSON.String(sum.name.move())},
+                    {key: "number", value: CanonicalJSON.Integer("{sum.number}")},
+                    {key: "pid", value: CanonicalJSON.Integer("{sum.pid}")},
+                },
+            ),
+        )
+    }
+    traced: refused == 0
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "calls", value: CanonicalJSON.Array(rows.move())},
+            {key: "errno", value: if traced -> CanonicalJSON.Null else -> CanonicalJSON.Integer("{refused}")},
+            {key: "left", value: CanonicalJSON.Integer("{left}")},
+            {key: "processes", value: CanonicalJSON.Integer("{processes}")},
+            {key: "ptrace_scope", value: jet_cli_perf_counts_number(scope)},
+            {key: "reason", value: if traced -> CanonicalJSON.Null else -> CanonicalJSON.String(jet_cli_perf_syscalls_refusal(refused, scope))},
+            {key: "status", value: CanonicalJSON.String(if traced -> "traced" else -> "unavailable")},
+            {key: "syscalls", value: CanonicalJSON.Array(totals.move())},
+        },
+    )
+    TraceReceiptSection{name: "syscalls", type_name: "JetPerfSyscalls", digest: canonical_json_sha256(value), value: value}
+}
+
+// Why the kernel refused to trace a command with `errno` under Yama's
+// ptrace_scope `scope`, and what to change.
+jet_cli_perf_syscalls_refusal: fn(errno: Int, scope: Int?) -> String Never! {
+    level: scope ?? -1
+    if {
+        level == 3 -> "Yama's ptrace_scope 3 lets no process trace another until the machine restarts with a lower one"
+        level == 2 -> "Yama's ptrace_scope 2 lets only a process with CAP_SYS_PTRACE trace another; set the sysctl kernel.yama.ptrace_scope to 1"
+        errno == 1 -> "the kernel refused to let jet trace the command, as a seccomp filter or a tracer already on jet does"
+        else -> "the kernel refused to let jet trace the command"
+    }
+}
+
+// The first line of a traced command's `syscalls` section `value`:
+// `syscalls calls=412 processes=2`, with ` left=1` for the processes let go
+// running. Untraced, it is
+// `syscalls unavailable errno=1 ptrace_scope=3 · <reason>`.
+jet_cli_perf_traced_header: fn(value: CanonicalJSON) -> String Never! {
+    fields: jettrace_object_view(value, "receipt syscalls") ?? return "syscalls"
+    if (jet_cli_perf_field_text(fields, "status") ?? "") != "traced" {
+        errno: jet_cli_perf_field_integer(fields, "errno") ?? "none"
+        scope: jet_cli_perf_field_integer(fields, "ptrace_scope") ?? "none"
+        reason: jet_cli_perf_field_text(fields, "reason") ?? "the kernel refused the trace"
+        return "syscalls unavailable errno={errno} ptrace_scope={scope} · {reason}"
+    }
+    at: jet_cli_perf_key(fields, "calls") ?? return "syscalls"
+    calls: jettrace_array(fields[at].value, "receipt syscalls.calls") ?? return "syscalls"
+    processes: jet_cli_perf_field_integer(fields, "processes") ?? "0"
+    left: jet_cli_perf_field_integer(fields, "left") ?? "0"
+    went: if left == "0" -> "" else -> " left={left}"
+    "syscalls calls={calls.len()} processes={processes}{went}"
+}
+
+// A traced command's `syscalls` section `value` as `jet perf view` shows
+// it: its first line (jet_cli_perf_traced_header), then each call in the
+// order it returned, as strace shows one after its process:
+// `  4251 openat(AT_FDCWD, "main.jet", O_RDONLY|O_CLOEXEC) = 3`.
+jet_cli_perf_traced_lines: fn(value: CanonicalJSON) -> [String] Never! {
+    lines := [String]{jet_cli_perf_traced_header(value)}
+    fields: jettrace_object_view(value, "receipt syscalls") ?? return lines
+    at: jet_cli_perf_key(fields, "calls") ?? return lines
+    calls: jettrace_array(fields[at].value, "receipt syscalls.calls") ?? return lines
+    loop call in calls {
+        pid: jet_cli_perf_member_integer(call, "pid") ?? "?"
+        name: jet_cli_perf_member_text(call, "name") ?? "?"
+        args: jet_cli_perf_member_text(call, "args") ?? ""
+        result: jet_cli_perf_member_text(call, "result") ?? "?"
+        lines.push("  {pid} {name}({args}) = {result}")
+    }
+    lines
+}
