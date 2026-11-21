@@ -237,11 +237,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1635,
+  "total": 1640,
   "counts": {
     "Compiler": 796,
     "Core": 179,
-    "Docs": 13,
+    "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
     "Tests": 566,
@@ -7117,6 +7117,41 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 107,
+      "column": 5,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 116,
+      "column": 5,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 206,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 245,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 284,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
       "file": "Docs/Proposals/DebugEvalNative20261118/Probes/fx_line.jet",
       "line": 13,
       "column": 5,
@@ -11703,12 +11738,12 @@ file in a `Tests/` tree. The ratchet refuses either.
 | --- | ---: |
 | Compiler | 796 |
 | Core | 179 |
-| Docs | 13 |
+| Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 566 |
 | Tools | 28 |
-| **total** | **1635** |
+| **total** | **1640** |
 
 ### Regions
 
@@ -12695,6 +12730,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_runtime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_runtime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 107:5 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 116:5 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 206:17 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 245:17 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 284:17 | "a raw word stands in for the destination word of the task's context" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/fx_line.jet | 13:5 | "probe: a raw write under the empty row" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/row_compose.jet | 21:9 | "probe: a raw write under the empty row" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/unsafe_callee.jet | 7:5 | "probe: a raw write in a callee" |

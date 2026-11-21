@@ -1,0 +1,355 @@
+// What a calling convention for a returned growing value costs at a call.
+// A round makes 12,000 calls, each returning a list of `items` Ints that the
+// caller reads and drops. Every list comes from today's heap, so each row
+// differs from `plain` only in what its convention adds to the call.
+// Conventions:
+// - `plain`: today's call.
+// - `arg`: one more Int argument that the callee reads once, as a hidden
+//   destination argument would be passed and read.
+// - `branch`: `arg`, and the callee picks between two lists by the word
+//   where it makes its result. That merges both arms into one variable,
+//   which at O2 keeps the list in memory; the other arm (never taken here,
+//   as the word is 0) is a two-item list built in line.
+// - `test`: `arg`, and the callee tests the word first, leaving the stack
+//   path an arm of its own that returns (never taken here). Its heap path
+//   is `arg`'s, so the row measures the test, not the stack path's speed.
+// - `slot`: the caller stores the destination in a mutable global, and the
+//   callee reads and clears it, as a destination kept in the task's context
+//   would be. The global is a raw word written inside `#Unsafe`, since its
+//   safe holder, `Shared`, takes a lock that a context word would not.
+// - `copy`: today's call, then the caller copies the result item by item
+//   into a growing list, as a value built on its own stack and placed on
+//   the heap by its caller would be at most.
+// - `sized`: today's call, then one sized copy of the result (a `.copy()`
+//   and one write, which makes the shared buffer copy at once): the same
+//   placement at its least.
+// Call forms: `direct` names the function; `value` calls a function value,
+// `trait` a trait value (a type test, then a direct call to the chosen
+// implementation) and `closure` a capturing lambda, each picked at run time
+// so that no level can inline it.
+// Run: returns <plain|arg|branch|test|slot|copy|sized> <direct|value|trait|closure> <items> <rounds> 0
+use {
+    process: core.process
+    time: core.time
+}
+
+CALLS: 12000
+
+dest_slot := 0
+
+// Every builder makes its first item from its destination (0 at run time),
+// so each convention reads the destination exactly once and adds one `+`.
+// `items` is at least 1.
+build: fn(i: Int, items: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_other: fn(i: Int, items: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i)
+    loop k in 1..<items -> out.push(i - k)
+    out
+}
+
+build_to: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_other_to: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i - k)
+    out
+}
+
+build_branch: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    out := if dest == 0 -> [Int]{} else -> [Int]{dest, items}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_other_branch: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    out := if dest == 0 -> [Int]{} else -> [Int]{dest, items}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i - k)
+    out
+}
+
+// Stands in for the stack path, never taken here: a function of its own,
+// so the heap path around the test keeps `build_to`'s shape.
+build_on_stack: fn(i: Int, items: Int, dest: Int) -> [Int] { [Int]{dest, items, i} }
+
+build_test: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    if dest != 0 -> return build_on_stack(i, items, dest)
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_other_test: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    if dest != 0 -> return build_on_stack(i, items, dest)
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i - k)
+    out
+}
+
+build_slot: fn(i: Int, items: Int) -> [Int] {
+    dest: dest_slot
+    #Unsafe("a raw word stands in for the destination word of the task's context") { dest_slot = 0 }
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_other_slot: fn(i: Int, items: Int) -> [Int] {
+    dest: dest_slot
+    #Unsafe("a raw word stands in for the destination word of the task's context") { dest_slot = 0 }
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i - k)
+    out
+}
+
+// The copy a caller makes when the callee built the value on a stack of its
+// own and the caller's rule wants it on the heap, at most: a heap list with
+// each item copied into it, growing as it goes.
+copy_out: fn(made: [Int]) -> Int {
+    kept := [Int]{}
+    loop item in made -> kept.push(item)
+    kept.len()
+}
+
+// The same copy at its least: `.copy()` shares the buffer until a write, so
+// the one write copies it whole, sized, at once.
+copy_sized: fn(made: [Int]) -> Int {
+    kept := made.copy()
+    kept[0] = kept[0] + 1
+    kept.len()
+}
+
+Maker: trait {
+    make: fn(self, i: Int, items: Int) -> [Int],
+    make_to: fn(self, i: Int, items: Int, dest: Int) -> [Int],
+    make_branch: fn(self, i: Int, items: Int, dest: Int) -> [Int],
+    make_test: fn(self, i: Int, items: Int, dest: Int) -> [Int],
+    make_slot: fn(self, i: Int, items: Int) -> [Int],
+}
+
+Up: struct {
+    base: Int,
+}
+
+impl Up.Maker {
+    make: fn(self, i: Int, items: Int) -> [Int] { build(i + self.base, items) }
+
+    make_to: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_to(i + self.base, items, dest)
+    }
+
+    make_branch: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_branch(i + self.base, items, dest)
+    }
+
+    make_test: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_test(i + self.base, items, dest)
+    }
+
+    make_slot: fn(self, i: Int, items: Int) -> [Int] { build_slot(i + self.base, items) }
+}
+
+Down: struct {
+    base: Int,
+}
+
+impl Down.Maker {
+    make: fn(self, i: Int, items: Int) -> [Int] { build_other(i + self.base, items) }
+
+    make_to: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_other_to(i + self.base, items, dest)
+    }
+
+    make_branch: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_other_branch(i + self.base, items, dest)
+    }
+
+    make_test: fn(self, i: Int, items: Int, dest: Int) -> [Int] {
+        build_other_test(i + self.base, items, dest)
+    }
+
+    make_slot: fn(self, i: Int, items: Int) -> [Int] { build_other_slot(i + self.base, items) }
+}
+
+direct: fn(conv: String, items: Int, dest: Int) -> Int {
+    total := 0
+    if conv == {
+        "arg" -> {
+            loop i in 0..<CALLS -> total += build_to(i, items, dest).len()
+        }
+        "branch" -> {
+            loop i in 0..<CALLS -> total += build_branch(i, items, dest).len()
+        }
+        "test" -> {
+            loop i in 0..<CALLS -> total += build_test(i, items, dest).len()
+        }
+        "slot" -> {
+            loop i in 0..<CALLS {
+                #Unsafe("a raw word stands in for the destination word of the task's context") {
+                    dest_slot = dest
+                }
+                total += build_slot(i, items).len()
+            }
+        }
+        "copy" -> {
+            loop i in 0..<CALLS {
+                made: build(i, items)
+                total += copy_out(made)
+            }
+        }
+        "sized" -> {
+            loop i in 0..<CALLS {
+                made: build(i, items)
+                total += copy_sized(made)
+            }
+        }
+        else -> {
+            loop i in 0..<CALLS -> total += build(i, items).len()
+        }
+    }
+    total
+}
+
+through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [Int], to: fn(Int, Int, Int) -> [Int], branch: fn(Int, Int, Int) -> [Int], test: fn(Int, Int, Int) -> [Int], slot: fn(Int, Int) -> [Int]) -> Int {
+    total := 0
+    if conv == {
+        "arg" -> {
+            loop i in 0..<CALLS -> total += to(i, items, dest).len()
+        }
+        "branch" -> {
+            loop i in 0..<CALLS -> total += branch(i, items, dest).len()
+        }
+        "test" -> {
+            loop i in 0..<CALLS -> total += test(i, items, dest).len()
+        }
+        "slot" -> {
+            loop i in 0..<CALLS {
+                #Unsafe("a raw word stands in for the destination word of the task's context") {
+                    dest_slot = dest
+                }
+                total += slot(i, items).len()
+            }
+        }
+        "copy" -> {
+            loop i in 0..<CALLS {
+                made: plain(i, items)
+                total += copy_out(made)
+            }
+        }
+        "sized" -> {
+            loop i in 0..<CALLS {
+                made: plain(i, items)
+                total += copy_sized(made)
+            }
+        }
+        else -> {
+            loop i in 0..<CALLS -> total += plain(i, items).len()
+        }
+    }
+    total
+}
+
+through_trait: fn(conv: String, items: Int, dest: Int, maker: Maker) -> Int {
+    total := 0
+    if conv == {
+        "arg" -> {
+            loop i in 0..<CALLS -> total += maker.make_to(i, items, dest).len()
+        }
+        "branch" -> {
+            loop i in 0..<CALLS -> total += maker.make_branch(i, items, dest).len()
+        }
+        "test" -> {
+            loop i in 0..<CALLS -> total += maker.make_test(i, items, dest).len()
+        }
+        "slot" -> {
+            loop i in 0..<CALLS {
+                #Unsafe("a raw word stands in for the destination word of the task's context") {
+                    dest_slot = dest
+                }
+                total += maker.make_slot(i, items).len()
+            }
+        }
+        "copy" -> {
+            loop i in 0..<CALLS {
+                made: maker.make(i, items)
+                total += copy_out(made)
+            }
+        }
+        "sized" -> {
+            loop i in 0..<CALLS {
+                made: maker.make(i, items)
+                total += copy_sized(made)
+            }
+        }
+        else -> {
+            loop i in 0..<CALLS -> total += maker.make(i, items).len()
+        }
+    }
+    total
+}
+
+round: fn(conv: String, form: String, items: Int, dest: Int, pick: Int) -> Int {
+    if form == {
+        "value" -> {
+            if pick == 0 {
+                through_values(conv, items, dest, build, build_to, build_branch, build_test, build_slot)
+            } else {
+                through_values(conv, items, dest, build_other, build_other_to, build_other_branch, build_other_test, build_other_slot)
+            }
+        }
+        "trait" -> {
+            if pick == 0 -> through_trait(conv, items, dest, Up{base: pick}) else {
+                through_trait(conv, items, dest, Down{base: pick})
+            }
+        }
+        "closure" -> {
+            through_values(
+                conv,
+                items,
+                dest,
+                fn(i, n) { build(i + pick, n) },
+                fn(i, n, d) { build_to(i + pick, n, d) },
+                fn(i, n, d) { build_branch(i + pick, n, d) },
+                fn(i, n, d) { build_test(i + pick, n, d) },
+                fn(i, n) { build_slot(i + pick, n) },
+            )
+        }
+        else -> direct(conv, items, dest)
+    }
+}
+
+run: fn() {
+    args: process.args()
+    conv: args.get(0) ?? "plain"
+    form: args.get(1) ?? "direct"
+    items: Int.parse(args.get(2) ?? "2") ?? 2
+    rounds: Int.parse(args.get(3) ?? "2000") ?? 2000
+    // The destination and the pick are 0, read at run time so that no level
+    // can fold them while building.
+    dest: Int.parse(args.get(4) ?? "0") ?? 0
+    pick: dest
+    total := 0
+    loop _ in 0..<50 -> total += round(conv, form, items, dest, pick)
+    started: time.start()
+    loop _ in 0..<rounds -> total += round(conv, form, items, dest, pick)
+    took: time.elapsed(started).ns
+    print("{conv} {form} {items}: {rounds} rounds of {CALLS} calls, {(took / (rounds * CALLS)).to_float()} ns a call, total {total}")
+}
