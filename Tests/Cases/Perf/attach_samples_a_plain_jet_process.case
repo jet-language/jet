@@ -7,13 +7,18 @@
 # was in, the hot one first, and how far its samples' stacks unwound, and
 # the trace holds them, with the samples' folded stacks, as the `functions`
 # receipt section, which `jet perf view` shows with their flame graph.
+# The attach starts once the compile-time process has spun for 0.2 s of
+# user CPU (its /proc stat utime, in 10 ms ticks), not as soon as it is
+# forked: until it spins it may still be starting (its exec, its image's
+# page faults) or waiting, using no user CPU, which is all the task clock
+# samples, and a window that falls there keeps none (p389: samples=0).
 requires: os-name:linux
 fixture: AttachSamplesAPlainJetProcess.fixture
 env: NO_COLOR=1
 spawn busy: jet check spin.jet
 stdout: null
 stderr: null
-poll spinning: sh -c 'test -n "$(cat /proc/{pid:busy}/task/*/children)"' until exit: 0 timeout 120s every 20ms # its compile-time work has started
+poll spinning: sh -c 'for c in $(cat /proc/{pid:busy}/task/*/children); do test "$(cut -d " " -f 14 /proc/$c/stat)" -ge 20 && exit 0; done; exit 1' until exit: 0 timeout 120s every 20ms # its compile-time work spins
 step: jet perf attach {pid:busy} --out busy.jettrace
 exit: 0
 stderr: ~ "functions samples=" # the samples the kernel took of it
