@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112698,
+    "rev": 112700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52626,51 +52626,6 @@
       "criteriaLastN": 4
     },
     {
-      "id": "c0g4h3r9",
-      "num": 6782,
-      "title": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list",
-      "body": "ir_route_can_stop (JetIR) is a hand-kept list of runtime routes that skip the stop poll after a call. Its generated twin RUNTIME_STOP_EXPORTS has no callers. The poll catches a stop that the callee published, so the sound set is the runtime closure of routes that can publish one, with fatal traps (allocation failure, capacity panic, invalid layout) declared fatal rather than stops. Plan (G11Speed-5, 2026-11-13): build a stops receipt from the runtime IR at library build, as the .threads receipt is built (BuildLibrary → Request → RuntimePack → Host), and prune stop points after the build from it. G11Speed-c29j1 extends the list by hand for now.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e24",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-18",
-          "by": "Main",
-          "text": "c1 met: r5 2a383826f1 and fallout adb1249dae; proofs pass on p284."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: `jet test Compiler --profile cases --filter stop_poll_follows_the_runtime_stops_receipt` (a call to a pure scalar runtime route has no stop poll after it in the lowered IR; a call to jet_time_sleep_until has one), and the cancellation and deadline cases pass at O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in 2a383826f1 (r5, p282) and adb1249dae (fallout, p284). On the p284 batch compiler bccd1b2738: `--filter stop_poll_follows_the_runtime_stops_receipt` passes 1/1, the context_allocator_panic and bounds_stop_names cases pass, `jet -A Tools/Perf/CodegenCeiling.jet --check` passes (main_gather_sum 253 instructions against a ceiling of 255), and Tools/Agent/RuntimeGenerators.jet --check passes.",
-          "at": "2026-11-18T00:38:01.802Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T10:15:23.686Z",
-      "updated": "2026-11-18T00:38:10.031Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-18T00:38:10.030Z"
-    },
-    {
       "id": "c0x3j5om",
       "num": 6793,
       "title": "Data-oriented compiler core: interned u32 ids, flat columns, per-phase arenas, no RC, under 1 GB",
@@ -73914,8 +73869,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T00:18:14.355Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-21T00:38:55.565Z",
+      "updatedBy": "Errors3202",
       "criteriaLastN": 22
     }
   ],
@@ -131608,6 +131563,184 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T00:18:01.816Z"
+    },
+    {
+      "id": "D-PERF-ALLOCATOR1",
+      "cardId": "c00ni11n",
+      "group": "tooling",
+      "title": "How Jet's own tools show a counting allocator's totals when a program ends",
+      "situation": "A program can count its memory use with allocator: mem.Counting.over(mem.Heap). The runtime keeps the number of allocations and the most bytes live at once. Nothing shows those totals when the program ends. Jet's read_into memory check stops the program at its end in gdb and reads the totals from memory, which Jet's rules allow only as a recorded stopgap. You decide which Jet tool shows the totals instead. We recommend that jet debug show them when it stops at the program's end.",
+      "gist": "Which Jet tool should show a counting allocator's totals when the program ends?",
+      "lesson": "A counting allocator keeps three totals: allocations made, bytes asked for, and the most bytes live at once, called the high water. They live in the program's memory and vanish when it ends. Under every option, the totals are the runtime's own counts.",
+      "explainer": "",
+      "story": "A contributor makes reading from a socket allocate less. The memory check must show fewer allocations per read. The test machine has no gdb, so the check cannot run there, and the gain goes unmeasured.",
+      "inWild": "// heaptrack watches from outside and prints totals after the program ends.\n// https://github.com/KDE/heaptrack\n$ heaptrack ./main\n// Go's program reads its own totals.\nvar stats runtime.MemStats\nruntime.ReadMemStats(&stats)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet debug shows them at the program's end",
+          "detail": "When the program's allocator counts, jet debug stops it at its end, before it is gone, whatever its exit status. The end report gains one line, Allocator: counting, N allocations, high water N bytes, ahead of Program finished. A program without a counting allocator shows no such line. The memory check builds each arm at -O2 with the counting allocator, runs it under jet debug, and reads that line. It pipes continue and quit today, and uses D-DEBUG-LISTING1's --do once that lands.",
+          "technical": "Not built. Today jet debug pauses at a nonzero exit only; a zero exit is reported after the process is gone (Native.jet, Program finished). A stops at every exit through ptrace's exit event. It reads the allocator root's words as the gdb script does: the root's address from jet_rt_alloc_init's first instruction, then mode, allocations and high water.",
+          "code": "// Not built. Counts are from a probe of the surface arm at -O2.\n$ printf 'continue\\nquit\\n' | jet debug .jet/build/main\nAllocator: counting, 17389 allocations, high water 148640 bytes\nProgram finished"
+        },
+        {
+          "key": "B",
+          "name": "jet perf reports them",
+          "detail": "jet perf run records the totals at the program's end as a receipt row named allocator, which jet perf view prints and jet perf compare compares. The memory check measures each arm's -O2 build. D-PERF-TARGET1 decides how jet perf run names a built program; with it, B runs that build directly, as shown here with its option A spelling. Without it, jet perf run needs a new -O flag.",
+          "technical": "Receipt rows are an existing named list that the view prints and compare diffs (Command.jet, jet_cli_perf_receipt_lines). The new part is the row's fields. Today jet perf run builds its own way. Probe of the same counted surface arm: an -O2 build made 17,389 to 18,084 allocations with a high water of 148,640 to 152,664 bytes. Under jet perf run it made 82,761 to 83,299, high water 85,880 to 88,584.",
+          "code": "// Not built. The --exec spelling is D-PERF-TARGET1's option A.\n$ jet perf run --out run.jettrace --exec .jet/build/main\n$ jet perf view run.jettrace\nreceipt allocator {\"allocations\":17389,\"high_water\":148640}"
+        },
+        {
+          "key": "C",
+          "name": "The program prints its own totals",
+          "detail": "Core's mem module gains program_allocator_totals, which returns the allocations, bytes asked for, live bytes and high water. Any program can call it in any run, with no tool and no ptrace, so a server can report its own memory in production. The memory check adds a print of them to the end of each arm's run, then reads it.",
+          "technical": "The runtime already keeps the totals behind a private export (Alloc.jet, jet_rt_program_allocator_fact). A Core call wraps it. Printing at the end of run misses any allocation during teardown, which gdb at exit counts.",
+          "code": "// Not built.\nuse core.mem\nrun: fn() {\n    work()\n    totals: mem.program_allocator_totals()\n    eprint(\"allocations={totals.allocations}\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "gdb",
+          "note": "catch syscall exit_group stops a program at its end, before it is gone, so its memory can still be read. This is A's shape.",
+          "code": "$ gdb -batch -ex 'catch syscall exit_group' -ex run -ex 'x/gx &counter' ./main"
+        },
+        {
+          "lang": "heaptrack",
+          "note": "An outside tool records every allocation and prints the totals after the program ends. This is B's shape.",
+          "code": "$ heaptrack ./main\n$ heaptrack_print heaptrack.main.1234.zst"
+        },
+        {
+          "lang": "Go",
+          "note": "runtime.ReadMemStats lets a program read its own allocation counts. This is C's shape.",
+          "code": "var stats runtime.MemStats\nruntime.ReadMemStats(&stats)\nfmt.Println(stats.Mallocs, stats.HeapAlloc)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reads the exact build at its end and changes nothing in it, which is what gdb does today. B measures another build unless perf grows a flag, and C edits the program it measures.",
+        "gains": [
+          "The read_into memory check drops gdb."
+        ],
+        "losses": [
+          {
+            "loss": "Scripts drive the console by piping commands into it.",
+            "mitigation": "If the console gains a script flag, the memory check uses it instead of piping."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B needs a new build flag on jet perf run, and the profiler's own work may change the counts."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a public Core call and changes the programs the check measures."
+          }
+        ],
+        "tradeoff": "A adds one report line to the debugger; B and C each add a flag or a Core call."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Which Jet tool should show a counting allocator's totals when the program ends?",
+        "lesson": "A counting allocator keeps three totals: allocations made, bytes asked for, and the most bytes live at once, called the high water. They live in the program's memory and vanish when it ends. Under every option, the totals are the runtime's own counts.",
+        "trio": {
+          "current": {
+            "note": "The read_into memory check needs gdb and a Python script that finds the counters in memory.",
+            "code": "$ jet Tools/Perf/ReadInto/Memory.jet --artifact jet --gdb gdb\n# gdb: catch syscall exit_group, run, then read the\n# allocator's words at 144, 160 and 184 from its root"
+          },
+          "wild": {
+            "lang": "heaptrack",
+            "note": "heaptrack watches a program from outside and prints its allocation totals after it ends. Source: https://github.com/KDE/heaptrack",
+            "code": "$ heaptrack ./main\n$ heaptrack_print heaptrack.main.1234.zst\n# ends with the calls to allocation functions\n# and the peak heap memory consumption"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "jet debug shows them at the program's end",
+            "gist": "jet debug stops at every end of the program, and its end line names the allocator's totals.",
+            "gains": [
+              "Reads the very build being measured, as gdb does today.",
+              "Changes nothing in the program, so the counts are exact.",
+              "Any counted program shows its totals by running under jet debug."
+            ],
+            "losses": [
+              "Adds one line to the debugger's end-of-program report.",
+              "Scripts drive the console by piping commands into it."
+            ],
+            "proposed": {
+              "code": "$ jet build -O2 main.jet\n$ printf 'continue\\nquit\\n' | jet debug .jet/build/main\nAllocator: counting, 17389 allocations, high water 148640 bytes\nProgram finished"
+            }
+          },
+          {
+            "key": "B",
+            "name": "jet perf reports them",
+            "gist": "jet perf run records the totals as a receipt row, measuring the build that D-PERF-TARGET1 lets it run.",
+            "gains": [
+              "The totals sit in the trace, so jet perf compare shows their change.",
+              "The receipt row is a new row in an existing list."
+            ],
+            "losses": [
+              "Needs D-PERF-TARGET1's built-program form, or else a new -O flag.",
+              "Profiler work may run on the counted heap and skew the counts."
+            ],
+            "proposed": {
+              "code": "$ jet build -O2 main.jet\n$ jet perf run --out run.jettrace --exec .jet/build/main\n$ jet perf view run.jettrace\nreceipt allocator {\"allocations\":17389,\"high_water\":148640}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The program prints its own totals",
+            "gist": "Core gains a call that returns the totals, and the memory check adds a print to each measured program.",
+            "gains": [
+              "Works in any run, with no tool and no ptrace.",
+              "A program can report its own memory in production."
+            ],
+            "losses": [
+              "Adds a public Core call.",
+              "The check edits the programs it measures and misses the teardown after run."
+            ],
+            "proposed": {
+              "code": "use core.mem\nrun: fn() {\n    work()\n    totals: mem.program_allocator_totals()\n    eprint(\"allocations={totals.allocations}\")\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reads the exact build at its end and changes nothing in it, which is what gdb does today. B depends on D-PERF-TARGET1 and may count the profiler's own work. C edits the programs it measures.",
+          "gains": [
+            "The read_into memory check drops gdb."
+          ],
+          "losses": [
+            {
+              "loss": "Scripts drive the console by piping commands into it.",
+              "mitigation": "D-DEBUG-LISTING1's --do runs console commands from a script; the memory check uses it once it lands."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "If D-PERF-TARGET1 lets perf run the built -O2 program, B needs no -O flag, but the profiler's own work may still change the counts."
+            },
+            {
+              "key": "C",
+              "reason": "C works in any run with no tool, but it adds a public Core call and changes the programs the check measures."
+            }
+          ],
+          "tradeoff": "A adds one report line to the debugger; B needs D-PERF-TARGET1 or a flag, and C a public Core call."
+        }
+      },
+      "draftedBy": "Errors3202",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-21T00:37:49.149Z"
     }
   ],
   "questions": [
@@ -133887,6 +134020,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T00:38:55.565Z",
+      "by": "Errors3202",
+      "action": "decision.update",
+      "ref": "D-PERF-ALLOCATOR1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-21T00:37:49.149Z",
+      "by": "Errors3202",
+      "action": "decision.add",
+      "ref": "D-PERF-ALLOCATOR1",
+      "note": "How Jet's own tools show a counting allocator's totals when a program ends (draft)"
+    },
     {
       "at": "2026-11-21T00:18:14.355Z",
       "by": "Main",

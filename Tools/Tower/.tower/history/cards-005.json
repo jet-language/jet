@@ -39300,6 +39300,53 @@
       "completedAt": "2026-11-17T23:46:47.073Z",
       "questions": [],
       "retiredAt": "2026-11-21T00:16:03.207Z"
+    },
+    {
+      "id": "c0g4h3r9",
+      "num": 6782,
+      "title": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list",
+      "body": "ir_route_can_stop (JetIR) is a hand-kept list of runtime routes that skip the stop poll after a call. Its generated twin RUNTIME_STOP_EXPORTS has no callers. The poll catches a stop that the callee published, so the sound set is the runtime closure of routes that can publish one, with fatal traps (allocation failure, capacity panic, invalid layout) declared fatal rather than stops. Plan (G11Speed-5, 2026-11-13): build a stops receipt from the runtime IR at library build, as the .threads receipt is built (BuildLibrary → Request → RuntimePack → Host), and prune stop points after the build from it. G11Speed-c29j1 extends the list by hand for now.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e24",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "c1 met: r5 2a383826f1 and fallout adb1249dae; proofs pass on p284."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: `jet test Compiler --profile cases --filter stop_poll_follows_the_runtime_stops_receipt` (a call to a pure scalar runtime route has no stop poll after it in the lowered IR; a call to jet_time_sleep_until has one), and the cancellation and deadline cases pass at O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 2a383826f1 (r5, p282) and adb1249dae (fallout, p284). On the p284 batch compiler bccd1b2738: `--filter stop_poll_follows_the_runtime_stops_receipt` passes 1/1, the context_allocator_panic and bounds_stop_names cases pass, `jet -A Tools/Perf/CodegenCeiling.jet --check` passes (main_gather_sum 253 instructions against a ceiling of 255), and Tools/Agent/RuntimeGenerators.jet --check passes.",
+          "at": "2026-11-18T00:38:01.802Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T10:15:23.686Z",
+      "updated": "2026-11-18T00:38:10.031Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-18T00:38:10.030Z",
+      "questions": [],
+      "retiredAt": "2026-11-21T00:38:55.665Z"
     }
   ]
 }
