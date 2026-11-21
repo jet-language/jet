@@ -3,14 +3,18 @@
 opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
 fixture: NixosMigrationProtectsStageBeforeWritingInputs.fixture
 mkdir: package-root
-requires: tool:strace
+requires: os-name:linux
+requires: arch:x86_64
 env: JETPACK_ROOT={work}/package-root
-step: strace -f -s 4096 -o {work}/stage.trace -e trace=%file -- {jet} os migrate compare-nixos devhost-gnome --out {work}/published --no-color
+step: jet perf attach --lens=syscalls --out {work}/stage.jettrace -- {jet} os migrate compare-nixos devhost-gnome --out {work}/published --no-color
 cwd: project
 env: NIX_REMOTE=invalid
 exit: 2
 file: published absent
-copy: stage.trace trace.log
+json: file stage.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the migration
+step: jet perf view stage.jettrace
+stdout: file trace.log
+exit: 0
 step: jet run observe/trace.jet
 exit: 0
 json: stdout doc $.mkdir >= 0

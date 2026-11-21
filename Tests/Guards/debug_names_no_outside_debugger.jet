@@ -128,8 +128,6 @@ DnRunKept: struct {
 
 DN_RUN_CLASSES: [String]{"comparison", "interop", "gap"}
 
-DN_WHY_SYSCALLS: "traces the system calls a jet command or a built program makes with strace; no jet tool traces another process's system calls"
-
 DN_WHY_INTEROP: "the outside tool is the subject, reading the DWARF, symbols or perf map Jet writes for it"
 
 // The harnesses that still run an outside tool, each named with its class
@@ -145,14 +143,6 @@ DN_RUNS_KEPT: [DnRunKept]{
     {path: "Tests/Cases/ToolInterop", harness: "ToolInterop", class: "interop", until: "", why: DN_WHY_INTEROP},
     {path: "Tests/Cases/Debug/objdump_disassembles_main_from_text_section.case", harness: "objdump reads Jet's image", class: "interop", until: "", why: DN_WHY_INTEROP},
     {path: "Tools/Perf/Scaling", harness: "Scaling", class: "gap", until: "#6995 c2", why: "profiles one compile's phases with perf record and perf script, the receipt Gate.jet stores; jet perf run samples no compile of the compiler itself"},
-    {path: "Tools/Perf/CoreStrace", harness: "CoreStrace", class: "gap", until: "#6995 c16", why: "the receipt that `jet run` opens no Core or Prelude source file, from strace's file calls; no jet tool lists the paths a jet command opens"},
-    {path: "Tests/Cases/CLICompilerSpeed/jet_run_of_a_small_program_starts_only_the_compile_thread.case", harness: "compile threads", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/CLICompilerSpeed/jet_run_opens_its_own_file_once.case", harness: "file opens", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/ControlAndData/process_exit_leaves_heap_to_kernel_after_user_cleanup.case", harness: "exit munmaps", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/JetpackJetOS/nixos_migration_protects_stage_before_writing_inputs.case", harness: "migration stage files", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/JetpackJetOS/nixos_migration_publish_stage_is_private_and_collision_safe.case", harness: "migration publish files", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/Report/ordinary_build_opens_no_network_connection.case", harness: "no network", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
-    {path: "Tests/Cases/TaskgroupStack/a_joined_task_runs_on_the_joining_thread.case", harness: "joining thread", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
 }
 
 // The outside tool `word` names, bare or as a path, or None.

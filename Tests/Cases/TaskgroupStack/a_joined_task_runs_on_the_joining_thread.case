@@ -1,7 +1,7 @@
 # A grouped task whose handle the next statement joins starts on the joining
 # thread instead of a carrier (JetRuntime Task.jet task_run_joined), on a
 # fiber of its group's stack. inline.jet's recursion outgrows a default stack
-# and its built program starts no thread (the strace watches the program, not
+# and its built program starts no thread (the trace watches the program, not
 # the compiler, whose own threads depend on the compiler that built it);
 # parks.jet's task sleeps, so a carrier resumes it; cancel.jet cancels a task
 # while it runs such a task inline, which never parks, and the cancel reaches
@@ -9,15 +9,16 @@
 # the stack budget, and stops the program with E3012. The overflow is
 # checked at -O0, where every call keeps its frame.
 requires: os-name:linux
-requires: tool:strace
+requires: arch:x86_64
 fixture: Fixtures/Joined
 env: NO_COLOR=1
 step: jet build inline.jet
 exit: 0
-step inline: strace -f -qq -e trace=clone,clone3 -o {work}/inline.trace {work}/.jet/build/inline
+step inline: jet perf attach --lens=syscalls --out inline.jettrace -- {work}/.jet/build/inline
 exit: 0
 stdout: = "reached the bottom true\n"
-file.filter(where ~ "CLONE_THREAD"): inline.trace lines = 0 # only thread starts count; a fork of the program is no thread
+json: file inline.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the program
+json: file inline.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name~="clone"][?args~="CLONE_THREAD"] #= 0 # only thread starts count; a fork of the program is no thread
 step inline_o2: jet run -O2 inline.jet
 exit: 0
 stdout: = "reached the bottom true\n"

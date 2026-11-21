@@ -1,0 +1,42 @@
+# `jet perf attach --lens=syscalls -- <command>` traces each system call of
+# a command and of every process it starts, with no tracer but jet. The
+# command is a shell that forks a subshell, then runs mkdir and ls, two
+# programs it forks and execs. So the trace holds calls of several
+# processes: the private directory mkdir made (its mode decoded as 0700),
+# the stat ls read back (its type and mode decoded as S_IFDIR|0700), the
+# path ls failed to find (ENOENT by name), and a fork's clone flags, which
+# end in SIGCHLD and hold no CLONE_THREAD. The command's exit code, 3, is
+# the attach's, and `jet perf view` prints each call.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:sh
+requires: tool:mkdir
+requires: tool:ls
+env: NO_COLOR=1
+step: jet perf attach --lens=syscalls --out calls.jettrace -- sh -c '(exit 0); mkdir -m 700 private; ls -d private nowhere >/dev/null 2>&1; exit 3'
+exit: 3 # the command's own exit code
+stderr: ~ "syscalls calls=" # the trace's line
+stderr: ~ " processes=" # with its processes
+stderr: ~ "Trace: " # then the trace
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].type_name = "JetPerfSyscalls"
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace it
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.processes >= 4 # the shell, its subshell, mkdir and ls
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="execve"] #>= 2 # mkdir's and ls's execs
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?args~="private"][?args~="0700"] #>= 1 # mkdir's mode
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?args~="S_IFDIR|0700"] #>= 1 # the stat ls read back
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?args~="nowhere"][?result="-1 ENOENT"] #>= 1 # the path ls failed to find
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?args~="SIGCHLD"] #>= 1 # a fork's clone flags
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?args~="CLONE_THREAD"] #= 0 # no thread among them
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="exit_group"][?result="?"] #>= 1 # a call that never returned
+json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="execve"] #>= 2 # summed per process
+json: file calls.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+step: jet perf view calls.jettrace
+exit: 0
+stdout: ~ "syscalls calls=" # the view prints the same line
+stdout: ~ "0700) = 0" # then each call, as strace shows it
+stdout: ~ " = -1 ENOENT" # a failure by its error's name
+step: jet perf attach --lens=counts,syscalls --out both.jettrace -- sh -c 'exit 5'
+exit: 5 # the command's own exit code
+stderr: ~ "syscalls calls=" # the trace's line
+json: file both.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # traced
+json: file both.jettrace doc $.content.receipt_sections[?name="counts"][0].value.cpu_ns >= 0 # and counted

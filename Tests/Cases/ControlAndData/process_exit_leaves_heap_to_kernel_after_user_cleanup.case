@@ -4,26 +4,28 @@
 # buffer alive at the exit is never unmapped. With `drop`, a buffer of the same
 # size dies inside the run first, so freeing one is seen as munmap.
 requires: os-name:linux
-requires: tool:strace
+requires: arch:x86_64
 fixture: ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture
 env: NO_COLOR=1
 step: jet build main.jet
 exit: 0
-step held: strace -f -qq -e trace=munmap -o {work}/exit.trace {work}/.jet/build/main
+step held: jet perf attach --lens=syscalls --out exit.jettrace -- {work}/.jet/build/main
 exit: 0
 stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.stdout.expected
-file.filter(where ~ "munmap("): exit.trace empty # only munmap lines count; strace may add exit notes
-step drop: strace -f -qq -e trace=munmap -o {work}/drop.trace {work}/.jet/build/main drop
+json: file exit.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the program
+json: file exit.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="munmap"] #= 0 # no free at the exit
+step drop: jet perf attach --lens=syscalls --out drop.jettrace -- {work}/.jet/build/main drop
 exit: 0
 stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.drop.stdout.expected
-file.filter(where ~ "munmap("): drop.trace nonempty # the dropped buffer's free shows as a munmap line
+json: file drop.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="munmap"] #>= 1 # the dropped buffer's free shows as a munmap
 step: jet build --release main.jet
 exit: 0
-step optimized: strace -f -qq -e trace=munmap -o {work}/optimized.trace {work}/.jet/build/main
+step optimized: jet perf attach --lens=syscalls --out optimized.jettrace -- {work}/.jet/build/main
 exit: 0
 stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.stdout.expected
-file.filter(where ~ "munmap("): optimized.trace empty # only munmap lines count; strace may add exit notes
-step optimizeddrop: strace -f -qq -e trace=munmap -o {work}/optimized-drop.trace {work}/.jet/build/main drop
+json: file optimized.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace the program
+json: file optimized.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="munmap"] #= 0 # no free at the exit
+step optimizeddrop: jet perf attach --lens=syscalls --out optimized-drop.jettrace -- {work}/.jet/build/main drop
 exit: 0
 stdout: = process_exit_leaves_heap_to_kernel_after_user_cleanup.drop.stdout.expected
-file.filter(where ~ "munmap("): optimized-drop.trace nonempty # the dropped buffer's free shows as a munmap line
+json: file optimized-drop.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="munmap"] #>= 1 # the dropped buffer's free shows as a munmap

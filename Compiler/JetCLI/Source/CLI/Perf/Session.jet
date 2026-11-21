@@ -379,8 +379,10 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     hot := ""
     // How a follow ended, and the rows it couldn't keep or read.
     said := ""
-    // `--lens=counts`, and the command after `--` it counts.
+    // `--lens=counts` and `--lens=syscalls`, and the command after `--`
+    // they count and trace.
     counts := false
+    syscalls := false
     command := [String]?{None}
     skip := false
     loop (index, arg) in args {
@@ -393,10 +395,13 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
             break
         }
         if arg.starts_with("--lens=") {
-            if arg != "--lens=alloc" && arg != "--lens=counts" {
-                return jet_cli_perf_error("`{arg}` names a lens attach doesn't take: it takes `alloc` on a running program, and `counts` on a command after `--`", "attach with `--lens=alloc` for a heap snapshot, `--lens=counts -- <command>` to count a command's work, or no lens for the flight ring", color)
+            loop lens in arg.slice(7..<arg.len()).split(",") {
+                if lens == "alloc" -> alloc = true else if lens == "counts" -> counts = true else if lens == "syscalls" {
+                    syscalls = true
+                } else {
+                    return jet_cli_perf_error("`{arg}` names a lens attach doesn't take: it takes `alloc` on a running program, and `counts` and `syscalls` on a command after `--`", "attach with `--lens=alloc` for a heap snapshot, `--lens=counts -- <command>` to count a command's work, `--lens=syscalls -- <command>` to trace its system calls, or no lens for the flight ring", color)
+                }
             }
-            if arg == "--lens=alloc" -> alloc = true else -> counts = true
             next
         }
         if skip {
@@ -477,12 +482,18 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
             return jet_cli_perf_error("`jet perf attach --` names no command", "write the command after `--`: `jet perf attach --lens=counts -- <command>`", color)
         }
         if for_ms > 0 || zones_ms > 0 || source != None || alloc || follow {
-            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, as `--follow` does, and a command after `--` runs from its start to its end", "drop them to count the command, or start it and attach to its pid", color)
+            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, as `--follow` does, and a command after `--` runs from its start to its end", "drop them to count or trace the command, or start it and attach to its pid", color)
+        }
+        if syscalls {
+            return jet_cli_perf_attach_syscalls(words.move(), counts, out, allowlist, quiet, color)
         }
         if !counts {
-            return jet_cli_perf_error("`jet perf attach -- <command>` takes `--lens=counts`", "run `jet perf attach --lens=counts -- {words.join(" ")}`, or start the command and attach to its pid", color)
+            return jet_cli_perf_error("`jet perf attach -- <command>` takes `--lens=counts` or `--lens=syscalls`", "run `jet perf attach --lens=counts -- {words.join(" ")}` to count it, `--lens=syscalls` to trace its system calls, or start the command and attach to its pid", color)
         }
         return jet_cli_perf_attach_command(words, out, allowlist, quiet, color)
+    }
+    if syscalls {
+        return jet_cli_perf_report("E2102", "`--lens=syscalls` traces a command from its start, and a running process has started already", "run `jet perf attach --lens=syscalls -- <command>`", color)
     }
     if counts {
         return jet_cli_perf_error("`--lens=counts` counts a command from its start, and a running process has started already", "run `jet perf attach --lens=counts -- <command>`", color)

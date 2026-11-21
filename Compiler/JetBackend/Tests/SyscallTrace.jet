@@ -1,0 +1,54 @@
+// A command's trace (Image/Loader.jet x64_trace_command) starts it stopped
+// before its first instruction; each step (x64_trace_syscall_step) lets a
+// thread go on to its next system call's entry or exit and waits for the
+// next stop or end. A system call stop carries the thread's registers, the
+// end its wait status and its reap's CPU and memory.
+use jet_backend.[X64_TRACE_ORIG_RAX, X64_TRACE_REGISTERS, X64_TRACE_SYSCALL_STOP, x64_trace_close, x64_trace_command, x64_trace_syscall_step]
+
+// x86-64's exit_group.
+SYSCALL_TRACE_EXIT_GROUP: 231
+
+#Test("a traced command stops at each system call's entry and exit, and its end gives its exit status") {
+    trace := x64_trace_command("/bin/sh", [String]{"sh", "-c", "exit 3"}, None)
+    if trace.refused != 0 {
+        // The kernel's ptrace policy refused the trace: the command never ran.
+        x64_trace_close(trace)
+        return
+    }
+    assert_eq(trace.failure, "")
+    stops := 0
+    exited := false
+    status := -1
+    resume := trace.pid
+    loop {
+        step: x64_trace_syscall_step(trace, resume, 0)
+        if step.thread <= 0 -> break
+        resume = step.thread
+        if step.status & 0xff != 0x7f {
+            if step.thread == trace.pid {
+                status = step.status
+                assert(step.peak_rss_bytes > 0, "the reap reports the shell's resident set")
+            }
+            resume = 0
+            next
+        }
+        if (step.status >> 8) & 0xff == X64_TRACE_SYSCALL_STOP {
+            assert_eq(step.registers.len(), X64_TRACE_REGISTERS)
+            stops += 1
+            if step.registers[X64_TRACE_ORIG_RAX] == SYSCALL_TRACE_EXIT_GROUP -> exited = true
+        }
+    }
+    x64_trace_close(trace)
+    assert(stops > 2, "the shell made system calls")
+    assert(exited, "the shell's last call was exit_group")
+    assert_eq((status >> 8) & 0xff, 3)
+}
+
+#Test("a traced command whose program can't be started gives the execve's error") {
+    trace := x64_trace_command("/nonexistent/syscall-trace-program", [String]{"syscall-trace-program"}, None)
+    assert(trace.pid <= 0, "no program started")
+    if trace.refused == 0 {
+        assert_eq(trace.failure, "execve of /nonexistent/syscall-trace-program failed")
+    } else { assert(trace.failure != "", "the trace says why") }
+    x64_trace_close(trace)
+}

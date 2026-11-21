@@ -1111,6 +1111,40 @@ command, a command without `--lens=counts`, and a pid with a command
 `Jet.DriverOperationFailed` (exit 1).
 Tests/Cases/Perf/attach_counts_a_command.case is the worked example.
 
+`jet perf attach --lens=syscalls -- <command>` traces each system call of a
+command, and of every thread and process it starts, from its start to its
+end (D-PERF-TARGET1), with no tracer but jet. jet starts the command traced
+as a whole: each call stops it twice, as it enters and as it returns, and
+jet's trace helper reads the call's registers at each stop. Its arguments
+are decoded as strace shows them: a path or buffer it reads is quoted,
+and flags (open, `AT_`, clone, mmap, socket families and types) are named.
+A `stat`, `statx`, pipe or socket pair the kernel filled shows what it
+holds, as `{st_mode=S_IFDIR|0700, st_size=4096, ...}`, and a failure shows
+its error by name (`-1 ENOENT`). A thread or process the command starts
+is traced from its first instruction; when the command itself ends, each
+process it left running is let go, untraced, and counted as `left`. The
+command keeps jet's terminal and its signals, and the attach exits with
+its exit code. After it ends the attach prints `syscalls calls=412
+processes=2`, then the trace's path. The trace holds every call as the
+`syscalls` receipt section (type `JetPerfSyscalls`), `status` `traced`:
+`calls` lists each in the order it returned, with its `pid`, `tid`,
+`number`, `name`, decoded `args` as one text and `result` (`?` for one
+that never returned, as `exit_group`), and `syscalls` sums them by process
+and name, with each row's `count` and `errors`. `jet perf view` prints the
+line, then each call after its process, as `  4251 openat(AT_FDCWD,
+"main.jet", O_RDONLY|O_CLOEXEC) = 3`. Where the kernel refuses the trace
+(Yama's `ptrace_scope` 2 or 3, a seccomp filter, or a tracer already on
+jet) the command still runs, untraced: `status` is `unavailable`, with the
+kernel's `errno`, the `ptrace_scope` and the `reason`, and the line reads
+`syscalls unavailable errno=1 ptrace_scope=3 · <reason>`. Each stop costs
+the command a round trip to jet's trace helper, so a traced command runs
+slower the more calls it makes; `--lens=counts,syscalls` counts it too,
+and the counts then include that cost. A trace missing the start would
+mislead, so `--lens=syscalls` on a pid is refused (`Jet.UnknownFlag`,
+exit 2) with the `--` form as its fix.
+Tests/Cases/Perf/attach_traces_a_commands_syscalls.case is the worked
+example.
+
 An attach's profile run window is the attach's own window on the program,
 `live`, not the run since it started, whatever it read: it opens before the
 attach's first read of the program (its live snapshot) and closes after its

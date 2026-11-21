@@ -1,6 +1,7 @@
-// Core source receipt: `jet run` of hello, under strace, names no file under
-// a toolchain tree's `Core/` or `Compiler/Prelude/`. Core and Prelude come
-// from the compiler's own records, out of tree and inside a checkout.
+// Core source receipt: `jet run` of hello, its system calls traced by
+// `jet perf attach --lens=syscalls`, names no file under a toolchain tree's
+// `Core/` or `Compiler/Prelude/`. Core and Prelude come from the compiler's
+// own records, out of tree and inside a checkout.
 //
 //   jet Tools/Perf/CoreStrace/run.jet -- --jet PATH [--work DIR] [--out DIR]
 //
@@ -10,17 +11,16 @@
 //   out-of-tree  jet run hello.jet in <work>/hello, a file printing "hello"
 //   checkout     jet run Examples/Basics/Hello.jet in this checkout
 //
-// Each runs twice under strace (`-f`, every thread and child):
-// `-e trace=%file,getdents64` lists every call that names a path or reads a
-// directory, and `-c -e trace=statx,openat,getdents64` counts those calls.
-// A call names the tree when its line holds `/Core/` or
-// `/Compiler/Prelude/`.
+// Each runs once under the trace, every thread and child included, and
+// `jet perf view` prints its calls. Its file calls are those that name a
+// path (FILE_CALLS) or read a directory (getdents64), and a call names the
+// tree when its line holds `/Core/` or `/Compiler/Prelude/`.
 //
 // --out DIR (default <work>) gets receipt.md: the compiler (the IDENTITY
 // file beside --jet and its `--version`), each run's file calls, its calls
-// on the tree and verdict, any calls on the tree, and each run's `strace -c`
-// table. Only those calls on the tree, when there are any, name a path on
-// this machine.
+// on the tree and verdict, any calls on the tree, and each run's count of
+// its statx, openat and getdents64 calls and their errors. Only those calls
+// on the tree, when there are any, name a path on this machine.
 //
 // Exit 0 when neither run names the tree, 1 when one does; a usage error
 // or a run that fails ends it with its report on stderr and exit 1 before
@@ -36,6 +36,77 @@ CORE_PART: "/Core/"
 
 PRELUDE_PART: "/Compiler/Prelude/"
 
+// The x86-64 system calls that name a path, as strace's `%file` class
+// holds them, and the one that reads a directory.
+FILE_CALLS: [String]{
+    "access",
+    "acct",
+    "chdir",
+    "chmod",
+    "chown",
+    "chroot",
+    "creat",
+    "execve",
+    "execveat",
+    "faccessat",
+    "faccessat2",
+    "fanotify_mark",
+    "fchmodat",
+    "fchmodat2",
+    "fchownat",
+    "futimesat",
+    "getxattr",
+    "inotify_add_watch",
+    "lchown",
+    "lgetxattr",
+    "link",
+    "linkat",
+    "listxattr",
+    "llistxattr",
+    "lremovexattr",
+    "lsetxattr",
+    "lstat",
+    "mkdir",
+    "mkdirat",
+    "mknod",
+    "mknodat",
+    "mount",
+    "name_to_handle_at",
+    "newfstatat",
+    "open",
+    "openat",
+    "openat2",
+    "pivot_root",
+    "quotactl",
+    "readlink",
+    "readlinkat",
+    "removexattr",
+    "rename",
+    "renameat",
+    "renameat2",
+    "rmdir",
+    "setxattr",
+    "stat",
+    "statfs",
+    "statx",
+    "swapoff",
+    "swapon",
+    "symlink",
+    "symlinkat",
+    "truncate",
+    "umount2",
+    "unlink",
+    "unlinkat",
+    "uselib",
+    "utime",
+    "utimensat",
+    "utimes",
+    "getdents64",
+}
+
+// The calls the receipt counts for each run.
+COUNTED_CALLS: [String]{"statx", "openat", "getdents64"}
+
 // A run: its name, its working directory, its entry and what it prints.
 Probe: struct {
     name: String,
@@ -46,11 +117,11 @@ Probe: struct {
 }
 
 // A run's receipt: its file calls, the ones that name the tree, and its
-// `strace -c` table.
+// count table.
 Traced: struct {
     calls: Int,
     on_tree: [String],
-    counted: String,
+    counted: [String],
 }
 
 run: fn() -> Never Err! {
@@ -60,7 +131,7 @@ run: fn() -> Never Err! {
     tmp: process.env_get_or("TMPDIR", "/tmp")
     args := [String:String]{
         "jet": "",
-        "work": files.join(tmp, "jet-core-strace"),
+        "work": files.join(tmp, "jet-core-sources"),
         "out": "",
     }
     i := 0
@@ -74,7 +145,6 @@ run: fn() -> Never Err! {
     }
     jet: args["jet"]
     if !jet.starts_with("/") -> return Err("--jet takes the compiler's absolute path")
-    if strace() == "" -> return Err("no strace on PATH")
     work: files.normalize(args["work"])
     out: if args["out"] == "" -> work else -> args["out"]
     files.remove_all(work) ?? ()
@@ -94,7 +164,7 @@ run: fn() -> Never Err! {
     }
     lines := [String]{"# Core source receipt", ""}
     lines.extend(compiler_lines(jet))
-    lines.push("Each run had an empty JET_STORE_DIR and XDG_CACHE_HOME, no JET_TOOLCHAIN_ROOT or JET_SEED, and NO_COLOR=1, under `strace -f`. File calls are the lines of `-e trace=%file,getdents64`; a call on the tree names a path holding `/Core/` or `/Compiler/Prelude/`. Produced by `jet Tools/Perf/CoreStrace/run.jet`.")
+    lines.push("Each run had an empty JET_STORE_DIR and XDG_CACHE_HOME, no JET_TOOLCHAIN_ROOT or JET_SEED, and NO_COLOR=1, under `jet perf attach --lens=syscalls`, every thread and child traced. File calls are its calls that name a path or read a directory (getdents64); a call on the tree names a path holding `/Core/` or `/Compiler/Prelude/`. Produced by `jet Tools/Perf/CoreStrace/run.jet`.")
     lines.extend([String]{"", "| Run | Command | File calls | On the tree | Verdict |", "|---|---|---:|---:|---|"})
     failed := false
     loop (index, probe) in probes {
@@ -105,7 +175,8 @@ run: fn() -> Never Err! {
     }
     loop (index, probe) in probes {
         ran: traced[index]
-        lines.extend([String]{"", "## {probe.name}", "", "`strace -f -c -e trace=statx,openat,getdents64 {probe.shown}`:", "", "```", ran.counted.trim(), "```"})
+        lines.extend([String]{"", "## {probe.name}", "", "`{probe.shown}`, its statx, openat and getdents64 calls:", "", "| Call | Calls | Errors |", "|---|---:|---:|"})
+        lines.extend(ran.counted)
         if ran.on_tree.len() > 0 {
             lines.extend([String]{"", "Calls on the tree:", "", "```"})
             lines.push(ran.on_tree.join("\n"))
@@ -115,13 +186,6 @@ run: fn() -> Never Err! {
     files.write(files.join(out, "receipt.md"), "{lines.join("\n")}\n")
     print(files.join(out, "receipt.md"))
     process.exit(if failed -> 1 else -> 0)
-}
-
-// The first executable `strace` on PATH, or "" when there is none.
-strace: fn() -> String {
-    on_path: process.env_get_or("PATH", "").split(":").to_list().find(fn(dir) { dir != "" && files.can_execute("{dir}/strace") })
-    if on_path == .Val(dir) -> return "{dir}/strace"
-    ""
 }
 
 // The compiler's lines: its IDENTITY file (beside it) and the first line of
@@ -134,42 +198,69 @@ compiler_lines: fn(jet: String) -> [String] Err! {
     [String]{"Compiler: identity `{identity}`, `jet --version`: `{named.partition("\n").head}`.", ""}
 }
 
-// `probe` run twice under strace in <work>/runs/<name>: once listing its
-// file calls, once counting them.
+// `probe` run once traced in <work>/runs/<name>, then its calls as
+// `jet perf view` prints them: `  <pid> <name>(<args>) = <result>`.
 trace: fn(jet: String, work: String, probe: Probe) -> Traced Err! {
     dir: files.join(work, "runs/{probe.name}")
-    listed: files.join(dir, "calls.trace")
-    counted: files.join(dir, "count.txt")
     files.create_dir_all(dir)
-    spawn(jet, dir, probe, "list", [String]{strace(), "-f", "-qq", "-e", "trace=%file,getdents64", "-o", listed})
-    spawn(jet, dir, probe, "count", [String]{strace(), "-f", "-c", "-e", "trace=statx,openat,getdents64", "-o", counted})
+    saved: files.join(dir, "run.jettrace")
+    spawn(jet, dir, probe, [String]{jet, "perf", "attach", "--lens=syscalls", "--out", saved, "--"})
+    viewed: process.cmd([jet, "perf", "view", saved]).env("NO_COLOR", "1").timeout(time.duration_seconds(TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT).run()
+    if viewed.code != 0 {
+        return Err("{probe.name}: jet perf view failed (exit {viewed.code}): {viewed.errors.trim()}")
+    }
+    files.write(files.join(dir, "calls.txt"), viewed.output)
     calls := 0
     on_tree := [String]{}
-    loop line in files.read(listed).split("\n") {
-        if line.trim() == "" -> next
+    counts := [Int]{0, 0, 0}
+    errors := [Int]{0, 0, 0}
+    loop line in viewed.output.split("\n") {
+        name: call_name(line) ?? next
+        if !FILE_CALLS.contains(name) -> next
         calls += 1
-        if line.contains(CORE_PART) || line.contains(PRELUDE_PART) -> on_tree.push(line.copy())  // copy: the receipt outlives the trace text
+        if line.contains(CORE_PART) || line.contains(PRELUDE_PART) -> on_tree.push(line.trim())
+        loop (index, counted) in COUNTED_CALLS {
+            if name != counted -> next
+            counts[index] = counts[index] + 1
+            if line.contains(") = -1 ") -> errors[index] = errors[index] + 1
+        }
     }
-    Ok(Traced{calls: calls, on_tree: on_tree, counted: files.read(counted)})
+    counted := [String]{}
+    loop (index, name) in COUNTED_CALLS {
+        counted.push("| {name} | {counts[index]} | {errors[index]} |")
+    }
+    Ok(Traced{calls: calls, on_tree: on_tree, counted: counted})
 }
 
-// One run of `probe` under `tracer` (the strace words before the command),
-// with its own empty store and cache in <dir>/<label>.
-spawn: fn(jet: String, dir: String, probe: Probe, label: String, tracer: [String]) Err! {
-    store: files.join(dir, "{label}.store")
-    cache: files.join(dir, "{label}.cache")
+// The call a line of `jet perf view` names, or None for a line that is no
+// call: `  <pid> <name>(`.
+call_name: fn(line: String) -> String? {
+    if !line.starts_with("  ") -> return None
+    rest: line.trim()
+    space: rest.partition(" ")
+    if space.tail == "" -> return None
+    open: space.tail.partition("(")
+    if open.tail == "" || open.head.contains(" ") -> return None
+    Val(open.head.copy())
+}
+
+// One run of `probe` after the `tracer` words, with its own empty store
+// and cache in <dir>.
+spawn: fn(jet: String, dir: String, probe: Probe, tracer: [String]) Err! {
+    store: files.join(dir, "store")
+    cache: files.join(dir, "cache")
     files.create_dir_all(store)
     files.create_dir_all(cache)
     argv := tracer
     argv.extend([String]{jet, "run", probe.entry})
     spec: process.cmd(argv).cwd(probe.cwd).env_remove("JET_TOOLCHAIN_ROOT").env_remove("JET_SEED").env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1")
     receipt: spec.timeout(time.duration_seconds(TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT).run()
-    files.write(files.join(dir, "{label}.stdout"), receipt.output)
-    files.write(files.join(dir, "{label}.stderr"), receipt.errors)
+    files.write(files.join(dir, "run.stdout"), receipt.output)
+    files.write(files.join(dir, "run.stderr"), receipt.errors)
     if receipt.timed_out || receipt.signal != None || receipt.code != 0 {
-        return Err("{probe.name} {label} failed (exit {receipt.code}, timed out {receipt.timed_out}); its output is in {dir}")
+        return Err("{probe.name} failed (exit {receipt.code}, timed out {receipt.timed_out}); its output is in {dir}")
     }
     if receipt.output != probe.stdout {
-        return Err("{probe.name} {label} printed {receipt.output.debug()}, not {probe.stdout.debug()}")
+        return Err("{probe.name} printed {receipt.output.debug()}, not {probe.stdout.debug()}")
     }
 }

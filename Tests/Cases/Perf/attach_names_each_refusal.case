@@ -71,9 +71,16 @@ step: jet perf attach 4242 --lens=counts
 exit: 2
 stderr: ~ "Error: Jet.InvalidCommandInput: `--lens=counts` counts a command from its start, and a running process has started already" # a count missing the start would mislead
 stderr: ~ "Fix: Run `jet perf attach --lens=counts -- <command>`" # the command form is the fix
+step: jet perf attach 4242 --lens=syscalls
+exit: 2
+stderr: ~ "Error: Jet.UnknownFlag: `--lens=syscalls` traces a command from its start, and a running process has started already" # a trace missing the start would mislead
+stderr: ~ "Fix: Run `jet perf attach --lens=syscalls -- <command>`" # the command form is the fix
+step: jet perf attach --lens=counts,stacks -- true
+exit: 2
+stderr: ~ "Error: Jet.InvalidCommandInput: `--lens=counts,stacks` names a lens attach doesn't take" # each lens of the list is checked
 step: jet perf attach -- true
 exit: 2
-stderr: ~ "Error: Jet.InvalidCommandInput: `jet perf attach -- <command>` takes `--lens=counts`" # a command is counted, not sampled
+stderr: ~ "Error: Jet.InvalidCommandInput: `jet perf attach -- <command>` takes `--lens=counts` or `--lens=syscalls`" # a command is counted or traced, not sampled
 step: jet perf attach --lens=counts --for=3s --out timed.jettrace -- true
 exit: 2
 stderr: ~ "Error: Jet.InvalidCommandInput: `--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process" # a window on a running process
