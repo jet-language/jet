@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1654,
+  "total": 1655,
   "counts": {
     "Compiler": 810,
     "Core": 179,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 566,
+    "Tests": 567,
     "Tools": 28
   },
   "regions": [
@@ -2666,14 +2666,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 180,
+      "line": 181,
       "column": 13,
       "reason": "the compiler admits between calls of the one thread it drives; the handler only reads the flag"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 195,
+      "line": 196,
       "column": 5,
       "reason": "the serve entry runs once, on the image's only thread, before it serves"
     },
@@ -4241,56 +4241,56 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 38,
+      "line": 40,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 61,
+      "line": 63,
       "column": 9,
       "reason": "written under the scheduler root mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 222,
+      "line": 224,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 282,
+      "line": 284,
       "column": 9,
       "reason": "written under the scheduler root mutex, after every word the handler and dispatcher read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 332,
+      "line": 334,
       "column": 5,
       "reason": "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 336,
+      "line": 338,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 345,
+      "line": 347,
       "column": 5,
       "reason": "rt_sigaction reads the saved four-word action from the hub's table and writes no old action"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 592,
+      "line": 594,
       "column": 9,
       "reason": "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action"
     },
@@ -8769,6 +8769,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Cases/ProcessSignalDrain/AHandlerRunsWhenItsTaskIsAtItsGuard.fixture/main.jet",
+      "line": 29,
+      "column": 9,
+      "reason": "the program signals itself: 0 only checks that it may, SIGINT is the subscribed signal"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet",
       "line": 19,
       "column": 5,
@@ -11839,9 +11846,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 566 |
+| Tests | 567 |
 | Tools | 28 |
-| **total** | **1654** |
+| **total** | **1655** |
 
 ### Regions
 
@@ -12192,8 +12199,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 531:5 | "MAP_FIXED replaces exactly the held map's own read-only private pages with the same length of its copy; borrowed views keep their addresses" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 18:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 95:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 180:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 195:5 | "the serve entry runs once, on the image's only thread, before it serves" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 181:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 196:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/Context.jet | 363:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 25:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAES.jet | 26:5 | "runtime-init runs before any other thread exists" |
@@ -12417,14 +12424,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 8330:5 | "getrusage writes the struct rusage in this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 8528:5 | "getcpu writes the CPU's 32-bit number into this thread's own entry" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 28:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 38:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 61:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 222:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 282:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 332:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 336:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 345:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 592:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 40:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 63:9 | "written under the scheduler root mutex" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 224:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 284:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 334:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 338:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 347:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 594:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 104:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 171:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 187:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
@@ -13064,6 +13071,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/PolicyScope/UnsafeObligationsAreCheckedBeforeCodegen.fixture/run.jet | 5:5 | "local pointer" |
 | Tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 54:5 | "the fixture's descendant rejoins the process group of the tree that spawned it" |
 | Tests | Tests/Cases/ProcessSessions/Subjects/native/session_fixture.jet | 96:9 | "kill -0 only asks whether the killed descendant still exists" |
+| Tests | Tests/Cases/ProcessSignalDrain/AHandlerRunsWhenItsTaskIsAtItsGuard.fixture/main.jet | 29:9 | "the program signals itself: 0 only checks that it may, SIGINT is the subscribed signal" |
 | Tests | Tests/Cases/ResourceClose/ReplacedListElementMapValueAndModuleStorageCloseBeforeTheyDrop.fixture/main.jet | 19:5 | "the test runs one task" |
 | Tests | Tests/Cases/RunEntry/ModuleWriteFromFnIsE0111.fixture/ok.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
 | Tests | Tests/Cases/SingleUse/DropErasesNoUnsafeInCodegen.fixture/source-1.jet | 11:5 | "gone" |

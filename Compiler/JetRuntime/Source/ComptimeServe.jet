@@ -98,10 +98,11 @@ comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64) {
     program: jet_rt_alloc(if (length < I64{8}) -> I64{8} else -> length, I64{8})
     comptime_serve_receive(program, length)
     action: jet_rt_alloc(I64{32}, I64{8})
-    // SA_SIGINFO | SA_RESTORER; a handler that answered an admitted call
-    // returns through the runtime's rt_sigreturn rail.
+    // SA_SIGINFO | SA_RESTORER | SA_ONSTACK; a handler that answered an
+    // admitted call returns through the runtime's rt_sigreturn rail, and runs
+    // on the thread's alternate stack.
     trap_store(action, handler)
-    trap_store(wrapping(action + I64{8}), I64{67108868})
+    trap_store(wrapping(action + I64{8}), I64{201326596})
     trap_store(wrapping(action + I64{16}), rt_process_signal_restore_address())
     trap_store(wrapping(action + I64{24}), I64{0})
     installed: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})

@@ -208,7 +208,10 @@ with status 101. No row speaks for it, so it is not a report: it prints one
 
 A native program's fatal signal is reported the same way under `jet run` and
 `jet build`. The handler runs on a per-thread alternate stack, so an exhausted
-stack is reported too. A SIGSEGV within the guard region below the stack
+stack is reported too. Every other handler the runtime installs, a subscribed
+process signal's included, runs on that stack as well, so a signal that
+arrives while a task is at its stack's guard is still handled
+(Tests/Cases/ProcessSignalDrain/a_handler_runs_when_its_task_is_at_its_guard.case). A SIGSEGV within the guard region below the stack
 pointer is a stack overflow: `Stop: Jet.StackOverflow:` names the Jet function and its
 source line and exits 70. Deep recursion reaches it only past the thread's
 total stack budget, since a recursive body moves onto stack segments as it

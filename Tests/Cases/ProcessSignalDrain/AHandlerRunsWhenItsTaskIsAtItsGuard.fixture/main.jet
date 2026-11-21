@@ -1,0 +1,83 @@
+// A subscribed SIGINT whose handler starts while the receiving task's stack
+// is within one page of its guard runs on the thread's alternate signal
+// stack, so it never writes into the guard page.
+//
+// Run with no arguments, the program caps its address space, so the task
+// stack is one small mapping with no segments to grow onto, and finds by
+// bisection the deepest recursion a copy of itself survives (`dive N`):
+// one recursion level more stops with a stack overflow. Then a copy runs
+// `raise N`: the same recursion, whose innermost call signals the process
+// with SIGINT instead of only checking it (signal 0), so the handler starts
+// less than one frame above the guard. That copy prints the signal its
+// subscription received and exits 0.
+use {
+    process: core.process
+    sys: core.sys
+}
+
+// The address-space cap: a hundredth of it is each stack and the stack
+// budget (JetRuntime Thread.jet thread_stack_capped), here the 1 MiB floor.
+SPACE: 104857600
+
+// No 1 MiB stack holds this many levels.
+DEEPEST: 16777216
+
+// The recursion keeps a frame per level on every tier: its result is no
+// running sum the optimizer can turn into a loop.
+dive: fn(n: Int, pid: Int, signal: Int) -> Int {
+    if n == 0 {
+        #Unsafe("the program signals itself: 0 only checks that it may, SIGINT is the subscribed signal") {
+            sys.kill(pid, signal) ?? panic("kill {signal}: {err}")
+        }
+        return 1
+    }
+    (dive(n - 1, pid, signal) * 31 + n) % 1000003
+}
+
+// The recursion in a task its next statement joins, so it runs on this
+// thread, the one the process signal reaches, on its own fiber stack.
+descend: fn(depth: Int, signal: Int) {
+    subscription: process.signals([ProcessSignal]{.Int}) ?? panic("process.signals refused Int: {err}")
+    pid: process.current_pid()
+    task.group deep {
+        diver: task dive(depth, pid, signal)
+        _ := diver.join() ?? panic("the recursion did not finish")
+    }
+    if signal != 0 {
+        received: subscription.receiver.receive() ?? panic("the subscription closed before the signal")
+        print("the handler ran: {received == .Int}")
+    }
+    subscription.close()
+}
+
+// Whether a copy of this program survives `dive depth`.
+survives: fn(program: String, depth: Int) -> Bool {
+    receipt: process.cmd([String]{program, "dive", "{depth}"}).run() ?? panic("the copy did not start: {err}")
+    receipt.success
+}
+
+run: fn() {
+    arguments: process.args()
+    if arguments.len() == 2 {
+        depth: Int.parse(arguments[1]) ?? panic("depth {arguments[1]}: {err}")
+        if arguments[0] == "dive" -> descend(depth, 0) else -> descend(depth, 2)
+        return
+    }
+    sys.set_memory_limit(Val(SPACE), None) ?? panic("set_memory_limit: {err}")
+    program: sys.executable()
+    // The deepest surviving depth lies in [low, high).
+    low := 0
+    high := 1024
+    loop high <= DEEPEST && survives(program, high) {
+        low = high
+        high *= 2
+    }
+    if high > DEEPEST -> panic("{low} levels never reached the stack's guard")
+    loop high - low > 1 {
+        middle: low + (high - low) /% 2
+        if survives(program, middle) -> low = middle else -> high = middle
+    }
+    receipt: process.cmd([String]{program, "raise", "{low}"}).run() ?? panic("the copy did not start: {err}")
+    print(receipt.output.trim_end())
+    print("raised at the guard, exit {process.exit_status(receipt)}")
+}
