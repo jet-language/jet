@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112936,
+    "rev": 112950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24403,20 +24403,20 @@
         {
           "n": 40,
           "text": "The semantic index spells a module one way: `definitions[].module` gives \"core.compiler\" while the identities give \"core_compiler\" for the same module (seen by Lens on the p400 jet, 2026-11-21, building c19). One spelling, used by every section, with the typed result and the CLI JSON agreeing. Proof: a case asserting the same module spelling in definitions and identities.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T09:00:19.852Z"
+          "evidence": "Landed f4e7a4f57e (p417, tip a495b97fee). Tests/Cases/CompilerAPI/typed_consumers_match_cli_json.case asserts the one spelling: the typed result prints definition/reference/call module core_compiler, the CLI JSON gives definitions[helper|run|param].module = \"core_compiler\" (the identity module), definitions/references/structural_nodes with module \"core.compiler\" #= 0, calls[0].module = \"core_compiler\". PASS in the p417 full suite (suite-p417/cases.out), with semantic_index_skips_injected_unit_families PASS beside it.",
+          "at": "2026-11-21T15:27:39.406Z"
         },
         {
           "n": 41,
           "text": "Every CLI refusal is headed by the name of what actually went wrong. On dev ba5711569a (2026-11-21), E2102 (Jet.UnknownFlag, registered as \"Unknown or ambiguous flag\") is raised at 31 jet_cli_fail sites in Compiler/JetCLI, most of which are not unknown flags: flags that conflict (`--attach` with `--dap`, `--record` with `--replay`, `jet emit` given two tiers), a value that is not valid (`--attach {value}` that is not a process id, `--break {spec}`), a flag valid only with another command (`--canvas`, `--threads`), and usage lines. So `jet debug echo.jet --stdin=/dev/stdin` prints \"Error: Jet.UnknownFlag\" for a known flag. Each meaning gets its own registered diagnostic (code, Jet.Name, what/why/fix, UI snapshot) and every site uses the one that fits, with E2102 kept for unknown or ambiguous flags only. Proof: a sweep of every jet_cli_fail call in Compiler/JetCLI shows each site's message matching its code's registered meaning (validated against the known misuse above), and the new diagnostics' UI snapshots pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T12:47:32.851Z"
+          "evidence": "Landed 55bbfc2207 (p419, tip 24356fa7b8), with existing codes (no new diagnostic). Sweep of every jet_cli_fail call in Compiler/JetCLI/Source (202 sites), validated on ba5711569a where it finds the 31 known E2102 sites (conflicts such as --attach with --dap and --record with --replay, invalid values such as --attach and --break, flags valid only elsewhere such as --canvas and --threads, usage lines). On 24356fa7b8, 4 E2102 sites remain, each an unknown flag: Front.jet 787 (not a build option), 839 (jet_cli_unknown_flag), 1127 (jet jobs flag), Repl.jet 1383 (repl option). The rest moved to E2104 Jet.InvalidCommandInput (106 -> 131), and E2101/E2105 keep their meanings. Every other \"E2102\" literal in JetCLI (usage, perf, inspect, binder and prove helpers) reads \"unknown ... flag\", so the 11 sites passing a code variable can carry E2102 only for unknown flags. The p419 suite passes the refusal cases: CLICommands/duplicate_authority_right_is_e2102, threads_flag_is_the_compiler_thread_cap, misplaced_flag_is_e2102_naming_the_commands_that_take_it, CLIParts* refusals, Debug/program_arguments_reach_the_program, Perf/attach_names_each_refusal; DiagnosticRows --check and DiagnosticCensus --check pass.",
+          "at": "2026-11-21T15:43:06.876Z"
         }
       ],
       "refs": [
@@ -24446,7 +24446,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T13:08:42.820Z",
+      "updated": "2026-11-21T15:43:06.876Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 41
@@ -49802,6 +49802,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "a0.0.46 admit of b946c4dfc4 (seed gate p407) failed: chain fixed point, packs, jetpack, golden and ui passed; cases lost 1, untracked 9, flaky 1 (receipt_reports_measured_overhead, owned by #6841 c105); registries 433/456, of which 20 also failed alike at a0.0.45 (dispositioned to this card then) and 3 are new (c6, c7); speed INCONCLUSIVE from per-phase spread 13-56% (agents worked during the timing; the rerun takes a quiet slot); throughput failed (c10). fork_under_load_child_completes stays #3594 c19. Next admit from the tip after these land."
+        },
+        {
           "at": "2026-11-18",
           "by": "Main",
           "text": "Release pass 2 at 751a90c25c: untracked:cases (22) and untracked:golden (4) failed. These rows fail on both columns but with a different status (a0.0.44 FAIL, a0.0.45 ERROR or the reverse), so a disposition cannot track them. Roots: (1) 0099c1cc87 put back the 3-carrier jet_plugin_load route row, so every plugin.load is an ICE (17 cases, PluginFailure, SandboxMathKit); fix SUB Main-a0045-plugin-route restores the seven carriers. (2) An f32 math sema-totality ICE (4 CoreMathNumeric/ComptimeCorePureParity cases). (3) The JetWeb ICE at O1/O2. (4) int_converts fraction_stop exits 101. (5) The rdtsc and state_arrow streams. All are on known-failing.tsv with #6717 (dev 4dec4676b0); each line comes off when its fix lands."
@@ -49902,6 +49907,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T09:38:43.044Z"
+        },
+        {
+          "n": 6,
+          "text": "JetRuntime/Tests/Fragments.fixture/SharedPublicationTests passes again: it passed at a0.0.45 (3a012d3674) and at the a0.0.46 admit of b946c4dfc4 shared-weak-fixture.c:185 aborts on jet_rt_program_allocator_fact(2) == base + 96. The accounting or the fixture is fixed at its root, whichever is wrong. Proof: suite:registries of the next admit lists the entry PASS.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T14:23:22.145Z"
+        },
+        {
+          "n": 7,
+          "text": "The registry entries JetRuntime/Tests/Fragments.fixture/PerfCitesTests and WaitCycleTests, added after a0.0.45, have a registered transport and a native verdict: the a0.0.46 admit reported both BLOCKED with \"No registered transport\". Proof: suite:registries of the next admit lists both PASS.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T14:23:22.951Z"
+        },
+        {
+          "n": 8,
+          "text": "Tests/Cases/LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts.case passes again: PASS at a0.0.45, exit 1 at the a0.0.46 admit of b946c4dfc4. Proof: the case PASS in the next admit and in the landing suite.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T14:23:23.743Z"
+        },
+        {
+          "n": 9,
+          "text": "The a0.0.46 admit untracked case failures pass, each fixed at its root: Debug/a_fault_stops_like_a_breakpoint_with_its_stack_readable (stream predicate), MetaSuite/jai_families_and_metadata_rows_each_pass_a_witness (exit 1), Perf/causal_profile_predicts_speedup (exit 70), Perf/task_clock_nominal_matches_kept (literal stream). Proof: each PASS in the next admit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T14:23:24.562Z"
+        },
+        {
+          "n": 10,
+          "text": "The release chain s2 and the speed cells agree on the compiler layout: the three ToolchainDefaults identity_* cases failed with \"file action source is missing: <release>/chain/s2/jet-bare\", and throughput failed the release-mode compile of the compiler corpus by s2 in its core-embed step (Jet.BuildProbeFailed, status 1) though a0.0.45 passed it. Proof: the three cases PASS and throughput PASS in the next admit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T14:23:25.361Z"
         }
       ],
       "refs": [],
@@ -49909,9 +49959,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-21T09:38:43.044Z",
+      "updated": "2026-11-21T14:23:26.179Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 10
     },
     {
       "id": "c0f9brds",
@@ -51673,20 +51723,29 @@
         {
           "n": 10,
           "text": "The case runner never errors on a step whose child exits, as expected, before reading its stdin: in the p413 full suite (dev ba5711569a, 2026-11-21) Tests/Cases/Debug/stdin_file_is_the_program_s_input_while_the_console_reads_commands.case reported ERROR \"stdin: closed during write `process stdin`: process stdin closed; child exited 2 without reading it\" on the step `jet debug echo.jet --stdin=/dev/stdin`, whose expected result is exactly that exit 2 refusal before any read. It passed in p410 on the same refusal, so the outcome depends on whether the child exits before the write. Fix: a write to a child that has exited (EPIPE) ends the stdin feed and the step is judged on its exit and streams. Proof: a testkit unit whose child exits at once without reading a large stdin, run 200 times under load, always judged on its exit; and that case passes 50 times in a row under the cases suite.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T12:20:31.268Z"
+          "evidence": "Landed 3b3c3e0724 (p417, tip a495b97fee). On the p417 batch compiler, under the p419 census and suite load: Compiler/JetTestKit/Tests/Core.jet --filter \"without reading its input is judged on its exit\" (the unit loops 200 rounds of a child that exits 2 without reading 1 MiB of stdin, each judged on exit 2 and its stderr, no process failure): 1 passed, 0 failed. Tests/Cases/Debug/stdin_file_is_the_program_s_input_while_the_console_reads_commands.case through the cases runner (jet test Compiler --profile cases --filter): 50 of 50 PASS in a row, load average 13.8-25.0 on 32 CPUs ($JET_SCRATCH_ROOT/lanes/Main/c6772-x50.out). It is in the p417 suite fixed list.",
+          "at": "2026-11-21T15:30:51.314Z"
         },
         {
           "n": 11,
           "text": "A case that copies jet and runs the copy never fails with ETXTBSY: in the p413 full suite (dev ba5711569a, 2026-11-21) Tests/Cases/CLI/compiler_aliases_run_the_compiler_verbs.case reported ERROR \"spawn: I/O error during resolve `.../work/bin/jet`: Text file busy (os error 26)\", so a write descriptor to the fresh copy was still open (in this process or a child forked meanwhile) when it was executed. Fix the root: the copy is written through a descriptor that no concurrently spawned child can inherit (O_CLOEXEC, closed before the spawn), or the runner retries exec only on ETXTBSY with that reason. Proof: a testkit unit that copies a binary and executes it while other threads spawn children, run 1000 times under load with no ETXTBSY; and the case passes 50 times in a row under the cases suite.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 3b3c3e0724 (p417, tip a495b97fee). On the p417 batch compiler, under the p419 census and suite load: Compiler/JetTestKit/Tests/Core.jet --filter \"a fresh copy of a program runs while other threads spawn children\" (1000 rounds of copy-then-exec of /bin/sh while three tasks spawn 2000 children each; every round ran with no error, exit 3): 1 passed, 0 failed. Tests/Cases/CLI/compiler_aliases_run_the_compiler_verbs.case through the cases runner: 50 of 50 PASS in a row, load average 13.8-25.0 on 32 CPUs ($JET_SCRATCH_ROOT/lanes/Main/c6772-x50.out). It is in the p417 suite fixed list.",
+          "at": "2026-11-21T15:30:52.177Z"
+        },
+        {
+          "n": 12,
+          "text": "Tests/Cases/Debug/first_print_nonentry_under_250ms holds under full-suite load, fixed at its root, not by retry or a wider bound: in the p417 suite (tip a495b97fee, 2026-11-21) it failed with \"recv deadline exceeded after 258.69942ms\", while direct timing on the same compilers gives a median of 18.6-21.8 ms (10 runs each, load 14-23), so a stall under load took the case 12 times its normal time. Its wall bound judges the debugger only when the debugger had the CPU: measure the debugger's own time to the first print (CPU time, or the stall excluded) or keep the 250 ms promise by design under load. Proof: the case passes 50 times in a row under the cases runner while a full suite runs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-21T12:20:32.081Z"
+          "at": "2026-11-21T15:32:53.783Z"
         }
       ],
       "refs": [],
@@ -51694,9 +51753,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-21T12:20:32.081Z",
+      "updated": "2026-11-21T15:32:53.783Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 12
     },
     {
       "id": "c08zzpo5",
@@ -55745,20 +55804,20 @@
         {
           "n": 114,
           "text": "The jet perf syscall lens records every system call a Jet program makes, including the runtime's direct os_syscall paths that bypass host_call (the stdout flush among them): on p407 a program printing 3000 lines to a pipe showed only `read x2` in the syscall view and no write rows. Found by Rivet on #6444 c2 (2026-11-21). Proof: a case whose program prints 3000 lines to a pipe and the syscall view lists its write calls with the same count `/proc/PID/io` syscw reports for the plain run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T11:12:25.856Z"
+          "evidence": "Landed df211c9425 (c114.r3, p419, tip 24356fa7b8). Tests/Cases/Perf/syscalls_count_every_write.case: the program prints 3000 lines into a pipe; a plain run reports its writes from /proc/self/io syscw, and under jet perf run the syscalls receipt holds exactly those writes at the print line plus the exit write of the last line (write rows #= 2, one with count=1). PASS in the p419 full suite and in the p419 proof run; threads_and_syscalls_name_their_callers PASS too. The codegen ceiling (CodegenCeiling) passes with the counted path's clock and frame calls kept as stop leaves (RuntimeStops and HotLoopChecks cases PASS).",
+          "at": "2026-11-21T15:43:45.118Z"
         },
         {
           "n": 115,
           "text": "jet perf run measures the same program a plain build makes: on p407 an owned-main program made 3000 fd-1 writes when built plainly but 11 under jet perf run, so the profiled program was not the shape it measures. Found by Rivet on #6444 c2 (2026-11-21). Proof: a case that builds an owned-main program plainly and under jet perf run and shows the same entry shape and the same write count.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T11:12:30.695Z"
+          "evidence": "Landed 354b3909b5 (c115.r3 part a, p419, tip 24356fa7b8). Tests/Cases/Perf/owned_main_is_measured_as_built.case builds an owned-main program plainly and under jet perf run, and checks the same program-owned entry and the same write count in both. PASS in the p419 full suite and in the p419 proof runs (c115.r3 and #6444 c2.r3 lines). Part b (Core naming each zone open) follows as c115b.",
+          "at": "2026-11-21T15:43:47.151Z"
         },
         {
           "n": 116,
@@ -55784,7 +55843,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T13:43:32.419Z",
+      "updated": "2026-11-21T15:43:47.152Z",
       "updatedBy": "Main",
       "criteriaLastN": 117
     },
@@ -59264,11 +59323,11 @@
         {
           "n": 27,
           "text": "The ReadInto memory pair measures peak RSS independent of who launches it: Tools/Perf/ReadInto/Memory.jet and its original memory.mjs read the same binaries 32 KB apart in both arms (1264/1344 against 1296/1376 KB, p407, 2026-11-21) because the measured program inherits its launcher's environment (env -i gives 1200 KB, an extra 30 KB of environment 1328-1352 KB; found by Lens proving #6995 c15). Both tools hand the timer one fixed, minimal environment. Proof: Memory.jet and memory.mjs report the same peak RSS for each arm, within the runs' own spread.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T12:16:01.449Z"
+          "evidence": "Landed fd84b259f8 (p417, tip a495b97fee). With the p417 batch jet as the artifact, three runs of each tool (100 RSS runs each): memory.mjs reports surface/plain peak RSS 1200/1280, 1200/1280 and 1200/1276 KB; Memory.jet reports 1200/1280 KB on all three. Before the fix the two read 1264/1344 against 1296/1376 KB (p407). The 4 KB plain-arm difference in one node run is one page, inside the runs' own spread, and the old constant 32 KB environment offset is gone.",
+          "at": "2026-11-21T15:37:57.965Z"
         }
       ],
       "refs": [],
@@ -59280,7 +59339,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:13.176Z",
-      "updated": "2026-11-21T12:16:01.449Z",
+      "updated": "2026-11-21T15:37:57.965Z",
       "updatedBy": "Main",
       "criteriaLastN": 27
     },
@@ -132648,6 +132707,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T15:43:47.152Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#115"
+    },
+    {
+      "at": "2026-11-21T15:43:45.119Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#114"
+    },
+    {
+      "at": "2026-11-21T15:43:06.876Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-21T15:37:57.965Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ejfsdq",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-21T15:32:53.783Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "12 criteria, soft limit 6: load-only failures of the case runner belong on this card"
+    },
+    {
+      "at": "2026-11-21T15:32:53.783Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#12 Tests/Cases/Debug/first_print_nonentry_under_250ms holds und"
+    },
+    {
+      "at": "2026-11-21T15:30:52.177Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-21T15:30:51.314Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-21T15:27:39.406Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#40"
+    },
+    {
+      "at": "2026-11-21T14:23:26.179Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qyk2os",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T14:23:25.361Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0qyk2os",
+      "note": "10 criteria, soft limit 6: one release sweep (a0.0.46 admit of b946c4dfc4): its findings share the release card"
+    },
+    {
+      "at": "2026-11-21T14:23:25.361Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#10 The release chain s2 and the speed cells agree on the compil"
+    },
+    {
+      "at": "2026-11-21T14:23:24.562Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0qyk2os",
+      "note": "9 criteria, soft limit 6: one release sweep (a0.0.46 admit of b946c4dfc4): its findings share the release card"
+    },
+    {
+      "at": "2026-11-21T14:23:24.562Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#9 The a0.0.46 admit untracked case failures pass, each fixed a"
+    },
+    {
+      "at": "2026-11-21T14:23:23.743Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0qyk2os",
+      "note": "8 criteria, soft limit 6: one release sweep (a0.0.46 admit of b946c4dfc4): its findings share the release card"
+    },
+    {
+      "at": "2026-11-21T14:23:23.743Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#8 Tests/Cases/LibraryOutputs/guest_import_library_calls_native"
+    },
+    {
+      "at": "2026-11-21T14:23:22.951Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0qyk2os",
+      "note": "7 criteria, soft limit 6: one release sweep (a0.0.46 admit of b946c4dfc4): its findings share the release card"
+    },
+    {
+      "at": "2026-11-21T14:23:22.951Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#7 The registry entries JetRuntime/Tests/Fragments.fixture/Perf"
+    },
+    {
+      "at": "2026-11-21T14:23:22.145Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#6 JetRuntime/Tests/Fragments.fixture/SharedPublicationTests pa"
+    },
     {
       "at": "2026-11-21T13:43:32.419Z",
       "by": "Main",
