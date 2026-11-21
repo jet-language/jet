@@ -1,0 +1,156 @@
+// What one builder body costs when its result's place travels with the
+// call, beside a builder that carries a second, stack arm. A round makes
+// 12,000 calls, each building a list of `items` Ints that the caller reads
+// and drops. Conventions:
+// - `plain`: today's call; the list comes from the heap.
+// - `arg`: one more Int argument, read once (returns.jet's row).
+// - `arm`: `arg`, and the callee tests the word and keeps a whole second
+//   body for the stack, as a builder with a stack path beside its heap path
+//   would. The arm is never taken here (the word is 0), so the row measures
+//   what carrying it costs the heap path, and the symbol table its size.
+// - `place`: one body, no test. The list's header is storage the caller
+//   names, so each growth asks the runtime's place lookup (JetRuntime
+//   Alloc.jet alloc_owner) which allocator owns that storage: here the
+//   caller's frame, so the heap.
+// - `arena`: the same body and the same calls, made inside the caller's
+//   `#Context(allocator: arena)` block. The lookup now finds the arena's
+//   carrier, so the list grows in the arena and rewinds with the block: the
+//   one body serves a second place with no second arm, as a scope stack
+//   would be served.
+// Call forms: `direct` names the function; `value` and `closure` call a
+// function value and a capturing lambda, picked at run time.
+// Run: place <plain|arg|arm|place|arena> <direct|value|closure> <items> <rounds> 0
+use {
+    mem: core.mem
+    process: core.process
+    time: core.time
+}
+
+CALLS: 12000
+
+build: fn(i: Int, items: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+build_to: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+// The stack arm is a whole body of its own, as it would be: it builds the
+// same list where the word says, here from the word itself so that no level
+// can merge it with the heap path.
+build_arm: fn(i: Int, items: Int, dest: Int) -> [Int] {
+    if dest != 0 {
+        kept := [Int]{}
+        kept.push(i * dest)
+        loop k in 1..<items -> kept.push(i * dest + k)
+        return kept
+    }
+    out := [Int]{}
+    out.push(i + dest)
+    loop k in 1..<items -> out.push(i + k)
+    out
+}
+
+// One body: the list it fills is the caller's storage.
+build_into: fn(i: Int, items: Int, into: &[Int]) -> Int {
+    into.push(i)
+    loop k in 1..<items -> into.push(i + k)
+    into.len()
+}
+
+direct: fn(conv: String, items: Int, dest: Int) -> Int {
+    total := 0
+    if conv == {
+        "arg" -> {
+            loop i in 0..<CALLS -> total += build_to(i, items, dest).len()
+        }
+        "arm" -> {
+            loop i in 0..<CALLS -> total += build_arm(i, items, dest).len()
+        }
+        "place" -> {
+            loop i in 0..<CALLS {
+                made := [Int]{}
+                total += build_into(i, items, made)
+            }
+        }
+        else -> {
+            loop i in 0..<CALLS -> total += build(i, items).len()
+        }
+    }
+    total
+}
+
+through_values: fn(conv: String, items: Int, dest: Int, plain: fn(Int, Int) -> [Int], to: fn(Int, Int, Int) -> [Int], arm: fn(Int, Int, Int) -> [Int], into: fn(Int, Int, &[Int]) -> Int) -> Int {
+    total := 0
+    if conv == {
+        "arg" -> {
+            loop i in 0..<CALLS -> total += to(i, items, dest).len()
+        }
+        "arm" -> {
+            loop i in 0..<CALLS -> total += arm(i, items, dest).len()
+        }
+        "place" -> {
+            loop i in 0..<CALLS {
+                made := [Int]{}
+                total += into(i, items, made)
+            }
+        }
+        else -> {
+            loop i in 0..<CALLS -> total += plain(i, items).len()
+        }
+    }
+    total
+}
+
+round: fn(conv: String, form: String, items: Int, dest: Int, pick: Int) -> Int {
+    if form == {
+        "value" -> through_values(conv, items, dest, build, build_to, build_arm, build_into)
+        "closure" -> {
+            through_values(
+                conv,
+                items,
+                dest,
+                fn(i, n) { build(i + pick, n) },
+                fn(i, n, d) { build_to(i + pick, n, d) },
+                fn(i, n, d) { build_arm(i + pick, n, d) },
+                fn(i, n, into) { build_into(i + pick, n, into) },
+            )
+        }
+        else -> direct(conv, items, dest)
+    }
+}
+
+run: fn() {
+    args: process.args()
+    conv: args.get(0) ?? "plain"
+    form: args.get(1) ?? "direct"
+    items: Int.parse(args.get(2) ?? "2") ?? 2
+    rounds: Int.parse(args.get(3) ?? "2000") ?? 2000
+    // The destination and the pick are 0, read at run time so that no level
+    // can fold them while building.
+    dest: Int.parse(args.get(4) ?? "0") ?? 0
+    pick: dest
+    // `arena` runs `place`'s calls inside the block, one block a round.
+    calls: if conv == "arena" -> "place" else -> conv
+    arena: mem.Arena.new()
+    total := 0
+    loop _ in 0..<50 -> total += round(calls, form, items, dest, pick)
+    started: time.start()
+    if conv == "arena" {
+        loop _ in 0..<rounds {
+            #Context(allocator: arena) { total += round(calls, form, items, dest, pick) }
+        }
+    } else {
+        loop _ in 0..<rounds -> total += round(calls, form, items, dest, pick)
+    }
+    took: time.elapsed(started).ns
+    print("{conv} {form} {items}: {rounds} rounds of {CALLS} calls, {(took / (rounds * CALLS)).to_float()} ns a call, total {total}")
+    close(arena)
+}
