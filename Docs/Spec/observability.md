@@ -163,14 +163,26 @@ a line's `path`, `line` and `function`, the `helper` named in Jet's terms
 (`stop poll` for every `jet_ir_stop_` poll, another helper its name past
 `jet_ir_` with spaces for `_`) and its `samples`, the most first; `jet
 explain --cost` names the stop poll each loop and each recursive call keeps
-as a cost fact on its line.
+as a cost fact on its line. The generated `entry` function that calls the
+program's `run` is compiler-emitted too: a sample in its own code counts
+outside the sources, as no line of it is theirs, and it is no frame of a
+sample under it, while the lines of `run` inlined into it keep theirs.
 `coverage` is `complete` when every sample landed in those sources and
 `partial` when some ran in the runtime or the toolchain's library, which the
 `reason` counts and, for samples outside every Jet function, names by the
 image's `.symtab` function, hottest first, as `perf report` names them. The
 `reason`
 also gives how many samples the CPU time sampled should give beside how many
-the session kept, and counts any sample in Jet code that kept no stack. The
+the session kept, and counts any sample in Jet code that kept no stack.
+Under the task clock that count is the task clocks' own, read from each
+thread's sampler as it closes and from every live one at exit: the CPU time
+each thread ran while sampled, over the period, so the runtime's start and
+exit outside the samplers give none; the kernel's share of it takes no
+sample (`it kept 392 of the 393 samples that 49 ms of CPU time on the
+threads' task clocks while sampled gives, of which time in the kernel takes
+none`). Under another sampler it is the process's CPU time over the
+sampling interval.
+The
 profile's overhead is `measured`: `overhead_ns` is the CPU time the
 sampler's handlers and drains took on their threads' CPU clocks (not the
 time a busy machine kept them preempted) plus, for each signal that carried
@@ -194,12 +206,15 @@ source's own), `cpu by package` follows: each package's samples, CPU time and
 share, heaviest first, at most 12, the samples of no package as `(none)`, so
 a profile of `jet build Compiler` gives the compiler's time by phase
 (`Compiler/JetIR samples=652042 cpu_us=81505250 share=57%`); an outside
-`jet perf attach` prints its samples by package the same way. A run whose
-samples never reach its sources (a short program, `jet perf test`, `jet
-perf attach`) keeps the observation rows, which attribute to the parsed `run:
-fn` declaration (`fn` through its closing brace) and do not separate the
-functions that `run` calls; their `inclusive_count` and `allocation_count` are
-null.
+`jet perf attach` prints its samples by package the same way. Every profile
+of a run that published observations ends in their `wall` row, which
+attributes to the parsed `run: fn` declaration (`fn` through its closing
+brace), whether or not any CPU-time sample landed in the sources, so a run
+too short for one keeps the same shape as one where some did; the `reason`
+says what the row is. A run whose samples never reach its sources (a short
+program, `jet perf test`, `jet perf attach`) keeps the `cpu` row of the
+observations that timed its CPU before it. Neither separates the functions
+that `run` calls; their `inclusive_count` and `allocation_count` are null.
 
 Unless the run is a causal experiment or a flight recording, each thread
 samples by a perf event of its own where `perf_event_paranoid` allows one. At

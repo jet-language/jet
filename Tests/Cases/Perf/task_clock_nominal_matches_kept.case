@@ -1,0 +1,24 @@
+# Under the task clock the samples a run should keep are the task clocks' own
+# count: each thread's CPU time while sampled, over the 125 microsecond
+# period, so the runtime's start and exit outside the samplers give none. A
+# spin of pure user CPU time keeps them all, to within one sample: every
+# sample is taken at a period's end, so it keeps no more than they give, and
+# the kernel's share of the spin, which takes none, is under a period.
+# The process's CPU time gave 8 to 11 for the 3 to 5 samples a half
+# millisecond spin keeps, its start and exit in the kernel and the runtime
+# counted too.
+requires: os-name:linux
+requires: probe grep -qx 2 /proc/sys/kernel/perf_event_paranoid # the task clock takes the samples at perf_event_paranoid 2
+fixture: TaskClockNominal.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 spin.jet --out {work}/spin.jettrace
+exit: 0
+stdout: = "spun=5702887\n"
+json: file spin.jettrace doc $.content.profile.reason ~ "the task clock took them" # the reason names the sampler
+json: file spin.jettrace doc $.content.profile.reason ~ " ms of CPU time on the threads' task clocks while sampled gives" # and counts by the task clocks
+capture: reason file spin.jettrace doc $.content.profile.reason
+capture: tally = text cap:reason.split("it kept ", 1).split(" samples that ", 0)
+capture: kept = text cap:tally.split(" ", 0)
+capture: nominal = text cap:tally.split("of the ", 1)
+json: cap:nominal doc $ >= {cap:kept}+0 # it keeps no more samples than the task clocks give
+json: cap:nominal doc $ <= {cap:kept}+1 # and at most one fewer

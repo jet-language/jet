@@ -18,7 +18,7 @@ exit: 0
 stdout: ~ "guesses=" # the program runs to its end under the lens
 json: file td.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 2
 json: file td.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[1] = "topdown"
-json: file td.jettrace doc $.content.profile.rows[?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the topdown events
+json: file td.jettrace doc $.content.profile.rows[?clock="cpu"][?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the topdown events
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"] #= 1
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].type_name = "JetPerfTopdown"
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.status = "captured"

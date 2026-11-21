@@ -15,7 +15,7 @@ exit: 0
 step: {work}/nocounters/.jet/build/main {jet} perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
 exit: 0
 stdout: ~ "guesses=" # the run still prints its topdown summary line
-json: file td.jettrace doc $.content.profile.rows #>= 1 # the CPU-time profile is still there
+json: file td.jettrace doc $.content.profile.rows[?clock="cpu"] #>= 1 # the CPU-time profile is still there
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.status = "unavailable"
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.reason ~ "the kernel refused " # the first event the kernel refused
 json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.reason ~ " (errno 2)" # and the errno it refused with
