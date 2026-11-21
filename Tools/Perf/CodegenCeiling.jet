@@ -40,6 +40,11 @@
 // build that its golden listing lacks, with its function and source line.
 // Instructions compare without their jump targets' offsets, so code an
 // added instruction only moved does not read as added.
+// A stale recording would read instructions that did not grow as grown, so
+// `--check` refuses one (STALE): a row recorded in AT&T syntax (`%rax`, as
+// objdump wrote it, which jet's listing never shows), or a row whose counts
+// all equal golden but whose build lists other instructions than recorded.
+// `--update` records it again.
 // A submission that touches Compiler/JetIR, Compiler/JetBackend or
 // Compiler/JetRuntime lists `jet Tools/Perf/CodegenCeiling.jet --check` in
 // its tests, and a gain lands with its `--update` (the orchestration skill's
@@ -627,6 +632,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
     }
     symbols: image_listing(jet, "symbols", binary, run_dir, scratch) ?? return fail("{err}")
     failures := 0
+    stale := 0
     lines := [String]{HEADER}
     listing_lines := [String]{LISTING_HEADER}
     loop row in rows {
@@ -649,16 +655,32 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         print("{row.symbol}\t{counts_line(current)}\tgolden {counts_line(row.golden)}\tceiling {row.ceiling}\tgap {gap(current.loop_insns, row.ceiling)}")
         worse: regressions(row.golden, current)
         loop item in worse -> term.eprint("REGRESSION {row.symbol}: {item}")
-        if !worse.is_empty() {
-            loop line in grown(row.symbol, listing_of(listed, row.symbol), sourced) {
-                term.eprint(line)
+        recorded: listing_of(listed, row.symbol)
+        unchanged: worse.is_empty() && regressions(current, row.golden).is_empty()
+        explained := false
+        // `--update` records the listing of a row that did not regress.
+        if !update || !worse.is_empty() {
+            if stale_listing(row.symbol, unchanged, recorded, sourced) == .Val(why) {
+                term.eprint(why)
+                stale += 1
+                explained = true
             }
+        }
+        if !worse.is_empty() && !explained {
+            loop line in grown(row.symbol, recorded, sourced) -> term.eprint(line)
         }
         failures += worse.len()
         lines.push("{row.symbol}\t{counts_line(current)}\t{row.ceiling}")
         listing_lines.extend(sourced)
     }
-    if failures != 0 -> return fail("{failures} regression(s)")
+    if failures != 0 || stale != 0 {
+        problems := [String]{}
+        if failures != 0 -> problems.push("{failures} regression(s)")
+        if stale != 0 {
+            problems.push("{stale} stale row(s) in {LISTING}; `--update` with a compiler that does not regress records them again")
+        }
+        return fail(problems.join("; "))
+    }
     if update {
         files.write("{root}/{GOLDEN}", "{lines.join("\n")}\n") ?? return fail("cannot write {GOLDEN}: {err}")
         files.write("{root}/{LISTING}", "{listing_lines.join("\n")}\n") ?? return fail("cannot write {LISTING}: {err}")
@@ -819,6 +841,28 @@ grown: fn(symbol: String, golden: [String], current: [String]) -> [String] Never
         lines.push("  {fields[1]} {fields[2]}: {fields[3]}")
     }
     lines
+}
+
+// Why a row's recording in listing.tsv is stale, or None. A recording in
+// AT&T syntax is objdump's, not jet's listing. A row whose counts all equal
+// golden (`unchanged`) lists exactly its recorded instructions, by function
+// and instruction: when it lists others, the recording is of another form
+// or another build. A row whose counts changed may list other code; it is
+// refused only for AT&T syntax.
+stale_listing: fn(symbol: String, unchanged: Bool, recorded: [String], current: [String]) -> String? Never! {
+    loop row in recorded {
+        fields: row.split("\t").to_list()
+        if fields.len() >= 4 && fields[3].contains("%") {
+            return Val("STALE {symbol}: {LISTING} records `{fields[3]}`, AT&T syntax, which jet's listing never shows; `--update` records it again")
+        }
+    }
+    if !unchanged || recorded.is_empty() -> return None
+    ours: loop row in recorded -> listing_key(row)
+    theirs: loop row in current -> listing_key(row)
+    if ours == theirs -> return None
+    missing: added_rows(current, recorded).len()
+    added: added_rows(recorded, current).len()
+    Val("STALE {symbol}: its counts equal golden, but this build lists {added} instruction(s) {LISTING} lacks and lacks {missing} it records; `--update` records it again")
 }
 
 // How many functions of each stem a symbol listing holds.
@@ -1149,4 +1193,21 @@ run: fn() {
     assert_eq(found.texts, [String]{"push   rbp", "add    rcx,QWORD PTR [rax]", "pop    rbp", "ret"})
     assert_eq(found.sources, [String]{"main.jet:4", "main.jet:5", "main.jet:5", "main.jet:5"})
     assert_eq(count_listing(listing).insns, 4)
+}
+
+#Test("a recording in objdump's AT&T syntax is stale, as is an unchanged row that lists other instructions") {
+    att: [String]{"main.k\tmain.k__value\tmain.jet:4\tpush %rbp", "main.k\tmain.k__value\tmain.jet:5\tmov (%rip),%rax"}
+    now: [String]{"main.k\tmain.k__value\tmain.jet:4\tpush rbp", "main.k\tmain.k__value\tmain.jet:5\tmov rax,QWORD PTR [rip]"}
+    assert_eq(stale_listing("main.k", false, att, now) ?? "", "STALE main.k: {LISTING} records `push %rbp`, AT&T syntax, which jet's listing never shows; `--update` records it again")
+    assert(stale_listing("main.k", true, att, now) != None)
+    assert(stale_listing("main.k", true, now, now) == None)
+    // Lines an edit above the kernel moved are no change of code.
+    moved: [String]{"main.k\tmain.k__value\tmain.jet:6\tpush rbp", "main.k\tmain.k__value\tmain.jet:7\tmov rax,QWORD PTR [rip]"}
+    assert(stale_listing("main.k", true, moved, now) == None)
+    other: [String]{"main.k\tmain.k__value\tmain.jet:4\tpush rbp", "main.k\tmain.k__value\tmain.jet:5\tmov rcx,QWORD PTR [rip]"}
+    assert_eq(stale_listing("main.k", true, other, now) ?? "", "STALE main.k: its counts equal golden, but this build lists 1 instruction(s) {LISTING} lacks and lacks 1 it records; `--update` records it again")
+    // A row whose counts changed may list other code.
+    assert(stale_listing("main.k", false, other, now) == None)
+    // A row with no recording is GREW's to explain.
+    assert(stale_listing("main.k", true, [String]{}, now) == None)
 }
