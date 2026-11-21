@@ -1234,6 +1234,36 @@ jet_driver_resolve_package_dependencies: fn(packages: &[JetDriverPackageInfo], s
     }
 }
 
+// Each setting a dependency entry gives (`tool: { settings: { loud: true } }`)
+// is one the dependency declares, with a value of its declared type; else
+// E0302 at the entry, naming what the dependency declares.
+jet_driver_check_dependency_settings: fn(packages: [JetDriverPackageInfo], diagnostics: &[Diagnostic]) {
+    loop package in packages {
+        loop dependency in package.dependencies {
+            if dependency.settings.len() == 0 -> next
+            target: jet_driver_find_package_by_root(packages, dependency.target_root_index) ?? next
+            declared: packages[target].settings
+            loop given in dependency.settings {
+                at := -1
+                loop (index, setting) in declared {
+                    if setting.name == given.name {
+                        at = index
+                        break
+                    }
+                }
+                if at < 0 {
+                    diagnostics.push(jet_driver_diagnostic_at_source("E0302", Val(given.span), dependency.source_path, 0, "`{dependency.name}` declares no setting `{given.name}`", "this entry gives `{given.name}` a value, and `{dependency.name}` declares {jet_driver_setting_names_text(declared)}", "write one of `{dependency.name}`'s settings, or drop this one"))
+                    next
+                }
+                setting: declared[at]
+                if !jet_driver_setting_text_fits(setting.ty, given.value) {
+                    diagnostics.push(jet_driver_diagnostic_at_source("E0302", Val(given.span), dependency.source_path, 0, "`{dependency.name}.{given.name}` is a `{setting.ty}`, and this entry gives it `{given.value}`", "an entry gives a dependency's setting a value of the type the dependency declares", "write a `{setting.ty}` value, such as its default `{setting.default}`"))
+                }
+            }
+        }
+    }
+}
+
 // A `{ git: …, tag|branch|rev: … }` dependency record.
 jet_driver_dependency_is_git: fn(source: String) -> Bool {
     source.starts_with("{{") && source.contains("git:")
@@ -2133,6 +2163,7 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
         packages.push(package)
     }
     jet_driver_resolve_package_dependencies(packages, snapshot, diagnostics)
+    jet_driver_check_dependency_settings(packages, diagnostics)
     jet_driver_bind_script_dependencies(packages, snapshot, diagnostics)
 
     entry_root: jet_driver_entry_root_path(snapshot)

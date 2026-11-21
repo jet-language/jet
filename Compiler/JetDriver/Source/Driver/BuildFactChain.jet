@@ -239,7 +239,9 @@ jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: Je
     diagnostics := [Diagnostic]{}
     loop override in request.setting_overrides {
         if jet_driver_setting_target(load, override.name) != None -> next
-        diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
+        writer: "`--set {override.name}={override.value}`"
+        fix: if override.name.contains(".") -> "write one of that dependency's settings, or drop the `--set`" else -> "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"
+        diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", jet_driver_undeclared_setting_why(load, override.name, writer), fix))
     }
     // The loader checks a profile's own setting names; a dependency's waits
     // for its package (jet_driver_check_profile_settings).
@@ -249,7 +251,7 @@ jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: Je
             if !given.name.contains(".") || jet_driver_setting_target(load, given.name) != None {
                 next
             }
-            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{given.name}` is undeclared", "build profile `{given.profile}` gives it a value, but no dependency declares such a setting", "write a dependency's setting as `dependency.setting`, as its `settings: {{ … }}` block declares it"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{given.name}` is undeclared", jet_driver_undeclared_setting_why(load, given.name, "build profile `{given.profile}`"), "write one of that dependency's settings, as `dependency.setting`"))
         }
     }
     loop package in load.packages {
@@ -264,6 +266,41 @@ jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: Je
         }
     }
     diagnostics
+}
+
+// Why a written setting name (`--set`, a profile) is undeclared, as
+// `writer` gives it: for `tool.lound`, what dependency `tool` does declare.
+jet_driver_undeclared_setting_why: fn(load: JetDriverLoadResult, name: String, writer: String) -> String Never! {
+    parts: name.split(".").to_list()
+    if parts.len() == 1 {
+        return "{writer} gives it a value, but `package.jet` declares no such setting"
+    }
+    loop package in load.packages {
+        if parts.len() == 2 && package.identity != load.package_identity && package.name == parts[0] {
+            return "{writer} gives it a value, but `{package.name}` declares {jet_driver_setting_names_text(package.settings)}"
+        }
+    }
+    "{writer} gives it a value, but no dependency `{parts[0]}` declares such a setting"
+}
+
+// The settings a package declares, as a message lists them: "`loud`,
+// `fast`", or "no settings".
+jet_driver_setting_names_text: fn(settings: [JetDriverPackageSetting]) -> String Never! {
+    if settings.len() == 0 -> return "no settings"
+    names := [String]{}
+    loop setting in settings -> names.push("`{setting.name}`")
+    names.join(", ")
+}
+
+// Whether `text` reads as a value of declared type `ty`
+// (jet_driver_setting_fact_value). An enum's variants are checked where the
+// setting is read.
+jet_driver_setting_text_fits: fn(ty: String, text: String) -> Bool Never! {
+    if ty.trim() == "String" -> return true
+    if jet_driver_setting_fact_value(ty, text) == {
+        .Text(_) -> false
+        .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> true
+    }
 }
 
 // `jet explain <fact>`: the resolved writer chain of one build fact, or the

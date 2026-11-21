@@ -1,0 +1,22 @@
+# A dependency entry may give only settings the dependency declares, with a value of the declared type. tool declares `loud: Bool = false` and `level: Int = 1`. app's entry writes `lound: true`, which is E0302 at that line and lists what tool declares. typed's entry writes `loud: 3`, which is E0302 naming the type. `--set tool.lound=true` lists tool's settings too.
+fixture: DependencySettingTypo.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run app/main.jet
+exit: 1
+stderr: ~ "Jet.UnknownField" # the registered undeclared-setting code
+stderr: ~ "`tool` declares no setting `lound`" # names the entry's setting
+stderr: ~ "`tool` declares `loud`, `level`" # lists what tool declares
+stderr: ~ "package.jet:7:13" # at the entry's own line
+step: jet run typed/main.jet
+exit: 1
+stderr: ~ "Jet.UnknownField"
+stderr: ~ "`tool.loud` is a `Bool`, and this entry gives it `3`" # names the declared type
+stderr: ~ "package.jet:7:13" # at the entry's own line
+step: jet run --set tool.lound=true plain/main.jet
+exit: 1
+stderr: ~ "`#build.settings.tool.lound` is undeclared"
+stderr: ~ "`tool` declares `loud`, `level`" # lists what tool declares
+step: jet run --set tool.level=2 plain/main.jet
+exit: 0
+stdout: = "quiet\n" # a declared name passes
