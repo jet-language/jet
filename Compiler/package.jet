@@ -22,7 +22,10 @@
 // testing (no optimizer passes). `ship` pins the values the self-host stages build with
 // (O1, not the stock O2 of `jet build`); the selfhost and perf suites of test.jet
 // build with it. Chain, census and release stages pass no profile, since they build trees
-// whose package.jet may predate these profiles: they pass `-O1` instead.
+// whose package.jet may predate these profiles: they pass `-O1` instead. `release`
+// (`jet build --release Compiler`) replaces the stock one, whose `debug_info: split`
+// would give jet-bare a `.gnu_debuglink`: core-embed then refuses to split jet's
+// debug info out a second time. jet still gets its jet.debug from core-embed.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"
@@ -74,6 +77,10 @@ build: {
     },
     ship: Build{
         optimize: O1,
+        debug_info: true,
+    },
+    release: Build{
+        optimize: O2,
         debug_info: true,
     },
 }
