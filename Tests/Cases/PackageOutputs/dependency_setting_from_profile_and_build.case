@@ -1,0 +1,35 @@
+# The entry package writes a dependency's setting by its qualified name, `tool.loud`, wherever it writes its own: a build profile, `b.contribute` and `--set`. tool declares `loud: Bool = false`. profiled's entry writes `loud: true` and its release profile `tool.loud: false`, which decides under `--profile=release`. A profile name tool doesn't declare is E0302. built declares no setting of its own, and its entry writes `loud: true`. Its `build: fn` contributes `tool.loud` false, which decides and is locked; `jet build --set tool.loud=true` decides over that.
+fixture: DependencySettingWriters.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run profiled/main.jet
+exit: 0
+stdout: = "LOUD\n" # the entry decides with no profile
+step: jet run --profile=release profiled/main.jet
+exit: 0
+stdout: = "quiet\n" # the release profile decides over the entry
+step: jet explain "#build.settings.tool.loud" profiled/main.jet --profile=release
+exit: 0
+stdout: ~ "[effective] optimization bundle / package false" # the profile's line
+stdout: ~ "package.jet:build.release.settings.tool.loud" # names the profile's entry
+step: jet run typo/main.jet
+exit: 1
+stderr: ~ "`#build.settings.tool.lound` is undeclared" # a profile name tool does not declare
+step: jet run built/main.jet
+exit: 0
+stdout: = "quiet\n" # the contribution decides over the entry
+json: file built/.jet/lock toml $.build.contribution[?key="Build.Settings.tool.loud"][0].package = "built"
+json: file built/.jet/lock toml $.build.contribution[?key="Build.Settings.tool.loud"][0].value = "Bool(false)"
+step: jet build built/main.jet
+exit: 0
+step: {work}/built/.jet/build/main
+exit: 0
+stdout: = "quiet\n"
+step: jet build --set tool.loud=true built/main.jet
+exit: 0
+step: {work}/built/.jet/build/main
+exit: 0
+stdout: = "LOUD\n" # `--set` reaches a package with a `build: fn`
+step: jet build --set tool.lound=true built/main.jet
+exit: 1
+stderr: ~ "`#build.settings.tool.lound` is undeclared" # and is checked there

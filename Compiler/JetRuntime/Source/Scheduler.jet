@@ -1301,6 +1301,9 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // until that thread runs, so a burst of wakes would queue carriers behind
 // each other on one CPU while others idle. The claimed carrier, once it
 // runs, claims the next while work still waits (jet_rt_scheduler_worker).
+// A carrier spins a while before it sleeps (scheduler_idle_spin), so a
+// claim that soon after reaches a carrier still on its CPU, and the claims
+// pass from carrier to carrier with no kernel wake between them.
 // started counts the carriers started. spare heads the records of retired
 // carriers, linked through next88: a wake sent after the claim's unlock may
 // reach a record whose carrier retired meanwhile, so a record is reused by
@@ -2012,13 +2015,52 @@ scheduler_pop: fn(root: I64) -> I64 {
 // returns at once: no claim is lost between the unlock and the sleep. Back
 // with the word still 0 (its deadline passed, or a spurious wake), it takes
 // itself off the list. With no carrier watching the fiber timers, it
-// watches them: it sleeps only until the earliest deadline.
-scheduler_carrier_idle: fn(root: I64, record: I64) {
+// watches them: it sleeps only until the earliest deadline. It spins first
+// (scheduler_idle_spin), `busy_since` the time it last left an idle wait or
+// started.
+scheduler_carrier_idle: fn(root: I64, record: I64, busy_since: I64) {
     deadline: scheduler_idle_enter(root, record)
     sync_thread_unlock(root)
-    _ := sync_futex_wait(wrapping(record + SCHEDULER_CARRIER_WAKE), I64{0}, deadline)
+    word: wrapping(record + SCHEDULER_CARRIER_WAKE)
+    if !scheduler_idle_spin(word, busy_since, deadline) {
+        _ := sync_futex_wait(word, I64{0}, deadline)
+    }
     sync_thread_lock(root)
     scheduler_idle_leave(root, record, deadline)
+}
+
+// The longest an idle carrier spins before it sleeps, in nanoseconds.
+SCHEDULER_IDLE_SPIN_NS: I64{1000000}
+
+// An idle carrier's spin before its futex wait, watching its wake word:
+// whether it ended the wait, claimed (the word 1) or at its deadline (-1:
+// none). A sleeping carrier starts claimed work late: the kernel brings its
+// CPU out of the idle state it chose, which on a quiet x86 host can take
+// 350 us from its deepest state (entered past 700 us idle) before the clock
+// ramps up again, may place the woken thread on a CPU a sibling carrier
+// holds, and a carrier claims the next one only once it runs
+// (scheduler_wake_work), so one late wake delays every task queued behind
+// its claim. A spinning carrier keeps its CPU and sees the claim's store at
+// once. The spin lasts as long as the carrier was busy before it, at most
+// SCHEDULER_IDLE_SPIN_NS: a program's next work tends to come about as
+// often as its last took, and a program that stops costs no more spinning
+// than its last busy stretch, then sleeps, so its idle carriers use no CPU.
+// A claim made past the spin wakes the sleeper as before; the shutdown
+// claims every idle carrier (jet_rt_scheduler_shutdown), so it ends a spin
+// as it ends a sleep.
+scheduler_idle_spin: fn(word: I64, busy_since: I64, deadline: I64) -> Bool {
+    now := sync_now_ns()
+    busy: now - busy_since
+    stop := now + (if (busy < SCHEDULER_IDLE_SPIN_NS) -> busy else -> SCHEDULER_IDLE_SPIN_NS)
+    if (deadline >= I64{0} && deadline < stop) { stop = deadline }
+    loop now < stop {
+        if (sync_load(word) != I64{0}) { return true }
+        #Unsafe("x86 pause only hints that this thread is waiting in a spin loop") {
+            os_spin_pause()
+        }
+        now = sync_now_ns()
+    }
+    sync_load(word) != I64{0} || (deadline >= I64{0} && now >= deadline)
 }
 
 // The carrier of `record` goes idle (scheduler_carrier_idle): counted
@@ -2087,6 +2129,7 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
     sync_store(wrapping(thread_base() + THREAD_TCB_INDEX), sync_load(wrapping(record + SCHEDULER_CARRIER_INDEX)))
     sync_store(wrapping(record + I64{32}), thread_tid())
     yielded := I64{0}
+    busy_since := sync_now_ns()
     loop {
         fiber_timers_fire(root)
         sync_thread_lock(root)
@@ -2103,8 +2146,9 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
                 scheduler_carrier_retire(root, record)
                 return I64{0}
             }
-            scheduler_carrier_idle(root, record)
+            scheduler_carrier_idle(root, record, busy_since)
             sync_thread_unlock(root)
+            busy_since = sync_now_ns()
             next
         }
         // Work still waiting takes the next carrier, as a submit's or a

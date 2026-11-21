@@ -3,8 +3,8 @@
 // <fact>` resolves and prints the whole chain through the one contribution
 // law (pkg_fact_resolve).
 use {
-    jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span]
-    jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, LockedBuildContribution, SourceScope, pkg_fact_resolve]
+    jet_foundation.[COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span]
+    jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, SourceScope, pkg_fact_resolve]
     jet_sema.[SemaBuildFacts, SemaBuildSetting, SemaSettingContribution]
 }
 
@@ -19,33 +19,104 @@ JetDriverSettingWriter: struct {
     span: Span,
 }
 
-// The writers of `setting`, from least to most explicit layer: its default,
-// the value the selected `build:` profile gives it, the values the package's
-// `build: fn` contributed (the lock's environment-layer rows), and each `--set`.
-jet_driver_setting_writers: fn(package: JetDriverPackageInfo, setting: JetDriverPackageSetting, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [JetDriverSettingWriter] Never! {
-    key: "Build.Settings.{setting.name}"
-    manifest: jet_driver_manifest_label(package)
-    manifest_file: package.manifest_path ?? ""
+// The writers of `setting`, which `package` declares, from least to most
+// explicit layer: its default; for a dependency's setting, each other
+// package's entry for that dependency (`DependencyEntry`), then the entry
+// package's (`RootEntry`); the value the selected `build:` profile gives it;
+// the values the entry package's `build: fn` contributed (the lock's
+// environment-layer rows); and each `--set`. The entry package writes a
+// dependency's setting by its qualified name (jet_driver_setting_name).
+jet_driver_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting, request: JetDriverCompileRequest) -> [JetDriverSettingWriter] Never! {
+    name: jet_driver_setting_name(load, package, setting)
+    key: "Build.Settings.{name}"
     no_site: Span{start: 0, end: 0}
     writers := [JetDriverSettingWriter]{}
-    writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{manifest}:settings.{setting.name} (default)", None, manifest_file, setting.span))
-    loop entry in package.profile_settings {
-        if entry.profile != profile || entry.name != setting.name -> next
-        writers.push(jet_driver_setting_writer(key, setting.ty, entry.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{profile}.settings.{setting.name}", None, manifest_file, entry.span))
+    writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{jet_driver_writer_label(load, package)}:settings.{setting.name} (default)", None, package.manifest_path ?? "", setting.span))
+    if package.identity != load.package_identity {
+        jet_driver_entry_setting_writers(load, package, setting, key, ContributionLayer.DependencyEntry, writers)
+        jet_driver_entry_setting_writers(load, package, setting, key, ContributionLayer.RootEntry, writers)
     }
-    loop contribution in contributions {
-        if contribution.package != package.name || contribution.key != key || contribution.layer != "environment" {
-            next
+    loop entry in load.packages {
+        if entry.identity != load.package_identity -> next
+        manifest: jet_driver_manifest_label(entry)
+        loop given in entry.profile_settings {
+            if given.profile != request.profile || given.name != name -> next
+            writers.push(jet_driver_setting_writer(key, setting.ty, given.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{request.profile}.settings.{name}", None, entry.manifest_path ?? "", given.span))
         }
-        text: jet_driver_locked_setting_text(contribution.value) ?? next
-        reason: if contribution.reason == "" -> String?{None} else -> Val(contribution.reason)
-        writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason, "", no_site))
+        loop contribution in request.build_contributions {
+            if contribution.package != entry.name || contribution.key != key || contribution.layer != "environment" {
+                next
+            }
+            text: jet_driver_locked_setting_text(contribution.value) ?? next
+            reason: if contribution.reason == "" -> String?{None} else -> Val(contribution.reason)
+            writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason, "", no_site))
+        }
     }
-    loop override in overrides {
-        if override.name != setting.name -> next
+    loop override in request.setting_overrides {
+        if override.name != name -> next
         writers.push(jet_driver_setting_writer(key, setting.ty, override.value, ContributionLayer.CommandLine, SourceScope.Package, "command line:--set {override.name}={override.value}", None, "", no_site))
     }
     writers
+}
+
+// The `layer` writers of a dependency's `setting`: each `settings:` value
+// that a loaded package's entry for `package` gives it. The entry package's
+// entry is the `RootEntry` layer, and any other package's the
+// `DependencyEntry` layer.
+jet_driver_entry_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting, key: String, layer: ContributionLayer, writers: &[JetDriverSettingWriter]) {
+    loop declarer in load.packages {
+        declarer_layer: if declarer.identity == load.package_identity -> ContributionLayer.RootEntry else -> ContributionLayer.DependencyEntry
+        if declarer_layer != layer -> next
+        label: jet_driver_writer_label(load, declarer)
+        loop dependency in declarer.dependencies {
+            if dependency.target_root_index != package.root_index -> next
+            loop given in dependency.settings {
+                if given.name != setting.name -> next
+                writers.push(jet_driver_setting_writer(key, setting.ty, given.value, layer, SourceScope.Package, "{label}:deps.{dependency.name}.settings.{given.name}", None, dependency.source_path, given.span))
+            }
+        }
+    }
+}
+
+// A declared setting's name as the entry package writes it: its own
+// settings bare (`loud`), and a dependency's qualified by that dependency's
+// name (`tool.loud`), in a profile, `b.contribute` and `--set` alike.
+jet_driver_setting_name: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting) -> String Never! {
+    if package.identity == load.package_identity -> return setting.name.copy()
+    "{package.name}.{setting.name}"
+}
+
+// The file a writer of `package` sits in, as its chain names it: the entry
+// package's manifest label, and a dependency's manifest from the entry
+// package's root (`../tool/package.jet`), so two packages' writers differ.
+jet_driver_writer_label: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo) -> String Never! {
+    if package.identity == load.package_identity -> return jet_driver_manifest_label(package)
+    path: package.manifest_path ?? return jet_driver_manifest_label(package)
+    loop entry in load.packages {
+        if entry.identity == load.package_identity {
+            return jet_driver_display_path(entry.root_path, path)
+        }
+    }
+    path.copy()
+}
+
+// Where the setting a written name (jet_driver_setting_name) means is
+// declared: the package's index in the load and the setting's in its
+// `settings:`.
+JetDriverSettingTarget: struct {
+    package: Int,
+    setting: Int,
+}
+
+jet_driver_setting_target: fn(load: JetDriverLoadResult, name: String) -> JetDriverSettingTarget? Never! {
+    loop (package_index, package) in load.packages {
+        loop (setting_index, setting) in package.settings {
+            if jet_driver_setting_name(load, package, setting) == name {
+                return Val(JetDriverSettingTarget{package: package_index, setting: setting_index})
+            }
+        }
+    }
+    None
 }
 
 jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: ContributionLayer, scope: SourceScope, source: String, reason: String?, file: String, span: Span) -> JetDriverSettingWriter Never! {
@@ -57,26 +128,13 @@ jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: Cont
 // `setting` as the build reads it: the text of the writer the contribution
 // law selects, its declared default, and every writer with its layer, the
 // selected one marked. A chain the law refuses is reported before any compile
-// reads it (jet_driver_setting_override_diagnostics); its last writer stands
+// reads it (jet_driver_setting_writer_diagnostics); its last writer stands
 // in.
 jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [JetDriverSettingWriter]) -> SemaBuildSetting Never! {
     if writers.len() == 0 {
         return SemaBuildSetting{name: setting.name, ty: setting.ty, value: setting.default, default: setting.default, contributions: [SemaSettingContribution]{}}
     }
-    contributions := [FactContribution]{}
-    loop writer in writers -> contributions.push(writer.contribution)
-    at := writers.len() - 1
-    if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Ok(resolved) {
-        if resolved == .Val(fact) {
-            effective: fact.provenance[fact.effective]
-            loop (index, writer) in writers {
-                if writer.contribution.layer == effective.layer && writer.contribution.source == effective.source {
-                    at = index
-                    break
-                }
-            }
-        }
-    }
+    at: jet_driver_setting_selected(writers)
     rows := [SemaSettingContribution]{}
     loop (index, writer) in writers {
         rows.push(SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
@@ -84,9 +142,74 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
     SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
 }
 
+// The index in `writers` of the writer the contribution law selects. When
+// the law refuses the chain, its last writer stands in (the refusal is
+// reported by jet_driver_setting_writer_diagnostics).
+jet_driver_setting_selected: fn(writers: [JetDriverSettingWriter]) -> Int Never! {
+    contributions := [FactContribution]{}
+    loop writer in writers -> contributions.push(writer.contribution)
+    jet_driver_contribution_selected(contributions) ?? writers.len() - 1
+}
+
+// The index in `contributions` of the one the contribution law selects, the
+// last when the law resolves no fact; None when the law refuses the chain.
+jet_driver_contribution_selected: fn(contributions: [FactContribution]) -> Int? Never! {
+    at := contributions.len() - 1
+    if at < 0 -> return Val(at)
+    if pkg_fact_resolve(FactKey.new(contributions[0].key), contributions) == {
+        .Ok(resolved) -> {
+            if resolved == .Val(fact) {
+                effective: fact.provenance[fact.effective]
+                loop (index, contribution) in contributions {
+                    if contribution.layer == effective.layer && contribution.source == effective.source {
+                        at = index
+                        break
+                    }
+                }
+            }
+        }
+        .Err(_) -> return None
+    }
+    Val(at)
+}
+
+// The entry writers of dependencies' settings that another entry overrides:
+// over the manifests' writers alone (each default and every entry), each
+// entry the contribution law does not select, such as a library's entry the
+// entry package's own entry overrides. The lock records them beside the
+// entry package's build rows (jet_cli_record_build_contributions), so they
+// stay the same whatever profile or `--set` a run takes. A load that fails,
+// or a chain the law refuses, records none; the compile reports why.
+jet_driver_overridden_entry_writers: fn(request: JetDriverCompileRequest) -> [FactContribution] Never! {
+    overridden := [FactContribution]{}
+    load: jet_driver_load_reach(request, false) ?? return overridden
+    if !load.complete || jet_driver_has_errors(load.diagnostics) -> return overridden
+    loop package in load.packages {
+        if package.identity == load.package_identity -> next
+        loop setting in package.settings {
+            contributions := [FactContribution]{}
+            writers: jet_driver_setting_writers(load, package, setting, request)
+            loop writer in writers.move() {
+                layer: writer.contribution.layer
+                if layer != .Declaration && layer != .DependencyEntry && layer != .RootEntry -> next
+                contributions.push(writer.contribution.move())
+            }
+            at: jet_driver_contribution_selected(contributions) ?? next
+            loop (index, contribution) in contributions.move() {
+                if index != at && contribution.layer != .Declaration {
+                    overridden.push(contribution.with_reason("overridden by a more explicit entry"))
+                }
+            }
+        }
+    }
+    overridden
+}
+
 // The ContributionKind variant of a setting writer's layer
 // (jet_driver_setting_writers): the declaration's default, the selected
-// `build:` profile, the package's `build: fn`, or a `--set`.
+// `build:` profile, the package's `build: fn`, or a `--set`. An entry's
+// value counts as `Declaration`; reflection lists only the entry package's
+// own settings, which no entry writes.
 jet_driver_setting_contribution_kind: fn(layer: ContributionLayer) -> String Never! {
     if layer == .OptimizationBundle -> return "Profile"
     if layer == .Environment -> return "Build"
@@ -148,44 +271,87 @@ jet_driver_manifest_label: fn(package: JetDriverPackageInfo) -> String Never! {
     segments[segments.len() - 1]
 }
 
-// The entry package of `load`, None for a manifest-less source.
-jet_driver_entry_package: fn(load: JetDriverLoadResult) -> JetDriverPackageInfo? Never! {
-    loop package in load.packages {
-        if package.identity == load.package_identity -> return Val(package.copy())
+// The row of `load.packages` that is the entry package, None for a
+// manifest-less source.
+jet_driver_entry_package: fn(load: JetDriverLoadResult) -> Int? Never! {
+    loop (at, package) in load.packages {
+        if package.identity == load.package_identity -> return Val(at)
     }
     None
 }
 
-// The refusals of the request's `--set` writers: a name the entry package
-// does not declare (E0302), and two command-line values for one setting
-// (the contribution law's same-layer conflict, E3521). Empty when every
-// writer stands.
-jet_driver_setting_override_diagnostics: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> [Diagnostic] Never! {
+// The refusals of the build's setting writers: a `--set` name, or a profile's
+// dependency setting name (`tool.loud`), that no loaded package declares
+// (E0302), and every chain the contribution law refuses (E3521), such as two
+// `--set` or profile values for one setting, or two dependency entries that
+// disagree with no more explicit writer. Every compile checks every chain,
+// `--set` or not. Empty when every writer stands.
+jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
-    if request.setting_overrides.len() == 0 -> return diagnostics
-    package: jet_driver_entry_package(load)
-    declared := [JetDriverPackageSetting]{}
-    if package == .Val(found) -> declared = found.settings.copy()
     loop override in request.setting_overrides {
-        known: loop setting in declared {
-            if setting.name == override.name {
-                break true
+        if jet_driver_setting_target(load, override.name) != None -> next
+        writer: "`--set {override.name}={override.value}`"
+        fix: if override.name.contains(".") -> "write one of that dependency's settings, or drop the `--set`" else -> "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"
+        diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", jet_driver_undeclared_setting_why(load, override.name, writer), fix))
+    }
+    // The loader checks a profile's own setting names; a dependency's waits
+    // for its package (jet_driver_check_profile_settings).
+    loop root in load.packages {
+        if root.identity != load.package_identity -> next
+        loop given in root.profile_settings {
+            if !given.name.contains(".") || jet_driver_setting_target(load, given.name) != None {
+                next
             }
-        } ?? false
-        if !known {
-            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{given.name}` is undeclared", jet_driver_undeclared_setting_why(load, given.name, "build profile `{given.profile}`"), "write one of that dependency's settings, as `dependency.setting`"))
         }
     }
-    found: package ?? return diagnostics
-    loop setting in found.settings {
-        writers: jet_driver_setting_writers(found, setting, request.profile, request.build_contributions, request.setting_overrides)
-        contributions := [FactContribution]{}
-        loop writer in writers -> contributions.push(writer.contribution)
-        if pkg_fact_resolve(FactKey.new("Build.Settings.{setting.name}"), contributions) == .Err(error) {
-            diagnostics.push(jet_driver_fact_error_diagnostic(error))
+    loop package in load.packages {
+        loop setting in package.settings {
+            contributions := [FactContribution]{}
+            loop writer in jet_driver_setting_writers(load, package, setting, request) {
+                contributions.push(writer.contribution)
+            }
+            if pkg_fact_resolve(FactKey.new("Build.Settings.{jet_driver_setting_name(load, package, setting)}"), contributions) == .Err(error) {
+                diagnostics.push(jet_driver_fact_error_diagnostic(error))
+            }
         }
     }
     diagnostics
+}
+
+// Why a written setting name (`--set`, a profile) is undeclared, as
+// `writer` gives it: for `tool.lound`, what dependency `tool` does declare.
+jet_driver_undeclared_setting_why: fn(load: JetDriverLoadResult, name: String, writer: String) -> String Never! {
+    parts: name.split(".").to_list()
+    if parts.len() == 1 {
+        return "{writer} gives it a value, but `package.jet` declares no such setting"
+    }
+    loop package in load.packages {
+        if parts.len() == 2 && package.identity != load.package_identity && package.name == parts[0] {
+            return "{writer} gives it a value, but `{package.name}` declares {jet_driver_setting_names_text(package.settings)}"
+        }
+    }
+    "{writer} gives it a value, but no dependency `{parts[0]}` declares such a setting"
+}
+
+// The settings a package declares, as a message lists them: "`loud`,
+// `fast`", or "no settings".
+jet_driver_setting_names_text: fn(settings: [JetDriverPackageSetting]) -> String Never! {
+    if settings.len() == 0 -> return "no settings"
+    names := [String]{}
+    loop setting in settings -> names.push("`{setting.name}`")
+    names.join(", ")
+}
+
+// Whether `text` reads as a value of declared type `ty`
+// (jet_driver_setting_fact_value). An enum's variants are checked where the
+// setting is read.
+jet_driver_setting_text_fits: fn(ty: String, text: String) -> Bool Never! {
+    if ty.trim() == "String" -> return true
+    if jet_driver_setting_fact_value(ty, text) == {
+        .Text(_) -> false
+        .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .OptionalText(_) | .Policy(_) -> true
+    }
 }
 
 // `jet explain <fact>`: the resolved writer chain of one build fact, or the
@@ -204,7 +370,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         return JetDriverBuildFactExplanation{fact: None, diagnostics: load.diagnostics}
     }
-    refusals: jet_driver_setting_override_diagnostics(load, request)
+    refusals: jet_driver_setting_writer_diagnostics(load, request)
     if refusals.len() > 0 -> return JetDriverBuildFactExplanation{fact: None, diagnostics: refusals}
     diagnostics := [Diagnostic]{}
     target: jet_driver_selected_target_machine(request, diagnostics) ?? return JetDriverBuildFactExplanation{fact: None, diagnostics: diagnostics}
@@ -213,19 +379,17 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
     contributions := [FactContribution]{}
     if key.starts_with("Build.Settings.") {
         name: key.removeprefix("Build.Settings.")
-        if package == .Val(found) {
-            loop setting in found.settings {
-                if setting.name != name -> next
-                loop writer in jet_driver_setting_writers(found, setting, request.profile, request.build_contributions, request.setting_overrides) {
-                    contributions.push(writer.contribution)
-                }
+        if jet_driver_setting_target(load, name) == .Val(declared) {
+            owner: load.packages[declared.package]
+            loop writer in jet_driver_setting_writers(load, owner, owner.settings[declared.setting], request) {
+                contributions.push(writer.contribution)
             }
         }
         if contributions.len() == 0 {
             undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
             return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{undeclared}}
         }
-    } else { contributions = jet_driver_fixed_fact_writers(key, facts, package, request) }
+    } else { contributions = jet_driver_fixed_fact_writers(key, facts, load, package, request) }
     if pkg_fact_resolve(FactKey.new(key), contributions) == {
         .Ok(resolved) -> return JetDriverBuildFactExplanation{fact: resolved, diagnostics: [Diagnostic]{}}
         .Err(error) -> return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{jet_driver_fact_error_diagnostic(error)}}
@@ -243,15 +407,16 @@ jet_driver_fact_error_diagnostic: fn(error: FactError) -> Diagnostic Never! {
     jet_driver_diagnostic_without_span("E3521", "a build fact has no single effective writer", error.message(), "make the writers agree, or move one value to a more explicit contribution layer")
 }
 
-// The writers of a fixed build fact. The package names itself in its
+// The writers of a fixed build fact. The package (the row `package` of
+// `load.packages`, None for a manifest-less source) names itself in its
 // manifest; a manifest-less source takes its name from the entry file
 // (`<source>`). A fact nobody writes takes the compiler's value
 // (`<default>`); the target machine supplies the OS and cache line
 // (`<target>`); the lock's `[build.stamp]` supplies the stamp; `--profile`
 // is the command-line writer of the profile.
-jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, package: JetDriverPackageInfo?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
-    manifest: if package == .Val(found) && found.manifest_path != None -> Val(jet_driver_manifest_label(found)) else -> String?{None}
-    declared_version: if package == .Val(found) -> found.version else -> String?{None}
+jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetDriverLoadResult, package: Int?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
+    manifest: if package == .Val(at) && load.packages[at].manifest_path != None -> Val(jet_driver_manifest_label(load.packages[at])) else -> String?{None}
+    declared_version: if package == .Val(at) -> load.packages[at].version else -> String?{None}
     stamped: request.build_stamp != None
     if key == {
         "Build.Package.Name" -> {

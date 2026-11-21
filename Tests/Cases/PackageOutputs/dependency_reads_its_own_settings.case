@@ -1,0 +1,15 @@
+# A dependency reads its own declared settings, never the settings of the package that uses it. tool declares `loud: Bool = false` and reads it. app declares no `loud`, and rootloud declares `loud: Bool = true`. Both see tool quiet, and rootloud still reads its own `loud`. reader reads `missing`, which only stray, the package using it, declares: E0302 at reader's own line.
+fixture: DependencyOwnSettings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run app/main.jet
+exit: 0
+stdout: = "tool quiet\n"
+step: jet run rootloud/main.jet
+exit: 0
+stdout: = "tool quiet\nroot loud\n"
+step: jet run stray/main.jet
+exit: 1
+stderr: ~ "Error: Jet.UnknownField: `#build.settings.missing` is undeclared" # the dependency's own read
+stderr: ~ "reader/reader.jet:2:41" # at reader's line, not the root's
+stderr: ~ "Error: Jet.DependencyCheckFailed: Dependency package `reader` has errors"

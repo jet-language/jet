@@ -1,0 +1,38 @@
+# A task the scheduler can run starts at once. Two programs record each
+# task's start less its spawn: the causal fixture's plain rounds
+# (Perf/CausalProfilePredictsSpeedup.fixture: a task of about 1.2 ms and
+# three of 0.9 ms a round, spawned by the main thread, which joins them and
+# spawns the next round at once), and a fan-out of one to three tasks of
+# uneven length, spawned by the main thread or by a task on a carrier, with
+# uneven work on the main thread between rounds. The bound is the cost of
+# one futex wake on this host: wake.c times how soon a thread that slept
+# 1 ms, the longest an idle carrier spins before it sleeps, runs after its
+# wake, 2,000 times before the programs and 2,000 after, and the larger
+# 99th percentile is the bound, so a load that drifts over the run falls on
+# it as on the starts. Each program's 99th percentile start is under it. A
+# start that waited for a chain of carrier wakes, each claimed carrier
+# claiming the next only once it runs, or that queued behind a sibling task
+# while another carrier idled, takes longer. A host with fewer than five
+# CPUs cannot start the causal rounds' four tasks beside the main thread
+# and says so.
+requires: os-name:linux
+requires: tool:cc
+fixture: Fixtures/StartLatency
+mkdir: causal
+copy: {root}/Tests/Cases/Perf/CausalProfilePredictsSpeedup.fixture/main.jet causal/main.jet
+env: NO_COLOR=1
+step: cc -std=c11 -O2 -Wall -Wextra -Werror -pthread -o wake wake.c
+exit: 0
+step: {work}/wake wake-before.txt
+exit: 0
+step: jet run -A -O1 causal/main.jet -- starts causal.txt
+exit: 0
+stdout: = "measured\n"
+step: jet run -A -O1 fanout.jet -- fanout.txt
+exit: 0
+stdout: = "measured\n"
+step: {work}/wake wake-after.txt
+exit: 0
+step: jet run -A check.jet -- wake-before.txt wake-after.txt causal.txt fanout.txt
+exit: 0
+stdout: ~any "the causal fixture's tasks started within one futex wake of their spawn\nthe fan-out's tasks started within one futex wake of their spawn\n" "the host has fewer than five CPUs, so the causal rounds' tasks cannot all start at once; no start was checked\n" # every program's 99th percentile start is under one wake's

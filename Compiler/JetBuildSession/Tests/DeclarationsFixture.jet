@@ -75,6 +75,16 @@ build_session_declarations_fixture: fn() -> Bool Never! {
     }
     contribution: build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: "cache_slots"}, .Int{value: 8}}, None, false, 71, 80)
     if contribution != .Value(value: .Unit) -> return false
+    // A dependency's setting is named by its package, `tool.loud`; any other dotted name is refused.
+    qualified: build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: "tool.loud"}, .Bool{value: false}}, None, false, 71, 80)
+    if qualified != .Value(value: .Unit) -> return false
+    malformed_names: [String]{"a.b.c", "tool.", ".loud"}
+    loop malformed in malformed_names {
+        if build_session_call(session, "contribute", [BuildSessionValue]{.Text{value: malformed}, .Int{value: 1}}, None, false, 71, 80) == {
+            .Failure(_) -> {}
+            .Value(_) | .HostRequest(_, _) -> return false
+        }
+    }
     plan: build_session_call(session, "plan", [BuildSessionValue]{target}, None, false, 81, 90)
     if plan != .Value(value: .Handle(type_name: "BuildPlan", session: 71, id: 0)) -> return false
     // Source is retained in memory; its digest is content-derived, and no
@@ -125,7 +135,7 @@ build_session_fixture_storage_matches: fn(session: BuildSession, source: String)
     if generated_module.source != source || generated_module.source_digest != "sha256:{build_crypto.sha256(source.bytes()).hex()}" {
         return false
     }
-    permit.value.contributions[0].key == "Build.Settings.cache_slots"
+    permit.value.contributions.len() == 2 && permit.value.contributions[0].key == "Build.Settings.cache_slots" && permit.value.contributions[1].key == "Build.Settings.tool.loud"
 }
 
 #Test("declarations_run_through_the_session_service") {

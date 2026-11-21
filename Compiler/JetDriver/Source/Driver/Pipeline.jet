@@ -43,6 +43,7 @@ use {
         SemaRootLoopValue,
         sema_derive_template_loop_landed,
         sema_derive_template_loop_waits,
+        SemaPackageSettings,
         SemaProgramTables,
         SemaScopeEnvironment,
         SemaScriptProbe,
@@ -187,7 +188,6 @@ use {
         effect_value_base,
         EffectRowEntry,
         body_fixed_timing,
-        BuildSettingOverride,
         DeepChecks,
         deep_checks_off,
         deep_checks_selects,
@@ -309,7 +309,6 @@ use {
         EffectBudgetModule,
         EffectBudgetOutput,
         EffectBudgetProgram,
-        LockedBuildContribution,
         PackageEffectSummary,
         PackageFacts,
         pkg_compute_package_effects,
@@ -883,23 +882,27 @@ jet_driver_host_os_key: fn(value: String) -> String Never! {
 // the lock's `[build.stamp]` the host read (request.build_stamp); without one
 // it is no git revision, clean, the compiler's own package version and no time.
 // A compile never captures a fresh stamp from git and the clock: only lock
-// writers do.
+// writers do. Each loaded dependency's settings are its own, each folded
+// over its own writer chain (jet_driver_setting_writers).
 jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
     settings := [SemaBuildSetting]{}
+    package_settings := [SemaPackageSettings]{}
     package_markers := [Marker]{}
     package_manifest := ""
     purposes := [String]{}
     loop package in load.packages {
-        if package.identity == load.package_identity {
-            package_name = package.name
-            package_version = package.version ?? ""
-            settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
-            package_markers = package.markers
-            package_manifest = package.manifest_path ?? ""
-            purposes = package.purposes
+        if package.identity != load.package_identity {
+            package_settings.push(SemaPackageSettings{package_identity: package.identity, settings: jet_driver_build_settings(load, package, request)})
+            next
         }
+        package_name = package.name
+        package_version = package.version ?? ""
+        settings = jet_driver_build_settings(load, package, request)
+        package_markers = package.markers
+        package_manifest = package.manifest_path ?? ""
+        purposes = package.purposes
     }
     package_name = jet_driver_package_name(package_name, request.authorized_sources.entry_path)
     if package_version.len() == 0 -> package_version = "0.0.0"
@@ -929,6 +932,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         stamp_at: stamp_at,
         artifact_build: request.artifact_build,
         settings: settings.move(),
+        package_settings: package_settings.move(),
         compiler_identity: request.host_facts.compiler_identity ?? "",
         package_markers: package_markers.move(),
         package_manifest: package_manifest,
@@ -949,16 +953,16 @@ jet_driver_package_name: fn(declared: String, entry_path: String) -> String Neve
     name
 }
 
-// Each declared setting's value for `profile`: the effective writer of its
-// chain (jet_driver_setting_writers): its default, then the value the selected
-// `build:` profile gives it, then the value the package's `build: fn`
-// contributed, as the lock records it (the function's
-// environment layer is above the profile's optimization-bundle layer), then
-// a `--set` value.
-jet_driver_build_settings: fn(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [SemaBuildSetting] Never! {
+// Each setting `package` declares, at the effective writer of its chain
+// (jet_driver_setting_writers): its default, then, for a dependency, the
+// entries that set it, then the value the selected `build:` profile gives
+// it, then the value the entry package's `build: fn` contributed, as the
+// lock records it (the function's environment layer is above the profile's
+// optimization-bundle layer), then a `--set` value.
+jet_driver_build_settings: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, request: JetDriverCompileRequest) -> [SemaBuildSetting] Never! {
     settings := [SemaBuildSetting]{}
     loop setting in package.settings {
-        writers: jet_driver_setting_writers(package, setting, profile, contributions, overrides)
+        writers: jet_driver_setting_writers(load, package, setting, request)
         settings.push(jet_driver_setting_effective(setting, writers))
     }
     settings
@@ -5461,9 +5465,35 @@ jet_driver_eval_segment_offset: fn(segments: [SemaSourceSegment], path: String, 
 }
 
 // Whether the source path `source` and the line table's `asked` name one
-// file: the same path, or one is the other's trailing components.
+// file: the same path, or one is the other's trailing components, either
+// without its leading `./` and `../` components (a module's source is
+// relative to the entry's root, so a path dependency's lies under `../`,
+// while the debugger asks by the stop's absolute path).
 jet_driver_eval_path_matches: fn(source: String, asked: String) -> Bool Never! {
-    source == asked || source.ends_with("/{asked}") || asked.ends_with("/{source}")
+    plain_source: jet_driver_eval_path_plain(source)
+    plain_asked: jet_driver_eval_path_plain(asked)
+    plain_source == plain_asked || plain_source.ends_with("/{plain_asked}") || plain_asked.ends_with("/{plain_source}")
+}
+
+// `path` without its leading `./` and `../` components.
+jet_driver_eval_path_plain: fn(path: String) -> String Never! {
+    at := 0
+    loop {
+        rest: path.slice(at..<path.len())
+        if {
+            rest.starts_with("./") -> at += 2
+            rest.starts_with("../") -> at += 3
+            else -> break
+        }
+    }
+    path.slice(at..<path.len())
+}
+
+#Test("a path dependency's module source beside the entry's root is the asked absolute source") {
+    assert(jet_driver_eval_path_matches("../lib/lib.jet", "/work/pkgs/lib/lib.jet"))
+    assert(jet_driver_eval_path_matches("Source/Main.jet", "/work/app/Source/Main.jet"))
+    assert(jet_driver_eval_path_matches("./prog.jet", "prog.jet"))
+    assert(!jet_driver_eval_path_matches("../lib/lib.jet", "/work/pkgs/mylib/lib.jet"))
 }
 
 JetDriverCompileSelectionRestore: struct {
@@ -5822,9 +5852,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
     jet_driver_unsafe_check(request, load)
-    // Every `--set` writer names a declared setting of the entry package and
-    // agrees with the other command-line writers (BuildFactChain.jet).
-    setting_refusals: jet_driver_setting_override_diagnostics(load, request)
+    // Every `--set` writer names a declared setting, and every setting's
+    // writers agree where the contribution law needs them to
+    // (BuildFactChain.jet).
+    setting_refusals: jet_driver_setting_writer_diagnostics(load, request)
     if setting_refusals.len() > 0 {
         loop diagnostic in setting_refusals -> load.diagnostics.push(diagnostic)
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)

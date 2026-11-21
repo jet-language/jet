@@ -1,0 +1,28 @@
+# Claim: `print` evaluates a field and a method call of a parameter at a
+# stop in a path dependency's function of a built multi-package image,
+# both from the directory the image was built from and from another one.
+# The image's line table records the dependency's source relative to the
+# build's directory (`pkgs/lib/lib.jet`), which is neither the working
+# directory of the second run nor the program's root (`pkgs/app`), where
+# the program's compile names that source `../lib/lib.jet`. The evaluator
+# takes the source the debugger finds for the stop, so it reads it and
+# finds its function either way. The fixture's lib.jet line 11 is total's
+# last line; its parameter `made` is Score{count: 3, label: "three"}.
+fixture: PrintEvaluatesInADependencyFromAnyDirectory.fixture
+env: NO_COLOR=1
+mkdir: elsewhere
+step: jet build -O0 pkgs/app/run.jet
+exit: 0
+step: jet debug {work}/pkgs/app/.jet/build/run --break lib.jet:11 --do 'print made.count' --do 'print made.doubled()'
+exit: 0
+stdout: ~ "Breakpoint hit  lib.jet:11  in total()\n" # the stop is in the dependency's function
+stdout: ~ "made.count = 3\n" # a field of the parameter, from the build's directory
+stdout: ~ "made.doubled() = 6\n" # and a method call on it
+stdout: !~ "Can't evaluate" # neither is refused
+step: jet debug {work}/pkgs/app/.jet/build/run --break lib.jet:11 --do 'print made.count' --do 'print made.doubled()'
+cwd: {work}/elsewhere
+exit: 0
+stdout: ~ "Breakpoint hit  lib.jet:11  in total()\n" # the same stop from another directory
+stdout: ~ "made.count = 3\n" # the field reads the same
+stdout: ~ "made.doubled() = 6\n" # and so does the call
+stdout: !~ "Can't evaluate" # the source is found above the image, not under the working directory

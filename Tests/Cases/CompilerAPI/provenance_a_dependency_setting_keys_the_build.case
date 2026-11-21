@@ -1,0 +1,36 @@
+# A dependency's setting keys the build and is recorded in the receipt. tool declares `loud: Bool = false`. report's entry for tool writes `loud: false`, and app's own entry writes `loud: true`, which decides. The receipt records tool's value and every writer, with report's marked shadowed. The lock lists report's overridden entry. tool's check node takes the value as an input, so app's compile and link keys follow it. A `--set tool.loud=false` build reads the default and adds no input. Its check, compile and link keys all differ from the loud build's, and each image prints its own greeting.
+fixture: DependencySettingKeys.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build app/main.jet
+exit: 0
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].value = "true" # app's entry decides
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="root entry"][0].state = "effective" # app's line
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="dependency entry"][0].state = "shadowed" # report's line
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="dependency entry"][0].source = "../report/package.jet:deps.tool.settings.loud" # names report's entry
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="declaration"][0].value = "false" # tool's default
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].input_digests[?name="setting:tool.loud=true"][0].digest = "bb5dba695b017385b30c0b4cb329ea276605d788870fa7939d4eb52437292919" # SHA-256 of `tool.loud=true`
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].inputs = ["main.jet"] # app's own source reads no setting
+json: file app/.jet/lock toml $.build.contribution[?key="Build.Settings.tool.loud"][0].layer = "dependency entry" # the lock lists the overridden entry
+json: file app/.jet/lock toml $.build.contribution[?key="Build.Settings.tool.loud"][0].source = "../report/package.jet:deps.tool.settings.loud" # report's entry
+capture: check_loud file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].key
+capture: compile_loud file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_loud file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "LOUD\nreport: LOUD\n"
+step: jet build --set tool.loud=false app/main.jet
+exit: 0
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].value = "false" # the command line decides
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="command line"][0].state = "effective"
+json: file app/.jet/build/receipt.json doc $.settings[?package="tool"][0].writers[?layer="root entry"][0].state = "shadowed" # app's line yields to `--set`
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].inputs = ["../tool/tool.jet"] # the default adds no input
+capture: check_quiet file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="../tool/tool.jet"][0].key
+capture: compile_quiet file app/.jet/build/receipt.json doc $.nodes[?kind="compile"][0].key
+capture: link_quiet file app/.jet/build/receipt.json doc $.nodes[?kind="link"][0].key
+cap:check_loud: != "{cap:check_quiet}"
+cap:compile_loud: != "{cap:compile_quiet}"
+cap:link_loud: != "{cap:link_quiet}"
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "quiet\nreport: quiet\n"

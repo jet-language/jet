@@ -59,7 +59,10 @@ use {
     if jet_cli_explain_build_fact_name("#Build.Settings.Mode") != .Val("Build.Settings.mode") {
         panic("dynamic setting normalization")
     }
-    if jet_cli_explain_build_fact_name("#build.settings.") != .None || jet_cli_explain_build_fact_name("#build.settings.a.b") != .None {
+    if jet_cli_explain_build_fact_name("#build.settings.tool.loud") != .Val("Build.Settings.tool.loud") {
+        panic("a dependency's setting is named by its package")
+    }
+    if jet_cli_explain_build_fact_name("#build.settings.") != .None || jet_cli_explain_build_fact_name("#build.settings.a.b.c") != .None || jet_cli_explain_build_fact_name("#build.settings..b") != .None {
         panic("invalid setting paths are not source queries")
     }
     // The generated rows: every JET_HIGHLIGHT_TOKENS spelling, under the kind

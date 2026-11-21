@@ -1,0 +1,38 @@
+# A program that owns its main prints through the one 65536-byte stdout
+# buffer at every optimize level: run at -O0, -O1 and -O2 under `jet perf
+# run`, which keeps the owned main and counts every write in its trace's
+# syscalls section (writes.py sums them), the 3000-line print loop sends
+# its 82890 bytes in two writes, one full buffer and the rest at the
+# return, never one write per line, and prints the same lines.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:python3
+fixture: OwnedMainPrintGoesThroughTheStdoutBuffer.fixture
+env: NO_COLOR=1
+step: jet inspect decisions many.jet
+exit: 0
+stdout: ~ "Main: program-owned" # the print loop needs no process root
+step: jet perf run -O0 many.jet --out many-O0.jettrace
+exit: 0
+stdout: lines = 3000 # every line arrives
+stdout: ~ "line 0 of the print loop\nline 1 of the print loop\n" # in order
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+step: python3 writes.py many-O0.jettrace
+exit: 0
+stdout: = "2\n" # one write per 64 KiB, not one per line
+step: jet perf run -O1 many.jet --out many-O1.jettrace
+exit: 0
+stdout: lines = 3000 # the same lines
+stdout: ~ "line 0 of the print loop\nline 1 of the print loop\n" # in order
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+step: python3 writes.py many-O1.jettrace
+exit: 0
+stdout: = "2\n" # the same two writes
+step: jet perf run -O2 many.jet --out many-O2.jettrace
+exit: 0
+stdout: lines = 3000 # the same lines
+stdout: ~ "line 0 of the print loop\nline 1 of the print loop\n" # in order
+stdout: ~ "line 2999 of the print loop\n" # the last one too
+step: python3 writes.py many-O2.jettrace
+exit: 0
+stdout: = "2\n" # the same two writes

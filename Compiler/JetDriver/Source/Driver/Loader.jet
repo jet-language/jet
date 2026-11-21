@@ -1234,6 +1234,36 @@ jet_driver_resolve_package_dependencies: fn(packages: &[JetDriverPackageInfo], s
     }
 }
 
+// Each setting a dependency entry gives (`tool: { settings: { loud: true } }`)
+// is one the dependency declares, with a value of its declared type; else
+// E0302 at the entry, naming what the dependency declares.
+jet_driver_check_dependency_settings: fn(packages: [JetDriverPackageInfo], diagnostics: &[Diagnostic]) {
+    loop package in packages {
+        loop dependency in package.dependencies {
+            if dependency.settings.len() == 0 -> next
+            target: jet_driver_find_package_by_root(packages, dependency.target_root_index) ?? next
+            declared: packages[target].settings
+            loop given in dependency.settings {
+                at := -1
+                loop (index, setting) in declared {
+                    if setting.name == given.name {
+                        at = index
+                        break
+                    }
+                }
+                if at < 0 {
+                    diagnostics.push(jet_driver_diagnostic_at_source("E0302", Val(given.span), dependency.source_path, 0, "`{dependency.name}` declares no setting `{given.name}`", "this entry gives `{given.name}` a value, and `{dependency.name}` declares {jet_driver_setting_names_text(declared)}", "write one of `{dependency.name}`'s settings, or drop this one"))
+                    next
+                }
+                setting: declared[at]
+                if !jet_driver_setting_text_fits(setting.ty, given.value) {
+                    diagnostics.push(jet_driver_diagnostic_at_source("E0302", Val(given.span), dependency.source_path, 0, "`{dependency.name}.{given.name}` is a `{setting.ty}`, and this entry gives it `{given.value}`", "an entry gives a dependency's setting a value of the type the dependency declares", "write a `{setting.ty}` value, such as its default `{setting.default}`"))
+                }
+            }
+        }
+    }
+}
+
 // A `{ git: …, tag|branch|rev: … }` dependency record.
 jet_driver_dependency_is_git: fn(source: String) -> Bool {
     source.starts_with("{{") && source.contains("git:")
@@ -1961,26 +1991,34 @@ jet_driver_parse_profile_settings: fn(source: String, tokens: [Token], tables: T
     }
 }
 
-// The `name: value` entries of one profile's `settings: { … }` block.
+// The `name: value` entries of one profile's `settings: { … }` block. A name
+// is a setting of the package, `fast`, or one of dependency `tool`'s,
+// `tool.loud`.
 jet_driver_parse_profile_values: fn(source: String, tokens: [Token], tables: TokenTables, profile: String, open: Int, close: Int, profile_settings: &[JetDriverProfileSetting], diagnostics: &[Diagnostic]) {
     index := jet_driver_manifest_skip_separators(tokens, open + 1, close)
     loop index < close {
         name_token: tokens[index]
-        if (name_token.kind != TOKEN_IDENT && !jet_driver_is_manifest_string(name_token.kind)) || index + 1 >= close || tokens[index + 1].kind != TOKEN_COLON {
-            diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "a profile setting must be `name: value`", "a build profile gives a declared setting one value", "write `name: value`"))
+        qualified: name_token.kind == TOKEN_IDENT && index + 3 < close && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT
+        colon: if qualified -> index + 3 else -> index + 1
+        if (name_token.kind != TOKEN_IDENT && !jet_driver_is_manifest_string(name_token.kind)) || colon >= close || tokens[colon].kind != TOKEN_COLON {
+            diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "a profile setting must be `name: value`", "a build profile gives a declared setting one value", "write `name: value`, or `tool.name: value` for dependency `tool`'s setting"))
             return
         }
-        value: jet_driver_manifest_field_value(source, tokens, index + 2)
+        name: if qualified -> "{token_decoded(tables, name_token)}.{token_decoded(tables, tokens[index + 2])}" else -> token_decoded(tables, name_token)
+        value: jet_driver_manifest_field_value(source, tokens, colon + 1)
         value_end: if value.next_index < close -> value.next_index else -> close
         span: Span{start: name_token.span.start, end: tokens[value_end - 1].span.end}
-        profile_settings.push(JetDriverProfileSetting{profile: profile, name: token_decoded(tables, name_token), value: jet_driver_manifest_tokens_text(source, tokens, tables, index + 2, value_end), span: span})
+        profile_settings.push(JetDriverProfileSetting{profile: profile, name: name, value: jet_driver_manifest_tokens_text(source, tokens, tables, colon + 1, value_end), span: span})
         index = jet_driver_manifest_skip_separators(tokens, value_end, close)
     }
 }
 
-// Every profile, active or not, may only give a declared setting a value.
+// Every profile, active or not, may only give a declared setting a value. A
+// dependency's setting (`tool.loud`) is checked once its package loads
+// (jet_driver_setting_writer_diagnostics).
 jet_driver_check_profile_settings: fn(settings: [JetDriverPackageSetting], profile_settings: [JetDriverProfileSetting], diagnostics: &[Diagnostic]) {
     loop entry in profile_settings {
+        if entry.name.contains(".") -> next
         declared: loop setting in settings {
             if setting.name == entry.name {
                 break true
@@ -2125,6 +2163,7 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
         packages.push(package)
     }
     jet_driver_resolve_package_dependencies(packages, snapshot, diagnostics)
+    jet_driver_check_dependency_settings(packages, diagnostics)
     jet_driver_bind_script_dependencies(packages, snapshot, diagnostics)
 
     entry_root: jet_driver_entry_root_path(snapshot)
