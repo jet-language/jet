@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112825,
+    "rev": 112834,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24366,11 +24366,11 @@
         {
           "n": 37,
           "text": "jet doc shows a public function's whole signature, parameter defaults included: for `install: fn(name: String, loud: Bool{false}) -> String` it prints that head, not `install: fn(name: String, loud: Bool`. Today jet_cli_doc_declaration_text (Compiler/JetCLI/Source/CLI/Docs.jet) ends the head at the first `{` byte, so every braced default (`Bool{false}`, `[String]{}`, a struct literal) cuts off the rest of the signature (probe on the gate-p392 jet, 2026-11-21). D-DEP-FEATURES1's option A relies on it: its one loss, no manifest list of optional parts, is mitigated by jet doc listing the exported build functions with their parameters and defaults. Proof: `jet test Compiler/JetCLI --filter \"declaration head\"`, and `jet doc` on a one-file package with that function prints the whole head.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T05:54:43.269Z"
+          "evidence": "p399 batch compiler (dev 50b6fec6e7, fix 4bd358ce30): `jet test Compiler/JetCLI --filter \"declaration head\"` rc=0 (proof row csignature-1). `jet doc lib.jet` on a one-file package whose function is `install: fn(name: String, loud: Bool{false}) -> String` writes index.md and index.html with that whole head (probe 2026-11-21, $JET_SCRATCH_ROOT/lanes/Main/probe-c37).",
+          "at": "2026-11-21T07:09:46.632Z"
         },
         {
           "n": 38,
@@ -24409,7 +24409,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T05:55:59.182Z",
+      "updated": "2026-11-21T07:09:46.632Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 38
@@ -50355,7 +50355,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -50460,11 +50460,11 @@
         {
           "n": 7,
           "text": "The dudect constant-time rows in Core/Net/SSL/TLS.jet give the same verdict under suite load as on a quiet machine. Today two O2 rows fail in most full core runs and pass when run alone: 'a TLS 1.2 server takes as long on a good RSA premaster block…' and 'an RSAES-OAEP decryption takes as long on a good block…'. They failed in p188, p189c, p191-p196 and p198-p200, with byte-identical O2 code between p199 and p200. Fix it without weakening detection: run timing rows serially on a reserved core, or use a load-robust statistic, never a looser threshold. Proof: the rows pass in 3 consecutive full core runs, and a planted variable-time branch still fails under the same load.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T03:04:52.356Z"
+          "evidence": "Three consecutive full core runs on the batch compilers p392, p394 and p399 (no core run between them: p393 and p395-p398 ran no suite) each passed 2772/2772, the two O2 dudect rows included. p399 (dev 50b6fec6e7) carries 0df6b5b615, and in that same full run the planted variable-time leak fails the rows own verdict: `jet test Compiler --profile core --filter \"dudect finds the leak\"` rc=0 (proof row tedverdict-1).",
+          "at": "2026-11-21T07:09:47.475Z"
         }
       ],
       "refs": [],
@@ -50472,9 +50472,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-17T01:45:03.126Z",
+      "updated": "2026-11-21T07:09:52.866Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 7,
+      "completedAt": "2026-11-21T07:09:52.866Z"
     },
     {
       "id": "c0j93bm1",
@@ -51552,6 +51553,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T00:38:11.274Z"
+        },
+        {
+          "n": 9,
+          "text": "WebBrowser/browser_test_ui_mode passes under full-suite load, fixed at its root, not by retry. It failed in 20 of 79 full cases suites from p303 to p399, each time with `a retried browser test records its trace` failing as `notes failed on chromium after 2 attempts: browser protocol failed` (p399 suite, $JET_SCRATCH_ROOT-side log cases.out). Alone on the p399 compiler with the suite environment it passed 3 of 3 (2026-11-21). Find which browser-protocol wait or read gives up under load and bound it by the work, as c1 does for steps. Proof: it passes in 5 consecutive full cases suites.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T07:07:46.921Z"
         }
       ],
       "refs": [],
@@ -51559,9 +51569,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-18T00:38:11.274Z",
+      "updated": "2026-11-21T07:07:46.921Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c08zzpo5",
@@ -55457,11 +55467,11 @@
         {
           "n": 99,
           "text": "The 170 #Unsafe regions the debugger and profiler added since 2026-11-15 are reviewed, never blessed: PerfSamples.jet (92), Image/Loader.jet (35), Alloc.jet (23), StackSegment.jet and Fault.jet (10), RecordReplay, ObserveLive and SessionHost (found 2026-11-20 at 29f59bdf10; the 11-16 tests/Tests rename had hidden them, see Errors3202 triage). Each region's reason states a contract a reader can check at the site. Each region a safe Core or runtime API can replace is replaced (the count falls). The review records, per file, which regions remain and why, and the safety.md baseline accepts only those. Proof: UnsafeRatchet passes on dev.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T21:07:53.978Z",
+          "evidence": "p399 batch compiler (dev 50b6fec6e7): `jet Tools/Agent/UnsafeRatchet.jet --check` rc=0 (proof row viewrecord-1). The per-row review record landed as 5d9ad3ac22 (Docs/Audits, 170 keep / 23 replace / 5 fix, per file). The replacements are in b4d2420992 (word-only syscalls through observe_syscall and host_call, one host_cpuid wrapper), so the count fell and the safety.md baseline accepts only the kept rows.",
+          "at": "2026-11-21T07:09:44.130Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -55488,11 +55498,11 @@
         {
           "n": 101,
           "text": "The causal and profiler clocks never tear: perf_causal_task_start, task_end, pass and open read the clock through perf_samples_clock(), which uses the signal handler's TCB scratch (PERF_SAMPLES_TCB_CLOCK), so a sample landing mid-read tears the value (a causal_tasks start of 366691413427327 among ~3.67e14 wall starts, on which the CLI then rebased every row); perf_causal_clock(thread, ...) races a handler pause the same way. Code outside the handler reads a clock that no handler writes. Proof: a unit test that reads the clock under 8 kHz sampling for a fixed count and finds every value monotonic and within the wall bound, and the causal cases passing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T01:44:34.863Z"
+          "evidence": "p399 batch compiler (dev 50b6fec6e7, fix a0fc737ec1): Perf/clock_reads_hold_under_sampling passes. Under the 8 kHz sampler it reads both clocks a fixed count of times in many tasks, four at a time, and requires every monotonic read at or after the one before and within the clock span. Perf/causal_task_clocks_hold, Perf/causal_counts_answered_requests and the concurrency_boundaries guard pass too (proof rows locktearr2-1..4). The proof is a case, not a unit test; it checks the facts the criterion names.",
+          "at": "2026-11-21T07:09:44.974Z"
         },
         {
           "n": 102,
@@ -55536,7 +55546,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T06:41:12.028Z",
+      "updated": "2026-11-21T07:09:44.974Z",
       "updatedBy": "Main",
       "criteriaLastN": 105
     },
@@ -72328,11 +72338,11 @@
         {
           "n": 7,
           "text": "A program run under `jet debug` reads its stdin: the debugger does not hand it end-of-input. A nested `jet debug` of `jet` can then be driven through a pipe and through a pty. Proof: a Debug case whose program echoes stdin lines while stopped and resumed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T01:38:48.456Z"
+          "evidence": "p399 batch compiler (dev 50b6fec6e7): Debug/stdin_file_is_the_program_s_input_while_the_console_reads_commands passes (proof row asecapital-1, and the full p399 cases suite, where it moved from failing to passing). The program echoes each line --stdin=FILE gives it while stopped and after it runs on, with the console driven through a pipe. Debug/program_shares_the_console_terminal_while_it_runs, the pty route, passes in the same suite.",
+          "at": "2026-11-21T07:09:45.791Z"
         },
         {
           "n": 8,
@@ -72540,7 +72550,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T06:41:20.152Z",
+      "updated": "2026-11-21T07:09:45.792Z",
       "updatedBy": "Main",
       "criteriaLastN": 27
     },
@@ -125677,8 +125687,8 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "Rivet",
+      "draft": false,
       "status": "open",
       "created": "2026-11-19T09:40:52.961Z"
     },
@@ -130577,6 +130587,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T07:09:52.867Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-21T07:09:47.475Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0miof6j",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-21T07:09:46.632Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-21T07:09:45.792Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-21T07:09:44.974Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#101"
+    },
+    {
+      "at": "2026-11-21T07:09:44.131Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#99"
+    },
+    {
+      "at": "2026-11-21T07:07:46.921Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "9 criteria, soft limit 6: the load-failure rows share one root class, which this card owns"
+    },
+    {
+      "at": "2026-11-21T07:07:46.921Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#9 WebBrowser/browser_test_ui_mode passes under full-suite load"
+    },
+    {
+      "at": "2026-11-21T06:41:29.744Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "reviewed by Rivet"
+    },
+    {
+      "at": "2026-11-21T06:41:27.788Z",
+      "by": "Rivet",
+      "action": "decision.review",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "passed"
+    },
     {
       "at": "2026-11-21T06:41:20.152Z",
       "by": "Main",
