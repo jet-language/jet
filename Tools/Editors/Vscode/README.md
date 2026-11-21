@@ -93,7 +93,9 @@ debugger is needed: `jet debug` runs the program under Jet's own native
 debugger, on Linux x86-64. Debugging requires a trusted workspace.
 
 A launch configuration can pass arguments, a working directory, environment
-overrides, and `stopOnEntry`:
+overrides, `stdin` (a file the program reads as its standard input, from the
+start of each run and restart; without it the program's stdin is empty), and
+`stopOnEntry`:
 
 ```json
 {
@@ -106,6 +108,7 @@ overrides, and `stopOnEntry`:
       "program": "${file}",
       "args": [],
       "cwd": "${workspaceFolder}",
+      "stdin": "${workspaceFolder}/input.txt",
       "stopOnEntry": true,
       "showRawFrames": false
     }

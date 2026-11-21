@@ -424,9 +424,12 @@ trap_simple_report: fn(code: I64, file: I64, file_len: I64, line: I64, message: 
 // a stop published to a task builds one, and `backtrace: off` keeps none.
 // The work is the root half's (jet_rt_trap_root runs trap_task_site_open,
 // trap_task_site_publish and trap_joined_site_write), so only a program
-// that makes a control links it.
+// that makes a control links it. A program that never entered a body has no
+// task stop, and its main thread may have no TCB to ask.
 trap_task_site_begin: fn() -> Bool {
-    if (jet_rt_stop_domain() != I64{2}) || fault_frames_off() -> return false
+    if !scheduler_body_ever_entered() || (jet_rt_stop_domain() != I64{2}) || fault_frames_off() {
+        return false
+    }
     trap_root(TRAP_ROOT_SITE_BEGIN, I64{0}, I64{0}, I64{0}) != I64{0}
 }
 

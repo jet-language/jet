@@ -1240,12 +1240,21 @@ it does not turn an unavailable panel or command into a silent no-op.
 `jet debug <file.jet>` stops at the start of the program's entry, the Jet
 function its image's `main` runs (`run`, a script's statements, or an -O2
 image's entry wrapper that keeps `run` inlined), or at `--break
-<file>:<line>`, and reads one command a line at the `(Jet) ` prompt. When
-its stdin is a terminal, the program shares it, as a shell's job does: the
-program reads the terminal while it runs and the console while it is
-stopped. Otherwise the program's stdin is empty, and its reads end at
-once; `jet debug --dap` keeps stdin for its protocol, so its program's
-stdin is empty too. D-DBG-VERBS1=A names the commands:
+<file>:<line>`, and reads one command a line at the `(Jet) ` prompt.
+`--stdin=FILE` (or `--stdin FILE`) is the program's standard input, opened
+again from its start at each run and restart: a file, a named pipe or a
+shell's `<(producer)`, while the console keeps reading its commands from
+its own stdin, so a piped session drives the program and the console
+apart. Without it, when its stdin is a terminal, the program shares it, as
+a shell's job does: the program reads the terminal while it runs and the
+console while it is stopped. Otherwise the program's stdin is empty, so
+its reads end at once, and the console's answer to a command it doesn't
+know says that `--stdin=FILE` gives the program its input. `--stdin` is
+refused with `--dap`, `--attach`, `--replay` and a `.jetdump`, and when
+it names the console's own piped stdin (E2102); a FILE that can't be read
+is E2105. `jet debug --dap` keeps stdin for its protocol: its program reads
+the file the launch configuration's `stdin` names, or an empty stdin.
+D-DBG-VERBS1=A names the commands:
 
 - `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
   program.

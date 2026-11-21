@@ -6,11 +6,13 @@
 // program_entry), or with `--break <file.jet>:<line>` (repeatable) at the
 // first of those lines the
 // program reaches, then reads one command a line; the end of stdin runs the
-// program to its end, and `quit` ends it early (E2204). A stdin that is a
-// terminal is the program's too, read by it while it runs; otherwise its
-// stdin is empty. `--dap` serves the same session to an editor over the
-// Debug Adapter Protocol instead (DebugDap.jet), whose launch request
-// carries the arguments. The image
+// program to its end, and `quit` ends it early (E2204). `--stdin=FILE` is
+// the program's standard input, opened again at each start: a file, a
+// named pipe or a shell's `<(producer)`. Without it, a stdin that is a
+// terminal is the program's too, read by it while it runs; otherwise the
+// program's stdin is empty. `--dap` serves the same session to an editor
+// over the Debug Adapter Protocol instead (DebugDap.jet), whose launch
+// request carries the arguments and the program's `stdin`. The image
 // keeps the deep checks `--deep-checks` selects, as a `jet build` with the
 // same flags does. A path that isn't a `.jet` file
 // is an image already built: it is debugged as it is, against the source its
@@ -51,11 +53,17 @@ use {
     jet_pkg_model.[WorkspaceDeclarationCache]
 }
 
+// The end of the console's answer to a command it doesn't know when its
+// stdin is not a terminal: the program reads none of the console's input,
+// whose lines are commands, so a line meant for the program reads as one.
+JET_CLI_DEBUG_STDIN_NOTE: "The program doesn't read the console's input: `--stdin=FILE` gives it FILE as its standard input.\n"
+
 jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     dap := false
     breaks := [NativeBreak]{}
     attach := -1
     replay_at := -1
+    stdin_at := -1
     loop (index, flag) in jet_argv {
         if flag == "--attach" || flag.starts_with("--attach=") {
             value: if flag == "--attach" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--attach=")
@@ -64,6 +72,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         }
         if flag == "--raw-frames" -> return jet_cli_not_ported("debug --raw-frames", color)
         if flag == "--replay" || flag.starts_with("--replay=") -> replay_at = index
+        if flag == "--stdin" || flag.starts_with("--stdin=") -> stdin_at = index
         if flag == "--dap" -> dap = true
         if flag != "--break" && !flag.starts_with("--break=") -> next
         spec: if flag == "--break" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--break=")
@@ -77,6 +86,20 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
     }
     if replay_at >= 0 && replay == "" {
         return jet_cli_fail("E2104", "`--replay` needs a NAME", jet_cli_why("E2104"), "write `--replay=NAME`, the NAME of a `jet run --record=NAME` recording", color, JET_DRIVER_EXIT_USAGE)
+    }
+    input: if {
+        stdin_at < 0 -> ""
+        jet_argv[stdin_at] == "--stdin" && stdin_at + 1 < jet_argv.len() -> jet_argv[stdin_at + 1]
+        else -> jet_argv[stdin_at].after("--stdin=")
+    }
+    if stdin_at >= 0 && input == "" {
+        return jet_cli_fail("E2104", "`--stdin` needs a FILE", jet_cli_why("E2104"), "write `--stdin=FILE`, the file the program reads as its standard input", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if input != "" && dap {
+        return jet_cli_fail("E2102", "`--stdin` gives the console's program its input, but `--dap` takes it from the editor", jet_cli_why("E2102"), "drop `--stdin`, and set `stdin` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if input != "" && replay != "" {
+        return jet_cli_fail("E2102", "`--replay` answers the program's input from its recording, so it takes no `--stdin`", jet_cli_why("E2102"), "drop `--stdin`: the replay reads what the recorded run read", color, JET_DRIVER_EXIT_USAGE)
     }
     record: jet_cli_record_flag(jet_argv) ?? return jet_cli_fail("E2104", "`--record` needs a NAME", jet_cli_why("E2104"), "write `--record=NAME` with letters, digits, `-`, or `_`", color, JET_DRIVER_EXIT_USAGE)
     if record != "" && replay != "" {
@@ -99,6 +122,9 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         if record != "" {
             return jet_cli_fail("E2102", "`--attach` takes a program already running, so its run can't be recorded from its start", jet_cli_why("E2102"), "drop `--record`, or record a new run: `jet debug --record={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
         }
+        if input != "" {
+            return jet_cli_fail("E2102", "`--attach` takes a program already running, which reads its own standard input", jet_cli_why("E2102"), "drop `--stdin`, or debug a new run of the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
+        }
         if args.len() > 1 {
             return jet_cli_fail("E2104", "`jet debug --attach` takes the process id alone, but got `{args[1]}` too", jet_cli_why("E2104"), "Run `jet debug --attach PID`; the image's own line table names its source.", color, JET_DRIVER_EXIT_USAGE)
         }
@@ -119,10 +145,19 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         if record != "" {
             return jet_cli_fail("E2104", "a crash dump runs nothing to record", jet_cli_why("E2104"), "drop `--record`, or record the program: `jet debug --record={record} <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
         }
+        if input != "" {
+            return jet_cli_fail("E2102", "a crash dump runs nothing to read `--stdin`", jet_cli_why("E2102"), "drop `--stdin`, or debug the program: `jet debug <file.jet> --stdin={input}`", color, JET_DRIVER_EXIT_USAGE)
+        }
         return jet_cli_debug_dump(args[1], color)
     }
+    if input != "" && !cli_files.can_read(input) {
+        return jet_cli_fail("E2105", "couldn't open `{input}`, the program's standard input", jet_cli_why("E2105"), "check that the file exists and is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if input != "" && !cli_term.stdin().is_tty() && (cli_files.samefile(input, "/dev/stdin") ?? false) {
+        return jet_cli_fail("E2102", "`--stdin={input}` names the console's own stdin, which carries its commands", jet_cli_why("E2102"), "give the program another file, or the console its commands through another pipe", color, JET_DRIVER_EXIT_USAGE)
+    }
     scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    plan: if attach >= 0 -> jet_cli_debug_attach(attach, scratch.path, deep_checks, color) else -> jet_cli_debug_target(args[1], scratch.path, deep_checks, breaks, program_args, dap, replay, record, color)
+    plan: if attach >= 0 -> jet_cli_debug_attach(attach, scratch.path, deep_checks, color) else -> jet_cli_debug_target(args[1], scratch.path, deep_checks, breaks, program_args, input, dap, replay, record, color)
     if cli_files.remove_all(scratch.path) == {
         .Err(_) -> {}
         .Ok(_) -> {}
@@ -130,19 +165,20 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
     plan
 }
 
-// Debug `entry`, a source file built into `scratch` or an image, under the
+// Debug `entry`, a source file built into `scratch` or an image, reading
+// the file `input` as its standard input when it isn't "", under the
 // recording `replay` names when it isn't "", or making the one `record`
 // names when it isn't. A replay runs with the program arguments its
 // recording was made with, since it reproduces that run; other arguments
 // after `--` are refused.
-jet_cli_debug_target: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, replay: String, record: String, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_target: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], input: String, dap: Bool, replay: String, record: String, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     if record != "" {
         made: jet_cli_debug_record_begin(record, entry, scratch) ?? return jet_cli_debug_unbegun(err, dap: dap, color: color)
         env: jet_cli_launch_env([JetCLIEnvVar]{JetCLIEnvVar{name: ENV_JET_RECORD, value: made.log}, JetCLIEnvVar{name: ENV_JET_REPLAY, value: ""}}) ?? [String]{}
-        return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, dap, Val(env), Val(made), color)
+        return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, input, dap, Val(env), Val(made), color)
     }
     if replay == "" {
-        return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, dap, None, None, color)
+        return jet_cli_debug_launch(entry, scratch, deep_checks, breaks, program_args, input, dap, None, None, color)
     }
     recorded := [String]{}
     env: jet_cli_debug_replay_env(replay, entry, scratch, recorded) ?? return jet_cli_debug_unbegun(err, dap: dap, color: color)
@@ -150,7 +186,7 @@ jet_cli_debug_target: fn(entry: String, scratch: String, deep_checks: DeepChecks
         shown: if recorded.len() == 0 -> "no arguments" else -> "`{recorded.join(" ")}`"
         return jet_cli_debug_unbegun(JetCLIProveRefusal{code: "E2104", what: "`--replay={replay}` reruns a run that had other program arguments", why: "the recording ran with {shown}, and a replay reproduces that run, so it takes its arguments from the recording", fix: "drop the words after `--`", exit_code: JET_DRIVER_EXIT_USAGE}, dap: dap, color: color)
     }
-    jet_cli_debug_launch(entry, scratch, deep_checks, breaks, recorded, dap, Val(env), None, color)
+    jet_cli_debug_launch(entry, scratch, deep_checks, breaks, recorded, input, dap, Val(env), None, color)
 }
 
 // A `jet debug --record` recording: bound before the program builds
@@ -200,13 +236,14 @@ jet_cli_debug_unbegun: fn(refusal: JetCLIProveRefusal, dap: Bool{false}, color: 
     jet_cli_debug_replay_refused(refusal, color)
 }
 
-// Debug `entry` with `program_args`, in the environment `env` when it is
+// Debug `entry` with `program_args` and the standard input `input` ("":
+// the console's terminal, or none), in the environment `env` when it is
 // set, making the recording `record` when it is set.
-jet_cli_debug_launch: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_launch: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], input: String, dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     if entry.ends_with(".jet") {
-        return jet_cli_debug_build(entry, scratch, deep_checks, breaks, program_args, dap, env, record, color)
+        return jet_cli_debug_build(entry, scratch, deep_checks, breaks, program_args, input, dap, env, record, color)
     }
-    jet_cli_debug_session(entry, "", [String]{}, scratch, breaks, program_args, deep_checks, dap, env, record, color, jet_cli_debug_eval_held_slot())
+    jet_cli_debug_session(entry, "", [String]{}, scratch, breaks, program_args, input, deep_checks, dap, env, record, color, jet_cli_debug_eval_held_slot())
 }
 
 // The environment of a `--replay=NAME` run of `entry`: jet's own, with
@@ -268,13 +305,13 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
 }
 
 // Build `entry` at O0 into `scratch`, then debug the image with the program
-// arguments `program_args` and the environment `env` (None: jet's own),
-// making the recording `record` when it is set. Under `--dap` the build's
-// report goes to stderr: stdout is the protocol's. The session's held check
-// of the program starts opening first, with the flags of the image's level,
-// O0, so it opens while the image builds, whose debug info records the
-// sources it was built from.
-jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
+// arguments `program_args`, the standard input `input` and the environment
+// `env` (None: jet's own), making the recording `record` when it is set.
+// Under `--dap` the build's report goes to stderr: stdout is the protocol's.
+// The session's held check of the program starts opening first, with the
+// flags of the image's level, O0, so it opens while the image builds, whose
+// debug info records the sources it was built from.
+jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], input: String, dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     held: jet_cli_debug_eval_held_slot()
     jet_cli_debug_eval_held_start(held, entry, jet_cli_debug_eval_argv(deep_checks, 0), color: color, program: true)
@@ -283,19 +320,21 @@ jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks,
     code: if built.code == 0 -> JET_DRIVER_EXIT_USER_ERROR else -> built.code
     if !built.success && dap -> return jet_cli_done("", "{built.output}{built.errors}", code)
     if !built.success -> return jet_cli_done(built.output, built.errors, code)
-    jet_cli_debug_session(native_debug_image(entry, out_dir), entry, source.split("\n").to_list(), scratch, breaks, program_args, deep_checks, dap, env, record, color, held)
+    jet_cli_debug_session(native_debug_image(entry, out_dir), entry, source.split("\n").to_list(), scratch, breaks, program_args, input, deep_checks, dap, env, record, color, held)
 }
 
 // Debug the built `image`, whose `run` is in the source file `entry` with
-// the text `lines`, run with `program_args` and the environment `env` (None:
-// jet's own), with the session's held checks `held`, which start opening
-// here unless they already are; the program's only when the image records
-// the sources it was built from (jet_cli_debug_eval_held_start). An `entry`
-// of "" is the source the image's line table names, read if it is there. A
-// replay (`env` names JET_REPLAY) and a recording (`record`) need an image
-// that links the runtime's observation start, where both begin; a
-// recording is published when the session ends.
-jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], deep_checks: DeepChecks, dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool, held: JetCLIDebugEvalHeldShared) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
+// the text `lines`, run with `program_args`, the file `input` as its
+// standard input ("": the console's terminal, or none) and the environment
+// `env` (None: jet's own), with the session's held checks `held`, which
+// start opening here unless they already are; the program's only when the
+// image records the sources it was built from
+// (jet_cli_debug_eval_held_start). An `entry` of "" is the source the
+// image's line table names, read if it is there. A replay (`env` names
+// JET_REPLAY) and a recording (`record`) need an image that links the
+// runtime's observation start, where both begin; a recording is published
+// when the session ends.
+jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], input: String, deep_checks: DeepChecks, dap: Bool, env: [String]?, record: JetCLIDebugRecord?, color: Bool, held: JetCLIDebugEvalHeldShared) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
     session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     if env != None && !session.replay_start {
         session.close()
@@ -304,12 +343,18 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
         return jet_cli_fail(refused.code, refused.what, refused.why, refused.fix, color, refused.exit_code)
     }
     session.env = env
-    // A console on a terminal shares it with the program, as a shell's job
-    // does: the program reads it while it runs and the console while it is
-    // stopped. The adapter's stdin carries its protocol, so its program's
-    // reads end at once, as they do when the console's stdin is not a
-    // terminal.
-    if !dap && cli_term.stdin().is_tty() -> session.input_path = "/dev/stdin"
+    // `--stdin=FILE` is the program's standard input, opened again at each
+    // start. Without it, a console on a terminal shares it with the
+    // program, as a shell's job does: the program reads it while it runs
+    // and the console while it is stopped. Otherwise the console's stdin
+    // carries its commands, and the adapter's its protocol: the program's
+    // reads end at once unless `--stdin` (or the adapter's launch `stdin`,
+    // DebugDap.jet) names its input, and the console's answer to a command
+    // it doesn't know says how to give it one.
+    piped: !dap && !cli_term.stdin().is_tty()
+    if input != "" -> session.input_path = input
+    if input == "" && !dap && !piped -> session.input_path = "/dev/stdin"
+    if piped -> session.unknown_note = JET_CLI_DEBUG_STDIN_NOTE
     source_file: if entry == "" -> session.entry_source() else -> entry
     // `print`, `watch`, conditions, logpoints and the adapter's `evaluate`
     // compile their expressions with this program (DebugCompile.jet).

@@ -22,8 +22,11 @@ run: fn() {
     request: "{method} {target} HTTP/1.1{CRLF}Host: {address}{CRLF}Origin: http://{address}{CRLF}Authorization: Bearer {secret}{CRLF}Content-Type: application/json{CRLF}Content-Length: {body.bytes().len()}{CRLF}Connection: close{CRLF}{CRLF}{body}"
     stream.write_bytes(request.bytes()) ?? panic("write")
     bytes := [U8]{}
+    // A first debug request answers once the entry is built and stopped
+    // (canvas-protocol.md, "Debug session"), as long as a build takes on a
+    // loaded host: the case step's own timeout bounds the wait.
     loop {
-        block: stream.read_bytes(4096, deadline: 5s) ?? panic("read")
+        block: stream.read_bytes(4096) ?? panic("read")
         if block.is_empty() -> break
         loop byte in block -> bytes.push(byte)
     }

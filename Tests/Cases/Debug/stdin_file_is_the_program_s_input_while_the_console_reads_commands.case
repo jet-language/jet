@@ -1,0 +1,41 @@
+# Claim: `jet debug --stdin=FILE` gives the program FILE as its standard
+# input while the console reads its commands from its own piped stdin, so
+# the two never take each other's lines. The program echoes each line it
+# reads: stopped at the echo, `print` shows the line FILE gave it, and the
+# echo follows once it runs on, at each stop. A line of the console's
+# input meant for the program is a command it doesn't know, and the answer
+# says how to give the program its input. `--stdin` refuses a missing
+# FILE (E2105), the console's own stdin, `--dap` and a bare flag.
+fixture: ProgramSharesTheConsoleTerminalWhileItRuns.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+write: input.txt stdin_file_is_the_program_s_input_while_the_console_reads_commands.program.stdin
+step: jet debug echo.jet --stdin=input.txt
+stdin: stdin_file_is_the_program_s_input_while_the_console_reads_commands.stdin
+exit: 0 # the program read `end` from FILE, finished, and the session ended with it
+stdout: ~ "Breakpoint set  echo.jet:8" # the console read its first command
+stdout: ~ "line = \"first\"" # the program read FILE's first line, not the console's
+stdout: ~ "echo first" # and runs on with it after the stop
+stdout: ~ "line = \"second\"" # FILE's next line at the next stop
+stdout: ~ "Unknown command `second`." # a line meant for the program is the console's command
+stdout: ~ "The program doesn't read the console's input: `--stdin=FILE` gives it FILE as its standard input.\n" # and the answer says how to give it the program
+stdout: ~ "echo second" # the step prints FILE's line
+stdout: ~ "done" # the program read `end` from FILE and finished
+step: jet debug --stdin input.txt echo.jet
+stdin: stdin_file_is_the_program_s_input_while_the_console_reads_commands.stdin
+exit: 0 # the flag takes its FILE as the next word too
+stdout: ~ "line = \"first\"" # and the program reads it the same
+step: jet debug echo.jet --stdin=missing.txt
+exit: 1
+stdout: = "" # refused before the program builds
+stderr: ~ "couldn't open `missing.txt`, the program's standard input" # a FILE that can't be read is E2105
+step: jet debug echo.jet --stdin=/dev/stdin
+stdin: stdin_file_is_the_program_s_input_while_the_console_reads_commands.stdin
+exit: 2
+stderr: ~ "names the console's own stdin, which carries its commands" # the console's own input is refused
+step: jet debug --dap echo.jet --stdin=input.txt
+exit: 2
+stderr: ~ "`--stdin` gives the console's program its input, but `--dap` takes it from the editor" # the adapter takes it from the launch configuration
+step: jet debug echo.jet --stdin=
+exit: 2
+stderr: ~ "`--stdin` needs a FILE" # a bare flag is a usage error

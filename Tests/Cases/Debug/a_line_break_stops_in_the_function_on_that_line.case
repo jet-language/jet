@@ -1,0 +1,27 @@
+# A breakpoint on a line stops in the function whose code is on that line.
+# At O1 and O2 `early` (line 5) is inlined into `host` (lines 13-17), whose
+# own code lies after line 9; `host` runs before `middle`, which holds line 9
+# and is recursive, so it keeps its own code. A break on line 9 must stop in
+# `middle`, never in `host`'s copy of `early` or at `host`'s own lines.
+fixture: ALineBreakStopsInTheFunctionOnThatLine.fixture
+env: NO_COLOR=1
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:9
+stdin: a_line_break_stops_in_the_function_on_that_line.stdin
+exit: 0 # middle(2) reaches line 9 at n = 2 and n = 1; the second `c` runs to the end
+stdout+stderr: ~ "Breakpoint hit  prog.jet:9  in middle()" # the line's own function stops
+stdout+stderr: ~ "#0  middle()  at prog.jet:9" # and its frame is middle's
+stdout+stderr: !~ "in host()" # never the later function holding an earlier copy
+stdout+stderr: ~ "Program finished" # the session runs to its end
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:9
+stdin: a_line_break_stops_in_the_function_on_that_line.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:9  in middle()" # the line's own function stops at O2
+stdout+stderr: !~ "in host()" # never the later function holding an earlier copy
+stdout+stderr: ~ "Program finished" # the O2 session runs to its end
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "51 12\n" # the image runs unchanged

@@ -515,11 +515,16 @@ NativeSession: struct {
     trace: X64Trace,
     output_path: String,
     output_read: Int,
-    // The file the program reads as its standard input, from the start of
-    // each run: `/dev/stdin` keeps the debugger's own (a terminal both
-    // share, the program reading while it runs and the console while it
-    // stops).
+    // The file the program reads as its standard input, opened again at
+    // the start of each run: the file `jet debug --stdin` or an editor's
+    // launch `stdin` names, or `/dev/stdin`, the debugger's own (a terminal
+    // both share, the program reading while it runs and the console while
+    // it stops).
     input_path: String{"/dev/null"},
+    // A line the console's answer to a command it doesn't know ends with
+    // ("" for none): `jet debug` says there how to give the program input
+    // when the console's own carries its commands.
+    unknown_note: String{""},
     // Whether the program has been launched or attached to; while it runs,
     // its trace has a pid, and the trace's thread is the one the last stop
     // is in. An `attached` program ran before the session and goes on
@@ -1104,17 +1109,26 @@ NativeSession: struct {
     // `locals` shows it, its DebugView included: reading a value runs no
     // code, so a dump and an inlined frame answer it too, and the local's
     // type need not be one a compiled function can take (`[Int String!]`).
+    // A local whose location doesn't cover the stop is unavailable there:
+    // compiled code would read the same nothing, so it's refused here, with
+    // or without a compiler, never shown as some other value.
     evaluate: fn(&self, text: String) -> NativeEvalValue NativeEvalRefused! {
         name: text.trim()
         if native_eval_is_name(name) {
             shown: self.locals() ?? return Err(native_eval_refused(err.detail))
+            unavailable := false
             loop local in shown {
-                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE || local.value == NATIVE_DEBUG_NOT_KEPT {
+                if local.name != name || local.value == NATIVE_DEBUG_NOT_KEPT -> next
+                if local.value == NATIVE_DEBUG_UNAVAILABLE {
+                    unavailable = true
                     next
                 }
                 truth: local.type_name == "Bool" && local.value == "true"
                 said: "{local.value}"
                 return Ok(NativeEvalValue{shown: local.value, type_name: local.type_name, text: said, truth: truth})
+            }
+            if unavailable {
+                return Err(native_eval_refused("local `{name}` has no readable value at this stop"))
             }
         }
         if self.dump != None {
@@ -2589,7 +2603,7 @@ NativeSession: struct {
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n"
+            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}"
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }
@@ -5795,47 +5809,73 @@ native_line_functions: fn(image: NativeImage, file: String) -> [Int] Never! {
 // The addresses of `line` in the Jet source `file` (native_line_functions).
 // In each function, the first statement row (no call row) of the line in
 // its own code and in each inlined copy it holds (two instances of a
-// generic module's member inlined into one caller are two copies). A
-// function with no row of the line, but rows on or before it, gives its
-// first row of the nearest later line instead.
+// generic module's member inlined into one caller are two copies); a copy
+// inlined from another file is skipped, since its rows carry that file's
+// lines. A function with no row of the line gives the first row of the
+// nearest later line of each run of code that is known to be of this file
+// and has its own rows on both sides of the line. The sides are judged per
+// run: a function whose own code starts after `line` and holds a copy of a
+// function from before it (sema_name_facts_empty, line 713, inlined into
+// code from line 6897) does not span `line`, and a copy whose file the
+// DWARF does not give (a Core function inlined into `run`) never does.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     addresses := [Int]{}
     loop index in native_line_functions(image, file) {
         function: image.lines.functions[index]
         described: native_function_at(image, function.low)
-        sites := [NativeLineSite]{}
-        covers := false
-        nearest := -1
-        nearest_line := 0
+        runs := [NativeLineRun]{}
+        exact := false
         at := function.rows
         row := X64LineRow{at: function.low, line: 1}
         loop at < function.rows_end {
             x64_jetline_next(image.lines.table, at, row)
             if row.call -> next
-            if row.line <= line -> covers = true
-            if row.line > line && (nearest < 0 || row.line < nearest_line) {
-                nearest = row.at
-                nearest_line = row.line
-            }
-            if row.line != line -> next
             site: native_line_site(described, row.at)
-            seen := false
-            loop found in sites {
-                if found.site == site -> seen = true
+            same: native_line_site_file(described, site)
+            if same < 0 -> next
+            k := -1
+            loop (found, run) in runs {
+                if run.site == site -> k = found
             }
-            if !seen -> sites.push(NativeLineSite{site: site, address: row.at})
+            if k < 0 {
+                k = runs.len()
+                runs.push(NativeLineRun{site: site, known: same > 0, address: -1, covers: false, nearest: -1, nearest_line: 0})
+            }
+            if {
+                row.line == line -> {
+                    exact = true
+                    if runs[k].address < 0 -> runs[k].address = row.at
+                }
+                row.line < line -> runs[k].covers = true
+                runs[k].nearest < 0 || row.line < runs[k].nearest_line -> {
+                    runs[k].nearest = row.at
+                    runs[k].nearest_line = row.line
+                }
+            }
         }
-        loop found in sites -> addresses.push(found.address)
-        if sites.len() == 0 && covers && nearest >= 0 -> addresses.push(nearest)
+        loop run in runs {
+            if {
+                run.address >= 0 -> addresses.push(run.address)
+                !exact && run.known && run.covers && run.nearest >= 0 -> addresses.push(run.nearest)
+            }
+        }
     }
     addresses
 }
 
-// The first row of the searched line in one run of code: the function's own
-// code (`site` -1) or one inlined copy (the run's index).
-NativeLineSite: struct {
+// One run of code searched for a line (native_line_addresses): the
+// function's own code (`site` -1) or one inlined copy (the run's index).
+// `known` says the run is known to be of the searched file; `address` is
+// the first row of the line, -1 for none; `covers` says the run has a row
+// before the line; `nearest` is the first row of the nearest later line,
+// -1 for none.
+NativeLineRun: struct {
     site: Int,
+    known: Bool,
     address: Int,
+    covers: Bool,
+    nearest: Int,
+    nearest_line: Int,
 }
 
 // The innermost inlined run of `function` holding `address`; -1 for the
@@ -5844,6 +5884,18 @@ native_line_site: fn(function: NativeFunction?, address: Int) -> Int Never! {
     described: function ?? return -1
     chain: native_inline_chain(described, address)
     if chain.len() == 0 -> -1 else -> chain[0]
+}
+
+// Whether run `site` of `function` (native_line_site) is code of the
+// function's own file: 1 when it is (its own code, or a copy of a function
+// declared in that file), -1 when it is a copy from another file, 0 when the
+// DWARF does not say.
+native_line_site_file: fn(function: NativeFunction?, site: Int) -> Int Never! {
+    if site < 0 -> return 1
+    described: function ?? return 0
+    run: described.inlined[site]
+    if run.file < 0 || described.file < 0 -> return 0
+    if run.file == described.file -> 1 else -> -1
 }
 
 // The first address past function `index`'s prologue: its second statement

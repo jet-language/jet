@@ -352,6 +352,11 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 // program's arguments, so the loop is not folded away.
 NATIVE_TEST_INLINED: "use process: core.process\n\nsum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n {{\n        total += i * i\n        if total < 0 -> break\n    }}\n    total\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n    print(\"{{sum_squares(n)}}\")\n}}\n"
 
+// At O2 `early` (line 4) is inlined into `host` (lines 13-17), whose own
+// code lies after line 9; `middle` is recursive, so line 9 keeps its own
+// code there. A break on line 9 belongs to `middle` only.
+NATIVE_TEST_LATER_LINE: "use process: core.process\n\nearly: fn(n: Int) -> Int {{\n    n * 3 + 1\n}}\n\nmiddle: fn(n: Int) -> Int {{\n    if n <= 0 -> return 1\n    total := middle(n - 1) + n\n    total * 2\n}}\n\nhost: fn(n: Int) -> Int {{\n    a := early(n)\n    loop k in 0..<n -> a += early(k)\n    a\n}}\n\nrun: fn() {{\n    n: Int.parse(process.args().get(0) ?? \"5\") ?? 5\n    first: host(n)\n    print(\"{{first}} {{middle(first % 7)}}\")\n}}\n"
+
 NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n -> total += i * i\n    return total\n}}\n\nrun: fn() {{ print(\"{{sum_squares(1000)}}\") }}\n"
 
 // A one-line loop, then a recursive call: `next` must run the loop whole
@@ -620,6 +625,23 @@ NATIVE_TEST_SCATTERED: "early: fn(n: Int) -> [Int] {{\n    items := [Int]{{}}\n 
     hit: session.command("c", placed.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(hit.text.contains("Breakpoint hit  prog.jet:"), hit.text)
     assert(hit.text.contains("in sum_squares()"), hit.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A file:line break stops in the function whose code is on that line, not
+// in a function that holds an inlined copy of an earlier one and whose own
+// code starts after the line (`--break CheckProgram.jet:759` on the
+// compiler once stopped in sema_name_facts_empty's copy inside code from
+// line 6897).
+#Test("a_line_break_skips_a_later_function_holding_an_earlier_inlined_copy") {
+    scratch: native_test_files.temp_dir("jet-debug-later-line") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_LATER_LINE, [String]{"-O2"})
+    lines: NATIVE_TEST_LATER_LINE.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint set  prog.jet:9\n"), first.text)
+    assert(first.text.contains("Breakpoint hit  prog.jet:9  in middle()"), first.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
