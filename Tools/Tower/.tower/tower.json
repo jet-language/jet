@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112725,
+    "rev": 112727,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42086,6 +42086,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T12:59:51.786Z"
+        },
+        {
+          "n": 2,
+          "text": "A task the scheduler can run starts at once: in plain `jet run` of the causal fixture (Perf/causal_profile_predicts_speedup), 4-22% of rounds start a task more than 100 us late, some waiting on a parked carrier's wake (100-1000 us) and others queued behind a sibling on one carrier (~1050 us) while other carriers idle; the share varies run to run, so the case's hand-measured truth varies with it. The wake and placement path is fixed in the runtime scheduler for every program, with no special case for the fixture. Proof: a case that measures task start latency against the spawn (p99 under a stated bound derived from the futex wake cost on this host) on the causal fixture and on a second spawn-heavy program, plus Perf/causal_profile_predicts_speedup passing when run alone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T03:41:14.710Z",
+          "movedFrom": {
+            "card": 6841,
+            "n": 100
+          }
         }
       ],
       "refs": [],
@@ -42093,8 +42106,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T11:41:45.304Z",
-      "updated": "2026-11-17T01:42:35.095Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-21T03:41:14.711Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c05p5u7s",
@@ -54133,6 +54147,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Owner order 2026-11-20: speed and size work goes to E24 (G11) or E25 (G13) unless the owner says otherwise. Moved the lldb speed bar (old c70) to #6960, the zone cost under 27 ns (old c87) to #6958, and the task start latency (old c100, the per-carrier wake root and its proof design) to #6440."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Perf/task_clock_nominal_matches_kept fails in suite p387 (nominal 335 > kept+1 = 327), and stays failing until fixed. The case premise \"the kernel share of the spin is under a period\" is false. Under exclude_kernel the task clock counts both modes and the kernel skips an overflow that lands in kernel mode, so nominal minus kept is the period ends that fell in the kernel, the second runtime thread's syscall time included. Measured on gate-p387: 408/413, 350/358, 389/399, 4611/4646, 10739/10866, a 1.2-2.8% gap that grows with run length. At perf_event_paranoid 2 no counter separates user time. Decision: no bound widening. Samples carry the task clock count (PERF_SAMPLE_READ), so the dropped period ends D are counted exactly, and the case asserts nominal == kept + D. This lands in one samples-file format bump with the stack-id cites (Lens)."
         },
         {
@@ -55446,11 +55465,16 @@
         {
           "n": 100,
           "text": "A task the scheduler can run starts at once: in plain `jet run` of the causal fixture (Perf/causal_profile_predicts_speedup), 4-22% of rounds start a task more than 100 us late, some waiting on a parked carrier's wake (100-1000 us) and others queued behind a sibling on one carrier (~1050 us) while other carriers idle; the share varies run to run, so the case's hand-measured truth varies with it. The wake and placement path is fixed in the runtime scheduler for every program, with no special case for the fixture. Proof: a case that measures task start latency against the spawn (p99 under a stated bound derived from the futex wake cost on this host) on the causal fixture and on a second spawn-heavy program, plus Perf/causal_profile_predicts_speedup passing when run alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T01:44:30.808Z"
+          "evidence": "Moved to #6440 c2",
+          "at": "2026-11-21T03:41:14.711Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6440,
+            "n": 2
+          }
         },
         {
           "n": 101,
@@ -55467,7 +55491,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T03:41:11.443Z",
+      "updated": "2026-11-21T03:41:16.639Z",
       "updatedBy": "Main",
       "criteriaLastN": 101
     },
@@ -130216,6 +130240,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T03:41:16.639Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T03:41:14.711Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00w7rum",
+      "note": "#2 moved from #6841 c100"
+    },
+    {
+      "at": "2026-11-21T03:41:14.711Z",
+      "by": "Main",
+      "action": "card.criteria-move",
+      "ref": "c0nwrfck",
+      "note": "#100 → #6440 c2"
+    },
     {
       "at": "2026-11-21T03:41:11.443Z",
       "by": "Main",
