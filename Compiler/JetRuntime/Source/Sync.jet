@@ -334,7 +334,9 @@ sync_sole := I64{1}
 sync_sole_inflight := I64{0}
 
 // true: the lock word was set with a plain store (an elided section); release
-// it with sync_sole_exit(address, true). false: the mutex is held.
+// it with sync_sole_exit(address, true). false: the mutex is held. Entry
+// stays a call, which a debugger evaluation refuses (JetDebug NativeEval.jet
+// NATIVE_EVAL_UNIT_LOCKING); the exit takes no lock, so it is inlined.
 priv sync_sole_enter: fn(address: I64) -> Bool {
     #Unsafe("sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier") {
         sync_sole_inflight = wrapping(sync_sole_inflight + I64{1})
@@ -348,7 +350,7 @@ priv sync_sole_enter: fn(address: I64) -> Bool {
     false
 }
 
-priv sync_sole_exit: fn(address: I64, sole: Bool) {
+#Inline(Always) priv sync_sole_exit: fn(address: I64, sole: Bool) {
     if !sole {
         sync_mutex_unlock(address)
         return
