@@ -1,0 +1,27 @@
+# Claim: `bt N` shows at most N frames, innermost first, then a line saying
+# how many more there are; plain `bt` still shows them all. A count under 1
+# is refused, and says what `bt` takes. The fixture's line 2 is inside
+# inner, which middle calls, which outer calls, which run calls: three
+# calls deep in an -O0 build, which keeps each call.
+fixture: BacktraceCountShowsTheFirstFrames.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet build -O0 calls.jet
+exit: 0
+step: jet debug {work}/.jet/build/calls --break calls.jet:2 --do 'bt 2'
+exit: 0
+stdout: ~ "Breakpoint hit  calls.jet:2  in inner()" # the stop, three calls deep
+stdout: ~ "#0  inner()  at calls.jet:2\n" # the innermost frame
+stdout: ~ "#1  middle()  at calls.jet:7\n" # and its caller
+stdout: !~ "#2  " # no third frame
+stdout: !~ "outer()  at" # outer is not shown
+stdout: !~ "run()  at" # nor run
+stdout: ~ "(2 more frames; `bt` shows them all)\n" # a line says how many more there are: outer and run
+step: jet debug {work}/.jet/build/calls --break calls.jet:2 --do bt
+exit: 0
+stdout: ~ "#2  outer()  at calls.jet:12\n" # plain `bt` shows every frame
+stdout: ~ "#3  run()  at calls.jet:16\n" # up to the entry
+stdout: !~ "more frame" # with no more-line
+step: jet debug {work}/.jet/build/calls --break calls.jet:2 --do 'bt 0'
+exit: 1
+stdout: ~ "Backtrace takes how many frames to show, 1 or more, as `bt 3`" # a count under 1 is refused

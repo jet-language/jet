@@ -2780,8 +2780,12 @@ NativeSession: struct {
             }
             "p" | "print" -> text = self.print_command(operand)
             "bt" | "backtrace" -> {
+                count: native_debug_backtrace_count(operand)
+                if count == .Val(most) && most < 1 {
+                    return Ok(NativeDebugStep{text: NATIVE_DEBUG_BACKTRACE_COUNT, stop: stop, refused: true})
+                }
                 frames: self.backtrace() ?? return Err(err)
-                text = native_debug_backtrace(frames)
+                text = native_debug_backtrace(frames, count: count)
             }
             "disassemble" | "disas" -> {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)
@@ -6593,7 +6597,7 @@ native_eval_image_of: fn(elf: [U8], runtime: &&[U8]) -> Shared<NativeEvalImage> 
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace [N] (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
@@ -6776,23 +6780,41 @@ native_debug_locals_typed: fn(locals: [NativeLocal]) -> String Never! {
 
 // The frames `bt` shows, innermost first, each line after `indent`: those
 // native_debug_shown numbers, or with `routines` false the Jet frames
-// alone (a task's stack in `tasks`). An inlined frame says so.
-native_debug_backtrace: fn(frames: [NativeFrame], indent: String{""}, routines: Bool{true}) -> String Never! {
+// alone (a task's stack in `tasks`). An inlined frame says so. With a
+// `count` (`bt 3`), the first `count` of them, then a line saying how many
+// more there are.
+native_debug_backtrace: fn(frames: [NativeFrame], indent: String{""}, routines: Bool{true}, count: Int?{None}) -> String Never! {
     text := ""
     index := 0
     loop level in native_debug_shown(frames) {
         frame: frames[level]
-        if {
-            native_debug_jet_frame(frame) -> {
-                inlined: if frame.inlined -> "  [inlined]" else -> ""
-                text = "{text}{indent}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
-            }
-            !routines -> next
-            else -> text = "{text}{native_debug_routine_line(frame, index, indent)}"
+        jet: native_debug_jet_frame(frame)
+        if !jet && !routines -> next
+        if count == .Val(most) && index >= most {
+            index += 1
+            next
         }
+        if jet {
+            inlined: if frame.inlined -> "  [inlined]" else -> ""
+            text = "{text}{indent}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
+        } else { text = "{text}{native_debug_routine_line(frame, index, indent)}" }
         index += 1
     }
+    if count == .Val(most) && index > most {
+        more: index - most
+        text = "{text}{indent}({more} more frame{if more == 1 -> "" else -> "s"}; `bt` shows them all)\n"
+    }
     text
+}
+
+// What `bt N` answers when `N` is no count of frames.
+NATIVE_DEBUG_BACKTRACE_COUNT: "Backtrace takes how many frames to show, 1 or more, as `bt 3`\n"
+
+// The frame count `bt`'s `operand` asks for: None for every frame, else
+// the number it names, which is no count when it is under 1.
+native_debug_backtrace_count: fn(operand: String) -> Int? Never! {
+    if operand == "" -> return None
+    Val(Int.parse(operand) ?? 0)
 }
 
 // The indices in `frames` (as backtrace finds them) of the frames `bt`

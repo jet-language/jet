@@ -1560,6 +1560,11 @@ D-DBG-VERBS1=A names the commands:
   lists its function's parameters at -O1 and -O2 too: each with the value
   passed where the code still holds it, else `<Unavailable>` with why,
   never a stale value.
+- `backtrace <n>` (`bt <n>`) shows the first n frames, then how many more
+  there are, as `(2 more frames; `bt` shows them all)`; plain `bt` shows
+  them all, and a count under 1 is refused. A dump's `bt` takes it too.
+  Tests/Cases/Debug/backtrace_count_shows_the_first_frames.case is the
+  worked example.
 - `disassemble` (`disas`) lists machine code under its source lines
   (D-DISASM1). With no operand it lists the selected frame's function (the
   one an inlined frame is inlined into); `disas NAME` lists a function by

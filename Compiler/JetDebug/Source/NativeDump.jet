@@ -102,7 +102,7 @@ NATIVE_DUMP_REDACTED: "<redacted>"
 // The ring records `events` lists without `--last`.
 NATIVE_DUMP_EVENTS: 20
 
-NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, task N, events [--last N], help (h), quit (q)"
+NATIVE_DUMP_HELP: "Commands: backtrace [N] (bt), frame N, locals, print NAME (p NAME), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), registers [--all], memory WHERE [COUNT] [as TYPE], symbols, segments, sections [NAME...] [--bytes], tasks, task N, events [--last N], help (h), quit (q)"
 
 // A dump's tasks, the stopped one first, its memory, with the image's, the
 // address of its task registry's root (0: none), and the file that holds
@@ -626,8 +626,12 @@ native_dump_command: fn(session: &NativeSession, line: String, events: [String],
         // (JetRuntime PerfSamples.jet perf_flight_dump), whose frames are
         // the capture's, not the program's.
         "bt" | "backtrace" -> {
+            count: native_debug_backtrace_count(operand)
+            if count == .Val(most) && most < 1 {
+                return Ok(NativeAnswer{text: NATIVE_DEBUG_BACKTRACE_COUNT})
+            }
             frames: session.backtrace() ?? return Err(err)
-            native_debug_backtrace(frames, routines: false)
+            native_debug_backtrace(frames, routines: false, count: count)
         }
         "locals" -> {
             locals := native_dump_locals(session) ?? return Err(err)
