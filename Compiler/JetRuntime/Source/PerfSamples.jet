@@ -8287,7 +8287,8 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // A task's start and end are the lens's sync points, as a thread's wake
 // and its wake of another are Coz's. A worker that starts a task was idle or
 // blocked, so it owes nothing for the delays inserted before; a task that
-// ends pays what it owes before its joiner can see it. Without them a short
+// ends pays what it owes before its joiner can see it, all of it
+// (perf_causal_settle). Without them a short
 // task finishes between samples and pays its delay later, in whatever its
 // thread runs next, which can be the line the experiment speeds up. A
 // thread's park another thread wakes is the third (perf_causal_woken).
@@ -8356,7 +8357,7 @@ perf_causal_task_end: fn(task: I64, outer: I64) {
         return
     }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
-    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), delay, false)
+    perf_causal_settle(state, thread, delay)
     now: sync_now_ns()
     perf_causal_mark(thread, now)
     cell: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_CELL))
@@ -8651,6 +8652,29 @@ perf_causal_pay: fn(thread: I64, local: I64, delay: I64, handler: Bool) {
     }
     // A pause cut at PERF_CAUSAL_PAUSE_MAX_NS forgives the rest.
     rt_text_store(wrapping(thread + I64{8}), if (paid < delay) -> delay else -> paid)
+}
+
+// Pay at a task's end until this thread owes nothing, from the global delay
+// `delay`: a line's thread can count a sample while this one pauses, so
+// the delay can grow past what one pause paid. The joiner the end lets go
+// is forgiven every delay inserted before its wake (perf_causal_woken), and
+// this thread's next task what came before its start, so a delay this end
+// left owing is one no thread pays, though the experiment takes it off its
+// time between passes. Every line's gain would read high by it, the more
+// the longer a line's thread runs while the others pause, as under load.
+// After PERF_CAUSAL_PAUSE_MAX_NS of pauses here the rest is forgiven, as
+// a cut pause forgives it.
+perf_causal_settle: fn(state: I64, thread: I64, delay: I64) {
+    from: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED))
+    owed := delay
+    loop rt_text_word(wrapping(thread + I64{8})) < owed {
+        if (wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED)) - from) >= PERF_CAUSAL_PAUSE_MAX_NS) {
+            rt_text_store(wrapping(thread + I64{8}), owed)
+            return
+        }
+        perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), owed, false)
+        owed = sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+    }
 }
 
 // Pause this thread for `ns`, at most PERF_CAUSAL_PAUSE_MAX_NS: the time it

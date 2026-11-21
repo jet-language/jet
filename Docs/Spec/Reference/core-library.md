@@ -6133,8 +6133,10 @@ is kept in the call's transaction, as a row of the `__jet_jobs` table of the
 first store the call used, under a random key of its own: a call that rolls
 back queues nothing, and once it commits each of its jobs runs, on a task of
 its own, as the system (`as_system`), and in a call of its own, which also
-deletes the job's row. A run that fails, its method's error or a failed
-commit, runs again after half a second, then after twice the wait before, an
+deletes the job's row. Jobs run in no set order: two jobs, of one call or
+of two calls one after the other, may start in either order. A run that
+fails, its method's error or a failed commit, runs again after half a
+second, then after twice the wait before, an
 hour at most, up to `#App.Job(retries: n)` more times, five unless set; each
 failure is recorded on the row, and a job that failed every run keeps its
 row, with its runs and the last failure, and runs no more.
