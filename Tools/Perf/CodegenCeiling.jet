@@ -4,9 +4,11 @@
 // catalog/main.jet holds the kernels. golden.tsv holds, per function, the
 // counts of the last accepted compiler and the hand-written ceiling of its
 // hot loop. The gate builds the catalog with `--release --debug-info=true`,
-// runs it against expected.out, and disassembles each function with
-// objdump. A row's symbol names the function exactly or as the prefix of a
-// specialized name (`main.list_sum` matches `main.list_sum__value_<hash>`).
+// runs it against expected.out, and lists each function's machine code
+// with `jet debug BINARY --do 'disas NAME'`, its symbols with `jet debug
+// BINARY --do symbols`. A row's symbol names the function exactly or as the
+// prefix of a specialized name (`main.list_sum` matches
+// `main.list_sum__value_<hash>`).
 // A row also counts the parts the backend moved out of its function (PART),
 // as if they were still in it. It counts:
 // - insns: instructions in the function;
@@ -32,12 +34,12 @@
 // against the ceiling (the instructions of one hand-written loop, 0 for
 // none) is the codegen gap, which the gate reports per row.
 // A regression names what grew. listing.tsv holds each row's instructions as
-// the last `--update` disassembled them (`objdump -d -l`), each with the
-// function it is in and the source line it lowers from. For each row that
-// regressed, the gate prints (GREW) every instruction of the new build that
-// its golden listing lacks, with its function and source line. Instructions
-// compare without their jump targets' offsets, so code an added instruction
-// only moved does not read as added.
+// the last `--update` listed them (`jet debug BINARY --do 'disas NAME'`), each
+// with the function it is in and the source line it lowers from. For each
+// row that regressed, the gate prints (GREW) every instruction of the new
+// build that its golden listing lacks, with its function and source line.
+// Instructions compare without their jump targets' offsets, so code an
+// added instruction only moved does not read as added.
 // A submission that touches Compiler/JetIR, Compiler/JetBackend or
 // Compiler/JetRuntime lists `jet Tools/Perf/CodegenCeiling.jet --check` in
 // its tests, and a gain lands with its `--update` (the orchestration skill's
@@ -45,7 +47,7 @@
 // `--zero-cost` checks the zero-cost pair instead (ZERO_COST below): the
 // kernel program's machine code against the direct program's at -O1 and
 // -O2.
-// Usage (from the repository root; needs objdump and nm):
+// Usage (from the repository root):
 //   jet Tools/Perf/CodegenCeiling.jet --check [--jet PATH]
 //   jet Tools/Perf/CodegenCeiling.jet --update [--jet PATH]
 //   jet Tools/Perf/CodegenCeiling.jet --zero-cost [--jet PATH]
@@ -176,17 +178,18 @@ flow_of: fn(addresses: [Int], texts: [String]) -> Flow Never! {
         target := -1
         far := false
         if text.starts_with("j") {
-            // `jne    401040 <main_list_sum+0x10>`: the target is the word
-            // before the symbolic name; `jmp    *%rax` jumps indirectly.
+            // `jne    0x401040 <+16>`: the target is the word after the
+            // mnemonic; `jmp    rax` and `jmp    QWORD PTR [rax]` jump
+            // indirectly.
             words: words_of(text)
-            direct: words.len() >= 3 && words[2].starts_with("<")
+            direct: words.len() >= 2 && words[1].starts_with("0x")
             if direct {
-                address: hex(words[1])
+                address: hex(words[1].removeprefix("0x"))
                 loop (at, other) in addresses {
                     if other == address -> target = at
                 }
             }
-            far = !direct && words.len() >= 2 && words[1].starts_with("*")
+            far = !direct && words.len() >= 2
         }
         jumps.push(target)
         indirect.push(far)
@@ -399,21 +402,55 @@ irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
     cycles
 }
 
-// The counts of one function's `objdump -d --no-show-raw-insn` listing.
-count_listing: fn(listing: String) -> Counts Never! {
+// The instructions of a `jet debug BINARY --do 'disas NAME'` listing, in
+// address order, without their `#` comments, each with the source position
+// its line heading names (`-` before the first). A copy of the function
+// inlined into another (its heading `NAME, inlined into ...`) lists as a
+// block of its own and is not the function's code, so its rows are left out.
+ListingRows: struct {
+    addresses: [Int],
+    texts: [String],
+    sources: [String],
+}
+
+listing_instructions: fn(listing: String) -> ListingRows Never! {
     addresses := [Int]{}
     texts := [String]{}
+    sources := [String]{}
+    source := "-"
+    inlined := false
     loop line in listing.split("\n") {
-        // `  401000:\tpush   %rbp`: the address, then the instruction.
-        parts: line.split("\t").to_list()
-        if parts.len() < 2 -> next
-        head: parts[0].trim()
-        if !head.ends_with(":") -> next
-        address: hex(head.removesuffix(":"))
+        // `   0x401000 <+0>    push   rbp`: the address, the offset in the
+        // function, then the instruction. A line heading
+        // (`main.jet:26   total += x`) starts the instructions its source
+        // line lowers to; a block's heading and an inlined call's line are
+        // no instructions.
+        row: line.trim()
+        if line != "" && !line.starts_with(" ") {
+            if words_of(line)[0].contains(".jet:") -> source = words_of(line)[0].copy() else {
+                inlined = line.contains(", inlined into ")
+                source = "-"
+            }
+            next
+        }
+        if inlined -> next
+        if !row.starts_with("0x") -> next
+        rest: row.after(" ").trim()
+        if !rest.starts_with("<+") -> next
+        address: hex(row.before(" ").removeprefix("0x"))
         if address < 0 -> next
         addresses.push(address)
-        texts.push(parts[1].trim())
+        texts.push(rest.after(">").split("#").to_list()[0].trim())
+        sources.push(source.copy())
     }
+    ListingRows{addresses: addresses, texts: texts, sources: sources}
+}
+
+// The counts of one function's `jet debug BINARY --do 'disas NAME'` listing.
+count_listing: fn(listing: String) -> Counts Never! {
+    rows: listing_instructions(listing)
+    addresses: rows.addresses
+    texts: rows.texts
     flow: flow_of(addresses, texts)
     preceding: predecessors(flow)
     idom: dominators(flow, preceding)
@@ -427,7 +464,7 @@ count_listing: fn(listing: String) -> Counts Never! {
         text: texts[index]
         if text.starts_with("push") -> pushes += 1
         if text.starts_with("pop") -> pops += 1
-        if text.contains("(%rbp)") && text.contains("-0x") -> frame_slots += 1
+        if text.contains("[rbp-0x") -> frame_slots += 1
         target: flow.jumps[index]
         if target >= 0 && addresses[target] <= addresses[index] && dominates(idom, target, index) {
             starts.push(addresses[target])
@@ -511,21 +548,48 @@ run_command: fn(command: [String], cwd: String, scratch: String) -[Exec, Env, IO
     Ok(receipt.output)
 }
 
+// `jet debug BINARY --do COMMAND`: the symbols (`symbols`) or a function's
+// machine code (`disas NAME`) of a built image, read from its file without
+// running it. Err when the image holds no such function.
+image_listing: fn(jet: [String], command: String, binary: String, cwd: String, scratch: String) -[Exec, Env, IO, Time.Wait]> String Err! {
+    argv := jet.copy()
+    argv.extend([String]{"debug", binary.copy(), "--do", command})
+    listing: run_command(argv, cwd, scratch)
+    if listing.starts_with("No function") -> return Err("{binary}: {listing.trim()}")
+    Ok(listing)
+}
+
+// A symbol of a `jet debug BINARY --do symbols` listing, whose rows read
+// `0x40dc50            100       function  main.list_sum__value_dac2`:
+// the address, the size, the kind and the name.
+SymbolRow: struct {
+    kind: String,
+    name: String,
+}
+
+symbol_rows: fn(symbols: String) -> [SymbolRow] Never! {
+    found := [SymbolRow]{}
+    loop line in symbols.split("\n") {
+        words: words_of(line)
+        if words.len() == 4 && words[0].starts_with("0x") {
+            found.push(SymbolRow{kind: words[2].copy(), name: words[3].copy()})
+        }
+    }
+    found
+}
+
 // A part of a function the backend moved out of it: a continuation the
 // function leaves to (`<symbol>__general_<hash>`, and its tail-call
 // variants `.own<mask>`). A row counts its function's parts with it, so a
 // split lowers a count only by removing instructions.
 PART: "__general_"
 
-// The functions of `nm` output that a row's symbol names: first the
+// The functions of a symbol listing that a row's symbol names: first the
 // function, the symbol itself or a specialization of it, then its parts
 // (PART). Err when no function or several match.
 resolve: fn(symbols: String, symbol: String) -> [String] Err! {
     names := [String]{}
-    loop line in symbols.split("\n") {
-        words: line.split(" ").to_list()
-        if words.len() == 3 -> names.push(words[2].copy())
-    }
+    loop row in symbol_rows(symbols) -> names.push(row.name.copy())
     found := [String]{}
     loop name in names {
         if !name.contains(PART) && (name == symbol || name.starts_with("{symbol}__")) {
@@ -561,7 +625,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
     if output != expected {
         return fail("the catalog prints other output than {DIR}/Catalog/expected.out:\n{output}")
     }
-    symbols: run_command([String]{"nm", binary}, run_dir, scratch) ?? return fail("{err}")
+    symbols: image_listing(jet, "symbols", binary, run_dir, scratch) ?? return fail("{err}")
     failures := 0
     lines := [String]{HEADER}
     listing_lines := [String]{LISTING_HEADER}
@@ -578,7 +642,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
         current := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
         sourced := [String]{}
         loop name in functions {
-            listing: run_command([String]{"objdump", "-d", "-l", "--no-show-raw-insn", "--disassemble={name}", binary.copy()}, run_dir, scratch) ?? return fail("{err}")
+            listing: image_listing(jet, "disas {name}", binary, run_dir, scratch) ?? return fail("{err}")
             current = add_counts(current, count_listing(listing))
             sourced.extend(listing_rows(row.symbol, name, listing, run_dir))
         }
@@ -626,19 +690,20 @@ normal_instruction: fn(text: String) -> String Never! {
         word: words[index]
         if index + 1 < words.len() && words[index + 1].starts_with("<") -> next
         if word.starts_with("<") {
-            // `<name+0x8>`: the hashes go, the offset stays.
+            // `<name+8>`: the hashes go, the offset stays.
             pieces: word.removeprefix("<").removesuffix(">").split("+").to_list()
             offset: if pieces.len() > 1 -> "+{pieces[1]}" else -> ""
             kept.push("<{stem(pieces[0])}{offset}>")
             next
         }
-        kept.push(if word.contains("(%rip)") -> "(%rip){word.split("(%rip)").to_list()[1]}" else -> word.copy())
+        kept.push(if word.contains("[rip") -> "{word.before("[rip")}[rip]{word.after("[rip").after("]")}" else -> word.copy())
     }
     kept.join(" ")
 }
 
 // An instruction as listing.tsv holds it: normal, and without its jump
-// targets' offsets, which an instruction added before them moves.
+// targets' offsets, which an instruction added before them moves (a jump
+// within its own function reads `<>`).
 listed_instruction: fn(text: String) -> String Never! {
     kept := [String]{}
     loop word in normal_instruction(text).split(" ") {
@@ -649,19 +714,15 @@ listed_instruction: fn(text: String) -> String Never! {
 
 // A listing's instructions without what differs between two builds of the
 // same code: addresses, rip-relative displacements, comments and the hashes
-// in the names of jump and call targets.
+// in the names of call targets.
 normal_listing: fn(listing: String) -> [String] Never! {
     found := [String]{}
-    loop line in listing.split("\n") {
-        parts: line.split("\t").to_list()
-        if parts.len() < 2 || !parts[0].trim().ends_with(":") -> next
-        found.push(normal_instruction(parts[1]))
-    }
+    loop text in listing_instructions(listing).texts -> found.push(normal_instruction(text))
     found
 }
 
-// A source position of `objdump -l` (`././main.jet:26`, or a path under the
-// run directory) as the catalog's file and line. A path outside the run
+// A listing's source position (`main.jet:26`, or a path under the run
+// directory) as the catalog's file and line. A path outside the run
 // directory keeps only its file name.
 source_line: fn(text: String, run_dir: String) -> String Never! {
     path := text.removeprefix("{run_dir}/")
@@ -671,23 +732,16 @@ source_line: fn(text: String, run_dir: String) -> String Never! {
     pieces[pieces.len() - 1].copy()
 }
 
-// One function's `objdump -d -l` listing as listing.tsv rows: the row's
-// symbol, the function's stem, the source line each instruction lowers from
-// (`-` before the first) and the instruction without its jump targets'
-// offsets.
+// One function's `jet debug BINARY --do 'disas NAME'` listing as listing.tsv
+// rows: the row's symbol, the function's stem, the source line each
+// instruction lowers from (`-` before the first) and the instruction
+// without its jump targets' offsets.
 listing_rows: fn(symbol: String, function: String, listing: String, run_dir: String) -> [String] Never! {
     rows := [String]{}
-    source := "-"
-    loop line in listing.split("\n") {
-        parts: line.split("\t").to_list()
-        if {
-            parts.len() >= 2 && parts[0].trim().ends_with(":") -> {
-                rows.push("{symbol}\t{stem(function)}\t{source}\t{listed_instruction(parts[1])}")
-            }
-            line != "" && !line.starts_with(" ") && words_of(line)[0].contains(".jet:") -> {
-                source = source_line(words_of(line)[0], run_dir)
-            }
-        }
+    found: listing_instructions(listing)
+    loop index in 0..<found.texts.len() {
+        source: if found.sources[index] == "-" -> "-" else -> source_line(found.sources[index], run_dir)
+        rows.push("{symbol}\t{stem(function)}\t{source}\t{listed_instruction(found.texts[index])}")
     }
     rows
 }
@@ -767,13 +821,12 @@ grown: fn(symbol: String, golden: [String], current: [String]) -> [String] Never
     lines
 }
 
-// How many functions of each stem `nm` output holds.
+// How many functions of each stem a symbol listing holds.
 function_stems: fn(symbols: String) -> [String:Int] Never! {
     counts := [String:Int]{}
-    loop line in symbols.split("\n") {
-        words: line.split(" ").to_list()
-        if words.len() != 3 || (words[1] != "t" && words[1] != "T") -> next
-        name: stem(words[2])
+    loop row in symbol_rows(symbols) {
+        if row.kind != "function" -> next
+        name: stem(row.name)
         counts[name] = (counts.get(name) ?? 0) + 1
     }
     counts
@@ -817,7 +870,7 @@ ZERO_COST_LEVELS: [String]{"-O1", "-O2"}
 
 ZERO_COST_HOT: [String]{"main.churn", "main.grow", "main.scan", "main.tally", "main.pages", "main.run"}
 
-// One arm built at one level: its binary and its `nm` output.
+// One arm built at one level: its binary and its symbol listing.
 ZeroCostBuild: struct {
     binary: String,
     symbols: String,
@@ -839,7 +892,7 @@ zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expect
     if output != expected {
         return Err("{name} {level} prints other output than {ZERO_COST}/expected.out:\n{output}")
     }
-    symbols: run_command([String]{"nm", binary}, dir, scratch)
+    symbols: image_listing(jet, "symbols", binary, dir, scratch)
     Ok(ZeroCostBuild{binary: binary, symbols: symbols})
 }
 
@@ -850,17 +903,17 @@ ZeroCostFunction: struct {
 }
 
 // A hot function of one build, as one: the function and every function
-// named after it (`main.scan__value_<hash>`, its parts), in `nm` order. A
-// build may keep a function both as itself and as the value the program
-// reads it as; the pair holds the two builds to the same sum.
-zero_cost_function: fn(build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
+// named after it (`main.scan__value_<hash>`, its parts), in address order,
+// as `jet` lists their code. A build may keep a function both as itself and
+// as the value the program reads it as; the pair holds the two builds to the
+// same sum.
+zero_cost_function: fn(jet: [String], build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
     counts := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
     text := [String]{}
     found := 0
-    loop line in build.symbols.split("\n") {
-        words: line.split(" ").to_list()
-        if words.len() != 3 || (words[2] != symbol && !words[2].starts_with("{symbol}__")) -> next
-        listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={words[2]}", build.binary}, run_dir, scratch)
+    loop row in symbol_rows(build.symbols) {
+        if row.name != symbol && !row.name.starts_with("{symbol}__") -> next
+        listing: image_listing(jet, "disas {row.name}", build.binary, run_dir, scratch)
         counts = add_counts(counts, count_listing(listing))
         text.extend(normal_listing(listing))
         found += 1
@@ -880,8 +933,8 @@ zero_cost: fn(root: String, jet: [String], run_dir: String, scratch: String) -[E
             failures += 1
         }
         loop symbol in ZERO_COST_HOT {
-            ours: zero_cost_function(kernel, symbol, run_dir, scratch) ?? return fail("kernel {level}: {err}")
-            theirs: zero_cost_function(direct, symbol, run_dir, scratch) ?? return fail("direct {level}: {err}")
+            ours: zero_cost_function(jet, kernel, symbol, run_dir, scratch) ?? return fail("kernel {level}: {err}")
+            theirs: zero_cost_function(jet, direct, symbol, run_dir, scratch) ?? return fail("direct {level}: {err}")
             worse: regressions(theirs.counts, ours.counts)
             verdict: if ours.text == theirs.text -> "identical" else if worse.is_empty() -> "no larger" else -> "LARGER"
             print("{level}\t{symbol}\tkernel {counts_line(ours.counts)}\tdirect {counts_line(theirs.counts)}\t{verdict}")
@@ -943,20 +996,25 @@ run: fn() {
 }
 
 #Test("two builds of the same code read the same once addresses and hashes are set aside") {
-    ours: "  401000:\tcall   40b630 <jet_ir_drop_9afa72ef4523a3b8>\n  401005:\tmov    0x256a0(%rip),%rax        # 426aa5 <x>\n  40100c:\tjne    401000 <main.k__value_3a05f1c2d4e5b6a7>\n"
-    theirs: "  402000:\tcall   40c000 <jet_ir_drop_0d69d289780faae2>\n  402005:\tmov    0x1000(%rip),%rax        # 403005 <y>\n  40200c:\tjne    402000 <main.k__value_4d91aa00bb11cc22>\n"
+    ours: "       0x401000 <+0>    call   0x40b630 <jet_ir_drop_9afa72ef4523a3b8>\n       0x401005 <+5>    mov    rax,QWORD PTR [rip+0x256a0]  # 0x426aa5 <x>\n       0x40100c <+12>   jne    0x401000 <+0>\n"
+    theirs: "       0x402000 <+0>    call   0x40c000 <jet_ir_drop_0d69d289780faae2>\n       0x402005 <+5>    mov    rax,QWORD PTR [rip+0x1000]  # 0x403005 <y>\n       0x40200c <+12>   jne    0x402000 <+0>\n"
     assert_eq(normal_listing(ours), normal_listing(theirs))
-    assert_eq(normal_listing(ours)[1], "mov (%rip),%rax")
+    assert_eq(normal_listing(ours)[0], "call <jet_ir_drop>")
+    assert_eq(normal_listing(ours)[1], "mov rax,QWORD PTR [rip]")
+    assert_eq(normal_listing(ours)[2], "jne <+0>")
 }
 
 #Test("a function only the kernel build keeps is reported with how many more it keeps") {
-    kernel: "000000000040b630 T kernel.claim\n000000000040b700 t jet_ir_drop_9afa72ef4523a3b8\n000000000040b800 t jet_ir_drop_0d69d289780faae2\n0000000000433980 D data_row\n"
-    direct: "000000000040c000 t jet_ir_drop_0d69d289780faae2\n"
+    kernel: "0x40b630            40        function  kernel.claim\n0x40b700            16        function  jet_ir_drop_9afa72ef4523a3b8\n0x40b800            16        function  jet_ir_drop_0d69d289780faae2\n0x433980            8         object    data_row\n"
+    direct: "0x40c000            16        function  jet_ir_drop_0d69d289780faae2\n"
     assert_eq(kept_functions(kernel, direct), [String]{"jet_ir_drop x1", "kernel.claim x1"})
 }
 
 #Test("a listing counts saves, frame slots and its innermost loop") {
-    listing: "0000000000401000 <main.k>:\n  401000:\tpush   %rbp\n  401001:\tmov    %rsp,%rbp\n  401004:\tmov    %rdi,-0x8(%rbp)\n  401008:\tadd    (%rax),%rcx\n  40100b:\tadd    $0x8,%rax\n  40100f:\tcmp    %rdx,%rax\n  401012:\tjne    401008 <main.k+0x8>\n  401014:\tpop    %rbp\n  401015:\tret\n"
+    // A heading, a source line and an inlined call's line are no
+    // instructions, and a copy of the function inlined into another is not
+    // its code.
+    listing: "main.k  main.jet:3-4  -O2  0x401000, 22 bytes\nmain.jet:4   total += step(at)\n  inlined main.step, called on line 4\n       0x401000 <+0>    push   rbp\n       0x401001 <+1>    mov    rbp,rsp\n       0x401004 <+4>    mov    QWORD PTR [rbp-0x8],rdi\n       0x401008 <+8>    add    rcx,QWORD PTR [rax]\n       0x40100b <+11>   add    rax,0x8\n       0x40100f <+15>   cmp    rax,rdx\n       0x401012 <+18>   jne    0x401008 <+8>\n       0x401014 <+20>   pop    rbp\n       0x401015 <+21>   ret\n\nmain.k, inlined into main.run on line 9  main.jet:4  -O2  0x402000, 4 bytes\nmain.jet:4   total += step(at)\n       0x402000 <+0>    add    rcx,QWORD PTR [rax]\n       0x402003 <+3>    ret\n"
     counts: count_listing(listing)
     assert_eq(counts.insns, 9)
     assert_eq(counts.pushes, 1)
@@ -967,47 +1025,47 @@ run: fn() {
 }
 
 #Test("only the innermost of nested loops counts, and a forward jump is no loop") {
-    listing: "  10:\tnop\n  11:\tnop\n  12:\tjmp    11 <k+0x1>\n  13:\tje     20 <k+0x10>\n  14:\tjne    10 <k>\n"
+    listing: "  0x10 <+0>    nop\n  0x11 <+1>    nop\n  0x12 <+2>    jmp    0x11 <+1>\n  0x13 <+3>    je     0x20 <+16>\n  0x14 <+4>    jne    0x10 <+0>\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 2)
 }
 
 #Test("an instruction in two overlapping innermost loops counts once") {
-    listing: "  10:\tnop\n  11:\tnop\n  12:\tjne    10 <k>\n  13:\tjne    11 <k+0x1>\n  14:\tret\n"
+    listing: "  0x10 <+0>    nop\n  0x11 <+1>    nop\n  0x12 <+2>    jne    0x10 <+0>\n  0x13 <+3>    jne    0x11 <+1>\n  0x14 <+4>    ret\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 2)
     assert_eq(counts.loop_insns, 4)
 }
 
 #Test("a loop with an early return inside it counts every instruction from its head to its back edge") {
-    listing: "  10:\tcmp    %rdx,%rax\n  13:\tjne    17 <k+0x7>\n  15:\tpop    %rbp\n  16:\tret\n  17:\tadd    $0x8,%rax\n  1b:\tjne    10 <k>\n  1d:\tret\n"
+    listing: "  0x10 <+0>    cmp    rax,rdx\n  0x13 <+3>    jne    0x17 <+7>\n  0x15 <+5>    pop    rbp\n  0x16 <+6>    ret\n  0x17 <+7>    add    rax,0x8\n  0x1b <+11>   jne    0x10 <+0>\n  0x1d <+13>   ret\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 6)
 }
 
 #Test("the stop exit's jump back into the epilogue after `ret` is no loop") {
-    listing: "  10:\tadd    (%rax),%rcx\n  13:\tjne    10 <k>\n  15:\ttest   %edx,%edx\n  17:\tjne    1d <k+0xd>\n  19:\txor    %edx,%edx\n  1b:\tpop    %rbp\n  1c:\tret\n  1d:\tmov    $0x1,%edx\n  22:\tjmp    1b <k+0xb>\n"
+    listing: "  0x10 <+0>    add    rcx,QWORD PTR [rax]\n  0x13 <+3>    jne    0x10 <+0>\n  0x15 <+5>    test   edx,edx\n  0x17 <+7>    jne    0x1d <+13>\n  0x19 <+9>    xor    edx,edx\n  0x1b <+11>   pop    rbp\n  0x1c <+12>   ret\n  0x1d <+13>   mov    edx,0x1\n  0x22 <+18>   jmp    0x1b <+11>\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 2)
     // A path that ends in `ud2` reaches no back edge after it either.
-    trapped: count_listing("  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tnop\n  15:\tud2\n  19:\tjmp    14 <k+0x4>\n")
+    trapped: count_listing("  0x10 <+0>    test   eax,eax\n  0x12 <+2>    jne    0x19 <+9>\n  0x14 <+4>    nop\n  0x15 <+5>    ud2\n  0x19 <+9>    jmp    0x14 <+4>\n")
     assert_eq(trapped.loops, 0)
 }
 
 #Test("a cycle entered at two instructions has no back edge and still counts") {
     // 10 enters the cycle at 14 by falling through and at 19 by its jump,
     // so neither entry dominates the other and 20's jump is no back edge.
-    listing: "  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tadd    $0x1,%rcx\n  18:\tnop\n  19:\tadd    $0x2,%rcx\n  1d:\tcmp    %rdx,%rcx\n  20:\tjne    14 <k+0x4>\n  22:\tret\n"
+    listing: "  0x10 <+0>    test   eax,eax\n  0x12 <+2>    jne    0x19 <+9>\n  0x14 <+4>    add    rcx,0x1\n  0x18 <+8>    nop\n  0x19 <+9>    add    rcx,0x2\n  0x1d <+13>   cmp    rcx,rdx\n  0x20 <+16>   jne    0x14 <+4>\n  0x22 <+18>   ret\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 5)
 }
 
 #Test("a slow path laid out after `ret` that jumps back into its loop is no loop of its own, and counts in its loop") {
-    listing: "  10:\tadd    %rcx,%rax\n  13:\tjo     30 <k+0x20>\n  15:\tcmp    %rdx,%rax\n  18:\tjne    10 <k>\n  1a:\tret\n  30:\tcall   401000 <jet_int_add>\n  35:\tjmp    15 <k+0x5>\n"
+    listing: "  0x10 <+0>    add    rax,rcx\n  0x13 <+3>    jo     0x30 <+32>\n  0x15 <+5>    cmp    rax,rdx\n  0x18 <+8>    jne    0x10 <+0>\n  0x1a <+10>   ret\n  0x30 <+32>   call   0x401000 <jet_int_add>\n  0x35 <+37>   jmp    0x15 <+5>\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     // The loop's four instructions and the slow path's two; not the `ret`
@@ -1016,10 +1074,14 @@ run: fn() {
 }
 
 #Test("a loop whose body calls a function that can stop still counts") {
-    listing: "  10:\tcall   401000 <main.step>\n  15:\ttest   %edx,%edx\n  17:\tjne    20 <k+0x10>\n  19:\tadd    $0x1,%rbx\n  1d:\tjmp    10 <k>\n  20:\tmov    $0x1,%edx\n  25:\tret\n"
+    listing: "  0x10 <+0>    call   0x401000 <main.step>\n  0x15 <+5>    test   edx,edx\n  0x17 <+7>    jne    0x20 <+16>\n  0x19 <+9>    add    rbx,0x1\n  0x1d <+13>   jmp    0x10 <+0>\n  0x20 <+16>   mov    edx,0x1\n  0x25 <+21>   ret\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 5)
+    // A jump through a register or memory may go to any instruction.
+    indirect: flow_of([Int]{16, 18, 21}, [String]{"jmp    rax", "jmp    QWORD PTR [rax+0x8]", "jne    0x10 <+0>"})
+    assert_eq(indirect.indirect, [Bool]{true, true, false})
+    assert_eq(indirect.jumps, [Int]{-1, -1, 0})
 }
 
 #Test("a count above golden is a regression, below it a gain") {
@@ -1042,21 +1104,21 @@ run: fn() {
 }
 
 #Test("a row's symbol names its function or one specialization of it") {
-    symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main.list_sum__value_dac2\n000000000040e720 t main.list_sum_wide__value_ba4a\n"
+    symbols: "0x411df0            264       function  jet_rt_alloc_8\n0x40dc50            100       function  main.list_sum__value_dac2\n0x40e720            100       function  main.list_sum_wide__value_ba4a\n`main` keeps no symbol table\n"
     assert_eq((resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}")).join(" "), "jet_rt_alloc_8")
     assert_eq((resolve(symbols, "main.list_sum") ?? panic("{err}")).join(" "), "main.list_sum__value_dac2")
     assert(resolve(symbols, "main.point_sum") == .Err(_))
-    twice: "1 t main.k__a\n2 t main.k__b\n"
+    twice: "0x1  1  function  main.k__a\n0x2  1  function  main.k__b\n"
     assert(resolve(twice, "main.k") == .Err(_))
 }
 
 #Test("a row counts the continuations its function leaves to as part of it") {
-    symbols: "1 t main.list_sum__value_dac2\n2 t main.list_sum__value_dac2__general_77aa\n3 t main.list_sum__value_dac2__general_77aa.own3\n4 t main.list_sum_wide__value_ba4a__general_10ff\n"
+    symbols: "0x1  1  function  main.list_sum__value_dac2\n0x2  1  function  main.list_sum__value_dac2__general_77aa\n0x3  1  function  main.list_sum__value_dac2__general_77aa.own3\n0x4  1  function  main.list_sum_wide__value_ba4a__general_10ff\n"
     found: resolve(symbols, "main.list_sum") ?? panic("main.list_sum does not resolve")
     assert_eq(found.join(" "), "main.list_sum__value_dac2 main.list_sum__value_dac2__general_77aa main.list_sum__value_dac2__general_77aa.own3")
     // The kernel keeps its fast loop; the continuation holds the general one.
-    kernel: count_listing("  10:\tpush   %rbx\n  11:\tadd    (%rax),%rcx\n  14:\tjne    11 <k+0x1>\n  16:\tpop    %rbx\n  17:\tret\n")
-    general: count_listing("  20:\tpush   %rbx\n  21:\tmov    %rcx,-0x8(%rbp)\n  25:\tcall   30 <jet_int_add>\n  2a:\tjmp    21 <c+0x1>\n")
+    kernel: count_listing("  0x10 <+0>    push   rbx\n  0x11 <+1>    add    rcx,QWORD PTR [rax]\n  0x14 <+4>    jne    0x11 <+1>\n  0x16 <+6>    pop    rbx\n  0x17 <+7>    ret\n")
+    general: count_listing("  0x20 <+0>    push   rbx\n  0x21 <+1>    mov    QWORD PTR [rbp-0x8],rcx\n  0x25 <+5>    call   0x30 <jet_int_add>\n  0x2a <+10>   jmp    0x21 <+1>\n")
     both: add_counts(kernel, general)
     assert_eq(counts_line(both), "9\t2\t1\t1\t2\t5")
 }
@@ -1064,13 +1126,14 @@ run: fn() {
 #Test("a regression prints each instruction its golden listing lacks, with its function and source line") {
     // The seeded regression spills a parameter at line 4; the loop's jump
     // target moves by it and still reads as the same instruction.
-    golden: "0000000000401000 <main.k__value_3a05f1c2d4e5b6a7>:\nk.value():\n././main.jet:4\n  401000:\tpush   %rbp\n././main.jet:5\n  401001:\tadd    (%rax),%rcx\n  401004:\tjne    401001 <main.k__value_3a05f1c2d4e5b6a7+0x1>\n  401006:\tpop    %rbp\n  401007:\tret\n"
-    seeded: "0000000000402000 <main.k__value_4d91aa00bb11cc22>:\nk.value():\n././main.jet:4\n  402000:\tpush   %rbp\n  402001:\tmov    %rdi,-0x8(%rbp)\n././main.jet:5\n  402005:\tadd    (%rax),%rcx\n  402008:\tjne    402005 <main.k__value_4d91aa00bb11cc22+0x5>\n  40200a:\tpop    %rbp\n  40200b:\tret\n"
+    golden: "k.value  main.jet:4-5  -O2  0x401000, 8 bytes\nmain.jet:4   value: fn(x: Int) -> Int\n       0x401000 <+0>    push   rbp\nmain.jet:5   total += x\n       0x401001 <+1>    add    rcx,QWORD PTR [rax]\n       0x401004 <+4>    jne    0x401001 <+1>\n       0x401006 <+6>    pop    rbp\n       0x401007 <+7>    ret\n"
+    seeded: "k.value  main.jet:4-5  -O2  0x402000, 12 bytes\nmain.jet:4   value: fn(x: Int) -> Int\n       0x402000 <+0>    push   rbp\n       0x402001 <+1>    mov    QWORD PTR [rbp-0x8],rdi\nmain.jet:5   total += x\n       0x402005 <+5>    add    rcx,QWORD PTR [rax]\n       0x402008 <+8>    jne    0x402005 <+5>\n       0x40200a <+10>   pop    rbp\n       0x40200b <+11>   ret\n"
     was: listing_rows("main.k", "main.k__value_3a05f1c2d4e5b6a7", golden, "/run/gate")
     now: listing_rows("main.k", "main.k__value_4d91aa00bb11cc22", seeded, "/run/gate")
-    assert_eq(was[2], "main.k\tmain.k__value\tmain.jet:5\tjne <main.k__value>")
+    assert_eq(was[0], "main.k\tmain.k__value\tmain.jet:4\tpush rbp")
+    assert_eq(was[2], "main.k\tmain.k__value\tmain.jet:5\tjne <>")
     assert_eq(regressions(count_listing(golden), count_listing(seeded)).join(", "), "insns 5 -> 6, frame_slots 0 -> 1")
-    assert_eq(grown("main.k", was, now), [String]{"GREW main.k: 1 instruction(s) its golden listing lacks:", "  main.k__value main.jet:4: mov %rdi,-0x8(%rbp)"})
+    assert_eq(grown("main.k", was, now), [String]{"GREW main.k: 1 instruction(s) its golden listing lacks:", "  main.k__value main.jet:4: mov QWORD PTR [rbp-0x8],rdi"})
     // A row with no golden listing says how to record one.
     assert_eq(grown("main.j", [String]{}, now), [String]{"GREW main.j: {LISTING} holds no listing of it; `--update` records one"})
     assert_eq(listing_of("{LISTING_HEADER}\n{was.join("\n")}\nmain.kk\tmain.kk\t-\tret\n", "main.k"), was)

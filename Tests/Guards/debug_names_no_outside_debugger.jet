@@ -130,8 +130,6 @@ DN_RUN_CLASSES: [String]{"comparison", "interop", "gap"}
 
 DN_WHY_SYSCALLS: "traces the system calls a jet command or a built program makes with strace; no jet tool traces another process's system calls"
 
-DN_WHY_IMAGE: "reads a built image's disassembly, symbol table or program headers with objdump; no jet command reads a built image's code or tables"
-
 DN_WHY_INTEROP: "the outside tool is the subject, reading the DWARF, symbols or perf map Jet writes for it"
 
 // The harnesses that still run an outside tool, each named with its class
@@ -149,12 +147,6 @@ DN_RUNS_KEPT: [DnRunKept]{
     {path: "Tools/Perf/Scaling", harness: "Scaling", class: "gap", until: "#6995 c2", why: "profiles one compile's phases with perf record and perf script, the receipt Gate.jet stores; jet perf run samples no compile of the compiler itself"},
     {path: "Tools/Perf/CompileThroughput", harness: "CompileThroughput", class: "gap", until: "#6995 c14", why: "the compiler's retired instructions and cycles per build, counted by perf stat across revisions; jet perf counts no hardware event of a built binary or a jet command"},
     {path: "Tools/Perf/CoreStrace", harness: "CoreStrace", class: "gap", until: "#6995 c16", why: "the receipt that `jet run` opens no Core or Prelude source file, from strace's file calls; no jet tool lists the paths a jet command opens"},
-    {path: "Tools/Perf/CodegenCeiling.jet", harness: "CodegenCeiling", class: "gap", until: "#6995 c17", why: "counts each catalog function's instructions in the release image with objdump -d; no jet command disassembles a built image's function"},
-    {path: "Tests/Cases/AllocatorFamilies/checked_alloc_is_chosen_at_build_time.case", harness: "checked alloc symbol", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/Perf/ZonesStripSettingLeavesNoSite.fixture/hot.sh", harness: "zone strip headers", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/Perf/zone_only_code_is_laid_after_hot_code.case", harness: "zone layout", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/Perf/zone_sites_are_patched_jumps.case", harness: "zone sites", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
-    {path: "Tests/Cases/Perf/zones_strip_setting_leaves_no_site.case", harness: "zone strip", class: "gap", until: "#6995 c17", why: DN_WHY_IMAGE},
     {path: "Tests/Cases/CLICompilerSpeed/jet_run_of_a_small_program_starts_only_the_compile_thread.case", harness: "compile threads", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/CLICompilerSpeed/jet_run_opens_its_own_file_once.case", harness: "file opens", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},
     {path: "Tests/Cases/ControlAndData/process_exit_leaves_heap_to_kernel_after_user_cleanup.case", harness: "exit munmaps", class: "gap", until: "#6995 c16", why: DN_WHY_SYSCALLS},

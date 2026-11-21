@@ -8,7 +8,6 @@
 # every site the note names.
 fixture: ZonesStripSettingLeavesNoSite.fixture
 env: NO_COLOR=1
-when tool objdump
 step: jet build --zones=strip main.jet
 exit: 0
 step: sh -c 'cp .jet/build/main plain'
@@ -17,7 +16,7 @@ step: jet build main.jet
 exit: 0
 step: sh -c 'cp .jet/build/main zoned'
 exit: 0
-step: sh hot.sh plain zoned
+step: sh hot.sh {jet} plain zoned
 exit: 0
 stdout: = "hot code grows by the sites' stubs alone\n" # -O1: the note, not code, lists the sites
 step: jet build --release -O2 --zones=strip main.jet
@@ -28,10 +27,9 @@ step: jet build --release -O2 main.jet
 exit: 0
 step: sh -c 'cp .jet/build/main zoned'
 exit: 0
-step: sh hot.sh plain zoned
+step: sh hot.sh {jet} plain zoned
 exit: 0
 stdout: = "hot code grows by the sites' stubs alone\n" # -O2 alike
-end when
 step: jet perf run main.jet --out keep.jettrace
 exit: 0
 stdout: = "total 166\n"

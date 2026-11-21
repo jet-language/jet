@@ -12,26 +12,20 @@ exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "total 166\n"
-when tool nm
-step: sh -c 'nm -n .jet/build/main | grep -e " __jet_start$" -e " jet_perf_zone_close$" | cut -d" " -f3'
+step: sh image.sh {jet} order .jet/build/main
 exit: 0
 stdout: = "__jet_start\njet_perf_zone_close\n" # the zone-only close comes after the startup
-end when
-when tool objdump
-step: sh -c 'objdump -p .jet/build/main | grep -c "flags r-x"'
+step: sh image.sh {jet} code-segments .jet/build/main
 exit: 0
 stdout: = "2\n" # the zone-only code is an executable segment apart from the rest
-end when
 step: jet build --release -O2 main.jet
 exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "total 166\n"
-when tool nm
-step: sh -c 'nm -n .jet/build/main.debug | grep -e " __jet_start$" -e " jet_perf_zone_close$" | cut -d" " -f3'
+step: sh image.sh {jet} order .jet/build/main
 exit: 0
-stdout: = "__jet_start\njet_perf_zone_close\n" # the same order at -O2
-end when
+stdout: = "__jet_start\njet_perf_zone_close\n" # the same order at -O2, read from the image's side debug file
 step: jet perf run main.jet --out keep.jettrace
 exit: 0
 stdout: = "total 166\n"

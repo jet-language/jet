@@ -11,17 +11,16 @@ exit: 0
 step: {work}/.jet/build/main
 exit: 0
 stdout: = "total 166\n"
-when tool objdump
-step: sh -c 'objdump -d .jet/build/main | grep -c "<jet_perf_zone_table>"'
-exit: 1
-stdout: = "0\n" # nothing registers a site table: the note lists the sites
-step: sh -c 'objdump -d .jet/build/main | grep -c "<jet_perf_zone_sites>:"'
-exit: 1
-stdout: = "0\n" # and the program holds no table's code
-step: sh -c 'objdump -d .jet/build/main | grep -c "(%rip),%r11 .*<jet_rt_perf_zones>"'
-exit: 1
+step: jet debug .jet/build/main --do disas
+exit: 0
+stdout: ~ "<jet_perf_zone_open>" # the sites' stubs call the zone routines by name
+stdout: !~ "<jet_perf_zone_table>" # nothing registers a site table: the note lists the sites
+step: jet debug .jet/build/main --do symbols
+exit: 0
+stdout: !~ " jet_perf_zone_sites\n" # and the program holds no table's code
+step: sh image.sh {jet} zones-loads .jet/build/main
+exit: 0
 stdout: = "0\n" # no site loads the zones word to test it: only the runtime's own code names it
-end when
 step: jet perf run main.jet --out keep.jettrace
 exit: 0
 stdout: = "total 166\n"
