@@ -1,0 +1,20 @@
+# Claim: once the source an image was built from is gone, `jet debug
+# IMAGE` still stops where it is asked to, and the stop's source line
+# says the source is unavailable, naming the path it looked for and the
+# image it looked above, never an empty line. The fixture's line 3 is
+# fib's sum. The breakpoint is then deleted, and the end of stdin runs
+# the program to its end.
+fixture: DisassembleMarksStopAndBreakpoint.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+remove: prog.jet
+step: jet debug {work}/.jet/build/prog --break prog.jet:3
+stdin: built_image_names_its_missing_source.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in fib()\n3 | (source unavailable: no `" # the stop, its line unavailable
+stdout: ~ "prog.jet` under the working directory or a directory above the image `" # naming the path it looked for
+stdout: ~ "/.jet/build/prog`)        <- here\n" # and the image it looked above
+stdout: !~ "3 |         <- here" # never an empty source line
+stdout: ~ "#0  fib()" # the stop is read as ever
+stdout: ~ "55\n" # the image runs to its end without its source

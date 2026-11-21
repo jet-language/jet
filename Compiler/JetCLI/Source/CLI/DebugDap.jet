@@ -275,7 +275,7 @@ JetCLIDap: struct {
                     return self.refuse(request, NATIVE_ATTACH_INVALID, "field showRawFrames must be true or false")
                 }
                 asked: jet_cli_dap_int(request.arguments, "threadId")
-                if self.stack(session, entry, if asked > 0 -> asked else -> self.task, raw) == {
+                if self.stack(session, if asked > 0 -> asked else -> self.task, raw) == {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
@@ -472,7 +472,7 @@ JetCLIDap: struct {
                     return self.fail(request, "no source has reference {reference}")
                 }
                 path: "{self.sources[reference - 1]}"
-                text: session.source_text(path) ?? return self.fail(request, "couldn't read `{path}`")
+                text: session.source_text(path) ?? return self.fail(request, err.detail)
                 self.respond(request, "{{\"content\":{foundation_json_quote(text)}}}")
             }
             "disassemble" -> {
@@ -488,7 +488,7 @@ JetCLIDap: struct {
                 at: address + jet_cli_dap_offset(request.arguments, "offset")
                 rows := [String]{}
                 loop row in native_listing_window(session, at, jet_cli_dap_offset(request.arguments, "instructionOffset"), count) {
-                    rows.push(self.instruction(row, entry))
+                    rows.push(self.instruction(session, row))
                 }
                 self.respond(request, "{{\"instructions\":[{rows.join(",")}]}}")
             }
@@ -758,7 +758,7 @@ JetCLIDap: struct {
     // `evaluate` name it by, with the pc `disassemble` lists its code from;
     // with `raw`, then its machine frames. A task with no stack yet (a
     // queued one) has none.
-    stack: fn(&self, session: &NativeSession, entry: String, task: Int, raw: Bool) -> String NativeDebugError! {
+    stack: fn(&self, session: &NativeSession, task: Int, raw: Bool) -> String NativeDebugError! {
         if !(self.focus(session, task) ?? return Err(err)) {
             return Ok("{{\"stackFrames\":[],\"totalFrames\":0}}")
         }
@@ -767,7 +767,7 @@ JetCLIDap: struct {
         loop (index, frame) in frames {
             if !native_debug_jet_frame(frame) -> next
             id: self.frame_id(task, index) ?? return Err(NativeDebugError{detail: "this stop's frames outnumber the frame ids a stop has"})
-            source: self.source(frame.file, frame.path, entry)
+            source: self.source(session, frame.file, frame.path)
             // A caller's frame at a call with a call-site row names the
             // call's column; any other frame its line.
             column: if frame.column > 0 -> frame.column else -> 1
@@ -786,28 +786,29 @@ JetCLIDap: struct {
     }
 
     // The DAP source of the file `file` (as the line table names it) whose
-    // source is `path` (native_line_source), taken from the entry's
-    // directory. A Core source is no file: the `source` request reads it by
-    // its `sourceReference` (NativeSession.source_text).
-    source: fn(&self, file: String, path: String, entry: String) -> String Never! {
+    // source is `path` (native_line_source): the file the session reads it
+    // from (NativeSession.source_file), else `path` itself, made absolute.
+    // A Core source is no file: the `source` request reads it by its
+    // `sourceReference` (NativeSession.source_text).
+    source: fn(&self, session: &NativeSession, file: String, path: String) -> String Never! {
         name: foundation_json_quote(dap_files.basename(file))
         if path.starts_with(MODULE_CORE_PREFIX) {
             return "{{\"name\":{name},\"path\":{foundation_json_quote(path)},\"sourceReference\":{self.source_reference(path)}}}"
         }
-        base: if entry.starts_with("/") -> dap_files.dirname(entry) else -> dap_files.join(dap_files.cwd() ?? ".", dap_files.dirname(entry))
-        "{{\"name\":{name},\"path\":{foundation_json_quote(dap_files.join(base, file))}}}"
+        found: session.source_file(path) ?? path
+        "{{\"name\":{name},\"path\":{foundation_json_quote(dap_files.resolve(found) ?? found)}}}"
     }
 
     // One instruction `disassemble` answers: its address, bytes, text and
     // the code it is in, its source and line when its function has them;
     // an address no code is known at is `invalid`, as DAP asks.
-    instruction: fn(&self, row: NativeListedRow, entry: String) -> String Never! {
+    instruction: fn(&self, session: &NativeSession, row: NativeListedRow) -> String Never! {
         address: native_debug_hex(row.address)
         if !row.valid {
             return "{{\"address\":\"{address}\",\"instruction\":\"(no code)\",\"presentationHint\":\"invalid\"}}"
         }
         symbol: if row.symbol == "" -> "" else -> ",\"symbol\":{foundation_json_quote(row.symbol)}"
-        place: if row.line > 0 && row.file != "" -> ",\"location\":{self.source(row.file, row.path, entry)},\"line\":{row.line}" else -> ""
+        place: if row.line > 0 && row.file != "" -> ",\"location\":{self.source(session, row.file, row.path)},\"line\":{row.line}" else -> ""
         "{{\"address\":\"{address}\",\"instructionBytes\":\"{native_listing_bytes(row.bytes)}\",\"instruction\":{foundation_json_quote(row.text)}{symbol}{place}}}"
     }
 

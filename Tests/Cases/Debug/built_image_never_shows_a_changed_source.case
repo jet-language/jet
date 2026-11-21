@@ -1,0 +1,25 @@
+# Claim: the image records the sha256 of each source it was built from,
+# and `jet debug IMAGE` shows a source's lines only from a file that
+# still hashes to it. Edited after the build, even below the line the
+# program stops at, the file the debugger finds above the image is not
+# this build's source: the stop's line says it has changed, naming the
+# file, and shows none of its text. Run from another directory. The
+# fixture's line 3 is fib's sum. The breakpoint is then deleted, and the
+# end of stdin runs the program to its end.
+fixture: DisassembleMarksStopAndBreakpoint.fixture
+env: NO_COLOR=1
+mkdir: elsewhere
+step: jet build -O0 prog.jet
+exit: 0
+append: prog.jet "// edited after the build\n"
+step: jet debug {work}/.jet/build/prog --break prog.jet:3
+stdin: built_image_never_shows_a_changed_source.stdin
+cwd: {work}/elsewhere
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in fib()\n3 | (source unavailable: `" # the stop, its line unavailable
+stdout: ~ "/prog.jet` has changed since this build)        <- here\n" # naming the changed file
+stdout: ~ "#1  run()  at prog.jet:6\n6 | (source unavailable: `" # `up` reads no line of it either
+stdout: !~ "fib(n - 1) + fib(n - 2)" # none of the changed file's text is shown
+stdout: !~ "run: fn() " # not even its unchanged lines
+stdout: ~ "Deleted breakpoint 1\n" # the stop's breakpoint goes
+stdout: ~ "55\n" # and the image runs to its end

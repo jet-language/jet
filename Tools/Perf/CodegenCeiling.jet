@@ -1140,3 +1140,13 @@ run: fn() {
     assert_eq(source_line("/run/gate/main.jet:7", "/run/gate"), "main.jet:7")
     assert_eq(source_line("/elsewhere/Core/x.jet:9", "/run/gate"), "x.jet:9")
 }
+
+#Test("a listing's note that a source is unavailable is no instruction and keeps the rows' source lines") {
+    // A session that can't read a function's source says so on one line
+    // under the heading; its rows still name their `file:line`.
+    listing: "k.value  main.jet:4-5  -O2  0x401000, 8 bytes\n  source unavailable: `main.jet` has changed since this build\nmain.jet:4   \n       0x401000 <+0>    push   rbp\nmain.jet:5   \n       0x401001 <+1>    add    rcx,QWORD PTR [rax]\n       0x401004 <+4>    pop    rbp\n       0x401005 <+5>    ret\n"
+    found: listing_instructions(listing)
+    assert_eq(found.texts, [String]{"push   rbp", "add    rcx,QWORD PTR [rax]", "pop    rbp", "ret"})
+    assert_eq(found.sources, [String]{"main.jet:4", "main.jet:5", "main.jet:5", "main.jet:5"})
+    assert_eq(count_listing(listing).insns, 4)
+}

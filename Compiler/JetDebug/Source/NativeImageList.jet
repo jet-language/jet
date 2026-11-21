@@ -250,7 +250,7 @@ native_image_command: fn(session: &NativeSession, line: String, file: String, li
                 }
             } ?? false
             if !named {
-                return Ok(Val(native_image_code_text(session, bytes: operand.contains("--bytes"))))
+                return Ok(Val(native_image_code_text(session, file, lines, bytes: operand.contains("--bytes"))))
             }
             text: native_disassemble(session, operand, file, lines) ?? return Err(err)
             Ok(Val(text))
@@ -263,10 +263,10 @@ native_image_command: fn(session: &NativeSession, line: String, file: String, li
 
 // Every function of the line table and every sized symbol of the image
 // whose code is in its executable segments, in address order, each as
-// `disassemble` lists it, with each row's `bytes` when asked; with
-// neither, each executable segment whole, as `segment 0`, `segment 1` and
-// on.
-native_image_code_text: fn(session: &NativeSession, bytes: Bool{false}) -> String Never! {
+// `disassemble` lists it (`file`, with the text `lines`, is the console's
+// own source), with each row's `bytes` when asked; with neither, each
+// executable segment whole, as `segment 0`, `segment 1` and on.
+native_image_code_text: fn(session: &NativeSession, file: String, lines: [String], bytes: Bool{false}) -> String Never! {
     runs := [NativeImageSegment]{}
     if session.dump == .Val(dumped) {
         loop segment in native_image_segments(dumped.memory.backing) {
@@ -280,7 +280,7 @@ native_image_code_text: fn(session: &NativeSession, bytes: Bool{false}) -> Strin
         if !native_image_in_runs(runs, symbol.address) -> next
         index: x64_jetline_find(session.image.lines, symbol.address)
         function: if index >= 0 && session.image.lines.functions[index].low == symbol.address -> index else -> -1
-        block: native_listing_block(session, symbols, function, symbol.address, symbol.address + symbol.size, symbol.name, ask, "", [String]{})
+        block: native_listing_block(session, symbols, function, symbol.address, symbol.address + symbol.size, symbol.name, ask, file, lines)
         if block == "" -> next
         text = "{text}{if text == "" -> "" else -> "\n"}{block}"
     }
