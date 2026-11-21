@@ -48,7 +48,7 @@ use {
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_held_set, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -912,7 +912,8 @@ jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDri
     level: jet_cli_native_level(options)
     checks: jet_cli_native_checks(result, inputs, options, runtime)
     declarations: jet_driver_checked_declarations(inputs)
-    program: ir_held_program(inputs.functions.move(), decls, inputs.symbols.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), checks, bind: level <= 0)
+    built: ir_program_new(inputs.functions.move(), decls, inputs.symbols.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move())
+    program: ir_held_program(built.move(), decls, declarations.foreign.move(), checks, bind: level <= 0)
     JetCLIDebugEvalHeldIR{program: program.move(), level: level, options: options, threads: result.compiler_threads}
 }
 
