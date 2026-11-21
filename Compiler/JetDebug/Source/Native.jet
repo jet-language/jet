@@ -2517,7 +2517,7 @@ NativeSession: struct {
             "rs" | "reverse-step" | "rn" | "reverse-next" | "rf" | "reverse-finish" | "rc" | "reverse-continue" -> {
                 refusal: self.reverse_refusal()
                 if refusal != "" {
-                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
                 }
                 short: if word == {
                     "rs" | "reverse-step" -> "s"
@@ -2535,7 +2535,7 @@ NativeSession: struct {
             "jump" | "back" -> {
                 refusal: self.replay_refusal("`{word}`")
                 if refusal != "" {
-                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop})
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
                 }
                 latest: self.latest_event()
                 event := -1
@@ -2561,7 +2561,10 @@ NativeSession: struct {
             }
             "events" -> {
                 refusal: self.replay_refusal("`events`")
-                text = if refusal != "" -> native_debug_refused(refusal) else -> self.events_text()
+                if refusal != "" {
+                    return Ok(NativeDebugStep{text: native_debug_refused(refusal), stop: stop, refused: true})
+                }
+                text = self.events_text()
             }
             "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
             "log" -> text = self.log_command(operand, file) ?? return Err(err)
@@ -2600,10 +2603,11 @@ NativeSession: struct {
             "disassemble" | "disas" -> {
                 text = native_disassemble(self, operand, file, lines) ?? return Err(err)
             }
+            "symbols" | "segments" -> text = native_image_listing(self.binary, word) ?? return Err(err)
             "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}"
+            else -> return Ok(NativeDebugStep{text: "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n{self.unknown_note}", stop: stop, refused: true})
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }
@@ -6293,7 +6297,7 @@ native_eval_image_of: fn(elf: [U8]) -> Shared<NativeEvalImage> Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), tasks, fix, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), reverse-step (rs), reverse-next (rn), reverse-finish (rf), reverse-continue (rc), jump N, back [K], events, break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, why PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), disassemble [FUNCTION|LINE|FILE:LINE|FILE:A-B] [--bytes] (disas), symbols, segments, tasks, fix, help (h), quit (q)"
 
 // The runtime's observation start, which an image links when it has a task,
 // a channel, a live value or an event (JetRuntime ObserveLive.jet): a replay
@@ -6353,14 +6357,16 @@ NATIVE_DEBUG_RED_ZONE: 128
 // How deep a readout follows a value's members and elements.
 NATIVE_DEBUG_SHOWN_DEPTH: 4
 
-// What one console command printed, where it left the program, and the
-// move it made the program take: the short word of its run (`s`, `n`, `f`,
+// What one console command printed, where it left the program, the move
+// it made the program take: the short word of its run (`s`, `n`, `f`,
 // `c`, a reverse one's `rs`, `rn`, `rf`, `rc`, or `jump`), "" when the
-// program didn't run.
+// program didn't run; and whether the console refused the command (one it
+// doesn't know, or a replay's alone), after which `jet debug --do` exits 1.
 NativeDebugStep: struct {
     text: String,
     stop: NativeStop,
     moved: String{""},
+    refused: Bool{false},
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {

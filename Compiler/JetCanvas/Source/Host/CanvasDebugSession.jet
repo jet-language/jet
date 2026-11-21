@@ -474,8 +474,8 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
 canvas_debug_step: fn(session: &CanvasDebugSession, input: String) -> String NativeDebugError! {
     if session.stop.kind != NativeStopKind.Paused -> return Ok("")
     if canvas_debug_tier_name(session) == CANVAS_DEBUG_DUMP {
-        text: native_dump_command(session.live, input, session.events, session.jet_file, session.jet_lines) ?? return Err(err)
-        session.transcript = "{session.transcript}{text}"
+        answer: native_dump_command(session.live, input, session.events, session.jet_file, session.jet_lines) ?? return Err(err)
+        session.transcript = "{session.transcript}{answer.text}"
         return Ok("")
     }
     step: session.live.command(input, session.stop, session.jet_file, session.jet_lines) ?? return Err(err)

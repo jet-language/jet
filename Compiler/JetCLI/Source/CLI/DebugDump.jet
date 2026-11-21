@@ -10,18 +10,20 @@
 // the run's. `bt`, `frame N`, `locals` and `print` read the stop as a live
 // session reads one, `tasks` lists every task the dump caught, running or
 // parked, with where it is, and `task N` selects task N for them; `events
-// [--last N]` lists the flight ring's records, oldest first. Nothing runs: a
-// run-control command says so. A #Secret value shows as redacted, a value
-// the dump cut off past its budget as cut off. The end of stdin or `quit`
-// ends it.
+// [--last N]` lists the flight ring's records, oldest first, and `symbols`
+// and `segments` the image's symbol table and program headers. Nothing
+// runs: a run-control command says so. A #Secret value shows as redacted, a
+// value the dump cut off past its budget as cut off. The end of stdin or
+// `quit` ends it. With `--do` commands (`dos`) it runs them in order
+// instead, with no banner or prompt, and exits 1 when one was refused.
 use {
     cli_files: core.files
     cli_term: core.term
     jet_debug.[NATIVE_DEBUG_PROMPT, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_sources]
-    jet_driver.[JET_DRIVER_EXIT_OK]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 }
 
-jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_dump: fn(path: String, dos: [String], color: Bool) -[FS, Env, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
     opened := native_dump_open(path) ?? return jet_cli_debug_unavailable(err, color)
     frames: opened.session.backtrace() ?? return jet_cli_debug_unavailable(err, color)
     stop: native_dump_jet_frame(frames, 0) ?? 0
@@ -34,6 +36,16 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.
     events: native_dump_events(opened.session.image, opened.ring)
     file: cli_files.basename(source)
     shown: native_dump_frame(opened.session, frames, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+    if dos.len() > 0 {
+        refused := false
+        loop command in dos {
+            if command == "q" || command == "quit" -> break
+            answer: native_dump_command(opened.session, command, events, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+            jet_cli_debug_write(answer.text)
+            refused = refused || answer.refused
+        }
+        return jet_cli_done("", "", if refused -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK)
+    }
     jet_cli_debug_write("Dump of process {opened.pid}, {events.len()} flight events\nImage: {opened.image} bytes, with {opened.records} bytes of records\nBuild: {opened.build}, its image in {cli_files.basename(opened.image_file)} beside the dump\n{sources.text}Memory: {opened.memory} bytes held, within the {opened.budget}-byte budget; {opened.cut_off} bytes cut off past it\n{shown}")
     input := cli_term.stdin()
     echo: !input.is_tty()
@@ -48,8 +60,8 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, Env, IO, Time.Wait, FFI.
         command: line.trim()
         if echo -> jet_cli_debug_write("{command}\n")
         if command == "q" || command == "quit" -> break
-        text: native_dump_command(opened.session, line, events, file, lines) ?? return jet_cli_debug_unavailable(err, color)
-        jet_cli_debug_write(text)
+        answer: native_dump_command(opened.session, line, events, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+        jet_cli_debug_write(answer.text)
     }
     jet_cli_debug_write("\n")
     jet_cli_done("", "", JET_DRIVER_EXIT_OK)

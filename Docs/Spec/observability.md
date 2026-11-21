@@ -1371,11 +1371,42 @@ D-DBG-VERBS1=A names the commands:
   ``No function `NAME` `` and `No code on FILE:LINE`.
   Tests/Cases/Debug/disassemble_marks_stop_and_breakpoint.case is the
   worked example.
+- `symbols` lists the image's symbol table, one row a symbol in address
+  order (then by name): its address in hexadecimal in a column of 20, its
+  size in bytes in a column of 10, its kind (`function`, `object`,
+  `thread`, `label` or `other`) in a column of 10, then its name.
+  `segments` lists the image's program headers in file order: its type
+  (`LOAD`, `GNU_STACK`, …) in a column of 13, then `offset`, `address`,
+  `file` and `memory` sizes, `flags` (`r-x`) and `align`, each named. Both
+  read the image's file (D-DEBUG-LISTING1): a stripped image's symbols come
+  from the side file its `.gnu_debuglink` names, and an image with neither
+  answers `` `IMAGE` keeps no symbol table ``. With that side file gone,
+  `segments` still lists and `symbols` says where the file should be.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
   thread.
 - `help` (`h`) lists the commands and `quit` (`q`) ends the session.
+
+`--do 'COMMAND'` (repeatable) runs console commands in order, then exits,
+with no prompt (D-DEBUG-LISTING1). Before anything starts, `jet debug
+IMAGE` reads the image's file, which answers `symbols`, `segments`,
+`disas NAME` and `help` with nothing run, even for an image that keeps no
+Jet debug information; plain `disas` there lists all the image's code in
+its executable segments, by function and symbol, or each segment whole as
+`segment 0`, `segment 1` when the image keeps no symbols. The first
+command that needs the program running starts it as the console does,
+shows its first stop, and runs the rest there. The end of the commands or
+`quit` ends the program (an attached one is let go on); a command left
+once the program has ended is refused with a line of its own. A
+`.jetdump` runs them against the dump, with no banner. It exits 0, or 1
+when the console refused a command (one it doesn't know, or a run-control
+command on a dump) or the program ended with a status other than 0 or a
+signal. `--do` is refused with `--dap` (E2102).
+`jet debug .jet/build/main --do segments --do 'disas main.run__entry'`
+checks a build's machine code with no other tool.
+Tests/Cases/Debug/do_runs_commands_against_the_image_file_then_the_running_program.case
+is the worked example.
 
 Every thread of the program is traced. A stop stops them all, so `tasks`
 and `print` see the whole program still. `continue` runs them all again,
