@@ -23,10 +23,10 @@ stderr: ~ "stacks unwound=" # how far the samples' stacks unwound, were cut or b
 stderr: ~ " at Compiler/Jet" # a hot function by its declaration's file and line
 stderr: ~ "\ncpu by package\n" # the samples split by the package they worked for
 stderr: ~ "\n  Compiler/JetSema samples=" # the checking phase among them
-stderr: ~ "Trace: "
+stderr: ~ "Trace: " # and the path of the trace it wrote
 json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.window_ms = 3000 # the trace keeps the window asked for
 json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.exited_ms = null # and that the check outlived it
-json: file check.jettrace doc $.content.profile.window_wall_ns > 3000000000 # the window the samplers were open, longer than a second
+json: file check.jettrace doc $.content.profile.window_wall_ns > 3000000000 # the window the samplers were open, past the three seconds asked for
 json: file check.jettrace doc $.content.receipt_sections[?name="functions"][0].value.stacks #>= 1 # the samples' folded stacks
 step: jet perf view check.jettrace
 exit: 0
