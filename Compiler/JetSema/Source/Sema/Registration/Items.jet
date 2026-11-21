@@ -118,13 +118,17 @@ use {
         module_none,
         module_text,
         name_count,
+        name_find,
         name_find_bytes,
+        name_index,
+        name_intern,
         name_rows,
         name_rows_get,
         name_rows_get_text,
         name_rows_hash,
         name_rows_remove,
         name_rows_set,
+        name_table_sized,
         name_text,
         owned_trait_codec,
         owned_trait_codec_marker,
@@ -702,6 +706,10 @@ SemaRegistrationModule: struct {
     // version; the defaults for a source without one): ProgramInfo groups
     // its modules into one PackageInfo by `package_identity`.
     package: SemaModulePackage{SemaModulePackage{}},
+    // The `package_settings` row of the build facts that holds its
+    // package's declared settings, -1 for the built package's
+    // (sema_build_facts_settings_at).
+    settings_row: Int{-1},
     // Whether the file is one of its package's memory kernel files
     // (`policy.memory`): its types' `priv` fields are then private to the
     // kernel files, not the whole package (sema_expression_field_visible).
@@ -825,8 +833,8 @@ SemaBuildFacts: struct {
     // (`#build.settings.*`, sema_fact_build_setting).
     settings: [SemaBuildSetting]{[SemaBuildSetting]{}},
     // Each loaded dependency's declared settings with this build's values,
-    // by package identity (sema_build_facts_settings_for).
-    package_settings: [String:[SemaBuildSetting]]{[String:[SemaBuildSetting]]{}},
+    // one row per package; a module's `settings_row` names its package's.
+    package_settings: [SemaPackageSettings]{[SemaPackageSettings]{}},
     // The host's compiler identity ("" when the host names none); a history
     // artifact's `tool` names it (#6410).
     compiler_identity: String{""},
@@ -866,17 +874,24 @@ SemaSettingContribution: struct {
     selected: Bool,
 }
 
+// One loaded dependency's declared settings with this build's values.
+SemaPackageSettings: struct {
+    package_identity: String,
+    settings: [SemaBuildSetting],
+}
+
 // `debug(…)` traces are development-only. A shipped artifact or a
 // release-profile compile rejects any that remain (E3405).
 sema_build_facts_reject_debug_traces: fn(facts: SemaBuildFacts) -> Bool Never! {
     facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
 }
 
-// The declared settings a module of `package_identity` reads: a loaded
-// dependency's own, else the built package's. A dependency never reads the
-// built package's settings (D-DEP-FEATURES1).
-sema_build_facts_settings_for: fn(facts: SemaBuildFacts, package_identity: String) -> [SemaBuildSetting] Never! {
-    facts.package_settings.get(package_identity) ?? facts.settings
+// The declared settings a module whose `settings_row` is `row` reads: its
+// dependency's own row of `facts.package_settings`, else (-1) the built
+// package's. A dependency never reads the built package's settings.
+sema_build_facts_settings_at: fn(facts: SemaBuildFacts, row: Int) -> [SemaBuildSetting] Never! {
+    if row >= 0 -> return facts.package_settings[row].settings
+    facts.settings
 }
 
 // #4319 scaling counters (Tools/Perf/Scaling) of the graph's lookups: module
@@ -3219,7 +3234,7 @@ sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModul
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program. `policies` are its package's checked user
 // policy declarations (Rust Registration: one policy set per package).
-// `settings` are its package's declared settings (sema_build_facts_settings_for),
+// `settings` are its package's declared settings (sema_build_facts_settings_at),
 // which module arguments may read.
 // `codecs` are the codecs the graph gives the types its declarations hold
 // (sema_derive_foreign_codecs).
@@ -5369,6 +5384,15 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         }
         imported_templates.push(sema_generic_modules_imported(prepared_inputs, edges, generic_module_index, prepared_inputs[index].module_identity, table))
     }
+    // Each dependency's row of `build_facts.package_settings`, by a
+    // pass-local id of its package identity (-1 at id 0, the empty identity,
+    // and for every package without a row).
+    settings_names := name_table_sized(build_facts.package_settings.len() * 2 + 2)
+    settings_rows := [Int]{-1}
+    loop (row, package) in build_facts.package_settings {
+        id: name_index(name_intern(settings_names, package.package_identity))
+        if id == settings_rows.len() -> settings_rows.push(row) else -> settings_rows[id] = row
+    }
     // A module carries its Module record only when a source reads it as a
     // value or its body sets a field; the reads span every input.
     sema_module_meta_mark_reads(prepared_inputs)
@@ -5400,13 +5424,17 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     imported_templates.reverse()
     codecs.reverse()
     jobs := [SemaRegistrationPrepareJob]{}
+    // Each job's `settings_row`, in job order.
+    job_settings := [Int]{}
     loop prepared_inputs.len() > 0 {
         input := prepared_inputs.pop() ?? break
         templates := imported_templates.pop() ?? break
         module_codecs := codecs.pop() ?? break
         policies: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
         input_text: module_text(table, input.module_identity)
-        settings: sema_build_facts_settings_for(build_facts, input.package_identity)
+        settings_row: if name_find(settings_names, input.package_identity) == .Val(found) -> settings_rows[name_index(found)] else -> -1
+        settings: sema_build_facts_settings_at(build_facts, settings_row)
+        job_settings.push(settings_row)
         bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
         symbols := symbol_keys(symbols_cursor, bound)
         symbols_cursor += bound
@@ -5417,6 +5445,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // Each prepared row moves out (front to back) into its module row, after
     // its diagnostics, as one module after another reported them.
     prepared.reverse()
+    job_settings.reverse()
     // Each prepared module's range, then the builtin range. A duplicate
     // keeps no range: its keys are its first row's, which the graph holds.
     symbol_ranges := [SymbolKeys]{}
@@ -5424,6 +5453,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         row := prepared.pop() ?? break
         loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
         module_row := row.module_row.move()
+        module_row.settings_row = job_settings.pop() ?? -1
         identity: module_index(module_row.module_identity)
         duplicate: module_rows[identity] >= 0
         if {

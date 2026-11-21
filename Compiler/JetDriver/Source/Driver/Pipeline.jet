@@ -43,6 +43,7 @@ use {
         SemaRootLoopValue,
         sema_derive_template_loop_landed,
         sema_derive_template_loop_waits,
+        SemaPackageSettings,
         SemaProgramTables,
         SemaScopeEnvironment,
         SemaScriptProbe,
@@ -887,13 +888,13 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     package_name := ""
     package_version := ""
     settings := [SemaBuildSetting]{}
-    package_settings := [String:[SemaBuildSetting]]{}
+    package_settings := [SemaPackageSettings]{}
     package_markers := [Marker]{}
     package_manifest := ""
     purposes := [String]{}
     loop package in load.packages {
         if package.identity != load.package_identity {
-            package_settings[package.identity] = jet_driver_build_settings(load, package, request)
+            package_settings.push(SemaPackageSettings{package_identity: package.identity, settings: jet_driver_build_settings(load, package, request)})
             next
         }
         package_name = package.name

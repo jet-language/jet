@@ -146,22 +146,31 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
 // the law refuses the chain, its last writer stands in (the refusal is
 // reported by jet_driver_setting_writer_diagnostics).
 jet_driver_setting_selected: fn(writers: [JetDriverSettingWriter]) -> Int Never! {
-    at := writers.len() - 1
-    if at < 0 -> return at
     contributions := [FactContribution]{}
     loop writer in writers -> contributions.push(writer.contribution)
-    if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Ok(resolved) {
-        if resolved == .Val(fact) {
-            effective: fact.provenance[fact.effective]
-            loop (index, writer) in writers {
-                if writer.contribution.layer == effective.layer && writer.contribution.source == effective.source {
-                    at = index
-                    break
+    jet_driver_contribution_selected(contributions) ?? writers.len() - 1
+}
+
+// The index in `contributions` of the one the contribution law selects, the
+// last when the law resolves no fact; None when the law refuses the chain.
+jet_driver_contribution_selected: fn(contributions: [FactContribution]) -> Int? Never! {
+    at := contributions.len() - 1
+    if at < 0 -> return Val(at)
+    if pkg_fact_resolve(FactKey.new(contributions[0].key), contributions) == {
+        .Ok(resolved) -> {
+            if resolved == .Val(fact) {
+                effective: fact.provenance[fact.effective]
+                loop (index, contribution) in contributions {
+                    if contribution.layer == effective.layer && contribution.source == effective.source {
+                        at = index
+                        break
+                    }
                 }
             }
         }
+        .Err(_) -> return None
     }
-    at
+    Val(at)
 }
 
 // The entry writers of dependencies' settings that another entry overrides:
@@ -178,21 +187,17 @@ jet_driver_overridden_entry_writers: fn(request: JetDriverCompileRequest) -> [Fa
     loop package in load.packages {
         if package.identity == load.package_identity -> next
         loop setting in package.settings {
-            writers := [JetDriverSettingWriter]{}
             contributions := [FactContribution]{}
-            loop writer in jet_driver_setting_writers(load, package, setting, request) {
+            writers: jet_driver_setting_writers(load, package, setting, request)
+            loop writer in writers.move() {
                 layer: writer.contribution.layer
                 if layer != .Declaration && layer != .DependencyEntry && layer != .RootEntry -> next
-                contributions.push(writer.contribution.copy())
-                writers.push(writer)
+                contributions.push(writer.contribution.move())
             }
-            if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Err(_) {
-                next
-            }
-            at: jet_driver_setting_selected(writers)
-            loop (index, writer) in writers {
-                if index != at && writer.contribution.layer != .Declaration {
-                    overridden.push(writer.contribution.copy().with_reason("overridden by a more explicit entry"))
+            at: jet_driver_contribution_selected(contributions) ?? next
+            loop (index, contribution) in contributions.move() {
+                if index != at && contribution.layer != .Declaration {
+                    overridden.push(contribution.with_reason("overridden by a more explicit entry"))
                 }
             }
         }
@@ -266,10 +271,11 @@ jet_driver_manifest_label: fn(package: JetDriverPackageInfo) -> String Never! {
     segments[segments.len() - 1]
 }
 
-// The entry package of `load`, None for a manifest-less source.
-jet_driver_entry_package: fn(load: JetDriverLoadResult) -> JetDriverPackageInfo? Never! {
-    loop package in load.packages {
-        if package.identity == load.package_identity -> return Val(package.copy())
+// The row of `load.packages` that is the entry package, None for a
+// manifest-less source.
+jet_driver_entry_package: fn(load: JetDriverLoadResult) -> Int? Never! {
+    loop (at, package) in load.packages {
+        if package.identity == load.package_identity -> return Val(at)
     }
     None
 }
@@ -383,7 +389,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
             undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
             return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{undeclared}}
         }
-    } else { contributions = jet_driver_fixed_fact_writers(key, facts, package, request) }
+    } else { contributions = jet_driver_fixed_fact_writers(key, facts, load, package, request) }
     if pkg_fact_resolve(FactKey.new(key), contributions) == {
         .Ok(resolved) -> return JetDriverBuildFactExplanation{fact: resolved, diagnostics: [Diagnostic]{}}
         .Err(error) -> return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{jet_driver_fact_error_diagnostic(error)}}
@@ -401,15 +407,16 @@ jet_driver_fact_error_diagnostic: fn(error: FactError) -> Diagnostic Never! {
     jet_driver_diagnostic_without_span("E3521", "a build fact has no single effective writer", error.message(), "make the writers agree, or move one value to a more explicit contribution layer")
 }
 
-// The writers of a fixed build fact. The package names itself in its
+// The writers of a fixed build fact. The package (the row `package` of
+// `load.packages`, None for a manifest-less source) names itself in its
 // manifest; a manifest-less source takes its name from the entry file
 // (`<source>`). A fact nobody writes takes the compiler's value
 // (`<default>`); the target machine supplies the OS and cache line
 // (`<target>`); the lock's `[build.stamp]` supplies the stamp; `--profile`
 // is the command-line writer of the profile.
-jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, package: JetDriverPackageInfo?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
-    manifest: if package == .Val(found) && found.manifest_path != None -> Val(jet_driver_manifest_label(found)) else -> String?{None}
-    declared_version: if package == .Val(found) -> found.version else -> String?{None}
+jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetDriverLoadResult, package: Int?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
+    manifest: if package == .Val(at) && load.packages[at].manifest_path != None -> Val(jet_driver_manifest_label(load.packages[at])) else -> String?{None}
+    declared_version: if package == .Val(at) -> load.packages[at].version else -> String?{None}
     stamped: request.build_stamp != None
     if key == {
         "Build.Package.Name" -> {

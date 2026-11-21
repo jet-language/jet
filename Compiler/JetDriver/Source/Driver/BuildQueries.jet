@@ -255,7 +255,7 @@ jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], output
 
 // `owned_nodes` (jet_driver_build_output_nodes: checks, then compiles, then
 // links) keyed under the settings each package's sources compile with, and
-// the receipt row of every loaded package's setting. A setting whose value
+// the receipt rows of every loaded package's settings. A setting whose value
 // is not its default adds one input, `setting:<name>=<value>` over its
 // SHA-256, to the check node of each source of its package; <name> is the
 // entry package's spelling (`loud`, `tool.loud`). The compile nodes over
@@ -264,74 +264,104 @@ jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], output
 // every key; the compile reports why.
 JetDriverBuildSettingNodes: struct {
     nodes: [BuildGraphNode],
-    settings: [JetDriverBuildSetting],
+    settings: [JetDriverBuildPackageSettings],
 }
 
 jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], request: JetDriverCompileRequest) -> JetDriverBuildSettingNodes Never! {
     nodes: owned_nodes.move()
-    settings := [JetDriverBuildSetting]{}
+    settings := [JetDriverBuildPackageSettings]{}
     load: jet_driver_load_reach(request, false) ?? return {nodes: nodes.move(), settings: settings.move()}
     root: jet_driver_entry_root_path(request.authorized_sources)
     if !load.complete || jet_driver_has_errors(load.diagnostics) || root == "" {
         return {nodes: nodes.move(), settings: settings.move()}
     }
-    // The setting inputs of each package, and the package of each source's
-    // check node by subject.
+    // The writer rows of each package's settings; the setting inputs of
+    // each package that has any; and that package's row of them for each
+    // source's check node, by a pass-local id of its subject (-1 at id 0,
+    // the empty subject).
+    package_writers := [[[JetDriverBuildSettingWriter]]]{}
     package_inputs := [[BuildGraphInputDigest]]{}
-    subjects := [String:Int]{}
+    subjects := name_table_sized(load.source_units.len() * 2 + 2)
+    owners := [Int]{-1}
     loop package in load.packages {
         inputs := [BuildGraphInputDigest]{}
+        setting_writers := [[JetDriverBuildSettingWriter]]{}
         loop setting in package.settings {
             writers: jet_driver_setting_writers(load, package, setting, request)
             at: jet_driver_setting_selected(writers)
-            rows := [JetDriverBuildSettingWriter]{}
-            loop (index, writer) in writers {
-                state: if index == at -> "effective" else -> "shadowed"
-                rows.push(JetDriverBuildSettingWriter{layer: writer.contribution.layer.name(), source: writer.contribution.source.copy(), value: writer.text.copy(), state: state})
-            }
             // The declaration's default is always the chain's first writer.
             value: writers[at].text
-            settings.push(JetDriverBuildSetting{package: package.name.copy(), name: setting.name.copy(), value: value.copy(), writers: rows.move()})
-            if jet_driver_setting_fact_value(setting.ty, value) == jet_driver_setting_fact_value(setting.ty, setting.default) {
-                next
+            if jet_driver_setting_fact_value(setting.ty, value) != jet_driver_setting_fact_value(setting.ty, setting.default) {
+                name: jet_driver_setting_name(load, package, setting)
+                inputs.push(BuildGraphInputDigest{name: "setting:{name}={value}", digest: sha256_hex("{name}={value}")})
             }
-            name: jet_driver_setting_name(load, package, setting)
-            inputs.push(BuildGraphInputDigest{name: "setting:{name}={value}", digest: sha256_hex("{name}={value}")})
+            rows := [JetDriverBuildSettingWriter]{}
+            loop (index, writer) in writers.move() {
+                state: if index == at -> "effective" else -> "shadowed"
+                rows.push(JetDriverBuildSettingWriter{layer: writer.contribution.layer.name(), source: writer.contribution.source.move(), value: writer.text.move(), state: state})
+            }
+            setting_writers.push(rows.move())
         }
+        package_writers.push(setting_writers.move())
         if inputs.len() == 0 -> next
         loop unit in load.source_units {
             if unit.package_identity != package.identity || unit.source_origin != SemaSourceOrigin.Snapshot || jet_driver_unit_is_core(unit) {
                 next
             }
             subject: jet_driver_build_source_subject(request, root, unit) ?? next
-            subjects[subject] = package_inputs.len()
+            id: name_index(name_intern(subjects, subject))
+            if id == owners.len() -> owners.push(package_inputs.len()) else {
+                owners[id] = package_inputs.len()
+            }
         }
         package_inputs.push(inputs.move())
     }
+    // Each package's name and its settings' names move into its receipt
+    // rows, beside their writers.
+    package_writers.reverse()
+    loop package in load.packages.move() {
+        writers := package_writers.pop() ?? break
+        writers.reverse()
+        rows := [JetDriverBuildSetting]{}
+        loop setting in package.settings.move() {
+            rows.push(JetDriverBuildSetting{name: setting.name.move(), writers: writers.pop() ?? break})
+        }
+        settings.push(JetDriverBuildPackageSettings{package: package.name.move(), settings: rows.move()})
+    }
     if package_inputs.len() == 0 -> return {nodes: nodes.move(), settings: settings.move()}
-    // The new key of each rekeyed node, by the input name its dependents
-    // give it (`check:<subject>`, `compile:<output>`).
-    keys := [String:String]{}
+    // The row in `keyed` of each rekeyed node, by a pass-local id of the
+    // input name its dependents give it (`check:<subject>`,
+    // `compile:<output>`; -1 at id 0, the empty name).
+    names := name_table_sized(nodes.len() * 2 + 2)
+    rekeyed_rows := [Int]{-1}
     keyed := [BuildGraphNode]{}
     loop node in nodes.move() {
-        digests := node.input_digests.copy()
-        changed := false
-        if node.kind == "check" && subjects.get(node.subject) == .Val(owner) {
-            loop input in package_inputs[owner] -> digests.push(input.copy())
-            changed = true
+        owner := -1
+        if node.kind == "check" && name_find(subjects, node.subject) == .Val(found) {
+            owner = owners[name_index(found)]
         }
-        loop index in 0..<digests.len() {
-            if keys.get(digests[index].name) == .Val(key) {
-                digests[index].digest = key.copy()
-                changed = true
-            }
+        changed := owner >= 0
+        loop input in node.input_digests {
+            if name_find(names, input.name) != None -> changed = true
         }
         if !changed {
             keyed.push(node)
             next
         }
+        digests := node.input_digests.move()
+        if owner >= 0 {
+            loop input in package_inputs[owner] -> digests.push(input.copy())
+        }
+        loop index in 0..<digests.len() {
+            if name_find(names, digests[index].name) == .Val(found) {
+                digests[index].digest = keyed[rekeyed_rows[name_index(found)]].key.copy()
+            }
+        }
         rekeyed: build_session_compiler_node(node.kind, node.subject, digests)
-        keys["{node.kind}:{node.subject}"] = rekeyed.key.copy()
+        id: name_index(name_intern(names, "{node.kind}:{node.subject}"))
+        if id == rekeyed_rows.len() -> rekeyed_rows.push(keyed.len()) else {
+            rekeyed_rows[id] = keyed.len()
+        }
         keyed.push(rekeyed)
     }
     {nodes: keyed.move(), settings: settings.move()}
@@ -600,9 +630,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         build_session_abort(session)
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, false, run.problem.move())
     }
-    // copy: `ran` owns the reported diagnostic, while `evaluated` keeps its error for the
-    // internal_problem/complete checks below. `error` is a payload view, which cannot be moved.
-    if evaluated.error == .Val(error) -> ran.push(error.diagnostic.copy())
+    // `ran` owns the reported diagnostic: the error moves out of `evaluated`,
+    // whose internal_problem/complete checks below never read it.
+    if evaluated.error.move() == .Val(error) -> ran.push(error.diagnostic.move())
     returned: evaluated.value
     if evaluated.internal_problem != None || !evaluated.complete || returned == None {
         build_session_abort(session)
@@ -1165,15 +1195,14 @@ jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool
     if !jet_driver_entry_package_may_have_build(request) -> return false
     load: jet_driver_load(request)
     if !load.complete -> return false
-    package := String?{None}
-    loop loaded_module in load.modules {
-        if loaded_module.module_identity == load.entry_module_identity {
-            package = Val(loaded_module.package_identity.copy())
-        }
+    // The entry module's row of `load.modules`.
+    entry := -1
+    loop (at, loaded_module) in load.modules {
+        if loaded_module.module_identity == load.entry_module_identity -> entry = at
     }
-    entry_package: package ?? return false
+    if entry < 0 -> return false
     loop loaded_module in load.modules {
-        if loaded_module.package_identity != entry_package -> next
+        if loaded_module.package_identity != load.modules[entry].package_identity -> next
         loop item in loaded_module.program.items {
             if jet_driver_item_is_build_entry(item) -> return true
         }

@@ -19,7 +19,7 @@ use {
         jet_driver_build_nodes_under_options,
         jet_driver_build_nodes_under_settings,
         jet_driver_overridden_entry_writers,
-        JetDriverBuildSetting,
+        JetDriverBuildPackageSettings,
         jet_driver_physical_path,
         jet_driver_entry_package_has_build,
         jet_driver_entry_package_profiled,
@@ -282,7 +282,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                 }
                 selection = Val(build_plan_selection(plan))
                 execution = Val(build_plan_execution(plan))
-                receipt = query.graph.copy()
+                receipt = query.graph.move()
                 policy = query.authority_policy
                 generated = build_plan_generated(plan)
                 keyed := response.request.move()
@@ -293,8 +293,8 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                     keyed.build_contributions = lock.build_contributions.copy()
                 }
                 settings_request = Val(keyed.move())
-                // copy: `query` is returned whole to report a failure above.
-                target_generated = query.generated.copy()
+                // `query` reports no failure past this branch.
+                target_generated = query.generated.move()
                 // A `meta.rewrite_body` row's plan source is the new body
                 // alone; it is written and locked as the whole function the
                 // target compiles load.
@@ -347,7 +347,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     projected := receipt ?? return jet_cli_ice("the completed build query has no graph")
     // Each package's sources are keyed under the settings they compile with,
     // and the receipt records those settings and their writers.
-    settings := [JetDriverBuildSetting]{}
+    settings := [JetDriverBuildPackageSettings]{}
     if settings_request == .Val(keyed_request) {
         keyed: jet_driver_build_nodes_under_settings(projected.nodes.move(), keyed_request)
         projected.nodes = keyed.nodes.move()
@@ -602,11 +602,11 @@ jet_cli_build_workspace_members: fn(file: String, color: Bool, options: BuildOpt
         loop notice in notices -> jet_cli_write_notice(notice)
         found: entry ?? next
         if jet_cli_package_declares_build_entry(found.path) {
-            built = jet_cli_build_package_as(found.path, color, options.copy(), [String]{}, threads, None, Val(member.name), locked, trace_sink)
+            built = jet_cli_build_package_as(found.path, color, options, [String]{}, threads, None, Val(member.name), locked, trace_sink)
         } else {
             source: build_files.read(found.path) ?? next
             if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
-            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [String]{}, [JetDriverGeneratedModule]{}, color, options.copy(), threads, None, trace_sink)
+            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [String]{}, [JetDriverGeneratedModule]{}, color, options, threads, None, trace_sink)
         }
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
