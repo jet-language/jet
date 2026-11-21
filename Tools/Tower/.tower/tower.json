@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 112858,
+    "rev": 112875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24380,11 +24380,11 @@
         {
           "n": 38,
           "text": "jet doc's failure line names the function's real failure contract: a function returning `String` under the implicit default prints `failure: String Err! (implicit default Err!)`, as one with no return type prints `failure: Err! (implicit default Err!)`; today it prints `failure: String (implicit default Err!)`, which reads as a failure type of String (probe on the gate-p392 jet, 2026-11-21; the text comes from semindex_failure_contract_name in jet_cli_doc_enrich). Proof: a jet doc golden over a function returning a value under the implicit default, beside the existing undocumented-function golden.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T05:54:45.361Z"
+          "evidence": "Landed bd076eb9d6 (p401, dev 9a0ab2b757). On the p401 batch compiler: JetDoc/a_value_return_names_its_implicit_default_failure passed (the golden prints `failure: String Err! (implicit default Err!)`), beside JetDoc/json_and_local_outputs_are_stable_and_complete, package_fixture_rejects_order_and_content_drift, OutputCallable/inspect_output_spells_the_default_error_beside_never, RatifiedP12/d_fieldmemo1_helper_contract and Semindex/semantic_symbols_carry_shared_docs_and_provenance; `jet check` of JetFoundation, JetSemIndex, JetSema and JetCLI rc=0.",
+          "at": "2026-11-21T09:08:27.743Z"
         },
         {
           "n": 39,
@@ -24394,6 +24394,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T07:42:23.872Z"
+        },
+        {
+          "n": 40,
+          "text": "The semantic index spells a module one way: `definitions[].module` gives \"core.compiler\" while the identities give \"core_compiler\" for the same module (seen by Lens on the p400 jet, 2026-11-21, building c19). One spelling, used by every section, with the typed result and the CLI JSON agreeing. Proof: a case asserting the same module spelling in definitions and identities.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T09:00:19.852Z"
         }
       ],
       "refs": [
@@ -24423,10 +24432,10 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T07:42:23.872Z",
+      "updated": "2026-11-21T09:08:27.743Z",
       "updatedBy": "Main",
       "workOrder": 19,
-      "criteriaLastN": 39
+      "criteriaLastN": 40
     },
     {
       "id": "c0svneex",
@@ -42101,6 +42110,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-21",
+          "by": "Main",
+          "text": "Same-run cat on the p403 batch compiler (dev 236298d8c0, 2026-11-21; $JET_SCRATCH_ROOT/lanes/Main/probe-6444/bench.sh, 2M lines / 93 MB on a pipe, hyperfine -N 30 runs interleaved, jet build --release against rustc -O). Reads are fixed: jetcat makes 1,427 read(0) calls averaging 65,487 bytes (rscat makes 11,409 of 8,191), and both outputs are byte-identical to the input. Speed still loses: wall 132.0 ± 5.8 ms against 117.6 ± 3.8 ms (Jet/Rust 1.12), user+sys 131.1 against 116.8 ms (1.12). c1 stays open: the remaining cost is past the read path (per-line handling or the write path), for E24."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
@@ -42162,7 +42176,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-17T01:42:36.666Z",
+      "updated": "2026-11-21T09:38:35.948Z",
       "updatedBy": "Main"
     },
     {
@@ -45709,7 +45723,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -45758,11 +45772,11 @@
         {
           "n": 1,
           "text": "The Engine-unit claim 'store broker realize verified round trips through broker and fails closed on auth' passes on the assembled Engine unit at O0, O1 and O2, and a minimal repro of the faulting pattern passes too. Proof: `jet test Jetpack/Engine --filter store_broker_realize_verified` and `jet test Compiler --profile cases --filter NativeFault/null_deref_repro`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:01:45.395Z"
+          "evidence": "Repro landed f3a531ada7 (p401). On the p403 batch compiler (dev 236298d8c0, 2026-11-21): the Engine unit assembled by `JETPACK_BOOTSTRAP_TEST_AREAS=Engine jet Jetpack/Bootstrap/Assemble.jet aot` (719 sources, 564 test claims), then in its project `jet test src/jetpack.jet -O0|-O1|-O2 --filter=\"store broker realize verified round trips through broker and fails closed on auth\"` printed \"pass\" and \"1 passed, 0 failed, 0 skipped\" at each of O0, O1 and O2. NativeFault/null_deref_repro passed in the p401 proofs and in the p403 full suite.",
+          "at": "2026-11-21T09:46:54.613Z"
         },
         {
           "n": 2,
@@ -45779,9 +45793,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T10:39:48.294Z",
-      "updated": "2026-11-17T20:17:42.948Z",
+      "updated": "2026-11-21T09:46:56.206Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-21T09:46:56.206Z"
     },
     {
       "id": "c0q4s6en",
@@ -49809,6 +49824,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T22:00:45.406Z"
+        },
+        {
+          "n": 5,
+          "text": "No case fails because its neighbours took the memory: the suite's concurrency is bounded by a memory budget per case, or a case that hits its cgroup cap is reported as a resource failure with the cap named, never as the program's own failure. In the p403 full suite (dev 236298d8c0, 2026-11-21), Atomics/d_atomic_width1_contract ERRORed with the runtime's \"memory allocation of 32 bytes failed\" under the suite's shared MemoryMax scope, and AuthorityManifest/i9_repl_keeps_the_authority_project_meaning hit \"process resource limit exceeded\". The atomics case passed alone on the same compiler. Proof: a full suite run with no case ERROR from allocation failure, and the runner's report naming the cap on a forced over-cap case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T09:38:43.044Z"
         }
       ],
       "refs": [],
@@ -49816,9 +49840,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-18T22:00:45.406Z",
+      "updated": "2026-11-21T09:38:43.044Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0f9brds",
@@ -55318,11 +55342,11 @@
         {
           "n": 83,
           "text": "G32: The best-in-existence review probes the Canvas Debug and Profile views against RemedyBG: the time to the first painted stop and the panels shown, measured by a probe axis, with a verdict. Proof: that axis's log in the review.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:14:06.997Z"
+          "evidence": "Landed 1a4381fdd9 (p401, dev 9a0ab2b757): Docs/Audits/2026-11-19-debug-profile-best-in-existence.md revision 6, axis D11, with its log Docs/Audits/BestInExistence20261119/Probes/run-p399.log section \"== Canvas: the Debug and Profile views, their first paint and panels, against RemedyBG\". It measures continue-to-breakpoint painting the stop in 56.8 ms, the six panels at the stop (Source, Call Stack, Locals, Watches, Tasks, Debug Console) and the Profile timeline painted 262.3 ms after entry, against RemedyBG. Verdict: fails, since the Debug view lacks memory, registers and disassembly; that gap is c108 (G40). This criterion asks for the probe, the measurement and the verdict, which the axis gives.",
+          "at": "2026-11-21T09:09:21.199Z"
         },
         {
           "n": 84,
@@ -55377,11 +55401,11 @@
         {
           "n": 89,
           "text": "G38: An attached capture's header reports the attach window's own wall and CPU time (about 500 ms for a 500 ms window), never `run_wall=1443ns run_cpu=0ns`. Proof: a Perf attach case and the probe axis p3.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T03:14:12.504Z"
+          "evidence": "Landed cc5134ea59 (p401, dev 9a0ab2b757). On the p401 batch compiler: Perf/attach_turns_zones_on, attach_drains_flight_ring and attach_samples_a_plain_jet_process passed, as did `jet test Compiler/JetCLI/Tests/Perf.jet --filter=window`. Probe axis p3 (Docs/Audits/BestInExistence20261119/Probes/run.py JET REPO p3, p401 jet, 2026-11-21): `jet perf attach PID --source live.jet --zones=500ms` writes a header of `window=live run_wall=500326936ns run_cpu=14260125ns`, the 500 ms window's own time, where p399 gave run_wall=1443ns run_cpu=0ns.",
+          "at": "2026-11-21T09:09:02.971Z"
         },
         {
           "n": 90,
@@ -55431,11 +55455,11 @@
         {
           "n": 95,
           "text": "Machine code is visible through Jet's own tools, after a ratified ballot for the surface: `jet debug` disassembles the function at a stop or by name, with each instruction mapped to its source line, and `jet perf view` annotates a hot line's instructions with their sample shares (perf annotate parity), on every native tier. Proof: a Debug case and a Perf case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T06:40:03.752Z"
+          "evidence": "D-DISASM1 ratified A. Landed c0e8fae53e (p401, dev 9a0ab2b757) beside the earlier view-instructions work. On the p401 batch compiler: Debug/disassemble_maps_inlined_code_at_every_tier (jet debug disas at a stop and by name at -O0, -O1 and -O2, each instruction under its source line, inlined lines included, no other disassembler on PATH) and Debug/disassemble_marks_stop_and_breakpoint passed; Perf/view_instructions_lists_sampled_code (jet perf view --instructions with per-instruction sample shares at -O0, -O1 and -O2) passed in the p401 full suite.",
+          "at": "2026-11-21T09:08:29.698Z"
         },
         {
           "n": 96,
@@ -55623,7 +55647,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T08:26:17.433Z",
+      "updated": "2026-11-21T09:09:21.199Z",
       "updatedBy": "Main",
       "criteriaLastN": 112
     },
@@ -61720,6 +61744,11 @@
         {
           "at": "2026-11-21",
           "by": "Main",
+          "text": "Ballot D-PLUGIN-ENGINE1 posted to the owner (2026-11-21): the engine that translates a plugin loaded by a run-time path. Drafted by Rivet; Lens reviewed it four times (r0, r1 and r2 rejected with 10, 7 and 6 findings; r3 accepted; r4 applies Lens's three wording notes and was passed by Lens, sha256 0f5c80c3). The sema half of this card stays held until the vote."
+        },
+        {
+          "at": "2026-11-21",
+          "by": "Main",
           "text": "Blocked on an engine choice (2026-11-21, Rivet): plugin.load today translates the literal artifact into native code at build time (JetPlugin Link.jet), and the runtime only verifies the bytes. A path computed at run time needs a run-time WASM engine, and none exists. D-CORE-PLUGINPATH1=A compiles at load but names no native engine (it was written against the Rust host Wasmtime). Ballot D-PLUGIN-ENGINE1 is being drafted (interpreter, load-time translator, baseline JIT, out-of-process helper). The sema/Core half is staged held until it is ratified, so no load-always-refuses surface ships."
         },
         {
@@ -61761,7 +61790,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-21T08:10:41.683Z",
+      "updated": "2026-11-21T09:23:10.888Z",
       "updatedBy": "Main"
     },
     {
@@ -72591,11 +72620,11 @@
         {
           "n": 22,
           "text": "jet perf attach gives every fact Tools/Perf/JetcProfile took from perf record before its port to attach (Errors3202-6995-c1-jetcprofile-attach): a window longer than 1 s, each hot function's declaration file:line, the per-phase split of a running compiler, folded stacks with a flame graph, and the stack-quality summary (unwound vs broken stacks). Proof: a Perf case that attaches to a busy `jet check` for 3 s and asserts each of the five in the view.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T20:17:36.265Z",
+          "evidence": "Landed 17a06156b2 (p401, dev 9a0ab2b757). On the p401 batch compiler, `jet test Compiler --profile cases --filter Perf/attach_gives_the_jetcprofile_facts` passed (n=1 bad=0) and in the p401 full suite: the case attaches to a busy `jet check` and asserts the window over 1 s, a hot function's declaration file:line (this commit), the per-phase split, folded stacks with the flame graph and the stack-quality summary.",
+          "at": "2026-11-21T09:08:25.661Z",
           "proof": {
             "profile": "cases",
             "filter": "Perf/attach_gives_the_jetcprofile_facts"
@@ -72630,12 +72659,12 @@
         },
         {
           "n": 26,
-          "text": "At a fault inside a runtime routine, jet debug shows at least what the crash report shows. Today, on the program_owned_main `plain` image (p392), the crash report backtrace lists jet_rt_stop_domain and unit.trap_simple_report above run at plain.jet:7, but `backtrace` at the SIGSEGV stop lists only `#0 run() at plain.jet:7` and `frame 1` is refused. Neither the stop nor any command names the faulting instruction, the address it read or the registers. The user line stays the stop line; the runtime frames are listed under it, and the stop names the faulting pc, instruction and address. Proof: a JetDebug unit test or Debug case on that image whose backtrace lists jet_rt_stop_domain and whose stop text names address 0x10.",
-          "status": "open",
-          "metBy": null,
+          "text": "At a fault inside a runtime routine, jet debug shows at least what the crash report shows. Today, on the program_owned_main `plain` image (p392), the crash report backtrace lists jet_rt_stop_domain and unit.trap_simple_report above run at plain.jet:7, but `backtrace` at the SIGSEGV stop lists only `#0 run() at plain.jet:7` and `frame 1` is refused. Neither the stop nor any command names the faulting instruction, the address it read or the registers. The user line stays the stop line; the runtime frames are listed under it, and the stop names the faulting pc, instruction and address. Proof: a JetDebug unit test on a fault dev still has (mem.list_append from address 0x40 under #Unsafe in a release build with debug info, faulting inside jet_rt_mem_move) whose stop text names the routine and fault address 0x40 with the pc and instruction, and whose backtrace lists jet_rt_mem_move above the user frames, with the routine frame selectable.",
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T05:18:11.896Z"
+          "evidence": "Landed 64683b5928 (p401, dev 9a0ab2b757). On the p401 batch compiler: `jet test Compiler/JetDebug/Tests/Native.jet` rc=0 PASS, including the test at Native.jet:1180-1207 asserting \"Program received SIGSEGV  prog.jet:6  in spill()\\n  through jet_rt_mem_move\\n  fault address 0x40  pc 0x\", \" <jet_rt_mem_move+\", bt \"#0  jet_rt_mem_move  at 0x\" and the selected routine frame; the Debug cases a_fault_stops_like_a_breakpoint_with_its_stack_readable, stopping_exit_pauses_with_the_stack_whole, crash_dump_opens_typed and a_worker_s_stopping_exit_ends_after_delete_and_continue pass; UnsafeRatchet --check PASS. p401 full suite: no new failure from this commit.",
+          "at": "2026-11-21T09:08:23.501Z"
         },
         {
           "n": 27,
@@ -72645,6 +72674,15 @@
           "verifiedBy": null,
           "evidence": "Landed Rivet c27.r2 as 9aee67021d in p400: the debugger resolves a stop source against the build root recorded in the image (digest-verified, .git walk capped) and says when it cannot read it. p400 full suite (49abf9184a): Debug/built_image_shows_its_source_from_another_directory PASS, Debug/built_image_names_its_missing_source PASS, Debug/built_image_never_shows_a_changed_source PASS, Debug/built_image_finds_its_source_through_a_breakpoint_path PASS, and the Debug suite 151 PASS, 0 FAIL.",
           "at": "2026-11-21T07:46:48.161Z"
+        },
+        {
+          "n": 28,
+          "text": "The task-clock accounting holds under load: a run's period ends equal its kept samples plus those that fell in kernel mode, and the sampler reports and accounts any the kernel threw away (throttled or lost records) instead of letting the totals disagree. In the p401 full suite (dev 9a0ab2b757, 2026-11-21) Tests/Cases/Perf/task_clock_nominal_matches_kept.case failed at -O1 with nominal 460 against kept+kernel 458; the same case passed alone on the same compiler and in p399 and p400. Proof: the case passing in a full-suite run, plus a unit test in which the sampler's count includes injected lost or throttled records.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-21T09:03:36.000Z"
         }
       ],
       "refs": [],
@@ -72652,9 +72690,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T07:46:48.161Z",
+      "updated": "2026-11-21T09:08:25.661Z",
       "updatedBy": "Main",
-      "criteriaLastN": 27
+      "criteriaLastN": 28
     },
     {
       "id": "c0c3gh6u",
@@ -128585,6 +128623,312 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T07:39:54.222Z"
+    },
+    {
+      "id": "D-PLUGIN-ENGINE1",
+      "cardId": "c0yuouhx",
+      "group": "architecture",
+      "title": "Choose what runs a plugin whose path is known only at run time",
+      "situation": "Today `plugin.load` takes only a literal path. When the program is built, the compiler reads that component and translates it into the program's own machine code. At run time the host only checks that the file still matches the copy it was built from. The ratified decision D-CORE-PLUGINPATH1 adds `plugin.load<Trait>(path, policy)`, whose path is computed while the program runs. A built program holds nothing that can run a component it never saw, so that load needs an engine. No decision picks one, and this ballot does. The main users are Jetpack's build-plugin and compiler-extension hosts, which load plugins chosen at run time. We recommend translating the component when it loads, inside the host, with the translator and code generator that already serve literal paths.",
+      "gist": "When a program loads a plugin whose path it learns only at run time, what runs that plugin's code?",
+      "lesson": "A plugin is a WebAssembly component: portable code that a host runs inside a sandbox. Something must turn it into work the processor does. An interpreter reads each instruction and acts on it, so it is small but slower. A translator turns the whole component into machine code before the first call, so calls run at full speed, but the translator must be present at load. It can live inside the program or in a helper process beside it.",
+      "explainer": "Beginner path: the code is the same under every option. A user declares a trait, calls `plugin.load<Analyzer>(path, policy)`, and calls `tool.analyze(bytes)`. A missing or mistyped export is refused at load under every option. What changes is the size of the built program, the speed of each call, and whether a helper file must ship beside it.\n\nExpert path: the expert adds `limits: plugin.Limits{...}` and handles each `PluginError`. Under A and E the guest runs the same translated code as a literal-path plugin, with the same fuel, time, memory, table and bounds checks and the same frames. Under B that code runs in a child process. C and D add a second way of running guest code, so each must repeat those checks to the same rules.\n\nFor `plugin.load<I>` the expert can also pass `load: plugin.LoadLimits{body_bytes:, timeout:, memory_bytes:}`. Every option bounds its load work by all three: A and D in the host, B and E in the helper, and C over decoding.",
+      "story": "Ravi ships a log tool that loads customer-written filters from a folder named on the command line. Under A he ships one file. Each filter is translated when it loads and then runs at native speed. A filter without `analyze` is refused at load with a message naming it. Under B or E he must also ship an engine helper beside his tool. Under C his tool is at least 3.5 MB smaller, but filters run slower.",
+      "inWild": "// Wasmtime (Rust): the component is compiled to machine code when it loads,\n// by Cranelift (optimizing) or Winch (single pass), inside the host process.\nlet engine = Engine::default();\nlet component = Component::from_file(&engine, &path)?;\nlet (tool, _) = Analyzer::instantiate(&mut store, &component, &linker)?;\nlet report = tool.call_analyze(&mut store, &snapshot)?;\n// Ahead-of-time variant: `wasmtime compile` writes a .cwasm file,\n// and Component::deserialize maps it; that call is marked unsafe.",
+      "detail": "Code read on dev 49abf9184a. Measurements used the compiler at commit 628e9695aa on x86-64 Linux, one small program at a time.\n\nLiteral loads today: the plugin link step (Compiler/JetPlugin/Source/Plugin/Link.jet) reads each literal artifact while the program is built. It decodes it with JetWasm and translates every core function into the program's own JetIR functions (Translate.jet). The runtime host (Compiler/JetRuntime/Source/PluginHost.jet) calls that code in process. At load, pg_load only compares the file's bytes with the copy embedded at build time.\n\nFuel is spent at function entry and at loop heads, in slices of 4096. The deadline is checked when a slice runs out, so a call past its deadline fails as Budget(.Time) and the plugin keeps serving calls. Memory and table growth go through runtime checks against the load's caps.\n\nA computed path does not type-check today. `jet check` on a host that calls `tool.analyze(41)` after `plugin.load(\"{name}.wat\", policy)` reports `Plugin export \\`analyze\\` has no Component interface`.\n\nSame-program size, built with `jet build` (O2). Both programs build an Authority, read `process.args()` and print one number:\n\n```text\nwithout a plugin                            179,832 bytes\nwith one literal plugin and one call        265,592 bytes\nthe plugin host code adds                    85,760 bytes\n```\n\nCall speed. One million calls of a one-instruction export took 54 to 66 ms over several runs. So a call costs about 55 to 65 ns.\n\nWhat the optimizer is worth. A guest loop that makes a call, a load and a store each iteration ran 60 calls of 2 million iterations. Process user time, in two builds of the same host:\n\n```text\n                    build 1          build 2\nguest built at O0   462 to 470 ms    439 ms\nguest built at O2   313 to 320 ms    303 ms\nO0 time / O2 time   1.47             1.45\n```\n\nSo O2 runs such a guest about 1.45 times faster. A three-instruction loop settles nothing. Its O0/O2 ratio was 1.96 in one build and 0.82 in the other, from code layout alone.\n\nLoad cost and memory, as upper bounds. Each row is a whole `jet build` of a host that loads one literal plugin and calls it. So it includes the front end, the WAT reader and the link, and the translation alone costs less. These builds don't use the build store: an empty store gave the same times and stayed empty. The large guests have one generated function body of arithmetic with a branch every 16 steps:\n\n```text\nguest code                    peak RSS        wall time\nnone (the host alone)          82 MB          0.04 s\nSandboxMathKit, 17 KB          101 to 109 MB  0.07 to 0.09 s\none 247 KB body                174 to 178 MB  0.42 to 0.55 s\none 1,012 KB body              454 to 466 MB  2.07 to 2.15 s\n```\n\nO0 and O2 differ by under 5 percent in each row. Under heavy machine load, another run took 0.38 to 0.75 s for SandboxMathKit, also with no store use. Memory and time grow about linearly with the code: about 380 bytes of memory per byte of guest code.\n\nThe largest function body in the WebAssembly the repository ships is 94,691 bytes, in the site's 796 KB HarfBuzz module. The largest in a shipped component is 6,352 bytes, in the Zed extension.\n\nMachine code in the jet binary, summed from its symbol table by source file:\n\n```text\nJetWasm decoder, validator, component, opcodes    about 0.35 MB\nJetWasm WAT text reader (Text.wat_*)               353,630 bytes\nJetPlugin translator, link, descriptor, interface  about 0.25 MB\nJetIR x64 selection, allocation, module, SSA, IR  1,534,065 bytes\nJetBackend x64 encoder                              45,788 bytes\nJetBackend in-memory linker (MemoryLink)           158,381 bytes\nJetIR optimizer passes (Opt*)                    1,931,419 bytes\n```\n\nSo A needs at least 2.18 MB of code at O0, for binary `.wasm` only. Linking in memory adds an estimated 0.16 MB, taking MemoryLink as the stand-in. An O1 or O2 host adds the optimizer, about 1.93 MB more.\n\nThese are lower bounds. JetPlugin also depends on JetFoundation and on more of JetIR than the rows above. A user host links no compiler code, so it shares none of that. It would link only the part the translator reaches, which is not measured. In `jet`, JetFoundation's functions total 13.9 MB and JetIR's 13.6 MB. JetWasm depends on nothing, so C and D carry none of this. The gap between A and C is therefore larger than the table shows.\n\nSize per host and per option. The A column sums the measurements above, so it is a lower bound. The C, D and E columns are estimates. B's helper is an estimated 4.5 MB file, shipped once:\n\n```text\nhost                               A (min)  B             C        D        E\njet run program (O0)               +2.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\njet build program (O2)             +4.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\njetpack build-plugin and\ncompiler-extension hosts           +4.3 MB  +helper file  +0.6 MB  +0.8 MB  +0.2 MB\nthe same hosts moved into `jet`    +0      +0            +0.6 MB  +0.8 MB  +0\n```\n\nThe jetpack binary today links only the compiler front end (Jetpack/Bootstrap/sources.list), so its hosts pay A's full size. The design note plans to run them inside `jet`, which already links the translator and back end. Then they pay nothing under A. For scale, the nixpkgs build of libwasmtime.so 48.0.0 is 50,449,344 bytes; a trimmed embedding is smaller.\n\nPipe round trip: a Python loop writing 8 bytes to a native `cat` child and reading them back took 6.4 to 6.6 microseconds. Python's own write and read cost 1.1 microseconds, so a native round trip is about 5 microseconds. That is roughly 80 to 100 times one in-process call.\n\nWeb tier: `plugin.load` needs the `Exec` effect, and the web target denies it. Building the plugin host with `--os=web` fails today with `Jet.TargetDeniedEffect: run uses Exec, which target wasm32-unknown-unknown denies`. No option changes that. Native code generation is x86-64 only today, so every option serves Linux x86-64 hosts.\n\nSystems that forbid new machine code: SELinux with deny_execmem, or PaX MPROTECT, refuse to make written memory executable. A, D and E map new code in the host, so their run-time loads fail there unless the host binary is exempted. B maps code only in its helper, so exempting the helper is enough. C maps no code and works. Literal-path plugins are built into the program, so they work under every option.\n\nThe design note Docs/Proposals/plugin-wasm-engine-2026-10-29.md leaves a run-time path in a user program out of scope until a ballot asks for one.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Translate at load, in the host process",
+          "detail": "A program that calls `plugin.load<T>` links the WebAssembly decoder, the plugin translator and the code generator's back end. At load, Core reads the bytes once and checks the optional sha256. It decodes the component, checks every trait method against the exports, then translates and compiles it in memory. It translates at the host's own level: O0 under `jet run`, O2 under `jet build`. So it runs the same code as a literal-path guest. A run-time path must name a binary `.wasm` file.",
+          "technical": "The link step's translation becomes callable at run time and writes an in-memory module. The runtime relocates it and maps it executable after writing, never both at once. The descriptor and PluginHost stay as they are. Fuel slices, the deadline check, memory and table caps, and frames are unchanged. Loads translate one at a time behind one runtime lock. The same sha256 in one process translates once, and later loads reuse that code with their own limits.\n\nSize: at least 2.3 MB in an O0 host and 4.3 MB in an O1 or O2 host. Load: one translate and compile per new component, under 0.1 s for SandboxMathKit and about 2 s for a 1 MiB function body, both bounded by full builds. Calls: about 55 to 65 ns, as literal plugins. Web: refused at build, as today, because `plugin.load` needs `Exec`. I9: one code generator on every level, so no exception.\n\nLoad limits are a new value, `plugin.LoadLimits`, passed as `load:`. Only `plugin.load<I>` takes it. The literal form has no `load:` argument, so passing one there is a compile error. A field of zero or less fails the load as Guest in load before the component is read, as `Limits` does.\n\nThe defaults come from the build measurements in the detail. `body_bytes` is 1 MiB, 11 times the largest body found. `timeout` is 10 s, about 4.7 times the 2.15 s build of a 1 MiB body. `memory_bytes` is 1 GiB, over twice the 466 MB that build peaked at.\n\nThe translation runs under the typed `task.timeout`, which hands a passed deadline back as an error. The load turns it into Budget(.Time) in load, and the host keeps running. The deadline starts when the load takes the translation lock, so a load waiting on another never times out on its account.\n\nCounting the translation's memory is new runtime work. Past the cap, the load fails as Budget(.Memory).\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as a literal plugin\nbad module        Guest in load: couldn't load plugin `x.wasm`: not a WebAssembly\n                  Component: magic header not detected (at byte 0)\nmissing method    Guest in load: couldn't load plugin `x.wasm`: x.wasm does not\n                  export `analyze` required by Analyzer\n.wat path         Guest in load: couldn't load plugin `x.wat`: a run-time path must\n                  name a binary .wasm component\nload race         one read; the sha256, decoder and translator use that buffer\nconcurrent loads  serialized by one lock; a second load waits, and its load.timeout\n                  starts when it takes the lock. The wait itself has no bound, so a\n                  host that needs one wraps the call in its own task.timeout; a load\n                  cancelled while it waits never takes the lock\ntranslator defect stops the host with Jet's internal-error report, not a PluginError\ncompile bomb      a body over load.body_bytes is refused as Guest in load; past\n                  load.timeout the translation stops at its next loop or call,\n                  Budget(.Time) in load; past load.memory_bytes, Budget(.Memory)\nno runtime code   on a host that forbids new executable memory (SELinux deny_execmem,\n                  PaX MPROTECT): Guest in load: couldn't load plugin `x.wasm`: this\n                  system forbids mapping new machine code; literal plugins still work\nuntrusted bytes   reach the decoder, validator and back end inside the host;\n                  the validator runs first\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// A: the load translates in the host at the host's level; calls take 55 to 65 ns.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// Memory past 32 MiB fails as Budget(.Memory), checked by the runtime as today."
+        },
+        {
+          "key": "B",
+          "name": "Translate and run in a helper process",
+          "detail": "The host starts an engine helper, `jet-plugin-engine`, for each loaded plugin. The host reads the bytes, checks the sha256 and pipes those exact bytes to the helper. The helper never opens the path. It decodes, checks and translates the component, then runs each export on request over two pipes. A crashing guest or translator cannot touch host memory. The helper ships beside the program or with the Jet toolchain.",
+          "technical": "The helper holds A's code as its own executable, an estimated 4.5 MB or more, shipped once. The host grows only by its start and pipe code. Each call becomes a pipe round trip of about 5 microseconds, measured as an upper bound through Python.\n\nLimits: the helper's translated code checks fuel, deadline, memory and tables exactly as A does. A call past its deadline returns Budget(.Time) and the plugin keeps serving calls. The host stops the helper only if it does not answer within the deadline plus one second. That call then fails as Defect, and so do later calls. Web: refused at build, as today. I9: one code generator, so no exception. Literal-path plugins still run in process, so guests run two ways.\n\nEdge cases:\n\n```text\nguest trap        the helper sends the fault and frames; the host builds the same PluginError\nbad module        the helper's decoder refuses it; same Guest in load message as A\nload race         the host hashes and pipes the bytes it read; the helper never reopens the path\nconcurrent loads  one helper per load; nothing shared\ntranslator defect the helper exits; that load or call fails as Defect, the host lives\ncompile bomb      the helper refuses a body over load.body_bytes; the host stops it past\n                  load.timeout: Budget(.Time) in load; the helper counts its translation\n                  memory as A does: past load.memory_bytes, Budget(.Memory) in load.\n                  That cap covers translation only; the guest's memory stays under\n                  Limits.memory_bytes, reserved as today\nno runtime code   works once the helper alone is exempted; the host maps no code\nmissing helper    Guest in load: couldn't load plugin `x.wasm`: the plugin engine\n                  `jet-plugin-engine` was not found\nuntrusted bytes   reach only the helper; the host parses replies only\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// B: the load starts jet-plugin-engine and pipes it the bytes; a call is a round trip.\n// Past 2 s the helper's own check returns Budget(.Time); the plugin keeps serving.\n// A helper silent for 3 s is stopped; that call and later calls fail as Defect."
+        },
+        {
+          "key": "C",
+          "name": "Interpret the component in the runtime",
+          "detail": "The shared runtime gains an interpreter beside the WebAssembly decoder. At load it decodes and checks the component. Each call then steps through the guest's instructions one at a time. Nothing ships beside the program, and loading does no translation. Guest code runs slower than translated code.",
+          "technical": "Size, an estimate: the decoder is about 0.35 MB measured, plus an interpreter of 0.1 to 0.3 MB. Wasm3, a C interpreter, needs about 64 KB of code. So C saves at least 3.5 MB against an O2 host under A. Speed: on CoreMark, wasm3 ran 4 times slower than an optimizing wasmtime and 12 times slower than native code. Those numbers are from 2019 and 2020.\n\nLimits: the interpreter must spend fuel at function entry and loop heads, in slices of 4096, and check the deadline at each slice end. Then Budget(.Fuel) falls at the same point as in translated code. Memory and table growth call the same runtime checks. These rules become a second copy of the translator's checks. Web: refused at build, as today; C would be the only option able to run in a browser later.\n\nI9 forbids an interpreter on any level. So C needs this ratified exception:\n\n\"Excluded from I9 on O0, O1 and O2: a plugin guest loaded by `plugin.load<T>` runs in Core's WebAssembly interpreter, not the Jet code generator. Literal-path guests are unchanged. The web tier has no `plugin.load`.\"\n\nEdge cases:\n\n```text\nguest trap        frames come from the interpreter's own call stack; offsets must match A's\nbad module        same decoder; same Guest in load message as A\nload race         one read, as A\nconcurrent loads  no shared state\ninterpreter defect stops the host, as A\ncompile bomb      none; loading only decodes and validates, under load.body_bytes,\n                  load.timeout and load.memory_bytes as in A\nno runtime code   works; the interpreter maps no code\nuntrusted bytes   reach the decoder, validator and interpreter inside the host\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// C: Core's interpreter runs analyze; fuel counts at function entry and loop heads.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// Memory and table caps use the same runtime checks as translated guests."
+        },
+        {
+          "key": "D",
+          "name": "Single-pass WebAssembly compiler in the runtime",
+          "detail": "The runtime gains a baseline compiler that turns each WebAssembly function straight into x86-64 code in one pass. Loading is fast and the compiler is small. Calls run in process. It is a second code generator beside Jet's own, with its own copy of the bounds, fuel and deadline checks.",
+          "technical": "Size, an estimate: the decoder is about 0.35 MB measured, plus a one-pass emitter of 0.3 to 0.6 MB. No comparable Jet code exists to measure. Speed: on the same CoreMark table, Wasmer's single-pass compiler ran about 1.6 times slower than its Cranelift compiler. Those numbers are from 2019 and 2020.\n\nLimits: the emitter must spend fuel at function entry and loop heads, in slices of 4096, and check the deadline at each slice end. Memory and table growth call the same runtime checks. It becomes a second trusted sandbox to audit. Web: refused at build, as today.\n\nI9 forbids a second code generator. So D needs this ratified exception:\n\n\"Excluded from I9 on O0, O1 and O2: a plugin guest loaded by `plugin.load<T>` is compiled by Core's single-pass WebAssembly compiler, not the Jet code generator. Literal-path guests are unchanged. The web tier has no `plugin.load`.\"\n\nEdge cases:\n\n```text\nguest trap        frames come from the emitter's own frame records; offsets must match A's\nbad module        same decoder; same Guest in load message as A\nload race         one read, as A\nconcurrent loads  serialized by one lock, as A\ncompiler defect   stops the host, as A\ncompile bomb      linear in size; load.body_bytes, load.timeout and\n                  load.memory_bytes apply as in A\nno runtime code   fails as in A unless the host is exempted\nuntrusted bytes   reach the decoder, validator and emitter inside the host\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// D: a guest-only compiler builds each function in one pass, with its own checks.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// Memory and table caps use the same runtime checks as translated guests."
+        },
+        {
+          "key": "E",
+          "name": "Translate in a helper at load, run in the host",
+          "detail": "At load the host pipes the bytes it read to an engine helper, `jet-plugin-engine`. The helper translates them with A's translator and returns native code tagged with the bytes' sha256. The host checks the tag, maps the code and runs it in process, as A does. The host stays small, and translator crashes and compile bombs stay in the helper. A steered translator bug still yields code the host runs, so escapes are not isolated. The helper must ship beside the program and match its Jet version exactly.",
+          "technical": "This is Wasmtime's precompile route done fresh at each load, with no file cache. Size: the host adds a loader of an estimated 0.2 MB, with MemoryLink as the stand-in. The helper is an estimated 4.5 MB or more, shipped once. Calls: about 55 to 65 ns, as A. Load: a process start plus A's translation.\n\nLimits, frames and the web tier behave as in A. I9: one code generator, so no exception.\n\nA disk cache keyed by sha256 would skip repeat translations. It is left out. Any process that can write the cache could plant native code that runs outside the sandbox. Wasmtime marks `Component::deserialize` unsafe for the same reason.\n\nEdge cases:\n\n```text\nguest trap        same PluginError and frames as A\nbad module        the helper's decoder refuses it; same Guest in load message as A\nload race         the host hashes and pipes the bytes it read; the reply must carry that sha256\nconcurrent loads  one helper per load\ntranslator defect the helper exits; the load fails as Defect, the host lives\ncompile bomb      the helper refuses a body over load.body_bytes; the host stops it past\n                  load.timeout: Budget(.Time) in load; the helper counts its translation\n                  memory as A does: past load.memory_bytes, Budget(.Memory) in load\nmissing helper    Guest in load: couldn't load plugin `x.wasm`: the plugin engine\n                  `jet-plugin-engine` was not found\nversion mismatch  Guest in load: the plugin engine is from another Jet version\nuntrusted bytes   reach only the helper, but a translator bug a crafted component\n                  steers, such as a dropped bounds or fuel check, yields code the host\n                  maps and runs; escape exposure equals A's\nno runtime code   fails as in A unless the host is exempted, since the host maps the code\n```",
+          "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    path: \"plugins/{process.args()[0]}.wasm\"\n    caps: plugin.Limits{fuel: 50_000_000, memory_bytes: 33_554_432, timeout: Duration{2s}}\n    tool: plugin.load<Analyzer>(path, policy, limits: caps)\n    if tool.analyze(\"rows\".bytes()) == {\n        .Ok(report) -> { print(\"{report.len()} bytes\") }\n        .Err(error) -> print(\"analyze failed: {error}\")\n    }\n}\n// E: jet-plugin-engine translates at load; the host maps the code and calls it in process.\n// Past 2 s a call fails as Budget(.Time); the plugin keeps serving calls.\n// A missing or mismatched helper refuses the load as Guest in load."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (Wasmtime)",
+          "note": "Compiles a component to machine code when it loads, inside the host process, with Cranelift or the single-pass Winch. It can also precompile ahead and map the result, which it marks unsafe.",
+          "code": "let component = Component::from_file(&engine, &path)?;\n// or, ahead of time:\nlet bytes = engine.precompile_component(&wasm)?;\nlet component = unsafe { Component::deserialize(&engine, &bytes)? };"
+        },
+        {
+          "lang": "C (wasm3)",
+          "note": "An interpreter of about 64 KB of code. It loads quickly, and its guest code ran 4 times slower than an optimizing compiler on CoreMark in 2019.",
+          "code": "m3_ParseModule(env, &module, bytes, size);\nm3_LoadModule(runtime, module);"
+        },
+        {
+          "lang": "JavaScript (V8)",
+          "note": "Compiles WebAssembly at load with a single-pass compiler, then recompiles hot functions with its optimizing one.",
+          "code": "const { instance } = await WebAssembly.instantiate(bytes, imports);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A runs a run-time-path plugin with the same code and checks a literal-path plugin runs. It needs no helper file and no I9 exception. Its cost is size, paid only by programs that call `plugin.load<T>`.",
+        "gains": [
+          "Run-time-path calls cost the same as literal-path calls, about 55 to 65 ns.",
+          "One translator and one set of fuel, time, memory and bounds checks for every plugin.",
+          "A program that loads plugins still ships as one file."
+        ],
+        "losses": [
+          {
+            "loss": "Hosts that use `plugin.load<T>` grow by at least 2.3 MB at O0 and 4.3 MB at O2.",
+            "mitigation": "Only those hosts pay it. Hosts run inside `jet` pay nothing, because `jet` already links this code."
+          },
+          {
+            "loss": "A translator defect stops the host instead of failing one load.",
+            "mitigation": "The validator rejects malformed input before translation. A WebAssembly spec-test runner and a fuzzer of mutated components are required work under A; neither exists today. Run-time loads stay off until the spec suite's core tests pass and the fuzzer runs with no open crash."
+          },
+          {
+            "loss": "Untrusted bytes reach the decoder, validator and back end inside the host process.",
+            "mitigation": "Wasmtime accepts this exposure with Cranelift, behind continuous fuzzing; A takes on the same fuzzing as required work. The validator runs first, and `plugin.LoadLimits` bounds body size, time and memory."
+          },
+          {
+            "loss": "Each new component is translated and compiled before its first call.",
+            "mitigation": "A small component takes under 0.1 s, a 1 MiB function body about 2 s. Jetpack build plugins pay it on every build, and compiler extensions at every `jet` start. Loads of the same sha256 in one process translate once. A host that calls a plugin often keeps one handle open."
+          },
+          {
+            "loss": "On a system that forbids new machine code, such as SELinux deny_execmem, run-time loads fail.",
+            "mitigation": "The error names the cause. Literal-path plugins still work, and the host binary can be exempted."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every call pays a pipe round trip of about 5 microseconds, roughly 80 to 100 times an in-process call. A helper must also ship beside each program."
+          },
+          {
+            "key": "C",
+            "reason": "Guest code runs several times slower, and the interpreter repeats the sandbox checks in a second place. It also needs an I9 exception."
+          },
+          {
+            "key": "D",
+            "reason": "It is a second code generator with its own sandbox checks to audit. It needs an I9 exception, and its code is slower than the translator's."
+          },
+          {
+            "key": "E",
+            "reason": "It keeps hosts small and isolates translator crashes and compile bombs, but not sandbox escapes: a steered translator bug still yields code the host runs. A version-matched helper must ship beside every program, and a missing one makes every run-time load fail."
+          }
+        ],
+        "tradeoff": "At least two to four megabytes in hosts that load plugins at run time, for native-speed calls, one file to ship, one code generator and one set of sandbox checks."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Lens. Lens rejected r0, r1 and r2 with 10, 7 and 6 measured findings, then accepted r3. Lens passed r4, which applies its three wording notes."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a program loads a plugin whose path it learns only at run time, what runs that plugin's code?",
+        "lesson": "A plugin is a sandboxed WebAssembly component. Today the compiler translates it at build time, so its path must be in the source. A run-time path needs an engine at load: a translator in the program, a helper process, or an interpreter.",
+        "trio": {
+          "current": {
+            "note": "Observed today: a computed path does not type-check.",
+            "code": "tool: plugin.load(\"{name}.wat\", policy)\nprint(\"{tool.analyze(41) ?? panic(\"failed\")}\")\n// error: Plugin export `analyze` has no Component interface\n//  fix: Pass `core.plugin.load` a literal path, from the package root"
+          },
+          "wild": {
+            "lang": "Rust (Wasmtime)",
+            "note": "Wasmtime compiles the component at load, inside the host.",
+            "code": "let component = Component::from_file(&engine, &path)?;\nlet (tool, _) = Analyzer::instantiate(&mut store, &component, &linker)?;\nlet report = tool.call_analyze(&mut store, &snapshot)?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Translate at load, in the host process",
+            "gist": "The existing translator runs inside the program at load.",
+            "gains": [
+              "Calls run as fast as literal-path plugin calls.",
+              "One file to ship, one set of checks."
+            ],
+            "losses": [
+              "Programs using it grow by 2.3 to 4.3 MB or more.",
+              "A translator bug stops the whole program.",
+              "Fails where new machine code is forbidden."
+            ],
+            "proposed": {
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// A: translated at load in the program; a call takes about 60 ns"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Translate and run in a helper process",
+            "gist": "A helper process translates and runs the plugin.",
+            "gains": [
+              "A crashing guest cannot touch program memory.",
+              "The program stays small."
+            ],
+            "losses": [
+              "Each call crosses processes, 80 to 100 times slower.",
+              "A helper must ship beside the program."
+            ],
+            "proposed": {
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// B: a helper process runs the plugin; a call takes about 5 microseconds"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Interpret the component in the runtime",
+            "gist": "The runtime steps through each instruction.",
+            "gains": [
+              "Smallest growth, an estimated 0.6 MB.",
+              "Loading does no translation."
+            ],
+            "losses": [
+              "Guest code runs several times slower.",
+              "Needs an exception to the no-interpreter rule."
+            ],
+            "proposed": {
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// C: each call interprets the guest; small program, slower guest code"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Single-pass WebAssembly compiler in the runtime",
+            "gist": "A second, small compiler translates in one pass.",
+            "gains": [
+              "Fast loads and in-process calls.",
+              "An estimated 0.8 MB."
+            ],
+            "losses": [
+              "A second code generator with its own sandbox checks.",
+              "Needs an exception to the one-code-generator rule."
+            ],
+            "proposed": {
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// D: a guest-only compiler builds each function in one pass"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Translate in a helper at load, run in the host",
+            "gist": "A helper translates at load; the program runs the result.",
+            "gains": [
+              "Calls as fast as A, with an estimated 0.2 MB program growth.",
+              "A translator crash stops only the helper."
+            ],
+            "losses": [
+              "A helper of the same Jet version must ship beside the program.",
+              "Steered translator bugs still run in the program."
+            ],
+            "proposed": {
+              "code": "use plugin: core.plugin\nuse process: core.process\n\nAnalyzer: trait {\n    analyze: fn(self, snapshot: [U8]) -> [U8],\n}\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\"plugins\\\")\"])\n    tool: plugin.load<Analyzer>(\"plugins/{process.args()[0]}.wasm\", policy)\n    report: tool.analyze(\"rows\".bytes()) ?? panic(\"analyze failed\")\n    print(\"{report.len()} bytes\")\n}\n// E: a helper translates at load; the program maps and calls the code"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A runs run-time plugins with the same code and checks as literal-path plugins. It needs no helper file and no rule exception. Only programs using it pay the size.",
+          "gains": [
+            "Native-speed calls, one file, one set of sandbox checks."
+          ],
+          "losses": [
+            {
+              "loss": "At least 2.3 to 4.3 MB in programs using it.",
+              "mitigation": "Literal-path programs are unchanged; hosts inside `jet` pay nothing."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Each call crosses processes, and a helper must ship."
+            },
+            {
+              "key": "C",
+              "reason": "Guest code runs several times slower and needs a rule exception."
+            },
+            {
+              "key": "D",
+              "reason": "It adds a second compiler with its own sandbox checks to audit."
+            },
+            {
+              "key": "E",
+              "reason": "A version-matched helper must ship beside every program."
+            }
+          ],
+          "tradeoff": "Megabytes in run-time plugin programs, for native calls, one file and one sandbox."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Hosts that use `plugin.load<T>` grow by at least 2.3 MB at O0 and 4.3 MB at O2.",
+          "attempts": [
+            "Always translate at O0, without the optimizer: saves 1.93 MB, but a guest that calls and touches memory ran about 1.45 times slower. Rejected, because the same guest would then run different code depending on how its path was written.",
+            "Accept text `.wat` paths at run time: rejected, because it adds the 0.35 MB WAT reader for a form that shipped plugins do not use.",
+            "Put the translator in the shared runtime for every program: rejected, because every program would pay the size, plugin or not.",
+            "Cache translated code on disk by sha256: rejected, because a writable cache lets planted native code run outside the sandbox."
+          ],
+          "result": "The translator is linked only into hosts that call `plugin.load<T>`, and run-time paths accept binary `.wasm` only."
+        },
+        {
+          "loss": "A translator defect stops the host instead of failing one load.",
+          "attempts": [
+            "Translate in a helper and run in the host: this is option E. It isolates translator crashes and compile bombs, not sandbox escapes, since the host still runs the code. It also needs a version-matched helper beside every program."
+          ],
+          "result": "Kept in process, with validation first. A spec-test runner and a fuzzer are required before run-time loads ship."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Plugin WASM engine design note",
+          "path": "Docs/Proposals/plugin-wasm-engine-2026-10-29.md",
+          "note": "How literal-path plugins are translated today, and why a run-time path was left to a ballot."
+        },
+        {
+          "title": "Wasm3 performance figures (CoreMark, 2019-2020)",
+          "url": "https://github.com/wasm3/wasm3/blob/main/docs/Performance.md",
+          "note": "Source for the interpreter (wasm3 4x slower than wasmtime) and single-pass (Wasmer singlepass 1.6x slower than Cranelift) figures."
+        },
+        {
+          "title": "Wasm3 README: code size",
+          "url": "https://github.com/wasm3/wasm3",
+          "note": "States about 64 KB of code for the interpreter."
+        },
+        {
+          "title": "Wasmtime Module::deserialize safety notes",
+          "url": "https://docs.rs/wasmtime/latest/wasmtime/struct.Module.html",
+          "note": "Why mapping precompiled native code from a file is unsafe; Component::deserialize shares these rules."
+        },
+        {
+          "title": "Wasmtime security and fuzzing",
+          "url": "https://docs.wasmtime.dev/security.html",
+          "note": "How an in-process compiling engine defends its translator against untrusted modules."
+        }
+      ],
+      "draftedBy": "Rivet",
+      "reviewedBy": "Lens",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-21T09:23:06.557Z"
     }
   ],
   "questions": [
@@ -130851,6 +131195,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-21T09:46:56.206Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a2monf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-21T09:46:54.613Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2monf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-21T09:38:43.044Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qyk2os",
+      "note": "#5 No case fails because its neighbours took the memory: the su"
+    },
+    {
+      "at": "2026-11-21T09:38:35.948Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05p5u7s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T09:23:10.888Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-PLUGIN-ENGINE1",
+      "note": "reviewed by Lens"
+    },
+    {
+      "at": "2026-11-21T09:23:08.719Z",
+      "by": "Lens",
+      "action": "decision.review",
+      "ref": "D-PLUGIN-ENGINE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-21T09:23:06.557Z",
+      "by": "Rivet",
+      "action": "decision.add",
+      "ref": "D-PLUGIN-ENGINE1",
+      "note": "Choose what runs a plugin whose path is known only at run time (draft)"
+    },
+    {
+      "at": "2026-11-21T09:22:22.107Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-21T09:09:21.199Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#83"
+    },
+    {
+      "at": "2026-11-21T09:09:02.972Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#89"
+    },
+    {
+      "at": "2026-11-21T09:08:29.698Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#95"
+    },
+    {
+      "at": "2026-11-21T09:08:27.743Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dktg7a",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-21T09:08:25.661Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-21T09:08:23.501Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-21T09:08:21.429Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00ni11n",
+      "note": "#26: the fault the old proof named (jet_rt_stop_domain reading 0x10) was fixed on dev, so the proof moved to a fault dev still has; the required behavior is unchanged (Lens c26.r1, 64683b5928); was: At a fault inside a runtime routine, jet debug shows at least what the crash report shows. Today, on the program_owned_main `plain` image (p392), the crash report backtrace lists jet_rt_stop_domain an"
+    },
+    {
+      "at": "2026-11-21T09:03:36.000Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "28 criteria, soft limit 6: an accounting defect in the profiler this card owns, seen under the full suite"
+    },
+    {
+      "at": "2026-11-21T09:03:36.000Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#28 The task-clock accounting holds under load: a run's period e"
+    },
+    {
+      "at": "2026-11-21T09:00:19.852Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0dktg7a",
+      "note": "30 criteria, soft limit 6: a consistency defect in the semantic index this card owns"
+    },
+    {
+      "at": "2026-11-21T09:00:19.852Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dktg7a",
+      "note": "#40 The semantic index spells a module one way: `definitions[].m"
+    },
     {
       "at": "2026-11-21T08:26:17.433Z",
       "by": "Main",
