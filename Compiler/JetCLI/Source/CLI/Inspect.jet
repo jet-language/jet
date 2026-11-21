@@ -51,8 +51,8 @@ use {
         type_name,
         DIAGNOSTIC_ERROR,
     ]
-    jet_eval.[JET_COMPILER_SERVICES_SCHEMA_VERSION, jet_eval_compiler_services_source_map, jet_eval_compiler_services_text_origins]
-    jet_sema.[SemaDiagnosticOrigin, sema_diagnostic_origin_row]
+    jet_eval.[JET_COMPILER_SERVICES_SCHEMA_VERSION, jet_eval_compiler_services_diagnostic_values, jet_eval_compiler_services_source_map, jet_eval_compiler_services_text_origins]
+    jet_sema.[SemaDiagnosticOrigin]
     jet_lexer.[
         lex,
     ]
@@ -1053,45 +1053,11 @@ jet_cli_compiler_span: fn(start: Int, end: Int) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(start)), jet_cli_status_field("end", jet_cli_status_int(end))})
 }
 
-// `status_span` of an optional span.
-jet_cli_compiler_optional_span: fn(span: Span?) -> JetCLIStatusValue Never! {
-    found: span ?? return JetCLIStatusValue.Null
-    jet_cli_compiler_span(found.start, found.end)
-}
-
-// A diagnostic with a source edit also lists it as `edit` (`span`, `new_text`).
-// `origin` is the checked text its span indexes, the same value the typed
-// CompilerDiagnostic holds (jet_eval_compiler_services_origin).
+// The diagnostics a query found, each printed as the one CompilerDiagnostic
+// value (jet_eval_compiler_services_diagnostic_values) over its row of
+// `origins`.
 jet_cli_compiler_diagnostics: fn(diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> JetCLIStatusValue Never! {
-    values := [JetCLIStatusValue]{}
-    loop diagnostic in diagnostics {
-        severity: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
-        fields := [JetCLIStatusField]{
-            jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
-            jet_cli_status_field("severity", jet_cli_status_text(severity)),
-            jet_cli_status_field("message", jet_cli_status_text(diagnostic.what)),
-            jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
-            jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
-            jet_cli_status_field("span", jet_cli_compiler_optional_span(diagnostic.span)),
-            jet_cli_status_field("origin", jet_cli_compiler_origin(diagnostic, origins)),
-        }
-        if diagnostic.edit == .Val(found) {
-            fields.push(jet_cli_status_field("edit", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("span", jet_cli_compiler_span(found.span.start, found.span.end)), jet_cli_status_field("new_text", jet_cli_status_text(found.new_text))})))
-        }
-        values.push(jet_cli_status_object(fields))
-    }
-    jet_cli_status_array(values)
-}
-
-jet_cli_compiler_origin: fn(diagnostic: Diagnostic, origins: [SemaDiagnosticOrigin]) -> JetCLIStatusValue Never! {
-    row: sema_diagnostic_origin_row(origins, diagnostic)
-    if row < 0 -> return JetCLIStatusValue.Null
-    path: if origins[row].path == .Val(named) -> jet_cli_status_text(named) else -> JetCLIStatusValue.Null
-    jet_cli_compiler_origin_value(path, origins[row].digest)
-}
-
-jet_cli_compiler_origin_value: fn(path: JetCLIStatusValue, digest: String) -> JetCLIStatusValue Never! {
-    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", path), jet_cli_status_field("source_digest", jet_cli_status_text(digest))})
+    jet_cli_compiler_checked_value(jet_eval_compiler_services_diagnostic_values(diagnostics, origins))
 }
 
 // `SourcePositionIndex.line_col` for every byte offset: lines and columns

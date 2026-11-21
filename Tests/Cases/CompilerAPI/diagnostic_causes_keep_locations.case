@@ -5,18 +5,18 @@ env: NO_COLOR=1
 step: jet check main.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E2404"] #= 2
-json: stdout doc $.reports[?code="E2404"][?file="main.jet"][0].cause[*].code = ["E0104"]
-json: stdout doc $.reports[?code="E2404"][?file="main.jet"][0].cause[0].file = "main.jet"
-json: stdout doc $.reports[?code="E2404"][?file="main.jet"][0].cause[0].line = 9
-json: stdout doc $.reports[?code="E2404"][?file="main.jet"][0].cause[0].col = 12
-json: stdout doc $.reports[?code="E2404"][?file="main.jet"][0].cause[0].span == $.reports[?code="E0104"][?file="main.jet"][?line=9][0].span
-json: stdout doc $.reports[?code="E2404"][?file="helper.jet"][0].cause[*].code = ["E0104"]
-json: stdout doc $.reports[?code="E2404"][?file="helper.jet"][0].cause[0].file = "helper.jet" # the imported file's cause names the import
-json: stdout doc $.reports[?code="E2404"][?file="helper.jet"][0].cause[0].line = 14
-json: stdout doc $.reports[?code="E2404"][?file="helper.jet"][0].cause[0].col = 5
-json: stdout doc $.reports[?code="E2404"][?file="helper.jet"][0].cause[0].span == $.reports[?code="E0104"][?file="helper.jet"][?line=14][0].span
-json: stdout doc $.reports[?code="E0104"][?file="main.jet"][?line=9][0].clears = 1 # each E0104 clears only the report that names its place
-json: stdout doc $.reports[?code="E0104"][?file="helper.jet"][?line=14][0].clears = 1
-json: stdout doc $.reports[?code="E0104"][?file="main.jet"][?line=14][0].clears = 0 # the same code at another place is not the cause
-json: stdout doc $.reports[?code in ["E0104","E2404"]][?file="main.jet"][0].code = "E0104" # a root is reported before the report it causes
-json: stdout doc $.reports[?code in ["E0104","E2404"]][?file="helper.jet"][0].code = "E0104"
+json: stdout doc $.reports[?code="E2404"][?span.file="main.jet"][0].cause[*].code = ["E0104"]
+json: stdout doc $.reports[?code="E2404"][?span.file="main.jet"][0].cause[0].span.file = "main.jet"
+json: stdout doc $.reports[?code="E2404"][?span.file="main.jet"][0].cause[0].line = 9
+json: stdout doc $.reports[?code="E2404"][?span.file="main.jet"][0].cause[0].col = 12
+json: stdout doc $.reports[?code="E2404"][?span.file="main.jet"][0].cause[0].span == $.reports[?code="E0104"][?span.file="main.jet"][?line=9][0].span
+json: stdout doc $.reports[?code="E2404"][?span.file="helper.jet"][0].cause[*].code = ["E0104"]
+json: stdout doc $.reports[?code="E2404"][?span.file="helper.jet"][0].cause[0].span.file = "helper.jet" # the imported file's cause names the import
+json: stdout doc $.reports[?code="E2404"][?span.file="helper.jet"][0].cause[0].line = 14
+json: stdout doc $.reports[?code="E2404"][?span.file="helper.jet"][0].cause[0].col = 5
+json: stdout doc $.reports[?code="E2404"][?span.file="helper.jet"][0].cause[0].span == $.reports[?code="E0104"][?span.file="helper.jet"][?line=14][0].span
+json: stdout doc $.reports[?code="E0104"][?span.file="main.jet"][?line=9][0].clears = 1 # each E0104 clears only the report that names its place
+json: stdout doc $.reports[?code="E0104"][?span.file="helper.jet"][?line=14][0].clears = 1
+json: stdout doc $.reports[?code="E0104"][?span.file="main.jet"][?line=14][0].clears = 0 # the same code at another place is not the cause
+json: stdout doc $.reports[?code in ["E0104","E2404"]][?span.file="main.jet"][0].code = "E0104" # a root is reported before the report it causes
+json: stdout doc $.reports[?code in ["E0104","E2404"]][?span.file="helper.jet"][0].code = "E0104"

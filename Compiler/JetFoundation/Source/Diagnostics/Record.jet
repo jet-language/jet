@@ -1,0 +1,144 @@
+// The one record of a compiler diagnostic: `core.compiler`'s
+// CompilerDiagnostic (JET_COMPILER_SERVICES_SCHEMA_VERSION 3). `jet inspect
+// compiler lex|parse|check` print it, every `jet check --json` report
+// (jet.report/v4) starts with it, and the language server converts it at its
+// edge. One builder fills it from a Diagnostic; each caller names the files.
+
+// A span of the text of `file`: "" for text a query was handed.
+DiagnosticRecordSpan: struct {
+    file: String,
+    start: Int,
+    end: Int,
+}
+
+// The checked snapshot a span indexes: the file it was read from (None for
+// handed text) and the SHA-256 of the exact bytes checked.
+DiagnosticRecordOrigin: struct {
+    path: String?,
+    source_digest: String,
+}
+
+// One repair: its span names its own file, and `safety` is its grade
+// (diagnostic_fix_safety_word).
+DiagnosticRecordEdit: struct {
+    span: DiagnosticRecordSpan,
+    new_text: String,
+    safety: String,
+}
+
+DiagnosticRecord: struct {
+    code: String,
+    severity: String,
+    message: String,
+    why: String,
+    fix: String,
+    span: DiagnosticRecordSpan?,
+    origin: DiagnosticRecordOrigin?,
+    fix_edits: [DiagnosticRecordEdit],
+}
+
+diagnostic_fix_safety_word: fn(safety: DiagnosticFixSafety) -> String Never! {
+    if safety == {
+        .Formatting -> "formatting"
+        .BehaviorPreserving -> "behavior-preserving"
+        .APIChanging -> "api-changing"
+        .TargetChanging -> "target-changing"
+        .NeedsReview -> "needs-review"
+    }
+}
+
+// The record's severity: `lint` for a lint, else `error`.
+diagnostic_severity_word: fn(diagnostic: Diagnostic) -> String Never! {
+    if diagnostic.severity == DIAGNOSTIC_LINT -> return "lint"
+    "error"
+}
+
+// A lint's tier, which the report extension and the language server read:
+// `tidy` for a tidy error (diagnostic_is_tidy), else `warning`. None for an
+// error.
+diagnostic_tier_word: fn(diagnostic: Diagnostic) -> String? Never! {
+    if diagnostic.severity != DIAGNOSTIC_LINT -> return None
+    if diagnostic_is_tidy(diagnostic) -> return Val("tidy")
+    Val("warning")
+}
+
+// The files `diagnostic`'s repairs name for themselves (TextEdit.path), each
+// once, in diagnostic_record's order. A caller names each for
+// diagnostic_record.
+diagnostic_repair_paths: fn(diagnostic: Diagnostic) -> [String] Never! {
+    paths := [String]{}
+    if diagnostic.edit == .Val(edit) {
+        diagnostic_repair_path_add(paths, edit)
+        loop other in diagnostic.fix_edits -> diagnostic_repair_path_add(paths, other)
+    }
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .SuggestedEdits(alternatives) -> {
+                loop alternative in alternatives -> diagnostic_repair_path_add(paths, alternative)
+            }
+            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
+        }
+    }
+    paths
+}
+
+diagnostic_repair_path_add: fn(paths: &[String], repair: TextEdit) Never! {
+    path: repair.path ?? return
+    if !paths.contains(path) -> paths.push("{path}")
+}
+
+// The record of `diagnostic`. `file` names the text its span indexes and
+// `origin` is that text's snapshot; a diagnostic with no span has neither. Its
+// repairs come in order: the primary edit with the edits applied beside it,
+// then the alternatives. A repair names its own file: `names[i]` for the path
+// `paths[i]` (diagnostic_repair_paths), else `file`. Every repair carries the
+// diagnostic's grade.
+diagnostic_record: fn(diagnostic: Diagnostic, file: String, origin: &&DiagnosticRecordOrigin?, paths: [String], names: [String]) -> DiagnosticRecord Never! {
+    span := DiagnosticRecordSpan?{None}
+    placed := DiagnosticRecordOrigin?{None}
+    if diagnostic.span == .Val(found) {
+        span = Val(DiagnosticRecordSpan{file: "{file}", start: found.start, end: found.end})
+        placed = origin
+    }
+    edits := [DiagnosticRecordEdit]{}
+    if diagnostic.edit == .Val(edit) {
+        diagnostic_record_repair(edits, diagnostic, edit, file, paths, names)
+        loop other in diagnostic.fix_edits {
+            diagnostic_record_repair(edits, diagnostic, other, file, paths, names)
+        }
+    }
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .SuggestedEdits(alternatives) -> {
+                loop alternative in alternatives {
+                    diagnostic_record_repair(edits, diagnostic, alternative, file, paths, names)
+                }
+            }
+            .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> {}
+        }
+    }
+    DiagnosticRecord{
+        code: "{diagnostic.code}",
+        severity: diagnostic_severity_word(diagnostic),
+        message: "{diagnostic.what}",
+        why: "{diagnostic.why}",
+        fix: "{diagnostic.fix}",
+        span: span,
+        origin: placed,
+        fix_edits: edits,
+    }
+}
+
+diagnostic_record_repair: fn(edits: &[DiagnosticRecordEdit], diagnostic: Diagnostic, repair: TextEdit, file: String, paths: [String], names: [String]) Never! {
+    safety: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
+    named := "{file}"
+    if repair.path == .Val(path) {
+        loop index in 0..<paths.len() {
+            if paths[index] == path && index < names.len() {
+                named = "{names[index]}"
+                break
+            }
+        }
+    }
+    edits.push(DiagnosticRecordEdit{span: DiagnosticRecordSpan{file: named, start: repair.span.start, end: repair.span.end}, new_text: "{repair.new_text}", safety: diagnostic_fix_safety_word(safety)})
+}

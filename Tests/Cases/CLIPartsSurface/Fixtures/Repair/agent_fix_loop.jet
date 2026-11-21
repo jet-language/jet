@@ -1,5 +1,5 @@
 // Line-for-line semantic port of surface.rs:1291-1577 (real CLI callback, no synthetic provider).
-// It reads the published status/report schemas: jet.status/v1 carrying jet.report/v3 rows.
+// It reads the published status/report schemas: jet.status/v1 carrying jet.report/v4 rows.
 use {
     files: core.files
     process: core.process
@@ -55,8 +55,8 @@ s1_repair_array: fn(value: encoding.Dyn) -> [encoding.Dyn] {
 }
 
 s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {
-    // The live machine report schema: jet.report/v3 inside a jet.status/v1 envelope.
-    assert_eq(s1_repair_string(value, "schema"), "jet.report/v3")
+    // The live machine report schema: jet.report/v4 inside a jet.status/v1 envelope.
+    assert_eq(s1_repair_string(value, "schema"), "jet.report/v4")
     code: s1_repair_string(value, "code")
     edits := [S1RepairEdit]{}
     loop edit in s1_repair_array(s1_repair_field(value, "fix_edits")) {
@@ -64,7 +64,7 @@ s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {
         edits.push(
             S1RepairEdit{
                 code: code.copy(),
-                file: s1_repair_string(edit, "file"),
+                file: s1_repair_string(span, "file"),
                 start: s1_repair_usize(span, "start"),
                 end: s1_repair_usize(span, "end"),
                 new_text: s1_repair_string(edit, "new_text"),

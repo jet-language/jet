@@ -11,7 +11,7 @@ exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $ valid # original predicate: parses
-json: stdout doc $.reports[0].file = "{work}/outside/bad.jet"
+json: stdout doc $.reports[0].span.file = "{work}/outside/bad.jet"
 step: jet check ../outside/bad.jet --json
 cwd: runner
 env: NO_COLOR=1
@@ -19,7 +19,7 @@ exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $ valid # original predicate: parses
-json: stdout doc $.reports[0].file = "{work}/outside/bad.jet"
+json: stdout doc $.reports[0].span.file = "{work}/outside/bad.jet"
 step: jet check {work}/repo/src/bad.jet --json
 cwd: runner
 env: NO_COLOR=1
@@ -27,7 +27,7 @@ exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $ valid # original predicate: parses
-json: stdout doc $.reports[0].file = "{work}/repo/src/bad.jet"
+json: stdout doc $.reports[0].span.file = "{work}/repo/src/bad.jet"
 step with_git: jet check {work}/stray/nested/bad.jet --json
 cwd: runner
 env: NO_COLOR=1
@@ -43,8 +43,8 @@ exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $ valid # original predicate: parses
-json: stdout doc $.reports[0].file == with_git
-json: stdout doc $.reports[0].file = "{work}/stray/nested/bad.jet"
+json: stdout doc $.reports[0].span.file == with_git
+json: stdout doc $.reports[0].span.file = "{work}/stray/nested/bad.jet"
 step: jet check ../fix/bad.jet --json
 cwd: runner
 env: NO_COLOR=1
@@ -56,7 +56,7 @@ json: stdout doc $.reports[0].applicability = "safe"
 json: stdout doc $.reports[0].fix_edits : array # original pattern
 json: stdout doc $.reports[0].fix_edits #= 1
 json: stdout doc $.reports[0].fix_edits[0] : object # original pattern
-json: stdout doc $.reports[0].fix_edits[0].file == $.reports[0].file
+json: stdout doc $.reports[0].fix_edits[0].span.file == $.reports[0].span.file
 json: stdout doc $.reports[0].fix_edits[0].span : object # original pattern
 json: stdout doc $.reports[0].fix_edits[0].span.start : int # original pattern
 json: stdout doc $.reports[0].fix_edits[0].span.end : int # original pattern
@@ -74,5 +74,5 @@ step: jet fmt ../left/bad.jet ../right/bad.jet --json
 cwd: runner
 env: NO_COLOR=1
 exit: 2
-json: stderr ndjson $[0].reports[0].file = "{work}/left/bad.jet"
-json: stderr ndjson $[1].reports[0].file = "{work}/right/bad.jet"
+json: stderr ndjson $[0].reports[0].span.file = "{work}/left/bad.jet"
+json: stderr ndjson $[1].reports[0].span.file = "{work}/right/bad.jet"

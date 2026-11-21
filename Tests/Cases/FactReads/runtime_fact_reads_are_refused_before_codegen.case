@@ -5,6 +5,6 @@ fixture: RuntimeFactReadsAreRefusedBeforeCodegen.fixture
 env: NO_COLOR=1
 step: jet check --json main.jet
 exit: nonzero
-json: stdout doc $.reports[?code="E0302"][0].what ~ "compile-time only" # original first matching diagnostic
+json: stdout doc $.reports[?code="E0302"][0].message ~ "compile-time only" # original first matching diagnostic
 json: stdout doc $.reports[?code="E0302"][0].why ~ "never selects runtime behavior" # original first matching diagnostic
 json: stdout doc $.reports[?code="E0302"][0].fix ~ "FACT: #run" # the fix shows the `#run` binding spelling (#6419 c49)

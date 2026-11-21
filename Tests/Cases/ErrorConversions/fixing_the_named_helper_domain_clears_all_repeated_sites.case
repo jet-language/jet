@@ -6,8 +6,8 @@ step: jet check run.jet --json
 exit: nonzero
 json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2404"
-# The E2404 registry row's what: "`{{callee}}` fails with `{{Source}}`, ...".
-json: stdout doc $.reports[0].what ~ "`load` fails with" # original predicate: what names the helper
+# The E2404 registry row's message: "`{{callee}}` fails with `{{Source}}`, ...".
+json: stdout doc $.reports[0].message ~ "`load` fails with" # original predicate: the message names the helper
 json: stdout doc $.reports[0].cause = []
 json: stdout doc $.reports[?code="E2404"] #= 1
 json: stdout doc $.reports[?code="E2404"][0].detail ~ "callee: load" # original predicate

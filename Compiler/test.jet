@@ -1265,7 +1265,7 @@ fuzz_run_failure: fn(program: FuzzProgram, first: FuzzOutcome, this: FuzzOutcome
     ""
 }
 
-// The error reports of a `jet check --json` answer, each `<name>: <what>`.
+// The error reports of a `jet check --json` answer, each `<name>: <message>`.
 fuzz_reports: fn(output: String) -> [String] {
     tree: json.parse(output) ?? return [String]{}
     reports := [String]{}
@@ -1273,7 +1273,7 @@ fuzz_reports: fn(output: String) -> [String] {
         loop item in items {
             if json_field(item, "severity") != (Dyn.Text("error")) -> next
             if json_field(item, "name") == .Text(name) {
-                if json_field(item, "what") == .Text(what) -> reports.push("{name}: {what}") else {
+                if json_field(item, "message") == .Text(what) -> reports.push("{name}: {what}") else {
                     reports.push("{name}:")
                 }
             }

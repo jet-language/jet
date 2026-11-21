@@ -18,7 +18,7 @@ json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.time" # original first 
 step: jet check 3.jet --json
 exit: 1 # an unused import is a tidy error
 json: stdout doc $.reports[0].code = "L0103" # the alias row binds core.time's `datetime` item (#6542 owner order); no E1001
-json: stdout doc $.reports[0].what ~ "`old`" # the bound import is merely unused
+json: stdout doc $.reports[0].message ~ "`old`" # the bound import is merely unused
 step: jet check 4.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.text" # original first E1001 fix names canonical home

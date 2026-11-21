@@ -3,7 +3,7 @@ use files: core.files
 #Test("apply-edits uses published spans descending byte offsets across multiple files") {
     root: cases_test_root("gap-apply-edits")
     directory: files.join(root, "Tests/Cases/group")
-    kit_exec_write(files.join(directory, "edits"), "{{\"fix_edits\":[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"long\"}},{{\"file\":\"two\",\"span\":{{\"start\":0,\"end\":2}},\"new_text\":\"é\"}},{{\"file\":\"one\",\"span\":{{\"start\":4,\"end\":5}},\"new_text\":\"Z\"}}]}}")
+    kit_exec_write(files.join(directory, "edits"), "{{\"fix_edits\":[{{\"span\":{{\"file\":\"one\",\"start\":1,\"end\":3}},\"new_text\":\"long\"}},{{\"span\":{{\"file\":\"two\",\"start\":0,\"end\":2}},\"new_text\":\"é\"}},{{\"span\":{{\"file\":\"one\",\"start\":4,\"end\":5}},\"new_text\":\"Z\"}}]}}")
     prefix: "write: one = \"ABCDE\"\nwrite: two = \"xy!\"\n"
     source: "{prefix}step: cat\nstdin: edits\napply-edits: stdout doc $.fix_edits\nfile: one = \"AlongDZ\"\nfile: two = \"é!\"\n"
     assert_eq(cases_test_advanced(root, "descending", source).verdict.status, "PASS")
@@ -18,19 +18,19 @@ use files: core.files
     root: cases_test_root("gap-invalid-edits")
     directory: files.join(root, "Tests/Cases/group")
     rows: [
-        "[{{\"file\":\"one\",\"span\":{{\"start\":0,\"end\":99}},\"new_text\":\"x\"}}]",
-        "[{{\"file\":\"one\",\"span\":{{\"start\":3,\"end\":2}},\"new_text\":\"x\"}}]",
-        "[{{\"file\":\"one\",\"span\":{{\"start\":-1,\"end\":2}},\"new_text\":\"x\"}}]",
-        "[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"x\"}},{{\"file\":\"one\",\"span\":{{\"start\":2,\"end\":4}},\"new_text\":\"y\"}}]",
-        "[{{\"file\":\"one\",\"start\":0,\"end\":1,\"new_text\":\"x\"}}]",
-        "[{{\"file\":\"../escape\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"x\"}}]",
+        "[{{\"span\":{{\"file\":\"one\",\"start\":0,\"end\":99}},\"new_text\":\"x\"}}]",
+        "[{{\"span\":{{\"file\":\"one\",\"start\":3,\"end\":2}},\"new_text\":\"x\"}}]",
+        "[{{\"span\":{{\"file\":\"one\",\"start\":-1,\"end\":2}},\"new_text\":\"x\"}}]",
+        "[{{\"span\":{{\"file\":\"one\",\"start\":1,\"end\":3}},\"new_text\":\"x\"}},{{\"span\":{{\"file\":\"one\",\"start\":2,\"end\":4}},\"new_text\":\"y\"}}]",
+        "[{{\"file\":\"one\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"x\"}}]",
+        "[{{\"span\":{{\"file\":\"../escape\",\"start\":0,\"end\":1}},\"new_text\":\"x\"}}]",
     ]
     loop (index, row) in rows {
         kit_exec_write(files.join(directory, "edits"), row)
         source: "write: one = \"ABCDE\"\nwrite: edits edits\napply-edits: file edits doc $\n"
         assert_eq(cases_test_advanced(root, "invalid-{index}", source).verdict.status, "FAIL")
     }
-    kit_exec_write(files.join(directory, "edits"), "[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":2}},\"new_text\":\"x\"}}]")
+    kit_exec_write(files.join(directory, "edits"), "[{{\"span\":{{\"file\":\"one\",\"start\":1,\"end\":2}},\"new_text\":\"x\"}}]")
     assert_eq(cases_test_advanced(root, "unicode-boundary", "write: one = \"é!\"\nwrite: edits edits\napply-edits: file edits doc $\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "empty", "write: edits = \"[]\"\napply-edits: file edits doc $\n").verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove invalid edits scratch")

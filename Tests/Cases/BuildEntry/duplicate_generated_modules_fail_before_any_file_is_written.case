@@ -4,6 +4,6 @@ fixture: Fixtures/DuplicateGeneratedModulesFailBeforeAnyFileIsWritten
 step: jet build main.jet --allow=Exec,FS --json
 exit: nonzero
 json: machine doc $.reports[?code="E3511"] #>= 1
-json: machine doc $.reports[?code="E3511"][?what~="generated twice"][?what~="alpha"] #>= 1 # all original conjunctions on same diagnostic
+json: machine doc $.reports[?code="E3511"][?message~="generated twice"][?message~="alpha"] #>= 1 # all original conjunctions on same diagnostic
 file: .jet/generated/main/alpha.jet absent
 file: .jet/generated/main/beta.jet absent

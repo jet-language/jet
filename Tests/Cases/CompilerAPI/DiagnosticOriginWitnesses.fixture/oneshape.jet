@@ -1,0 +1,9 @@
+use compiler: core.compiler
+
+// The text of habit.jet, handed to the query as a value: it was read from no file.
+PARSED: #run { compiler.parse(embed_file("habit.jet")) ?? panic("parse") }
+
+// Every record member the CLI prints, as typed code reads it.
+RECORDS: #run (loop d in PARSED.diagnostics() -> "{d.code} {d.severity} {d.message} | {(if d.span == .Val(s) -> "[{s.file}] {s.start}-{s.end}" else -> "unplaced")} | {(if d.origin == .Val(o) -> "{o.path ?? "none"} {o.source_digest}" else -> "no origin")} | {(loop e in d.fix_edits -> "[{e.span.file}] {e.span.start}-{e.span.end} <{e.new_text}> {e.safety}").join(";")}").join("\n")
+
+run: fn() { print(RECORDS) }

@@ -12,11 +12,11 @@ env: JET_STORE_DIR={work}/cache
 step: jet build main.jet --json
 exit: nonzero
 json: machine doc $.reports[?code="ORG01"] #= 1 # one finding, for the program's one entity
-json: machine doc $.reports[?code="ORG01"][0].what = "entity must define archive" # the type checker's finding
-json: machine doc $.reports[?code="ORG01"][0].file != null # mapped to the file of the type it read
+json: machine doc $.reports[?code="ORG01"][0].message = "entity must define archive" # the type checker's finding
+json: machine doc $.reports[?code="ORG01"][0].span.file != null # mapped to the file of the type it read
 json: machine doc $.reports[?code="ORG01"][0].line = 4 # at the type's declaration
 json: machine doc $.reports[?code="ORG02"][0].why = "project policy routes output through the logger" # the call handler's finding
-json: machine doc $.reports[?code="ORG02"][0].file != null # mapped to the file of the call it heard
+json: machine doc $.reports[?code="ORG02"][0].span.file != null # mapped to the file of the call it heard
 json: machine doc $.reports[?code="ORG02"][0].line = 8 # at the call
 json: machine doc $.reports[?code="E3530"] #>= 1 # a checker can't speak with the compiler's own code
 json: machine doc $.reports[?code="E0101"] #= 0 # so the claimed compiler code is never reported

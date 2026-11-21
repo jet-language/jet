@@ -4,7 +4,7 @@ fixture: Fixtures/ModuleDirectoryEntryRequiresRunJetNotMainJet
 step: jet build run.jet --json
 exit: nonzero
 json: machine doc $.reports[?code="E0603"] #>= 1
-json: machine doc $.reports[?code="E0603"][0].what = "can't find a module named `tool`"
+json: machine doc $.reports[?code="E0603"][0].message = "can't find a module named `tool`"
 json: machine doc $.reports[?code="E0603"][0].why = "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
 json: machine doc $.reports[?code="E0603"][0].fix = "add `tool.jet` under this project, or fix the `use` name"
 json: machine doc $.reports[?code="E0603"][0].why ~ "run.jet" # original contains

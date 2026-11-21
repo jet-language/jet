@@ -24,8 +24,8 @@ kit_steps_edit_field: fn(tree: Dyn, key: String) -> Dyn? {
 }
 
 kit_steps_edit: fn(tree: Dyn) -> KitSourceEdit? {
-    file: kit_steps_edit_field(tree, "file") ?? return None
     span: kit_steps_edit_field(tree, "span") ?? return None
+    file: kit_steps_edit_field(span, "file") ?? return None
     start: kit_steps_edit_field(span, "start") ?? return None
     end: kit_steps_edit_field(span, "end") ?? return None
     text: kit_steps_edit_field(tree, "new_text") ?? return None
@@ -64,7 +64,7 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
             .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> [value]
         }
         loop row in rows {
-            edit := kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs file, span.start/end integers and new_text")}
+            edit := kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs span.file, span.start/end integers and new_text")}
             edit.file = kit_steps_work_path(edit.file, context.env, context.work, context.scratch, state.built) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits file escapes work directory")}
             edits.push(edit)
         }

@@ -10,5 +10,5 @@ json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].orig
 json: stdout doc $.compiler.value.diagnostics[?message~="missing_local"][0].origin.source_digest = "d12db0f0ca7e6c3880d8b95b34090a52a088ddb0562e23d0472e78d9b82a9cc7" # SHA-256 of the fixture main.jet bytes
 step: jet check --json main.jet
 exit: nonzero
-json: stdout doc $.reports[?what~="missing_helper"][0].file = "helper.jet"
-json: stdout doc $.reports[?what~="missing_local"][0].file = "main.jet"
+json: stdout doc $.reports[?message~="missing_helper"][0].span.file = "helper.jet"
+json: stdout doc $.reports[?message~="missing_local"][0].span.file = "main.jet"
