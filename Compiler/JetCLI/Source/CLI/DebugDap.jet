@@ -327,7 +327,7 @@ JetCLIDap: struct {
                     }
                     .Err(failure) -> return self.fail(request, failure.detail)
                 }
-                if jet_cli_dap_variables(session, frame.index, registers: (reference - 1) & 3 == JET_CLI_DAP_REGISTERS) == {
+                if jet_cli_dap_variables(session, frame.index, registers: reference & 3 == JET_CLI_DAP_REGISTERS) == {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
@@ -457,7 +457,7 @@ JetCLIDap: struct {
                 // A scope's reference names its frame (`variables`); with
                 // neither it nor a frame id, the stopped task's innermost.
                 reference: jet_cli_dap_int(request.arguments, "variablesReference")
-                if reference > 0 && (reference - 1) & 3 == JET_CLI_DAP_REGISTERS {
+                if reference > 0 && reference & 3 == JET_CLI_DAP_REGISTERS {
                     return self.respond(request, jet_cli_dap_no_data("a register is no Jet place to watch; choose a local in Locals"))
                 }
                 id: if reference > 0 -> (reference - 1) >> 2 else -> jet_cli_dap_int(request.arguments, "frameId")

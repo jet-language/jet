@@ -27,7 +27,7 @@ stdout: ~ "              -> items[0]\n" # a register holds the List's buffer, at
 capture: here2 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
 capture: pc2 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
 stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc2}  " # rip is the stop's pc
-stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here2}\n" # named as disas marks its row
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here2}" # named as disas marks its row
 stdout.filter(^= "rflags 0x").line(0): ~ " IF" # rflags names its set flags, interrupts on in user code
 stdout: ~ "  items: len=3 cap=" # a List's header: length, capacity and buffer
 stdout: ~ "  11  21  31  items[0..2]\n" # its items as Ints, each named
@@ -52,19 +52,19 @@ env: PATH={work}/no-tools
 stdin: registers_and_memory_at_a_stop.stdin
 exit: 0
 stdout: ~ "  at the pc: items through [rbp-0x40], depth at [rbp-0x48], total in r13\n" # -O1 keeps total where -O2 does
-stdout: ~ "\nr13    0x000000000000003f  63          total\n"
-stdout: ~ "              -> items[0]\n"
+stdout: ~ "\nr13    0x000000000000003f  63          total\n" # its register's row names it at -O1 too
+stdout: ~ "              -> items[0]\n" # a register holds the List's buffer at -O1 too
 capture: here1 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
 capture: pc1 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
-stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc1}  "
-stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here1}\n"
-stdout: ~ "  items: len=3 cap="
-stdout: ~ "  11  21  31  items[0..2]\n"
-stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n"
-stdout: ~ "  $rip = 0x{cap:pc1}\n0x{cap:pc1}  48 8b 45 b8 "
-stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n"
-stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n"
-stdout: ~ "63\nProgram finished\n"
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc1}  " # rip is the stop's pc
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here1}" # named as disas marks its row
+stdout: ~ "  items: len=3 cap=" # a List's header at -O1
+stdout: ~ "  11  21  31  items[0..2]\n" # its items as Ints at -O1
+stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n" # a register has no bytes to read
+stdout: ~ "  $rip = 0x{cap:pc1}\n0x{cap:pc1}  48 8b 45 b8 " # the breakpoint's bytes are the program's own
+stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n" # no mapping holds address 0
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n" # run's caller-saved registers are lost
+stdout: ~ "63\nProgram finished\n" # the program runs to its end
 step: jet build -O0 prog.jet
 exit: 0
 step: jet debug {work}/.jet/build/prog
@@ -75,12 +75,12 @@ stdout: ~ "  at the pc: items at [rbx], depth at [rbp-0x40], total in r13\n" # -
 stdout: ~ "\nr13    0x000000000000003f  63          total\n" # and its row names it
 capture: here0 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split(" <+", 1).split(">", 0)
 capture: pc0 = text stdout.filter(~ "        <- here").filter(~ " <+").line(0).split("0x", 1).split(" ", 0)
-stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc0}  "
-stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here0}\n"
-stdout: ~ "  items: len=3 cap="
-stdout: ~ "  11  21  31  items[0..2]\n"
-stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n"
+stdout.filter(^= "rip    0x").line(0): ~ "{cap:pc0}  " # rip is the stop's pc
+stdout.filter(^= "rip    0x").line(0): ~ "  sum+{cap:here0}" # named as disas marks its row
+stdout: ~ "  items: len=3 cap=" # a List's header at -O0
+stdout: ~ "  11  21  31  items[0..2]\n" # its items as Ints at -O0
+stdout: ~ "`total` is held in r13, 0x3f, so it has no address; `memory $r13` reads where that value points\n" # a register has no bytes to read
 stdout: ~ "  $rip = 0x{cap:pc0}\n0x{cap:pc0}  48 8b 45 c0 " # the stop's `mov rax, [rbp-0x40]`
-stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n"
-stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n"
-stdout: ~ "63\nProgram finished\n"
+stdout: ~ "\n0x0  ?? ?? ?? ?? ?? ?? ?? ??  (not mapped)\n" # no mapping holds address 0
+stdout.after_first("(Jet) frame 1\n"): ~ "\nrax    not saved\n" # run's caller-saved registers are lost
+stdout: ~ "63\nProgram finished\n" # the program runs to its end
