@@ -1,0 +1,35 @@
+# A program that copies stdin to stdout a line at a time reads 6.9 MB of
+# piped input in large blocks on every tier. It prints each line unchanged,
+# and its read calls stay under 256. That is about 106 of 64 KiB for the
+# input, plus 3 for its own start and the read of its count. 4 KiB reads
+# would take about 1,700 calls and byte-at-a-time reads millions. The count
+# is the program's own `syscr` from /proc/self/io, so no tracer runs. These
+# are built programs: under `jet run` the count would include the compiler's
+# reads.
+requires: os-name:linux
+requires: probe test -r /proc/self/io # the program counts its read calls there
+fixture: Fixtures/StdinBufferedReads
+env: NO_COLOR=1
+step: sh -c 'seq 1 1000000 > big.txt'
+exit: 0
+step: jet build -O0 lines.jet
+exit: 0
+step: sh -c 'cat big.txt | .jet/build/lines > out-o0.txt'
+exit: 0
+json: stderr.trim doc $ <= 256 # stdin read in 64 KiB blocks: about 109 read calls, where 4 KiB reads take about 1,700
+step: cmp big.txt out-o0.txt
+exit: 0 # every line printed unchanged
+step: jet build -O1 lines.jet
+exit: 0
+step: sh -c 'cat big.txt | .jet/build/lines > out-o1.txt'
+exit: 0
+json: stderr.trim doc $ <= 256 # stdin read in 64 KiB blocks: about 109 read calls, where 4 KiB reads take about 1,700
+step: cmp big.txt out-o1.txt
+exit: 0 # every line printed unchanged
+step: jet build --release lines.jet
+exit: 0
+step: sh -c 'cat big.txt | .jet/build/lines > out-o2.txt'
+exit: 0
+json: stderr.trim doc $ <= 256 # stdin read in 64 KiB blocks: about 109 read calls, where 4 KiB reads take about 1,700
+step: cmp big.txt out-o2.txt
+exit: 0 # every line printed unchanged
