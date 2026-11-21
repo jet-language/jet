@@ -1143,9 +1143,15 @@ naming the build; so is one whose image file's bytes hash to another build
 (another build's image, or a changed copy), naming both builds. It shows
 `Dump of process <pid>, <n> flight events`, `Image: <n> bytes, with <n>
 bytes of records`, `Build: <build>, its image in <program>-<build>.image
-beside the dump`, then `Memory: <n> bytes held, within
-the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
-frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
+beside the dump`, a `Source: <path>, sha256 <hex>` line for each source the
+build was compiled from (by path from the entry root, sorted, with the
+sha256 of the bytes the build read, as the image records them; a file that
+no longer holds those bytes adds `; it has changed since this build (sha256
+<hex> now), so its lines are not shown`, or `; it is gone, so its lines are
+not shown`, and the Canvas refuses the dump for such an entry source), then
+`Memory: <n> bytes held, within the 33554432-byte budget; <n> bytes cut off
+past it`, then the innermost Jet frame of the stop (`Stopped  main.jet:9  in
+check()`), its source line (none when its source changed) and
 its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
 live session reads one, with typed locals; a `Secret` shows as
 `<redacted>`, a value whose bytes the dump cut off as `<cut off>`, and a

@@ -20,7 +20,9 @@
 // deadlock held with its wait, `events` lists the ring, and `disassemble`
 // lists the image's code (NativeListing.jet).
 use {
+    native_dump_crypto: core.crypto
     native_dump_files: core.files
+    native_dump_hex: core.encoding.hex
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
 }
 
@@ -530,6 +532,43 @@ native_dump_source: fn(path: String, source: &&String) -> String Never! {
     native_dump_files.join(ran, source)
 }
 
+// The sources the dump's build was compiled from, as its image records them
+// (NativeImage.sources, by path from the entry root), sorted by path: a
+// header line each, its path and sha256. A source whose file
+// (native_dump_source) no longer reads as the build read it says so, with
+// its sha256 now, or that it is gone; `changed` lists those paths, whose
+// lines are never shown as the run's.
+NativeDumpSources: struct {
+    text: String,
+    changed: [String],
+}
+
+native_dump_sources: fn(path: String, image: NativeImage) -[FS.Read]> NativeDumpSources Never! {
+    names := [String]{}
+    loop name in image.sources.keys() -> names.push("{name}")
+    names.sort()
+    text := ""
+    changed := [String]{}
+    loop name in names {
+        built: image.sources.get(name) ?? next
+        line: "Source: {name}, sha256 {native_dump_hex.encode(built)}"
+        if native_dump_files.read_bytes(native_dump_source(path, "{name}")) == {
+            .Ok(bytes) -> {
+                now: native_dump_crypto.sha256(bytes)
+                if now.as_bytes() == built -> text = "{text}{line}\n" else {
+                    text = "{text}{line}; it has changed since this build (sha256 {now.hex()} now), so its lines are not shown\n"
+                    changed.push(name)
+                }
+            }
+            .Err(_) -> {
+                text = "{text}{line}; it is gone, so its lines are not shown\n"
+                changed.push(name)
+            }
+        }
+    }
+    NativeDumpSources{text: text, changed: changed}
+}
+
 // One console command's readout of the dump: `line`, as read. `events` are
 // the flight ring's records (native_dump_events), and `file` (with the text
 // `lines`) the program's source.
@@ -660,6 +699,21 @@ native_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], index: Int
     assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "/src/crash.jet"), "/src/crash.jet")
     assert_eq(native_dump_source("/w/kept/crash-1.jetdump", "crash.jet"), "crash.jet")
     assert_eq(native_dump_source("/w/run/.jet/dumps/crash-1.jetdump", ""), "")
+}
+
+#Test("a dump names each source of its build by sha256, and one changed or gone since that build") {
+    scratch: native_dump_files.temp_dir("jet-dump-sources") ?? panic("scratch: {err}")
+    root: scratch.path
+    dump: native_dump_files.join(root, ".jet/dumps/crash-1.jetdump")
+    native_dump_files.write_bytes(native_dump_files.join(root, "crash.jet"), "crash\n".bytes()) ?? panic("source: {err}")
+    native_dump_files.write_bytes(native_dump_files.join(root, "other.jet"), "changed\n".bytes()) ?? panic("source: {err}")
+    image := NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    image.sources["crash.jet"] = native_dump_crypto.sha256("crash\n".bytes()).as_bytes()
+    image.sources["other.jet"] = native_dump_crypto.sha256("built\n".bytes()).as_bytes()
+    image.sources["gone.jet"] = native_dump_crypto.sha256("gone\n".bytes()).as_bytes()
+    sources: native_dump_sources(dump, image)
+    assert_eq(sources.text, "Source: crash.jet, sha256 990a9a4e4265a1354baaeca97c46175c3d7b5466ab7cad54bc6984b70fc2243b\nSource: gone.jet, sha256 4b9f2c32577beb1ebc8ab2a1e226faaa9176a81cd4eedbaa22f8a0db919972b5; it is gone, so its lines are not shown\nSource: other.jet, sha256 56f6e6304d02d413bb7d5d463ac5cdc58551266dc7269b467fc385815f39b913; it has changed since this build (sha256 7f8b1dfc466b6249f06cbe55c9174df2578e7754da793fded244ef5cba2a38f1 now), so its lines are not shown\n")
+    assert_eq(sources.changed, [String]{"gone.jet", "other.jet"})
 }
 
 // A CPU-time sample shows its task and where it was: the first Jet frame of

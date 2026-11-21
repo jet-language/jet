@@ -17,7 +17,7 @@ use {
     session_files: core.files
     session_process: core.process
     core.encoding.[Dyn]
-    jet_debug.[DebugSnapshot, NativeDebugError, NativeDebugStep, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_task_list]
+    jet_debug.[DebugSnapshot, NativeDebugError, NativeDebugStep, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_dump_command, native_dump_events, native_dump_frame, native_dump_jet_frame, native_dump_open, native_dump_source, native_dump_sources, native_dump_task_list]
     jet_foundation.[DeepChecks, Span, diagnostic_render, foundation_json_integer, foundation_json_parse, foundation_json_quote]
 }
 
@@ -422,7 +422,7 @@ canvas_debug_open: fn(host: CanvasDebugHost, jet: String, file: String, source_i
 // directory when relative) as `jet debug <dump>` does: a new `native-dump`
 // session, the `serial`th, paused where the program stopped, at its
 // innermost Jet frame. The dump must be of the entry `file`, the source the
-// session is bound to.
+// session is bound to, as its build read it (native_dump_sources).
 canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, named: String, serial: Int) -> CanvasDebugSession CanvasDebugError! {
     if named.len() > CANVAS_DEBUG_MAX_PATH_BYTES || !named.ends_with(".jetdump") {
         return Err(canvas_debug_error("bad_request", "Canvas debug `dump` must be a path ending with .jetdump"))
@@ -430,9 +430,14 @@ canvas_debug_open_dump: fn(file: String, source_id: String, revision: String, na
     path: session_files.join(session_files.dirname(file), named)
     opened := native_dump_open(path) ?? return Err(canvas_debug_unavailable(err))
     live := opened.session.move()
-    program: native_dump_source(path, live.entry_source())
+    entry: live.entry_source()
+    changed: native_dump_sources(path, live.image).changed.contains("{entry}")
+    program: native_dump_source(path, entry)
     if (session_files.realpath(program) ?? program) != (session_files.realpath(file) ?? file) {
         return Err(canvas_debug_error("bad_request", "the dump `{named}` is of `{program}`, not of the entry `{session_files.basename(file)}` this session is bound to"))
+    }
+    if changed {
+        return Err(canvas_debug_error("bad_request", "the dump `{named}` is of another build of `{session_files.basename(file)}`: the source has changed since that build, so its stop is not this source's"))
     }
     src: read_source_without_symlinks(file) ?? return Err(canvas_debug_error("io", "couldn't read the debug source: {err.message}"))
     jet_file: session_files.basename(file)
