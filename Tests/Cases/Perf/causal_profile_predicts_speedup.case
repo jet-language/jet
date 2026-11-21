@@ -6,7 +6,7 @@
 # and one with its wide line's, so the machine's drifting load falls alike
 # on each pair. It measures what the lens predicts, the rate of rounds (the
 # rounds over the time they took), not a typical round's time, which load
-# sets apart from it. On every tier one of four outcomes passes. Either
+# sets apart from it. On every tier one of six outcomes passes. Either
 # each of the two lines the lens ranked for the `round` zone has a
 # predicted interval that meets the speedup measured around the run, and
 # it ranked one at least; or the program's threads waited for a CPU longer
@@ -16,21 +16,34 @@
 # trusts and it could not fit how much slower that made a task after its
 # CPU idled, so it flagged its gains with the drop. A fit that holds warms
 # the gains, and the run is compared. A measured speedup above the 30% a
-# line 30% faster can give is an error, not a pass.
+# line 30% faster can give is an error, not a pass. The speedup measured
+# around the run reaches as far as the drift between the measurement before
+# it and the one after says the gain may have moved. A comparison must
+# also fail two wrong predictions, the lines' predictions swapped and a
+# narrow prediction of 0. When one would pass, the lens's interval for a
+# line it set against the truth includes no gain, so it claimed none
+# (unclaimed); or the drifted truth holds the wrong prediction's gain, so
+# no truth was measured; or the lens claimed a gain no check can tell
+# from a wrong one, which fails. The check first proves all that on fixed
+# numbers.
 # Which line gains more depends on the CPUs the run gets, so neither is
 # required to rank first. Each finished task is a progress point of its own.
 # A run too short to rank is refused with the reason, and the lens refuses
 # the company of lenses whose readings its delays would skew.
 # Each tier's check prints the outcome it took on stdout and stderr, with
 # its numbers and the receipt's fit (slope, R² and residuals): compared,
-# contention (the profiled run's wait, or the hand measurement's) or clock;
-# a failed comparison prints its line before it panics, so the output of a
-# failing run keeps both lines' predictions and truths. With
+# unclaimed, no truth (with each measured interval's half-width and
+# drift), contention (the profiled run's wait, or the hand measurement's)
+# or clock; a failed comparison prints its line before it panics, so the
+# output of a failing run keeps both lines' predictions and truths. With
 # JET_CAUSAL_CASE_PATHS naming a file, it appends that line to it too.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: CausalProfilePredictsSpeedup.fixture
 env: NO_COLOR=1
+step: jet run -A check.jet -- controls
+exit: 0
+stdout: = "the comparison passes a right prediction, fails each wrong one and names what it cannot check\n"
 step o0: jet run -A -O0 main.jet -- measure before.txt
 exit: 0
 stdout: = "measured\n"
@@ -46,7 +59,7 @@ stdout: = "measured\n"
 step: jet run -A check.jet -- o0 causal.jettrace
 exit: 0
 stdout: ~ "causal case o0: " # the outcome line, with its numbers and the fit
-stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # the hand-sped program lands in the interval of each ranked line, or the lens withheld its gains under contention, or the hand measurement was contended, or the CPUs clocked down
+stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens's interval for a line its check could not tell from a wrong prediction includes no gain, so it claimed none to compare\n" "the measurements drifted too far apart to tell a wrong prediction from the lens's, so they measured no truth to check the lens by\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # the hand-sped program lands in the interval of each ranked line, or the lens claimed no gain where its check could not tell, or the truth drifted too far to check by, or the lens withheld its gains under contention, or the hand measurement was contended, or the CPUs clocked down
 step o1: jet run -A -O1 main.jet -- measure before.txt
 exit: 0
 stdout: = "measured\n"
@@ -60,7 +73,7 @@ stdout: = "measured\n"
 step: jet run -A check.jet -- o1 causal.jettrace
 exit: 0
 stdout: ~ "causal case o1: " # the outcome line
-stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # on every tier
+stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens's interval for a line its check could not tell from a wrong prediction includes no gain, so it claimed none to compare\n" "the measurements drifted too far apart to tell a wrong prediction from the lens's, so they measured no truth to check the lens by\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # on every tier
 step o2: jet run -A -O2 main.jet -- measure before.txt
 exit: 0
 stdout: = "measured\n"
@@ -74,7 +87,7 @@ stdout: = "measured\n"
 step: jet run -A check.jet -- o2 causal.jettrace
 exit: 0
 stdout: ~ "causal case o2: " # the outcome line
-stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # on every tier
+stdout: ~any "each line sped up by hand that the lens ranked gained within its predicted interval\n" "the lens's interval for a line its check could not tell from a wrong prediction includes no gain, so it claimed none to compare\n" "the measurements drifted too far apart to tell a wrong prediction from the lens's, so they measured no truth to check the lens by\n" "the lens withheld its gains under CPU contention, naming the wait\n" "a hand measurement's threads waited for a CPU longer than the lens ranks under, so it measured no truth to check the lens by\n" "the CPUs that ran the rounds clocked down more than the lens trusts and it could not fit how that slowed the tasks, so it flagged its gains\n" # on every tier
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="round"] #= 1 # the zone is a progress point
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="task"] #= 1 # finished tasks are a point ranked apart
 json: file causal.jettrace doc $.content.receipt_sections[?name="causal"][0].value.cpu_wait_ms >= 0 # the receipt keeps the threads' wait for a CPU

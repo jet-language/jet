@@ -11,14 +11,19 @@
 // flags its gains with the drop its receipt keeps. Or, for the `round` progress
 // point, each of the two lines the lens ranked has a predicted interval
 // that meets the line's measured one, and the lens ranked one of them at
-// least. A line's measured interval spans both measurements' 90% intervals
-// of their gain, by rate as the lens predicts it, since the machine's CPUs,
-// and with them the line's gain, drift from the one measurement to the
-// other, and the profiled run lies between them. A ranked line's interval
+// least. A line's measured interval is where its gain lay in the profiled
+// run, which the measurements bracket in time: it spans both
+// measurements' 90% intervals of their gain, by rate as the lens predicts
+// it, and reaches as far as the drift between them says the gain may have
+// moved (measured_interval), since the machine's CPUs, and with them the
+// line's gain, drift from one run to the next. A ranked line's interval
 // is at most WIDEST wide, the lens's own bound for ranking a line, so no
 // interval passes by being vague; and a measured speedup above BOUND, which
 // no line 30% faster can give, is refused as a measurement gone wrong, so
-// none passes by being wild.
+// none passes by being wild. A comparison that passes must also fail two
+// wrong predictions (the controls): the lines' intervals swapped, and the
+// narrow line's moved to a gain of 0; a truth too loose to reject them
+// checks nothing, and the case fails.
 //
 // The argument before the trace names the tier. The outcome's own line,
 // with its numbers and the receipt's fit (its octaves' residuals, slope
@@ -37,6 +42,11 @@
 // `check.jet -- counts TIER TRACE` sets out the lens's part alone and
 // checks nothing, so a run too short to rank shows the experiments it kept,
 // the count `jet perf view`'s refusal names.
+//
+// `check.jet -- controls` checks the comparison itself on fixed numbers:
+// it passes a right prediction, and fails the lines swapped, a narrow
+// prediction of 0, and a truth whose measurements drift too far apart to
+// tell a right prediction from a wrong one.
 use {
     files: core.files
     process: core.process
@@ -278,6 +288,41 @@ check_bound: fn(function: String, gain: Int) -> String {
     ""
 }
 
+// The integer square root of `value`, rounded up; 0 below 1.
+isqrt_up: fn(value: Int) -> Int {
+    if value <= 0 -> return 0
+    root := value
+    next := (root + 1) /% 2
+    loop next < root {
+        root = next
+        next = (root + value /% root) /% 2
+    }
+    if root * root < value -> root + 1 else -> root
+}
+
+// Where a line's gain lay in the profiled run, from its gain measured
+// before it, `first`, and after it, `last` (each the low end of its 90%
+// interval, the gain and the high end): the low end and the high end,
+// then the interval's half-width and the drift's share of it. It holds
+// both measurements' intervals and reaches as far as the 90% interval of
+// a gain that drifts from run to run by as much as the two measurements
+// differ beyond their own errors. With the drift a variance d² per run
+// and each measurement's error its own, the two differ by a variance of
+// 2d² plus their errors, and the profiled run's gain differs from their
+// mean by 1.5d² plus a quarter of their errors. A half-width h of a 90%
+// interval is 1.645 standard errors, so the interval's half-width squared
+// is 0.75 (1.645² Δ² - h1² - h2²), at least 0, plus (h1² + h2²) / 4, Δ
+// the two gains' difference.
+measured_interval: fn(first: [Int], last: [Int]) -> [Int] {
+    h1: (first[2] - first[0]) /% 2
+    h2: (last[2] - last[0]) /% 2
+    delta: last[1] - first[1]
+    drift: max(3 * (2706 * delta * delta /% 1000 - h1 * h1 - h2 * h2) /% 4, 0)
+    half: isqrt_up(drift + (h1 * h1 + h2 * h2 + 3) /% 4)
+    twice: first[1] + last[1]
+    [Int]{min(min(first[0], last[0]), (twice - 2 * half) /% 2), max(max(first[2], last[2]), (twice + 2 * half + 1) /% 2), half, isqrt_up(drift)}
+}
+
 // The integer after `key` in `text`; None when `key` is absent.
 number_after: fn(text: String, key: String) -> Int? {
     parts: text.split(key).to_list()
@@ -287,33 +332,178 @@ number_after: fn(text: String, key: String) -> Int? {
     Val(number)
 }
 
-// One line's comparison: whether the lens ranked it, what it predicted
-// against what was measured, and every way it fails.
+// One line's comparison: whether the lens ranked it, its interval and gain
+// when it did, what it predicted against what was measured, and every way
+// it fails.
 LineCheck: struct {
+    function: String,
     ranked: Bool,
+    low: Int,
+    gain: Int,
+    high: Int,
     said: String,
     wrong: [String],
 }
 
+// Whether the interval `low` to `high` meets the measured one, `measured`
+// (measured_interval).
+meets: fn(low: Int, high: Int, measured: [Int]) -> Bool {
+    measured[1] >= low && measured[0] <= high
+}
+
+// Whether `measured` (measured_interval) holds the gain `gain`.
+holds: fn(measured: [Int], gain: Int) -> Bool { measured[0] <= gain && gain <= measured[1] }
+
 // The lens's interval for the line of `function` among `lines`, the `round`
-// point's, against the measured one, `measured_low` to `measured_high`. A
+// point's, against the measured one, `measured` (measured_interval). A
 // ranked line's interval must meet the measured one and be at most WIDEST
 // wide.
-check_line: fn(lines: String, function: String, measured_low: Int, measured_high: Int) -> LineCheck {
+check_line: fn(lines: String, function: String, measured: [Int]) -> LineCheck {
     loop line in lines.split("}},{{").to_list() {
         if !line.contains("\"function\":\"{function}\"") -> next
         low: number_after(line, "\"low_tenths\":") ?? panic("no low_tenths in {line}")
+        gain: number_after(line, "\"gain_tenths\":") ?? panic("no gain_tenths in {line}")
         high: number_after(line, "\"high_tenths\":") ?? panic("no high_tenths in {line}")
         wrong := [String]{}
         if high - low > WIDEST {
             wrong.push("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
         }
-        if measured_high < low || measured_low > high {
-            wrong.push("the {function} line sped up by hand gained {measured_low} to {measured_high}, outside its predicted {low} to {high}")
+        if !meets(low, high, measured) {
+            wrong.push("the {function} line sped up by hand gained {measured[0]} to {measured[1]}, outside its predicted {low} to {high}")
         }
-        return LineCheck{ranked: true, said: "{function} predicted {low} to {high}, measured {measured_low} to {measured_high}", wrong: wrong}
+        return LineCheck{function: function, ranked: true, low: low, gain: gain, high: high, said: "{function} predicted {low} to {high}, measured {measured[0]} to {measured[1]}", wrong: wrong}
     }
-    LineCheck{ranked: false, said: "{function} unranked, measured {measured_low} to {measured_high}", wrong: [String]{}}
+    LineCheck{function: function, ranked: false, low: 0, gain: 0, high: 0, said: "{function} unranked, measured {measured[0]} to {measured[1]}", wrong: [String]{}}
+}
+
+// A comparison's verdict: every way it fails, the lines the lens claimed
+// no gain for where a control passed (unclaimed), and the measurements too
+// far apart to tell a control from the lens (no truth).
+Comparison: struct {
+    wrong: [String],
+    unclaimed: [String],
+    untrue: [String],
+}
+
+// Files a control that passed, `what`, with the ranked lines it set
+// against the truth, `claims`, and, when the truth holds the control's own
+// gain, the truth's measured intervals, `loose`. A line whose interval
+// holds 0 claimed no gain, so the lens said it could not tell: unclaimed.
+// Else a truth that holds the control's gain cannot tell it from the
+// lens: no truth. Else the lens claimed a gain no control can check,
+// which fails.
+file_control: fn(verdict: &Comparison, claims: [LineCheck], what: String, loose: String?) {
+    claimless := [String]{}
+    loop line in claims {
+        if line.low <= 0 && line.high >= 0 {
+            claimless.push("the {line.function} line, {line.low} to {line.high}")
+        }
+    }
+    if {
+        claimless.len() > 0 -> {
+            verdict.unclaimed.push("{what}, and the lens's interval for {claimless.join(" and ")} includes no gain")
+        }
+        loose != None -> verdict.untrue.push("{what}: {loose}")
+        else -> {
+            verdict.wrong.push("{what}, though the lens claimed a gain for each line: a claimed gain must be checkable")
+        }
+    }
+}
+
+// A measured interval as its ends, its half-width and the drift's share.
+said_measured: fn(function: String, measured: [Int]) -> String {
+    "the {function} line measured {measured[0]} to {measured[1]}, a half-width of {measured[2]} with {measured[3]} of drift"
+}
+
+// The wrong predictions a comparison must fail, filed as file_control
+// files those it passes: the ranked lines' intervals swapped, each against
+// the other line's measured interval, and the narrow line's interval, when
+// it is ranked, moved to a gain of 0.
+check_controls: fn(narrow: LineCheck, wide: LineCheck, narrow_measured: [Int], wide_measured: [Int]) -> Comparison {
+    verdict := Comparison{wrong: [String]{}, unclaimed: [String]{}, untrue: [String]{}}
+    swapped := narrow.ranked || wide.ranked
+    if narrow.ranked && !meets(narrow.low, narrow.high, wide_measured) -> swapped = false
+    if wide.ranked && !meets(wide.low, wide.high, narrow_measured) -> swapped = false
+    if swapped {
+        claims := [LineCheck]{}
+        if narrow.ranked -> claims.push(narrow.copy())
+        if wide.ranked -> claims.push(wide.copy())
+        loose: (narrow.ranked && holds(wide_measured, narrow.gain)) || (wide.ranked && holds(narrow_measured, wide.gain))
+        file_control(verdict, claims, "the lines' predictions swapped would pass too", if (loose) -> Val("{said_measured("narrow", narrow_measured)}; {said_measured("wide", wide_measured)}") else -> None)
+    }
+    half: (narrow.high - narrow.low) /% 2
+    if narrow.ranked && meets(-half, narrow.high - narrow.low - half, narrow_measured) {
+        file_control(verdict, [LineCheck]{narrow.copy()}, "a narrow prediction of 0, {-half} to {narrow.high - narrow.low - half}, would pass too", if (holds(narrow_measured, 0)) -> Val(said_measured("narrow", narrow_measured)) else -> None)
+    }
+    verdict
+}
+
+// The `round` point's ranked lines as the trace holds them, for the narrow
+// line's interval `narrow_low` to `narrow_high` and the wide line's.
+lines_of: fn(narrow_low: Int, narrow_high: Int, wide_low: Int, wide_high: Int) -> String {
+    "{{\"experiments\":30,\"function\":\"narrow\",\"gain_tenths\":{(narrow_low + narrow_high) /% 2},\"high_tenths\":{narrow_high},\"line\":43,\"low_tenths\":{narrow_low}}},{{\"experiments\":50,\"function\":\"wide\",\"gain_tenths\":{(wide_low + wide_high) /% 2},\"high_tenths\":{wide_high},\"line\":49,\"low_tenths\":{wide_low}}}"
+}
+
+// The comparison of the lines `lines` with the narrow line's measured
+// interval `narrow_measured` and the wide line's, controls included, with
+// the line checks it made.
+Compared: struct {
+    narrow: LineCheck,
+    wide: LineCheck,
+    verdict: Comparison,
+}
+
+compare: fn(lines: String, narrow_measured: [Int], wide_measured: [Int]) -> Compared {
+    narrow: check_line(lines, "narrow", narrow_measured)
+    wide: check_line(lines, "wide", wide_measured)
+    verdict := check_controls(narrow, wide, narrow_measured, wide_measured)
+    loop problem in narrow.wrong -> verdict.wrong.push(problem)
+    loop problem in wide.wrong -> verdict.wrong.push(problem)
+    if !narrow.ranked && !wide.ranked {
+        verdict.wrong.push("the lens ranked neither line sped up by hand for `round`: {lines}")
+    }
+    Compared{narrow: narrow, wide: wide, verdict: verdict}
+}
+
+// The verdict on fixed numbers: the lines `lines` against measurements of
+// the narrow line, `narrow_first` and `narrow_last`, and of the wide one.
+compare_fixed: fn(lines: String, narrow_first: [Int], narrow_last: [Int], wide_first: [Int], wide_last: [Int]) -> Comparison {
+    compare(lines, measured_interval(narrow_first, narrow_last), measured_interval(wide_first, wide_last)).verdict
+}
+
+// The comparison on fixed numbers, a run of the fixture's shape: the
+// narrow line predicted 175 to 190 and measured about 180, the wide one
+// predicted -5 to 10 and measured about 5. It must pass that; fail the
+// lines swapped, a narrow prediction of 0, and claimed gains too vague
+// for a control to fail; name as unclaimed intervals that vague holding
+// 0; and name as no truth one that drifted from 80 to 210.
+check_comparison: fn() {
+    narrow_first: [Int]{170, 178, 186}
+    narrow_last: [Int]{172, 180, 188}
+    wide_first: [Int]{0, 4, 8}
+    wide_last: [Int]{2, 6, 10}
+    right: compare_fixed(lines_of(175, 190, -5, 10), narrow_first, narrow_last, wide_first, wide_last)
+    if right.wrong.len() + right.unclaimed.len() + right.untrue.len() > 0 {
+        panic("the comparison does not pass a right prediction: {right.wrong.join("; ")}{right.unclaimed.join("; ")}{right.untrue.join("; ")}")
+    }
+    if compare_fixed(lines_of(-5, 10, 175, 190), narrow_first, narrow_last, wide_first, wide_last).wrong.len() == 0 {
+        panic("the comparison passes the lines' predictions swapped")
+    }
+    if compare_fixed(lines_of(-8, 7, -5, 10), narrow_first, narrow_last, wide_first, wide_last).wrong.len() == 0 {
+        panic("the comparison passes a narrow prediction of 0")
+    }
+    if compare_fixed(lines_of(10, 290, 5, 200), narrow_first, narrow_last, wide_first, wide_last).wrong.len() == 0 {
+        panic("the comparison passes a claimed gain too vague for a control to fail")
+    }
+    vague: compare_fixed(lines_of(-75, 190, -20, 175), narrow_first, narrow_last, wide_first, wide_last)
+    if vague.wrong.len() > 0 || vague.unclaimed.len() == 0 {
+        panic("the comparison does not name as unclaimed intervals of -75 to 190 and -20 to 175: {vague.wrong.join("; ")}")
+    }
+    drifted: compare_fixed(lines_of(175, 190, -5, 10), [Int]{70, 80, 90}, [Int]{200, 210, 220}, wide_first, wide_last)
+    if drifted.wrong.len() > 0 || drifted.unclaimed.len() > 0 || drifted.untrue.len() == 0 {
+        panic("the comparison does not name as no truth a truth that drifted from 80 to 210: {drifted.wrong.join("; ")}")
+    }
+    print("the comparison passes a right prediction, fails each wrong one and names what it cannot check")
 }
 
 // The receipt's fit of how much slower a task ran the longer its CPU idled
@@ -386,7 +576,11 @@ check_clocked: fn(trace: String) -> Bool {
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 -> panic("usage: check.jet -- [counts] TIER TRACE")
+    if args.len() > 0 && args[args.len() - 1] == "controls" {
+        check_comparison()
+        return
+    }
+    if args.len() < 2 -> panic("usage: check.jet -- [counts] TIER TRACE, or check.jet -- controls")
     tier: args[args.len() - 2]
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
     // `counts` reports the lens's record of TRACE alone, the experiments
@@ -429,15 +623,24 @@ run: fn() {
     if before.len() < 2 -> panic("no `round` progress point in the causal section")
     pieces: before[0].split("{{\"lines\":[").to_list()
     lines: pieces[pieces.len() - 1]
-    narrow: check_line(lines, "narrow", min(first.narrow[0], last.narrow[0]), max(first.narrow[2], last.narrow[2]))
-    wide: check_line(lines, "wide", min(first.wide[0], last.wide[0]), max(first.wide[2], last.wide[2]))
-    loop problem in narrow.wrong -> wrong.push(problem)
-    loop problem in wide.wrong -> wrong.push(problem)
-    if !narrow.ranked && !wide.ranked {
-        wrong.push("the lens ranked neither line sped up by hand for `round`: {lines}")
+    compared: compare(lines, measured_interval(first.narrow, last.narrow), measured_interval(first.wide, last.wide))
+    verdict: compared.verdict
+    loop problem in verdict.wrong -> wrong.push(problem.copy())
+    said: "{compared.narrow.said}; {compared.wide.said}; waits {first.wait} and {last.wait} thousandths; the measurements' clock drops {clock_drop(first.high_mhz, first.low_mhz)} and {clock_drop(last.high_mhz, last.low_mhz)} thousandths"
+    if wrong.len() > 0 {
+        record_path(tier, trace, "compared and failed, {said}")
+        panic(wrong.join("; "))
     }
-    outcome: if wrong.len() == 0 -> "compared" else -> "compared and failed"
-    record_path(tier, trace, "{outcome}, {narrow.said}; {wide.said}; waits {first.wait} and {last.wait} thousandths; the measurements' clock drops {clock_drop(first.high_mhz, first.low_mhz)} and {clock_drop(last.high_mhz, last.low_mhz)} thousandths")
-    if wrong.len() > 0 -> panic(wrong.join("; "))
+    if verdict.unclaimed.len() > 0 {
+        record_path(tier, trace, "unclaimed, {verdict.unclaimed.join("; ")}; {said}")
+        print("the lens's interval for a line its check could not tell from a wrong prediction includes no gain, so it claimed none to compare")
+        return
+    }
+    if verdict.untrue.len() > 0 {
+        record_path(tier, trace, "no truth, {verdict.untrue.join("; ")}; {said}")
+        print("the measurements drifted too far apart to tell a wrong prediction from the lens's, so they measured no truth to check the lens by")
+        return
+    }
+    record_path(tier, trace, "compared, {said}")
     print("each line sped up by hand that the lens ranked gained within its predicted interval")
 }

@@ -130,15 +130,28 @@ PERF_TOPDOWN_EVENT_BITS: I64{40}
 // The kind of the record of the CPU time the process used since sampling
 // started (perf_samples_exit): its second word, in nanoseconds. A record of
 // this kind with 1 for its address is a flight ring's tally
-// (perf_flight_tally), and one with PERF_SAMPLES_ENDED a sampler's end.
+// (perf_flight_tally), one with PERF_SAMPLES_ENDED a sampler's end, and one
+// with PERF_SAMPLES_THROTTLED a throttle's start or end.
 PERF_SAMPLES_CLOCK: I64{13}
 
 // The address of a sampler's end record (perf_precise_ended), a clock
 // record of PERF_SAMPLES_ENDED_WORDS words: its first, the sampler's serial
-// (PERF_PRECISE_SERIAL), then its event's count at its end.
+// (PERF_PRECISE_SERIAL), then its event's count at its end, then the
+// monotonic time it ended at, from the epoch (-1 with none).
 PERF_SAMPLES_ENDED: I64{2}
 
-PERF_SAMPLES_ENDED_WORDS: I64{3}
+PERF_SAMPLES_ENDED_WORDS: I64{4}
+
+// The address of a throttle record (perf_samples_ring_throttle), a clock
+// record of PERF_SAMPLES_THROTTLED_WORDS words: its first, the sampler's
+// serial, then the time the kernel stopped or restarted its samples, from
+// the epoch (-1 with none), then 1 for a stop and 0 for a restart. While
+// the kernel throttles a sampler its count runs on, so the session counts
+// the periods each throttle spans as samples not taken, not as time in the
+// kernel.
+PERF_SAMPLES_THROTTLED: I64{3}
+
+PERF_SAMPLES_THROTTLED_WORDS: I64{4}
 
 // The kind of a file or network transfer's record (perf_samples_io).
 PERF_SAMPLES_IO: I64{11}
@@ -575,16 +588,20 @@ PERF_PRECISE_COUNT: I64{2064}
 
 // The control page's word after the count's: the sampler's serial, from 1
 // in the order the samplers attached (PERF_PRECISE_SERIALS), which each of
-// its samples' count words and its end record name it by
-// (PERF_SAMPLES_TIMED). Then PERF_PRECISE_ALONE's words, where a drain that
-// holds no record buffer builds a sample's record of its program counter
-// alone (perf_samples_ring_sample), and PERF_PRECISE_END's, where its end
-// record is built (perf_precise_ended), each under the ring's lock.
+// its samples' count words, its throttle records and its end record name it
+// by (PERF_SAMPLES_TIMED). Then PERF_PRECISE_ALONE's words, where a drain
+// that holds no record buffer builds a sample's record of its program
+// counter alone (perf_samples_ring_sample), PERF_PRECISE_END's, where its
+// end record is built (perf_precise_ended), and PERF_PRECISE_THROTTLE's,
+// where a drain builds a throttle record (perf_samples_ring_throttle), each
+// under the ring's lock.
 PERF_PRECISE_SERIAL: I64{2072}
 
 PERF_PRECISE_ALONE: I64{2080}
 
 PERF_PRECISE_END: I64{2112}
+
+PERF_PRECISE_THROTTLE: I64{2144}
 
 // Where a perf event's sample (PERF_RECORD_SAMPLE) keeps, past its
 // header, the words perf_precise_open's sample_type asks for: the sampled
@@ -1582,10 +1599,11 @@ perf_precise_count: fn(fd: I64, ring: I64) -> I64 {
 }
 
 // Write sampler `fd`'s end record, its ring `ring`'s lock held: a clock
-// record with PERF_SAMPLES_ENDED for its address, the sampler's serial and
-// its event's count (perf_precise_count), from which the session counts
-// the periods its thread's samplers ran and, by each sample's count word
-// (PERF_SAMPLES_TIMED), those that ended in the kernel. The sampler is
+// record with PERF_SAMPLES_ENDED for its address, the sampler's serial,
+// its event's count (perf_precise_count) and the time it ended at, from
+// which the session counts the periods its thread's samplers ran and, by
+// each sample's count word (PERF_SAMPLES_TIMED), those that ended in the
+// kernel, and finds whether a throttle ran to the end. The sampler is
 // disabled first (PERF_EVENT_IOC_DISABLE), so the count is final and the
 // kernel takes no sample past it for a later drain to write. Nothing for a
 // sampler whose count is 0, which took no sample, or without a samples
@@ -1604,6 +1622,7 @@ perf_precise_ended: fn(fd: I64, ring: I64) {
     rt_text_store(record, (PERF_SAMPLES_ENDED_WORDS << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS) | PERF_SAMPLES_ENDED)
     rt_text_store(wrapping(record + I64{8}), sync_load(wrapping(ring + PERF_PRECISE_SERIAL)))
     rt_text_store(wrapping(record + I64{16}), count)
+    rt_text_store(wrapping(record + I64{24}), perf_samples_since_epoch(sync_now_ns()))
     perf_samples_send(out, record, wrapping(PERF_SAMPLES_ENDED_WORDS * I64{8}))
 }
 
@@ -1980,10 +1999,12 @@ perf_samples_put: fn(fd: I64, side: I64, record: I64, head: I64, pc: I64, period
 // claims (perf_samples_ring_sample), charged to the task the TCB `tcb`
 // runs (perf_samples_task_of), 0 for none; the samples the kernel found no
 // room for (PERF_RECORD_LOST, type 2, its count after its id) count as
-// lost records. The rings' tallies (PERF_SAMPLES_RING_COUNT) add the
-// drained samples, the kernel's time for them, those the kernel's
-// callchain cut and those it dropped. Each tail store frees what the drain
-// read for the kernel.
+// lost records; and each of the kernel's throttle and unthrottle records
+// (PERF_RECORD_THROTTLE, type 5, and PERF_RECORD_UNTHROTTLE, type 6) is
+// written as a throttle record (perf_samples_ring_throttle). The rings'
+// tallies (PERF_SAMPLES_RING_COUNT) add the drained samples, the kernel's
+// time for them, those the kernel's callchain cut and those it dropped.
+// Each tail store frees what the drain read for the kernel.
 perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
     fd: perf_samples_fd
     lock: wrapping(ring + PERF_PRECISE_LOCK)
@@ -2020,6 +2041,8 @@ perf_samples_ring_drain: fn(ring: I64, tcb: I64) {
                 dropped = wrapping(dropped + count)
                 lost: perf_samples_lost_word()
                 if (lost != I64{0}) { _ := sync_add(lost, count) }
+            } else if (kind == I64{5} || kind == I64{6}) {
+                perf_samples_ring_throttle(fd, data, tail, kind == I64{5})
             }
             tail = wrapping(tail + size)
         }
@@ -2184,13 +2207,34 @@ perf_samples_ring_sample: fn(fd: I64, buffer: I64, slot: I64, data: I64, at: I64
 // low PERF_SAMPLES_ADDRESS_BITS of its event's count as the kernel took the
 // sample (PERF_PRECISE_READ).
 perf_samples_ring_timed: fn(data: I64, at: I64, task: I64, words: I64) {
-    epoch: time_host_epoch_ns(perf_zone_clock)
-    time: perf_samples_ring_word(data, wrapping(at + I64{16}))
-    rt_text_store(words, if (epoch == I64{0}) -> I64{-1} else -> wrapping(time - epoch))
+    rt_text_store(words, perf_samples_since_epoch(perf_samples_ring_word(data, wrapping(at + I64{16}))))
     rt_text_store(wrapping(words + I64{8}), task)
     serial: rt_text_word(wrapping(wrapping(data - PERF_PRECISE_PAGE) + PERF_PRECISE_SERIAL))
     count: perf_samples_ring_word(data, wrapping(at + PERF_PRECISE_READ))
     rt_text_store(wrapping(words + I64{16}), (serial << PERF_SAMPLES_ADDRESS_BITS) | (count & PERF_SAMPLES_ADDRESS_MASK))
+}
+
+// A monotonic time `time` from the process epoch (time_host_epoch_ns), -1
+// before the epoch is known.
+perf_samples_since_epoch: fn(time: I64) -> I64 {
+    epoch: time_host_epoch_ns(perf_zone_clock)
+    if (epoch == I64{0}) -> I64{-1} else -> wrapping(time - epoch)
+}
+
+// Write the throttle record (PERF_SAMPLES_THROTTLED) of the kernel's
+// throttle or unthrottle record at `at` of a ring, past `data`, built in the
+// ring's control page (PERF_PRECISE_THROTTLE) under its lock: the sampler's
+// serial, the record's time (at 8: its sampler was opened without
+// sample_id_all, so the record is its header, time, id and stream id) from
+// the epoch, and whether it throttles (PERF_RECORD_THROTTLE, `on`).
+perf_samples_ring_throttle: fn(fd: I64, data: I64, at: I64, on: Bool) {
+    control: wrapping(data - PERF_PRECISE_PAGE)
+    record: wrapping(control + PERF_PRECISE_THROTTLE)
+    rt_text_store(record, (PERF_SAMPLES_THROTTLED_WORDS << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS) | PERF_SAMPLES_THROTTLED)
+    rt_text_store(wrapping(record + I64{8}), rt_text_word(wrapping(control + PERF_PRECISE_SERIAL)))
+    rt_text_store(wrapping(record + I64{16}), perf_samples_since_epoch(perf_samples_ring_word(data, wrapping(at + I64{8}))))
+    rt_text_store(wrapping(record + I64{24}), if on -> I64{1} else -> I64{0})
+    perf_samples_send(fd, record, wrapping(PERF_SAMPLES_THROTTLED_WORDS * I64{8}))
 }
 
 // The word at `address` of the stack a sample copied: `copied` bytes from

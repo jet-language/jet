@@ -503,7 +503,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     // should have kept: sampler 1's 8 periods and sampler 2's 2. Of their
     // 10 ends, sampler 1's 2nd, its 5th to 8th after its last sample and
     // both of sampler 2's fell in kernel mode.
-    assert(profile.reason.contains("; it kept 3 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 7 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 0 were lost in the rings, drained but not kept, and 0 dropped by the kernel, which found no room in a ring"), profile.reason)
+    assert(profile.reason.contains("; it kept 3 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 7 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 0 were lost in the rings, drained but not kept, 0 dropped by the kernel, which found no room in a ring, and 0 not taken while the kernel throttled the sampler"), profile.reason)
 }
 
 // Under load a sampler's timer drifts off the multiples of its period, as
@@ -632,7 +632,72 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
     profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
     // 10 ends: 6 samples kept, 2 in kernel mode, 1 lost and 1 dropped.
-    assert(profile.reason.contains("; it kept 6 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 2 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 1 were lost in the rings, drained but not kept, and 1 dropped by the kernel, which found no room in a ring"), profile.reason)
+    assert(profile.reason.contains("; it kept 6 of the 10 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 2 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 1 were lost in the rings, drained but not kept, 1 dropped by the kernel, which found no room in a ring, and 0 not taken while the kernel throttled the sampler"), profile.reason)
+}
+
+// While the kernel throttles a sampler its count runs on past the thread's
+// CPU time, so a stretch a restart falls in, or one after the last sample
+// while throttled, counts the periods its time spans, and those that took
+// no sample are the throttled ones, not kernel mode's.
+#Test("perf counts the samples a throttled sampler did not take apart from the period ends in kernel mode") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    four: 4 << 48
+    first: 1 << 48
+    throttle: (13 << 59) | (4 << 48) | 3
+    values := [Int]{}
+    // Sampler 1, at 125 µs a period: samples at 125 and 250 µs. The kernel
+    // throttles it at the second and restarts it at 1250 µs; its count ran
+    // on to 9 ms by the next sample, at 1300 µs. Then a sample at 1425 µs,
+    // where it throttles again, to its end at 1550 µs.
+    counts: [Int]{125000, 250000, 9000000, 9125000}
+    times: [Int]{125000, 250000, 1300000, 1425000}
+    loop index in 0..<counts.len() {
+        values.push(4112 | four)
+        values.push(times[index])
+        values.push(0)
+        values.push(first | counts[index])
+    }
+    values.push(throttle)
+    values.push(1)
+    values.push(240000)
+    values.push(1)
+    values.push(throttle)
+    values.push(1)
+    values.push(1250000)
+    values.push(0)
+    values.push(throttle)
+    values.push(1)
+    values.push(1420000)
+    values.push(1)
+    // Its end, with its count and time; then the clock record, its rings'
+    // 4 samples and none dropped.
+    values.push((13 << 59) | (4 << 48) | 2)
+    values.push(1)
+    values.push(9250000)
+    values.push(1550000)
+    values.push((13 << 59) | (11 << 48))
+    values.push(1550000)
+    values.push(6000)
+    values.push(1000)
+    values.push(0)
+    values.push(0)
+    values.push(0)
+    values.push(4)
+    values.push(1000)
+    values.push(0)
+    values.push(0)
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, jet_cli_perf_test_words(values), 0)
+    sampled.sampler = jet_cli_perf_pc_words(jet_cli_perf_test_words([Int]{3, 0, 0, 0, 2, 125000, 0, 127}))
+    assert_eq(sampled.total, U64{4})
+    assert_eq(sampled.throttles.len(), 3)
+    assert_eq(sampled.end_times[1], 1550000)
+    text: "\n\n\n\nfib: fn(n: Int) -> Int {{ n }}\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("fib.jet", text), sampled) ?? panic("fib's line holds samples")
+    // 1550 µs of CPU time give 12 periods: 4 samples kept; 7 not taken
+    // between 250 and 1300 µs, and 1 after 1425 µs, while throttled; none in
+    // kernel mode, though the count reached 74 periods.
+    assert(profile.reason.contains("; it kept 4 of the 12 samples that 1 ms of CPU time on the threads' task clocks while sampled gives; 0 of their periods ended in kernel mode, where the task clock takes no sample; of their samples, 0 were lost in the rings, drained but not kept, 0 dropped by the kernel, which found no room in a ring, and 8 not taken while the kernel throttled the sampler"), profile.reason)
 }
 
 // A sample in a generated entry's own code counts outside the source, by

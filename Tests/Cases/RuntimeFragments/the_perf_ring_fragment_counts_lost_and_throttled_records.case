@@ -1,0 +1,37 @@
+# The PerfRing runtime test fragment (Compiler/JetRuntime/Tests/Fragments.fixture/PerfRingTests.jet)
+# runs as a program under Tests/Fixtures/runtime_fragment_host.c, as
+# the_perf_cites_fragment_decodes_to_the_samples_kept.case does: a drain of
+# a sampler's ring whose records cross its wrap writes each sample and each
+# of the kernel's throttle and unthrottle records once, and tallies the
+# samples and the ones the kernel lost apart.
+requires: os-name:linux
+requires: tool:cc
+requires: tool:as
+mkdir: native/Source
+step unit: jet {root}/Compiler/Toolchain/RuntimePack.jet --root {root}/Compiler unit raw --test PerfRing
+timeout: 600s
+exit: 0
+write: glue.jet = "\n#Export(c) jet_rt_plain_fixture: fn() { perf_ring_tests() }\n"
+concat: native/Source/Fixture.jet raw/unit.jet glue.jet
+copy: raw/package.jet native/package.jet
+copy: {root}/Compiler/JetRuntime/lifecycle.list lifecycle.full
+capture: lifecycle = text file.filter(!^= "jet_rt_alloc_check_init ") lifecycle.full
+write: native/lifecycle.list = "{cap:lifecycle}\n"
+step library: jet doc {work}/native/Source/Fixture.jet
+cwd: native/Source
+env: JET_FRONT_LIBRARY_OBJECT_OUTPUT={work}/native/fixture
+env: JET_FRONT_LIBRARY_LIFECYCLE={work}/native/lifecycle.list
+timeout: 1800s
+exit: 0
+file: native/fixture.issues absent # the front lowered every function of the unit
+file: native/fixture.o exists
+write: fault-report.S = "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{root}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n    .section .note.GNU-stack,\"\",@progbits\n"
+step: as --64 -o fault-report.o fault-report.S
+exit: 0
+step: cc -std=c11 -Wall -Wextra -Werror {root}/Tests/Fixtures/runtime_fragment_host.c native/fixture.o fault-report.o -lpthread -ldl -lm -o fragment
+exit: 0
+step run: {work}/fragment
+timeout: 60s
+exit: 0
+stdout: empty
+stderr: empty

@@ -186,9 +186,12 @@ JetCLIPerfInlines: struct {
 // `table`, the function a generated entry stands for, -1 for every other
 // (x64_jetline_entry_runs). `counts` holds each counted CPU-time sample's
 // count word that a sampler took (its last JET_CLI_PERF_TIMED word, nonzero
-// above JET_CLI_PERF_ADDRESS_BITS), and `ends` each sampler's count of its
-// event at its end by its serial (PerfSamples.jet perf_precise_ended); both
-// are empty for a zones window's file.
+// above JET_CLI_PERF_ADDRESS_BITS) and `count_times` its time by that word;
+// `ends` holds each sampler's count of its event at its end by its serial
+// (PerfSamples.jet perf_precise_ended) and `end_times` the time of that
+// end; `throttles` holds the kernel's throttles of the samplers
+// (PerfSamples.jet perf_samples_ring_throttle); all are empty for a zones
+// window's file.
 JetCLIPerfSamples: struct {
     table: X64Jetline,
     inlines: JetCLIPerfInlines,
@@ -230,7 +233,19 @@ JetCLIPerfSamples: struct {
     interval_us: Int{JET_CLI_PERF_SAMPLE_US},
     unwindowed: U64{0},
     counts: [Int]{[Int]{}},
+    count_times: [Int:Int]{[Int:Int]{}},
     ends: [Int:Int]{[Int:Int]{}},
+    end_times: [Int:Int]{[Int:Int]{}},
+    throttles: [JetCLIPerfThrottle]{[JetCLIPerfThrottle]{}},
+}
+
+// A sampler's throttle record (PerfSamples.jet perf_samples_ring_throttle):
+// its serial, the time from the epoch the kernel stopped (`on`) or restarted
+// its samples, -1 with no epoch.
+JetCLIPerfThrottle: struct {
+    serial: Int,
+    at_ns: Int,
+    on: Bool,
 }
 
 // A program counter the samples named: its CPU-time samples and, per
@@ -702,7 +717,15 @@ jet_cli_perf_sampler_reason: fn(used: JetCLIPerfSampler, total: U64, cpu_ns: U64
 // either, so of the ends no sample took, the samples lost in the rings
 // (those the drains took, JetCLIPerfCost.ring_samples, that the file
 // lacks) and those the kernel dropped, finding no room in a ring
-// (JetCLIPerfCost.dropped), are not kernel mode's.
+// (JetCLIPerfCost.dropped), are not kernel mode's. Nor are those the kernel
+// did not take while it throttled the sampler (JetCLIPerfSamples.throttles):
+// a throttled sampler's count runs on unchecked, far past the thread's CPU
+// time, until the first sample after the kernel restarts it, or to its end
+// when it stays throttled. So a stretch from one sample, or the sampler's
+// end, to the next that a restart falls in, or after the last sample while
+// throttled or once restarted, counts at most the periods its time spans.
+// Its count past those adds neither CPU time nor periods, and the periods
+// it spans that took no sample are the throttled ones.
 jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_sample: U64) -> String Never! {
     if sampled.sampler == .Val(used) && used.source == 3 && used.period > 0 && sampled.ends.len() > 0 {
         period: used.period
@@ -715,13 +738,21 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
         }
         counts := sampled.counts
         counts.sort()
+        throttles := sampled.throttles
+        throttles.sort_by(fn(left: JetCLIPerfThrottle, right: JetCLIPerfThrottle) { (left.serial <=> right.serial).then(left.at_ns <=> right.at_ns) })
         kernel := 0
+        throttled := 0
         took := [Int:Bool]{}
         serial := 0
         // The ends the sampler's timer reached to its latest sample, and
-        // that sample's count.
+        // that sample's count and time (-1 for none).
         reached := 0
         last := 0
+        since := 0
+        // Whether the kernel throttled the sampler at its latest sample,
+        // and the first throttle record past that sample.
+        held := false
+        next := 0
         index := 0
         loop index <= counts.len() {
             word: if index < counts.len() -> counts[index] else -> 0
@@ -729,24 +760,62 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
             if owner != serial {
                 if serial != 0 {
                     ended: if sampled.ends.has_key(serial) -> sampled.ends[serial] /% period else -> 0
-                    if ended > reached -> kernel += ended - reached else {
-                        nominal += reached - ended
-                    }
+                    if ended > reached {
+                        resumed := false
+                        loop next < throttles.len() && throttles[next].serial == serial {
+                            if !throttles[next].on -> resumed = true
+                            next += 1
+                        }
+                        tail: ended - reached
+                        end_ns: sampled.end_times.get(serial) ?? -1
+                        if (held || resumed) && since >= 0 && end_ns >= since {
+                            spent: end_ns - since
+                            spans: (spent + period /% 2) /% period
+                            taken: if spans < tail -> spans else -> tail
+                            nominal -= tail - taken
+                            counted: sampled.ends[serial] - last
+                            if counted > spent -> ns -= counted - spent
+                            throttled += taken
+                        } else { kernel += tail }
+                    } else { nominal += reached - ended }
                     took[serial] = true
                 }
                 serial = owner
                 reached = 0
                 last = 0
+                since = 0
+                held = false
+                loop next < throttles.len() && throttles[next].serial < serial -> next += 1
             }
             if index == counts.len() -> break
             count: word & low
+            at: sampled.count_times.get(word) ?? -1
+            // The throttle records to this sample: whether the kernel
+            // restarted the sampler since the previous one.
+            resumed := false
+            loop at >= 0 && next < throttles.len() && throttles[next].serial == serial && throttles[next].at_ns <= at {
+                if !throttles[next].on -> resumed = true
+                held = throttles[next].on
+                next += 1
+            }
             // A sample under half a period past the previous one took the
             // same end, so it reaches none, and the samples kept then
             // outnumber the ends they and kernel mode make up.
             gap: (count - last + period /% 2) /% period
-            if gap > 0 -> kernel += gap - 1
+            if resumed && since >= 0 && at >= since {
+                // The sample takes an end of its own, however short the
+                // time since the one before.
+                spent: at - since
+                spans: (spent + period /% 2) /% period
+                bound: if spans > 1 -> spans else -> 1
+                taken: if bound < gap -> bound else -> gap
+                nominal -= gap - taken
+                if count - last > spent -> ns -= count - last - spent
+                if taken > 0 -> throttled += taken - 1
+            } else if gap > 0 { kernel += gap - 1 }
             reached += gap
             last = count
+            since = at
             index += 1
         }
         loop (owner, end) in sampled.ends {
@@ -755,7 +824,7 @@ jet_cli_perf_nominal: fn(sampled: JetCLIPerfSamples, cost: JetCLIPerfCost, per_s
         lost: if cost.ring_samples > sampled.total -> Int{cost.ring_samples - sampled.total} else -> 0
         dropped: Int{cost.dropped}
         kernel = if kernel > lost + dropped -> kernel - lost - dropped else -> 0
-        return "; it kept {sampled.total} of the {nominal} samples that {ns /% 1000000} ms of CPU time on the threads' task clocks while sampled gives; {kernel} of their periods ended in kernel mode, where the task clock takes no sample; of their samples, {lost} were lost in the rings, drained but not kept, and {dropped} dropped by the kernel, which found no room in a ring"
+        return "; it kept {sampled.total} of the {nominal} samples that {ns /% 1000000} ms of CPU time on the threads' task clocks while sampled gives; {kernel} of their periods ended in kernel mode, where the task clock takes no sample; of their samples, {lost} were lost in the rings, drained but not kept, {dropped} dropped by the kernel, which found no room in a ring, and {throttled} not taken while the kernel throttled the sampler"
     }
     "; it kept {sampled.total} of the {cost.cpu_ns / per_sample} samples that {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives"
 }
@@ -1267,14 +1336,26 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         }
         if kind == JET_CLI_PERF_CLOCK_KIND && pc == 2 {
             // A sampler's end (PerfSamples.jet perf_precise_ended): its
-            // serial and its event's count. Its thread's end and the exit
-            // may each write one, so the most wins.
+            // serial, its event's count and, from the fourth word, the time
+            // it ended. Its thread's end and the exit may each write one, so
+            // the most wins.
             if record >= 3 && at + record * 8 <= words.len() {
                 serial: link_debug_addr(words, at + 8)
                 ended: link_debug_addr(words, at + 16)
                 if !sampled.ends.has_key(serial) || sampled.ends[serial] < ended {
                     sampled.ends[serial] = ended
+                    if record >= 4 -> sampled.end_times[serial] = link_debug_addr(words, at + 24)
                 }
+            }
+            at += record * 8
+            next
+        }
+        if kind == JET_CLI_PERF_CLOCK_KIND && pc == 3 {
+            // A sampler's throttle (PerfSamples.jet
+            // perf_samples_ring_throttle): its serial, the time, and 1
+            // when the kernel stopped its samples, 0 when it restarted them.
+            if record >= 4 && at + record * 8 <= words.len() {
+                sampled.throttles.push(JetCLIPerfThrottle{serial: link_debug_addr(words, at + 8), at_ns: link_debug_addr(words, at + 16), on: link_debug_addr(words, at + 24) != 0})
             }
             at += record * 8
             next
@@ -1560,6 +1641,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             counted_by: link_debug_addr(words, stamp + 16)
             if ((counted_by >> JET_CLI_PERF_ADDRESS_BITS) & 65535) != 0 {
                 sampled.counts.push(counted_by)
+                sampled.count_times[counted_by] = link_debug_addr(words, stamp)
             }
         }
         at += record * 8
@@ -1570,7 +1652,10 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         sampled.records_lost = open.lost
         // A window's samples are its CPU time's, not its samplers' whole runs.
         sampled.counts = [Int]{}
+        sampled.count_times = [Int:Int]{}
         sampled.ends = [Int:Int]{}
+        sampled.end_times = [Int:Int]{}
+        sampled.throttles = [JetCLIPerfThrottle]{}
     }
     sampled.timed.sort_by(fn(left: JetCLIPerfTimed, right: JetCLIPerfTimed) { (left.at_ns <=> right.at_ns).then(left.task <=> right.task).then(left.line <=> right.line) })
     sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(jet_cli_perf_line_counted(right, 1) <=> jet_cli_perf_line_counted(left, 1)).then(jet_cli_perf_line_counted(right, 0) <=> jet_cli_perf_line_counted(left, 0)).then(right.allocations <=> left.allocations).then(left.name <=> right.name).then(left.line <=> right.line) })

@@ -220,12 +220,17 @@ thread whose timer ran ahead of its count adds the ends it reached. An end
 whose sample was lost took none either, and the exit's clock record tells
 those apart: the samples the drains took from the threads' rings, less those
 the session kept, were lost in the rings, and those the kernel found no room
-for in a ring (`PERF_RECORD_LOST`) it dropped. The ends in kernel mode are
-the rest (`it kept 392 of the 400 samples that 50 ms of CPU time on the
-threads' task clocks while sampled gives; 8 of their periods ended in kernel
-mode, where the task clock takes no sample; of their samples, 0 were lost in
-the rings, drained but not kept, and 0 dropped by the kernel, which found no
-room in a ring`). Under another sampler it is the process's CPU time over
+for in a ring (`PERF_RECORD_LOST`) it dropped. While the kernel throttles a
+sampler (`PERF_RECORD_THROTTLE`), its count runs on past the thread's CPU
+time. So a stretch the restart falls in, or the stretch after the last
+sample while throttled, holds at most the ends its time spans. Those of its
+ends that took no sample were not taken while throttled. The ends in kernel
+mode are the rest (`it kept 392 of the 400 samples that 50 ms of CPU time
+on the threads' task clocks while sampled gives; 8 of their periods ended in
+kernel mode, where the task clock takes no sample; of their samples, 0 were
+lost in the rings, drained but not kept, 0 dropped by the kernel, which
+found no room in a ring, and 0 not taken while the kernel throttled the
+sampler`). Under another sampler it is the process's CPU time over
 the sampling interval.
 The
 profile's overhead is `measured`, in two parts that `overhead_ns` sums.
