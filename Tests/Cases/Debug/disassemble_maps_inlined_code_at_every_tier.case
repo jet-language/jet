@@ -1,0 +1,105 @@
+# `disas` lists machine code under the source lines it lowers from, at every
+# native tier. At -O0 `square` and `sum_squares` keep their own code. At -O1
+# and -O2 `square` is inlined into `sum_squares`, and both into `run`.
+# Stopped on line 3, `disas` lists the function that holds the stop's code:
+# `square` at -O0, `run` at -O1 and -O2. Each source line of that code
+# heads its own rows, the inlined callees' lines too. Inlined code follows
+# a line that names the inlined function and its call line, and `back in`
+# marks where it ends. The stop's row ends `<- here`. `disas NAME` lists a
+# function by name, an inlined one as its code in `run`, under the same
+# lines. A line with no code at a tier lists no rows, such as `total` on
+# line 11 at -O1 and -O2, whose value stays in a register. The fixture must
+# stay in jet fmt form: line 3 is square. No other debugger or
+# disassembler is on PATH.
+fixture: DisassembleMapsInlinedCodeAtEveryTier.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in square()\n" # the stop the listing marks
+stdout: ~ "#1  sum_squares()  at prog.jet:8\n" # -O0 inlines nothing
+stdout: ~ "disas\nsquare  prog.jet:3  -O0  0x" # the stopped function, its line and level
+stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n       0x" # its line heads its rows
+stdout.filter(~ "   b2  0x").filter(~ "        <- here"): lines = 1 # the pc's row is the breakpoint's
+stdout: ~ "332833500\n" # the program's own output
+stdout: ~ "Program finished\n" # and it runs to its end
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
+exit: 0
+stdout: ~ "disas sum_squares\nsum_squares  prog.jet:5-11  -O0  0x" # a function by name
+stdout: ~ "prog.jet:5   sum_squares: fn(n: Int) -> Int {\n       0x" # each of its lines
+stdout: ~ "prog.jet:6   total := 0\n       0x" # heads its rows
+stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # the loop
+stdout: ~ "prog.jet:8   sq: square(i)\n       0x" # the call
+stdout: ~ "prog.jet:9   total += sq\n       0x" # the sum
+stdout: ~ "prog.jet:11   total\n       0x" # the result
+stdout: ~ "disas square\nsquare  prog.jet:3  -O0  0x" # the callee by name
+stdout: ~ "Program finished\n" # the session runs to its end
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in square()\n" # the stop is on square's line
+stdout: ~ "#0  square()  at prog.jet:3  [inlined]\n#1  sum_squares()  at prog.jet:8  [inlined]\n#2  run()  at prog.jet:16\n" # inlined twice into run
+stdout: ~ "disas\nrun  prog.jet:3-16  -O1  0x" # run holds the stop's code; its lines span the inlined ones
+stdout: ~ "prog.jet:14   run: fn() {\n       0x" # run's own lines head their rows
+stdout: ~ "prog.jet:15   n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n  inlined args, called on line 15\n       0x" # a call line, with the callee inlined there
+stdout: ~ "prog.jet:16   print(\"{sum_squares(n)}\")\n       0x" # the line that calls sum_squares
+stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
+stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # its loop
+stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n   b2  0x" # square inlined inside it, from the breakpoint's row
+stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
+stdout.filter(~ "   b2  0x").filter(~ "        <- here"): lines = 1 # the pc's row
+stdout: ~ "  back in run\n" # where the inlined code ends
+stdout: ~ "332833500\n" # the program's own output
+stdout: ~ "Program finished\n" # and it runs to its end
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
+exit: 0
+stdout: ~ "disas sum_squares\nsum_squares, inlined into run on line 16  prog.jet:3-9  -O1  0x" # an inlined function by name
+stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
+stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
+stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
+stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
+stdout: ~ "disas square\nsquare, inlined into run" # the innermost callee by name
+stdout: ~ "  prog.jet:3  -O1  0x" # its one line
+stdout: ~ "Program finished\n" # the session runs to its end
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:3  in square()\n" # the same stop at -O2
+stdout: ~ "#0  square()  at prog.jet:3  [inlined]\n#1  sum_squares()  at prog.jet:8  [inlined]\n#2  run()  at prog.jet:16\n" # inlined twice into run
+stdout: ~ "disas\nrun  prog.jet:3-16  -O2  0x" # run holds the stop's code at -O2
+stdout: ~ "prog.jet:14   run: fn() {\n       0x" # run's own lines head their rows
+stdout: ~ "prog.jet:15   n: Int.parse(process.args().get(0) ?? \"1000\") ?? 1000\n  inlined args, called on line 15\n       0x" # a call line, with the callee inlined there
+stdout: ~ "prog.jet:16   print(\"{sum_squares(n)}\")\n       0x" # the line that calls sum_squares
+stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # an inlined callee's line, under its call
+stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # its loop
+stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n   b2  0x" # square inlined inside it, from the breakpoint's row
+stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
+stdout.filter(~ "   b2  0x").filter(~ "        <- here"): lines = 1 # the pc's row
+stdout: ~ "  back in run\n" # where the inlined code ends
+stdout: ~ "332833500\n" # the program's own output
+stdout: ~ "Program finished\n" # and it runs to its end
+step: jet debug {work}/.jet/build/prog
+env: PATH={work}/no-tools
+stdin: disassemble_maps_inlined_code_at_every_tier.named.stdin
+exit: 0
+stdout: ~ "disas sum_squares\nsum_squares, inlined into run on line 16  prog.jet:3-9  -O2  0x" # an inlined function by name at -O2
+stdout: ~ "prog.jet:6   total := 0\n  inlined sum_squares, called on line 16\n       0x" # each of its lines
+stdout: ~ "prog.jet:7   loop i in 0..<n {\n       0x" # heads its rows
+stdout: ~ "prog.jet:3   square: fn(i: Int) -> Int { i * i }\n  inlined square, called on line 8\n       0x" # the code inlined at its call
+stdout: ~ "prog.jet:9   total += sq\n  inlined sum_squares, called on line 16\n       0x" # its sum
+stdout: ~ "disas square\nsquare, inlined into run" # the innermost callee by name
+stdout: ~ "  prog.jet:3  -O2  0x" # its one line
+stdout: ~ "Program finished\n" # the session runs to its end
