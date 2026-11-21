@@ -44,9 +44,10 @@ NativeEvalRefused: struct {
 // refuses an expression that reaches an item of a source that reads
 // otherwise now, whose code the program doesn't run.
 // `unchanged`: whether the program's sources read as they did at the last
-// ask; the first ask, and one that finds them changed, takes them as they
-// read now. Code compiled before a change may not be what the source says
-// now, so the session drops the code it kept then.
+// ask; the first ask, while nothing is kept, may take them as the
+// evaluator last read them, and one that finds them changed takes them as
+// they read now. Code compiled before a change may not be what the source
+// says now, so the session drops the code it kept then.
 // `source`: the text of the source `path` names, a stop's as the line table
 // names it (NativeSession.source_at, NativeFrame.path), as the compile reads
 // it: a Core source's is the Core the program compiles with, never a file
@@ -130,12 +131,15 @@ NativeEvalValue: struct {
 }
 
 // The image's code facts an evaluation places code against, read once:
-// its sized symbols, its `.text`, and whether its `main` owns the program's
-// run (native_eval_owned).
+// its sized symbols, its `.text`, whether its `main` owns the program's
+// run (native_eval_owned), and the runtime pack the evaluation places the
+// runtime functions the image lacks from (NativeFixPack.jet; None when it
+// can't be read).
 NativeEvalImage: struct {
     symbols: NativeFixSymbols,
     code: NativeCode,
     owned: Bool,
+    pack: NativeFixPack?{None},
 }
 
 // A read of the image's code facts on a task of its own

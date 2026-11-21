@@ -9,7 +9,7 @@
 // expression reaches, callees first (jet_cli_debug_eval_held_reach); the
 // first stop shows, and an evaluation answers, once it is open.
 use {
-    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_cut_wait, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale]
+    jet_cli.[JetCLIDebugEvalDeclared, JetCLIDebugEvalHeldOpen, JetCLIDebugEvalHeldShared, JetCLIDebugEvalHeldStamp, jet_cli_debug_eval_declared, jet_cli_debug_eval_digests, jet_cli_debug_eval_held_claim, jet_cli_debug_eval_held_cut_claim, jet_cli_debug_eval_held_cut_done, jet_cli_debug_eval_held_cut_wait, jet_cli_debug_eval_held_done, jet_cli_debug_eval_held_reach, jet_cli_debug_eval_held_slot, jet_cli_debug_eval_image_same, jet_cli_debug_eval_stale, jet_cli_debug_eval_unchanged]
     jet_debug.[NativeEvalBinder]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot]
     held_time: core.time
@@ -62,6 +62,18 @@ held_test_open_later: fn(held: JetCLIDebugEvalHeldShared) -[Time.Wait]> Never! {
     permit: held.slot.guard_edit()
     assert(!permit.value.cut_opening, "the wait ends once the cut has opened")
     opening.join() ?? panic("the opening task failed")
+}
+
+#Test("the session's first ask takes the sources the cut's open read while they read the same") {
+    held: jet_cli_debug_eval_held_slot()
+    assert(jet_cli_debug_eval_held_cut_claim(held))
+    seed: JetCLIDebugEvalHeldStamp{sources: [String:String]{}, keys: [String:String]{}}
+    opened: JetCLIDebugEvalHeldOpen{held: None, missed: None, seed: Val(seed)}
+    jet_cli_debug_eval_held_cut_done(held, opened)
+    assert(jet_cli_debug_eval_unchanged(held, "/p/prog.jet"), "the first ask reads no snapshot of its own")
+    assert(jet_cli_debug_eval_unchanged(held, "/p/prog.jet"), "the seed is kept for the next ask")
+    permit: held.slot.guard_edit()
+    assert(permit.value.asked && permit.value.seed == None)
 }
 
 // The names of the functions of `declared` at the slots `order`, in order;

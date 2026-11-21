@@ -48,7 +48,7 @@ use {
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_held_set, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -892,12 +892,14 @@ jet_cli_debug_eval_build: fn(result: JetDriverCompileResult, checked: &&JetDrive
 // for the IR builder (JetIR ir_held_program), so an evaluation builds only
 // its expression's function and the functions that reaches which the image
 // doesn't hold (jet_cli_debug_eval_held_run). The program's build is the
-// image's: its optimization `level` and build `options`, at whose O0 a call
-// of a function the image holds calls the image's code.
+// image's: its optimization `level` and its optimizer's options `opt`
+// (jet_cli_opt_options), read once at the open rather than at each
+// evaluation, at whose O0 a call of a function the image holds calls the
+// image's code.
 JetCLIDebugEvalHeldIR: struct {
     program: IRProgram,
     level: Int,
-    options: BuildOptions,
+    opt: IROptOptions,
     threads: CompilerThreads,
 }
 
@@ -914,7 +916,7 @@ jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDri
     declarations: jet_driver_checked_declarations(inputs)
     built: ir_program_new(inputs.functions.move(), decls, inputs.symbols.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move())
     program: ir_held_program(built.move(), decls, declarations.foreign.move(), checks, bind: level <= 0)
-    JetCLIDebugEvalHeldIR{program: program.move(), level: level, options: options, threads: result.compiler_threads}
+    JetCLIDebugEvalHeldIR{program: program.move(), level: level, opt: jet_cli_opt_options(level, options), threads: result.compiler_threads}
 }
 
 // The held build `built` (JetIR ir_build_held_root) of the expression's
@@ -927,7 +929,7 @@ jet_cli_debug_eval_held_lower: fn(held: &JetCLIDebugEvalHeldIR, built: &&IRBuild
     }
     program := built.program.move()
     census := [JetDriverIceRow]{}
-    jet_cli_native_optimize(program, held.level, held.options, threads, census, None)
+    jet_cli_native_optimize(program, held.opt, threads, census, None)
     if census.len() > 0 -> return Err(jet_cli_debug_eval_refused("the compiler couldn't build it"))
     program.debug_level = held.level
     code := jet_cli_debug_eval_native(program.move(), key, names, value, text, threads) ?? return Err(err)
@@ -991,9 +993,12 @@ JET_CLI_DEBUG_EVAL_RACY_NS: 1000000000
 // image's functions run the code its source says only while `read` is the
 // session's record (jet_cli_debug_eval_held_in). `kept`: the sources as
 // they read when the session last asked whether its kept code is current
-// (jet_cli_debug_eval_unchanged). `cut`, `cut_opening`, `cut_missed`: the
-// session's held check of the package's cut, as `held`, `opening` and
-// `missed` are the program's (jet_cli_debug_eval_held_cut).
+// (jet_cli_debug_eval_unchanged). `seed`: the sources as the first open
+// that read them found them, which the session's first ask takes as
+// `kept` while they read the same; `asked`: whether the session has
+// asked. `cut`, `cut_opening`, `cut_missed`: the session's held check of
+// the package's cut, as `held`, `opening` and `missed` are the program's
+// (jet_cli_debug_eval_held_cut).
 JetCLIDebugEvalHeldSlot: struct {
     held: JetCLIDebugEvalHeld?{None},
     opening: Bool{false},
@@ -1003,6 +1008,8 @@ JetCLIDebugEvalHeldSlot: struct {
     program: Bool{false},
     read: [String:[U8]]{[String:[U8]]{}},
     kept: JetCLIDebugEvalHeldStamp?{None},
+    seed: JetCLIDebugEvalHeldStamp?{None},
+    asked: Bool{false},
     cut: JetCLIDebugEvalHeld?{None},
     cut_opening: Bool{false},
     cut_missed: JetCLIDebugEvalHeldStamp?{None},
@@ -1094,6 +1101,7 @@ jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&
     permit := held.slot.guard_edit()
     permit.value.cut = opened.held.move()
     permit.value.cut_missed = opened.missed.move()
+    if !permit.value.asked && permit.value.seed == None -> permit.value.seed = opened.seed.move()
     permit.value.cut_opening = false
     held.opened.notify_all()
 }
@@ -1104,11 +1112,13 @@ jet_cli_debug_eval_held_cut_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&
 // an empty `run`), with the items of the sources it read
 // (JetCLIDebugEvalHeldItems), and its held IR program built with the
 // image's build `options`, as jet_cli_debug_eval_held_open opens the
-// program's. Its stamp is the package's sources, not their cut.
+// program's. Its stamp is the package's sources, not their cut, which seed
+// the session's first ask (JetCLIDebugEvalHeldOpen.seed).
 jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildOptions) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIDebugEvalHeldOpen {
     since: debug_eval_time.unix_ns()
     snapshot: jet_cli_debug_eval_snapshot(entry, color) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: None}
     stamp: jet_cli_debug_eval_stamp(snapshot, since)
+    seed: jet_cli_debug_eval_stamp(snapshot, since)
     read := jet_cli_debug_eval_digests(snapshot)
     members := jet_cli_debug_eval_members_of(snapshot.move()) ?? return JetCLIDebugEvalHeldOpen{held: None, missed: Val(stamp.move())}
     paths := members.paths.move()
@@ -1128,6 +1138,7 @@ jet_cli_debug_eval_held_cut_open: fn(entry: String, color: Bool, options: BuildO
             if &opened.held == .Val(cut_held) {
                 cut_held.items = Val(JetCLIDebugEvalHeldItems{declared: declared.move(), paths: paths.move(), read: read.move()})
             }
+            opened.seed = Val(seed.move())
             return opened
         }
     }
@@ -1170,6 +1181,7 @@ jet_cli_debug_eval_held_done: fn(held: JetCLIDebugEvalHeldShared, opened: &&JetC
     permit.value.held = opened.held.move()
     permit.value.missed = opened.missed.move()
     permit.value.read = opened.read.move()
+    if !permit.value.asked && permit.value.seed == None -> permit.value.seed = opened.seed.move()
     permit.value.opening = false
     held.opened.notify_all()
 }
@@ -1209,12 +1221,15 @@ JetCLIDebugEvalHeldRun: struct {
 }
 
 // An open's held check (jet_cli_debug_eval_held_open), or the sources of
-// one that didn't open, and the digests of the sources it read
-// (jet_cli_debug_eval_digests), empty when it read none.
+// one that didn't open, the digests of the sources it read
+// (jet_cli_debug_eval_digests), empty when it read none, and those sources
+// as it read them, for the session's first ask (JetCLIDebugEvalHeldSlot
+// seed), None when it read none.
 JetCLIDebugEvalHeldOpen: struct {
     held: JetCLIDebugEvalHeld?,
     missed: JetCLIDebugEvalHeldStamp?,
     read: [String:[U8]]{[String:[U8]]{}},
+    seed: JetCLIDebugEvalHeldStamp?{None},
 }
 
 // `text` as the function of the locals `params` (jet_cli_debug_eval_params)
@@ -1436,7 +1451,10 @@ jet_cli_debug_eval_held_run: fn(held: &&JetCLIDebugEvalHeld?, path: String, text
     }
     names: loop param in params -> param.name
     key: "{function.key}"
-    threads: CompilerThreads{cap: current.ir.threads.cap, cores: current.ir.threads.cores, memory_available: jet_cli_memory_available()}
+    // The open's memory term stands: the held program is already in memory
+    // and an evaluation adds one function and what it reaches, so it reads
+    // the host's memory only once a session, not at each evaluation.
+    threads: CompilerThreads{cap: current.ir.threads.cap, cores: current.ir.threads.cores, memory_available: current.ir.threads.memory_available}
     rooted: ir_build_held_root(current.ir.program.move(), function.move(), source, threads)
     current.ir.program = rooted.program.move()
     built: jet_cli_debug_eval_held_lower(current.ir, rooted.result.move(), key, names, value, text, threads) ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
@@ -1479,6 +1497,7 @@ jet_cli_debug_eval_held_open: fn(entry: String, color: Bool, options: BuildOptio
         .Compiled(compile, snapshot) -> {
             opened := jet_cli_debug_eval_held_of(compile.move(), jet_cli_debug_eval_stamp(snapshot, since), options)
             opened.read = jet_cli_debug_eval_digests(snapshot)
+            opened.seed = Val(jet_cli_debug_eval_stamp(snapshot, since))
             return opened
         }
     }
@@ -1558,19 +1577,44 @@ jet_cli_debug_eval_stamp: fn(snapshot: JetDriverAuthorizedSourceSnapshot, since:
 
 // Whether the program of `entry` reads as it did when the session `held`
 // last asked (NativeEvaluator.unchanged): its sources then, `kept`, each
-// read the same now. The first ask, and one that finds them changed, keeps
-// the sources as they read now; none are kept while they can't be read,
-// and every ask is then a change.
+// read the same now. The first ask takes the sources as an open of the
+// session's held checks read them (`seed`) while each reads the same, so
+// it reads no snapshot of its own: no code is kept before it. Otherwise
+// the first ask, and one that finds them changed, keeps the sources as
+// they read now; none are kept while they can't be read, and every ask is
+// then a change.
 jet_cli_debug_eval_unchanged: fn(held: JetCLIDebugEvalHeldShared, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
     permit := held.slot.guard_edit()
-    if permit.value.kept == .Val(kept) {
+    jet_cli_debug_eval_unchanged_in(permit.value, entry)
+}
+
+jet_cli_debug_eval_unchanged_in: fn(slot: &JetCLIDebugEvalHeldSlot, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Bool Never! {
+    if slot.kept == .Val(kept) {
         if jet_cli_debug_eval_held_change(kept) == None -> return true
     }
-    permit.value.kept = None
+    slot.kept = None
+    if !slot.asked {
+        slot.asked = true
+        if slot.seed == .Val(read) {
+            if jet_cli_debug_eval_held_change(read) == None {
+                slot.kept = jet_cli_debug_eval_stamp_take(slot.seed.move())
+                slot.seed = None
+                return true
+            }
+        }
+        slot.seed = None
+    }
     since: debug_eval_time.unix_ns()
     snapshot: jet_cli_debug_eval_snapshot(entry, false) ?? return false
-    permit.value.kept = Val(jet_cli_debug_eval_stamp(snapshot, since))
+    slot.kept = Val(jet_cli_debug_eval_stamp(snapshot, since))
     false
+}
+
+// The stamp `stamp`, moved out of its slot, as jet_cli_debug_eval_held_take
+// moves a held check: the slot is emptied next, which would otherwise copy
+// the source texts it holds.
+jet_cli_debug_eval_stamp_take: fn(stamp: &&JetCLIDebugEvalHeldStamp?) -> JetCLIDebugEvalHeldStamp? Never! {
+    stamp
 }
 
 // The built module `built`'s function `key`, the expression's, with the
