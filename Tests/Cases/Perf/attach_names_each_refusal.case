@@ -11,6 +11,9 @@ requires: os-name:linux
 requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
 env: NO_COLOR=1
+env: TMPDIR={work}/tmp
+step: mkdir -m 700 tmp
+exit: 0
 copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
 step: cc authorizer.c -o authorizer
 exit: 0
@@ -45,6 +48,12 @@ stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # a
 stderr: ~ ": it publishes no live snapshot jet can read (no live observation is available at " # and says what it lacks
 stderr: ~ "Fix: Start the program with `jet run --observe`, then attach to the pid it runs as" # and how to start it observed
 file: plain.jettrace absent # refused before it traced anything
+step: jet perf attach {pid:sleeper} --follow --out followed.jettrace
+exit: 1
+stdout: = ""
+stderr: ~ "Error: Jet.AttachTargetNotObserved: Jet can't attach to process " # a follow of a process jet doesn't observe is refused by that cause
+stderr: ~ "so it has no zones to follow" # and says what it lacks
+file: followed.jettrace absent # refused before it traced anything
 signal sleeper: KILL
 wait: sleeper
 exit: any # the case's KILL ends the process

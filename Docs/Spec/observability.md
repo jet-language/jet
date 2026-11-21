@@ -1021,10 +1021,16 @@ An attach that can't run is refused by its cause. A process that isn't
 running, or runs without publishing what the attach reads (no live snapshot,
 no flight ring, or no live list for `--lens=alloc`), is E2124
 (`Jet.AttachTargetNotObserved`, exit 1), with the command that starts it
-observed. A command line that names no one process (no pid, two pids, or a
-word that isn't a pid) is E2125 (`Jet.AttachWhichProcess`, exit 2). A flag
-that conflicts with the others, such as `--lens=alloc` without `--source`,
-is `Jet.InvalidCommandInput` (exit 2).
+observed. With no pid, the attach takes the one observed program of this
+user's that runs: one whose live snapshot in the temporary directory is its
+own and fresh. A command line that names no one process (no pid and no
+observed program, no pid and several, two pids, or a word that isn't a pid)
+is E2125 (`Jet.AttachWhichProcess`, exit 2); with several, it lists each
+pid and source. Without `--source`, the attach names the program's rows in
+the source its run published, read from the program's working directory.
+A flag that conflicts with the others, such as `--lens=alloc` without
+`--source`, or `--follow` with `--zones=`, `--for=` or `--lens=alloc`, is
+`Jet.InvalidCommandInput` (exit 2).
 Tests/Cases/Perf/attach_names_each_refusal.case is the worked example.
 
 A process that publishes nothing about itself, as the jet CLI does and as a
@@ -1208,6 +1214,24 @@ same rows as before. As the window closes, or at the exit, it copies the
 last of them, marks the end in the header and removes the file. A reader
 that holds it open keeps reading until it closes it.
 
+`jet perf attach [<pid>] --follow` holds a zones window open until Ctrl-C
+or the program's end. It leaves its lease and the trigger as `--zones=`
+does, then links the live file under its own name,
+`jet-perf-attach-<its pid>-<pid>-<ns>.live`, so it reads on after the
+program removes its own. Every millisecond it reads the slots' new
+records and prints each on stdout as it arrives, a line each, as `jet perf
+view`'s timeline shows them: `[<since>..<since>] app.jet#name`, timed from
+the window's opening, a plot as `name = value`. A slot that wrapped past
+the records it had not read yet prints `Lost <n> records of thread <t>:
+this follow fell behind`; a damaged one prints that it skipped to the
+newest. At the end it says how the program ended, `Process <pid> ended` or
+`Process <pid> ended without an exit (killed)`, and writes the trace: the
+rows it read, with the window's records while the program still runs.
+Ctrl-C ends it with exit 0. Where no live file stands (no memory file
+system), it says so and prints the rows each 100 ms turn adds to
+`.samples.spans`. Tests/Cases/Perf/attach_follow_draws_zone_before_exit.case
+is the worked example.
+
 Profiling leaves no files behind. The spans file, a flight ring's
 `.samples.spans` or a `jet perf run` session's, holds at most 16 MiB of
 rows: a program that closes more zones, log spans, frame marks and plots
@@ -1223,7 +1247,7 @@ the flight ring's file first. At a normal exit the program removes its ring, the
 `jet perf attach` removes, from the temporary directory, the user's
 private directory and `/dev/shm/jet-<euid>`, each file of this user's named for a process
 (`jet-flight-<pid>.…`, `jet-perf-<pid>-…`, `jet-perf-attach-<pid>-…`, an
-attach's copies under the attach's own pid) when that process is gone or
+attach's copies and a follow's link under the attach's own pid) when that process is gone or
 started after the file was last written, a later process under the same
 pid. Tests/Cases/Perf/profiling_leaves_no_files.case and
 Tests/Cases/Perf/spans_file_is_bounded.case are the worked examples.

@@ -349,13 +349,17 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
 
 // `attach`: one point capture of a running process. A devserver browser
 // relay supplies browser rows and compiler symbol identities; otherwise the
-// runtime's live observation is attributed to `--source`. A process that
+// runtime's live observation is attributed to `--source`, by default the
+// source the run published. A process that
 // publishes neither, as the jet CLI and a program run without `--observe`
 // do, is sampled from outside for a second: the trace and the attach show
 // which of its functions its CPU was in (Outside.jet). With `--lens=alloc`,
 // the trace also holds a heap snapshot the program takes while it runs
-// (jet_cli_perf_attach_heap).
-jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+// (jet_cli_perf_attach_heap). With `--follow`, its zones window stays open
+// until Ctrl-C or the program's end, each row printed as it arrives
+// (Follow.jet). Without a pid, it attaches to the one observed program of
+// this user that runs.
+jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, IO, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     pid := Int?{None}
     out := String?{None}
     source := String?{None}
@@ -364,6 +368,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     // How long an outside attach samples, 0 for JET_CLI_PERF_OUTSIDE_WINDOW_MS.
     for_ms := 0
     alloc := false
+    follow := false
     held_ns := Int?{None}
     lost := U64{0}
     // Why those records were lost, and the CPU time each CPU-time sample
@@ -372,6 +377,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     sampling_us := Int?{None}
     // The functions an outside sampling found the program's CPU in.
     hot := ""
+    // How a follow ended, and the rows it couldn't keep or read.
+    said := ""
     // `--lens=counts`, and the command after `--` it counts.
     counts := false
     command := [String]?{None}
@@ -398,6 +405,10 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         }
         if arg.starts_with("--zones=") {
             zones_ms = jet_cli_perf_attach_window(arg.slice(8..<arg.len())) ?? return jet_cli_perf_error("`{arg}` isn't a window jet understands", "write how long to record zones, as `--zones=500ms` or `--zones=2s`", color)
+            next
+        }
+        if arg == "--follow" {
+            follow = true
             next
         }
         if arg.starts_with("--for=") {
@@ -465,8 +476,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         if words.len() == 0 {
             return jet_cli_perf_error("`jet perf attach --` names no command", "write the command after `--`: `jet perf attach --lens=counts -- <command>`", color)
         }
-        if for_ms > 0 || zones_ms > 0 || source != None || alloc {
-            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, and a command after `--` runs from its start to its end", "drop them to count the command, or start it and attach to its pid", color)
+        if for_ms > 0 || zones_ms > 0 || source != None || alloc || follow {
+            return jet_cli_perf_error("`--for=`, `--zones=`, `--source` and `--lens=alloc` read a running process, as `--follow` does, and a command after `--` runs from its start to its end", "drop them to count the command, or start it and attach to its pid", color)
         }
         if !counts {
             return jet_cli_perf_error("`jet perf attach -- <command>` takes `--lens=counts`", "run `jet perf attach --lens=counts -- {words.join(" ")}`, or start the command and attach to its pid", color)
@@ -476,7 +487,22 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     if counts {
         return jet_cli_perf_error("`--lens=counts` counts a command from its start, and a running process has started already", "run `jet perf attach --lens=counts -- <command>`", color)
     }
-    target_pid: pid ?? return jet_cli_perf_attach_which("`jet perf attach` names no process", "name the process by its pid: `jet perf attach <pid> --source <file.jet>`", color)
+    if follow && (zones_ms > 0 || alloc || for_ms > 0) {
+        return jet_cli_perf_error("`--follow` keeps the window open until Ctrl-C or the program's end, and `--zones=`, `--for=` and `--lens=alloc` each take one capture", "drop `--follow` for one capture, or drop the others to follow the program", color)
+    }
+    target_pid: pid ?? {
+        found: jet_cli_perf_observed_programs()
+        if found.len() == 0 {
+            return jet_cli_perf_attach_which("`jet perf attach` names no process, and no observed program of yours is running", "start the program with `jet run --observe <file.jet>`, or name the process by its pid: `jet perf attach <pid> --source <file.jet>`", color)
+        }
+        if found.len() > 1 {
+            named := [String]{}
+            loop program in found -> named.push("{program.pid} {program.source}")
+            again: if follow -> " --follow" else -> ""
+            return jet_cli_perf_attach_which("{found.len()} observed programs of yours are running: {named.join(", ")}", "run `jet perf attach {found[0].pid}{again}`", color)
+        }
+        found[0].pid
+    }
     if alloc && source == None {
         return jet_cli_perf_error("`--lens=alloc` names each live block by its line in `--source`, which is missing", "run `jet perf attach {target_pid} --lens=alloc --source <file.jet>`", color)
     }
@@ -513,9 +539,14 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     }
     capture := jet_cli_perf_capture_new(trace_profile_unsupported("source sampling requires a source capture"), [SourceIdentity]{})
     browser := JetCLIPerfBrowser?{None}
-    if jet_cli_perf_attach_browser(target_pid, source == None) == {
+    // A follow reads a browser relay only when one is there, and refuses
+    // it below.
+    if jet_cli_perf_attach_browser(target_pid, source == None && !follow) == {
         .Ok(found) -> browser = found
         .Err(failure) -> return jet_cli_perf_failed(failure.message, color)
+    }
+    if browser == None && source == None && observations.len() == 1 {
+        source = jet_cli_perf_published_source(target_pid, observations[0].live.source_id)
     }
     if browser == .Val(relayed) {
         if alloc {
@@ -523,6 +554,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         }
         if for_ms > 0 {
             return jet_cli_perf_error("process {target_pid} is a devserver browser session, which its relay's rows describe, so jet doesn't sample it from outside for `--for=`", "attach without `--for=`", color)
+        }
+        if follow {
+            return jet_cli_perf_error("process {target_pid} is a devserver browser session, whose relay jet reads once an attach", "attach without `--follow`", color)
         }
         if source == .Val(path) {
             matched := false
@@ -551,12 +585,22 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         // spans for that window, and its records in it, before its ring is
         // read.
         zoned := JetCLIPerfZonesTaken?{None}
+        // With `--follow`, its zones until Ctrl-C or its end, the trace
+        // timed from the window's opening, as the printed rows are.
+        followed_at := 0
         if zones_ms > 0 {
             if jet_cli_perf_attach_zones(target_pid, home, zones_ms, path) == {
                 .Ok(found) -> zoned = found
                 .Err(failure) -> return jet_cli_perf_failed(failure.message, color)
             }
             read.push("its zones for {zones_ms} ms")
+        }
+        if follow {
+            ran: jet_cli_perf_attach_follow(target_pid, home, path, quiet) ?? return jet_cli_perf_failed(err.message, color)
+            followed_at = ran.origin
+            said = jet_cli_perf_follow_said(ran)
+            zoned = ran.taken.move()
+            read.push("its zones while followed")
         }
         spans := String?{None}
         flight := JetCLIPerfSamples?{None}
@@ -592,17 +636,21 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         }
         // The records are timed from their earliest wait or transfer, or
         // the window's first zone row, on the program's monotonic clock:
-        // attach has no start of its own on it.
-        origin := 0
-        if spans == .Val(taken) -> origin = jet_cli_perf_spans_first(taken)
+        // attach has no start of its own on it. A follow's are timed from
+        // the window's opening, as the rows it printed are.
+        origin := followed_at
+        fixed: origin > 0
+        if !fixed && spans == .Val(taken) -> origin = jet_cli_perf_spans_first(taken)
         // The CPU-time samples, which the window's zones hold.
         timed := [JetCLIPerfTimed]{}
         if flight.move() == .Val(found) {
             loop wait in found.waits {
-                if origin == 0 || wait.start_ns < origin -> origin = wait.start_ns
+                if !fixed && (origin == 0 || wait.start_ns < origin) -> origin = wait.start_ns
             }
             loop transfer in found.transfers {
-                if origin == 0 || transfer.start_ns < origin -> origin = transfer.start_ns
+                if !fixed && (origin == 0 || transfer.start_ns < origin) {
+                    origin = transfer.start_ns
+                }
             }
             timed = found.timed.move()
             jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, jet_cli_perf_task_samples(timed), found.transfers, path, origin)
@@ -616,6 +664,8 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         observed = true
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
+    } else if follow {
+        return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({live_error ?? ""}), so it has no zones to follow", "start the program with `jet run --observe <file.jet>`, then attach with `--follow`", color)
     } else {
         // A process that publishes nothing about itself: the kernel samples
         // its threads' CPU from outside it.
@@ -646,6 +696,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     if zones_ms > 0 -> argv.push("--zones={zones_ms}ms")
     if for_ms > 0 -> argv.push("--for={for_ms}ms")
     if alloc -> argv.push("--lens=alloc")
+    if follow -> argv.push("--follow")
     // The interval the trace's CPU-time samples stand for, which its view
     // charges them at.
     if sampling_us == .Val(interval) {
@@ -660,7 +711,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
     // Records the program made that the ring never got, which the trace
     // lacks.
     dropped: if lost > (U64{0}) -> "Records lost: {lost}; {loss}\n" else -> ""
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{held}{dropped}{hot}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "{said}{held}{dropped}{hot}Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Why a flight-recorded program's records were lost (JetRuntime
@@ -844,11 +895,30 @@ jet_cli_perf_attach_zones: fn(pid: Int, home: String, window_ms: Int, source: St
         }
     }
     perf_files.remove(lease).drop("a lease the program no longer sees ends this attach's hold")
+    jet_cli_perf_attach_zones_read(pid, home, source, [U8]{}, false)
+}
+
+// What a zones window took, once the attach's lease is gone: two
+// publications are awaited, the window's row among them when this was
+// the last lease (jet_cli_perf_spans_window). The program's spans file is
+// copied out of its way, its rows replaced by `rows` when `own` (a
+// follow's, jet_cli_perf_attach_follow), and the window's records read
+// beside a copy of the ring's image, as jet_cli_perf_attach_zones says.
+// Where the program's spans file is gone, as once it ended, `rows` are
+// the trace's alone, without the window's records; None without either.
+jet_cli_perf_attach_zones_read: fn(pid: Int, home: String, source: String, rows: [U8], own: Bool) -[FS, Env, Time]> JetCLIPerfZonesTaken? JetCLIReadError! {
+    ring: perf_files.join(home, "jet-flight-{pid}.samples")
     perf_time.sleep(250ms)
     stem: perf_files.join(home, "jet-perf-attach-{perf_process.current_pid()}-{pid}-{perf_time.unix_ns()}")
     spans: "{stem}.spans"
-    perf_files.copy("{ring}.spans", spans) ?? return Ok(None)
-    window: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{}) ?? return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
+    if perf_files.copy("{ring}.spans", spans) == .Err(_) {
+        if rows.len() == 0 -> return Ok(None)
+        perf_files.write_bytes(spans, rows) ?? return Ok(None)
+        return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
+    }
+    found: jet_cli_perf_spans_window(perf_files.read_bytes(spans) ?? [U8]{})
+    if own -> perf_files.write_bytes(spans, rows) ?? return Ok(None)
+    window: found ?? return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
     records: "{stem}.window"
     if perf_files.copy("{ring}.window", records) == .Err(_) {
         return Ok(Val(JetCLIPerfZonesTaken{spans: spans, samples: None, held: None}))
@@ -1036,6 +1106,52 @@ jet_cli_perf_attach_unobserved: fn(pid: Int, cause: String, fix: String, color: 
 jet_cli_perf_attach_which: fn(problem: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     why: "One attach profiles one process, named by one process id, so jet won't guess which process you mean."
     jet_cli_report_output("", "E2125", problem, why, fix, color, JET_DRIVER_EXIT_USAGE)
+}
+
+// An observed program of this user's that runs: its pid, and the source
+// its run published (JetCLIPerfLive.source_id).
+JetCLIPerfObserved: struct {
+    pid: Int,
+    source: String,
+}
+
+// The observed programs of this user's that run, by pid: those whose live
+// snapshot in the temporary directory is theirs, private and fresh
+// (jet_cli_perf_live_read). An attach that names no process takes the one.
+jet_cli_perf_observed_programs: fn() -[FS.Read, Env, Time]> [JetCLIPerfObserved] Never! {
+    found := [JetCLIPerfObserved]{}
+    listed: perf_files.list_dir(perf_sys.temp_dir()) ?? return found
+    loop entry in listed {
+        name: entry.name
+        if !name.starts_with("jet-observe-") || !name.ends_with(".json") -> next
+        pid: Int.parse(name.slice(12..<name.len() - 5)) ?? next
+        live := jet_cli_perf_live_read(pid) ?? next
+        found.push(JetCLIPerfObserved{pid: pid, source: live.source_id.move()})
+    }
+    found.sort_by(fn(left: JetCLIPerfObserved, right: JetCLIPerfObserved) { left.pid <=> right.pid })
+    found
+}
+
+// The source an observed run published, as this attach names it:
+// normalized when absolute or the program's working directory is this
+// one's, else joined to the program's. None for one this user can't read,
+// which `--source` then names.
+jet_cli_perf_published_source: fn(pid: Int, published: String) -[FS, Env]> String? Never! {
+    if published == "" -> return None
+    if perf_files.is_absolute(published) {
+        return jet_cli_perf_readable_source(perf_files.normalize(published))
+    }
+    cwd: perf_files.read_link("/proc/{pid}/cwd") ?? return None
+    here: perf_files.cwd() ?? ""
+    path: if here == cwd -> perf_files.normalize(published) else -> perf_files.join(cwd, published)
+    jet_cli_perf_readable_source(path.move())
+}
+
+// `path` when it names a file, else None.
+jet_cli_perf_readable_source: fn(path: &&String) -[FS.Read]> String? Never! {
+    facts: perf_files.stat(path) ?? return None
+    if !facts.is_file -> return None
+    Val(path.move())
 }
 
 // An attach's window on its program, open (jet_cli_perf_attach_watch):
