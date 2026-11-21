@@ -237,11 +237,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1635,
+  "total": 1640,
   "counts": {
     "Compiler": 796,
     "Core": 179,
-    "Docs": 13,
+    "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
     "Tests": 566,
@@ -5781,21 +5781,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 566,
+      "line": 594,
       "column": 13,
       "reason": "the testkit signals the child of its own step child, as the row's `@signal_child` asks"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 660,
+      "line": 688,
       "column": 5,
       "reason": "the testkit stops its own step child at a resource guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 920,
+      "line": 948,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -5809,7 +5809,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/StepsSessions.jet",
-      "line": 375,
+      "line": 370,
       "column": 5,
       "reason": "the case explicitly authorizes signaling its own spawned child"
     },
@@ -7114,6 +7114,41 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 22,
       "column": 9,
       "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 107,
+      "column": 5,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 116,
+      "column": 5,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 206,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 245,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
+    },
+    {
+      "package": "Docs",
+      "file": "Docs/Audits/PlaceDefault20261121/Probes/returns.jet",
+      "line": 284,
+      "column": 17,
+      "reason": "a raw word stands in for the destination word of the task's context"
     },
     {
       "package": "Docs",
@@ -11703,12 +11738,12 @@ file in a `Tests/` tree. The ratchet refuses either.
 | --- | ---: |
 | Compiler | 796 |
 | Core | 179 |
-| Docs | 13 |
+| Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 566 |
 | Tools | 28 |
-| **total** | **1635** |
+| **total** | **1640** |
 
 ### Regions
 
@@ -12504,11 +12539,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetSema/Tests/XMLCheckerRootsFixtures.jet | 13:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XMLCheckerRootsFixtures.jet | 14:9 | "nested tail retains its value grammar" |
 | Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 57:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 566:13 | "the testkit signals the child of its own step child, as the row's `@signal_child` asks" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 660:5 | "the testkit stops its own step child at a resource guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 920:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 594:13 | "the testkit signals the child of its own step child, as the row's `@signal_child` asks" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 688:5 | "the testkit stops its own step child at a resource guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 948:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 193:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
-| Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 375:5 | "the case explicitly authorizes signaling its own spawned child" |
+| Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 370:5 | "the case explicitly authorizes signaling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 228:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 273:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
@@ -12695,6 +12730,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_runtime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_runtime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 107:5 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 116:5 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 206:17 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 245:17 | "a raw word stands in for the destination word of the task's context" |
+| Docs | Docs/Audits/PlaceDefault20261121/Probes/returns.jet | 284:17 | "a raw word stands in for the destination word of the task's context" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/fx_line.jet | 13:5 | "probe: a raw write under the empty row" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/row_compose.jet | 21:9 | "probe: a raw write under the empty row" |
 | Docs | Docs/Proposals/DebugEvalNative20261118/Probes/unsafe_callee.jet | 7:5 | "probe: a raw write in a callee" |

@@ -204,9 +204,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
     files.remove_all(root) ?? panic("remove known-failing case scratch")
 }
 
-#Test("a child that exits without reading its scripted input is an owned failure, a kit fault is not") {
-    unread: kit_exec_input_detail("terminal input: closed during write `process stdin`: process stdin closed", 0, "")
-    assert(kit_cases_owned_failure(kit_expect_verdict("ERROR", unread)))
+#Test("a kit fault is not an owned failure") {
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "spawn: no such file")))
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "wait: interrupted")))
 }

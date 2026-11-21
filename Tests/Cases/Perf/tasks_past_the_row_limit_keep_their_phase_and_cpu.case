@@ -2,9 +2,11 @@
 # CPU time and phase: the tasks with the fewest CPU-time samples have no
 # row, and the trace's `tasks` receipt section counts each of them, with
 # its samples, in the phase of the zone it opened. `jet perf view` shows
-# every task in its count, the coverage complete, and each phase's tasks
-# with their CPU microseconds, those past the rows folded into it. The
-# profile's rows past their limit fold the same way, so none is cut.
+# every task in its count, the coverage complete, and each of the three
+# phases' tasks with their CPU microseconds, those past the rows folded
+# into it. Every sample a phase's zone took is in that phase's CPU, so no
+# folded task's CPU is lost. The profile's rows past their limit fold the
+# same way, so none is cut.
 fixture: TasksPastTheRowLimit.fixture
 env: NO_COLOR=1
 step perf: jet perf run -O0 main.jet --out tasks.jettrace
@@ -15,19 +17,32 @@ json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].type_
 json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.count = 5001 # the run's task and the 5000 it spawned
 json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.rows = 4096 # as many rows as the trace keeps
 json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.coverage = "complete" # every task's samples count
-json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="parse"][0].tasks = 2500 # each parse task in its zone's phase
-json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="lower"][0].tasks = 2500 # each lower task in its own
-json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="parse"][0].samples >= 1 # the parse tasks took CPU time
-json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="lower"][0].samples >= 1 # so did the lower tasks
+json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.unattributed_samples = 0 # no task's samples are left out of a phase
+json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="parse"][0].tasks = 2000 # each parse task in its zone's phase
+json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="lower"][0].tasks = 2000 # each lower task in its own
+json: file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="emit"][0].tasks = 1000 # each emit task in its own
 json: file tasks.jettrace doc $.content.profile.status = "captured" # no profile row is cut
+capture: parse file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="parse"][0].samples
+capture: lower file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="lower"][0].samples
+capture: emit file tasks.jettrace doc $.content.receipt_sections[?name="tasks"][0].value.phases[?name="emit"][0].samples
 step view: jet perf view tasks.jettrace
 exit: 0
 stdout: ~ "tasks count=5001 children=5000 rows=4096 coverage=complete · main.jet#run" # every task counts, 4096 of them with rows
-stdout: ~ "task phase parse tasks=2500 cpu_us=" # each parse task in its phase
-stdout: ~ "task phase lower tasks=2500 cpu_us=" # each lower task in its phase
-stdout: !~ "task phase parse tasks=2500 cpu_us=0 " # the parse phase holds CPU time
-stdout: !~ "task phase lower tasks=2500 cpu_us=0 " # so does the lower phase
+stdout: ~ "task phase parse tasks=2000 cpu_us=" # each parse task in its phase
+stdout: ~ "task phase lower tasks=2000 cpu_us=" # each lower task in its phase
+stdout: ~ "task phase emit tasks=1000 cpu_us=" # each emit task in its phase
+stdout: !~ "task phase parse tasks=2000 cpu_us=0 " # the parse phase holds CPU time
+stdout: !~ "task phase lower tasks=2000 cpu_us=0 " # so does the lower phase
+stdout: !~ "task phase emit tasks=1000 cpu_us=0 " # and the emit phase
 stdout: ~ " · folded tasks=" # the tasks past the rows fold into their phase
 stdout: ~ "task phase (none) tasks=1 " # the run's own task opened no zone
 stdout: !~ "task phase unattributed" # no task's samples are left out
 stdout: !~ "status=truncated" # no profile row is cut either
+capture: parse_zone = text stdout.split("zone parse count=2000 samples=", 1).split(" ", 0)
+capture: lower_zone = text stdout.split("zone lower count=2000 samples=", 1).split(" ", 0)
+capture: emit_zone = text stdout.split("zone emit count=1000 samples=", 1).split(" ", 0)
+json: cap:parse_zone doc $ >= 1 # the parse zones took CPU time
+json: cap:emit_zone doc $ >= 1 # so did the emit zones
+json: cap:parse doc $ >= {cap:parse_zone} # the parse phase holds every sample its zones took
+json: cap:lower doc $ >= {cap:lower_zone} # the lower phase holds every sample of its zones
+json: cap:emit doc $ >= {cap:emit_zone} # and the emit phase every sample of its zones

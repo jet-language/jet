@@ -519,7 +519,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2125 | AttachWhichProcess | Compiler/JetCLI/Source/CLI/Perf/Session.jet:987 | one attach names one process id |
 | E2126 | PerfNoInstructions | Compiler/JetCLI/Source/CLI/CanvasProfile.jet:154 | the trace of a native `jet perf run` keeps the code its samples landed in |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:27 | the program is a native -O0 image this machine can run traced |
-| E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:590 | let the program run to its end |
+| E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:610 | let the program run to its end |
 | E2231 | DebugAttachFailed | Compiler/JetDebug/Source/Native.jet:51 | attach to a process of your user that the system lets you trace |
 | E2236 | DebugConfigInvalid | Compiler/JetDebug/Source/Native.jet:49 | name the process and its program as they are |
 | E2237 | DebugRequestRefused | Compiler/JetDebug/Source/Native.jet:56 | ask where the session can answer |
@@ -684,8 +684,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3611 | CorruptProofArtifact | Compiler/JetCLI/Source/CLI/ProveReport.jet:1864 | produce the artifact again |
 | E3614 | UnsafeProofArtifactPath | Compiler/JetCLI/Source/CLI/ProveReport.jet:1860 | a plain path |
 | E3620 | ReplaySchemaMismatch | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1624 | capture with a matching `jet prove` |
-| E3621 | ReplayIdentityMismatch | Compiler/JetCLI/Source/CLI/Debug.jet:303 | capture again for this target |
-| E3622 | CorruptReplay | Compiler/JetCLI/Source/CLI/Debug.jet:294 | capture again |
+| E3621 | ReplayIdentityMismatch | Compiler/JetCLI/Source/CLI/Debug.jet:304 | capture again for this target |
+| E3622 | CorruptReplay | Compiler/JetCLI/Source/CLI/Debug.jet:295 | capture again |
 | E3623 | ReplayDiverged | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1382 | capture again |
 | E3624 | ReplayTargetNotUnique | Compiler/JetCLI/Source/CLI/Prove.jet:71 | select one runnable target |
 | E3625 | UnmodeledReplayOperation | Compiler/JetCLI/Source/CLI/ProveReplay.jet:1500 | keep the operation off the captured path |

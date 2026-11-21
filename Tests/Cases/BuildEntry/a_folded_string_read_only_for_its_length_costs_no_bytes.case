@@ -7,9 +7,9 @@
 # byte of either run, so the -O2 image holds neither: it stays
 # within 10% of the image of the same program that reads its size at run
 # time (10% of that image's 136,272 bytes on seed-b13 is 13,627), and its
-# data holds no run of either byte.
+# data holds no run of either byte: `jet debug --do` prints the whole of
+# `.data` and `.rodata`, sixteen bytes a row, and no row is all `x` or `y`.
 requires: os-name:linux
-requires: tool:readelf
 fixture: AFoldedStringReadOnlyForItsLengthCostsNoBytes.fixture
 env: NO_COLOR=1
 step: jet inspect decisions -O2 constant.jet
@@ -30,7 +30,9 @@ file: .jet/build/constant size <= {cap:runtime}+13627
 step: {work}/.jet/build/constant
 exit: 0
 stdout: = "100000000\n"
-step: readelf -x .data -x .rodata .jet/build/constant
+step: jet debug .jet/build/constant --do 'sections .data .rodata --bytes'
 exit: 0
-stdout: !~ "78787878 78787878 78787878 78787878" # no run of the 50,000,000 `x` bytes
-stdout: !~ "79797979 79797979 79797979 79797979" # no run of the 50,000,000 `y` bytes
+stdout: ~ ".rodata " # the section's row
+stdout: ~ " from the file\n" # and its bytes, read from the image's file
+stdout: !~ "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78" # no row of the 50,000,000 `x` bytes
+stdout: !~ "79 79 79 79 79 79 79 79 79 79 79 79 79 79 79 79" # no row of the 50,000,000 `y` bytes

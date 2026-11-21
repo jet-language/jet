@@ -185,6 +185,49 @@ kit_test_core_scratch: fn(label: String) -> String {
     files.remove_all(root) ?? panic("remove cpu limit scratch")
 }
 
+#Test("a child that exits without reading its input is judged on its exit and streams, 200 times") {
+    root: cases_test_root("unread-input")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0}
+    // A mebibyte is more than a pipe holds, so the child exits before the
+    // write begins or while it waits for room; the pipe is closed either way.
+    input: "x".repeat(1048576)
+    loop round in 0..<200 {
+        run: kit_exec_invoke(env, ["/bin/sh", "-c", "echo refused >&2; exit 2"], root, root, input)
+        assert(run.error == "", "round {round}: {run.error}")
+        assert_eq(run.code, 2)
+        assert_eq(run.stderr, "refused\n")
+        assert(kit_exec_process_failure(run) == None, "round {round}")
+    }
+    files.remove_all(root) ?? panic("remove unread input scratch")
+}
+
+// Spawns `count` children one after another, as the pool's other rows do.
+core_test_spawn_many: fn(env: KitEnv, root: String, count: Int) -> Int {
+    loop _ in 0..<count {
+        run: kit_exec_invoke(env, ["/bin/sh", "-c", "exit 0"], root, root, "")
+        if run.error != "" || run.code != 0 -> return 1
+    }
+    0
+}
+
+#Test("a fresh copy of a program runs while other threads spawn children, 1000 times") {
+    root: cases_test_root("fresh-copy")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0}
+    // A child cloned while the copy's writer is open holds that writer until
+    // its own execve; the copy's spawn must still run it.
+    spawners: [task core_test_spawn_many(env, files.join(root, "a"), 2000), task core_test_spawn_many(env, files.join(root, "b"), 2000), task core_test_spawn_many(env, files.join(root, "c"), 2000)]
+    fresh: files.join(root, "bin/sh")
+    loop round in 0..<1000 {
+        kit_exec_copy_file("/bin/sh", fresh)
+        run: kit_exec_invoke(env, [fresh, "-c", "exit 3"], root, root, "")
+        assert(run.error == "", "round {round}: {run.error}")
+        assert_eq(run.code, 3)
+        files.remove(fresh) ?? panic("remove the copy: {err}")
+    }
+    loop spawner in spawners -> assert_eq(spawner.join() ?? panic("spawner"), 0)
+    files.remove_all(root) ?? panic("remove fresh copy scratch")
+}
+
 #Test("the resident guard reads VmRSS and names a memory kill") {
     assert_eq(kit_exec_resident_bytes("Name:\tjet\nVmSize:\t 8388608 kB\nVmRSS:\t   20480 kB\nThreads:\t33\n"), 20971520)
     assert_eq(kit_exec_resident_bytes("Name:\tjet\nState:\tZ (zombie)\n"), 0)

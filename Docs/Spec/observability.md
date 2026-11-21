@@ -1435,6 +1435,25 @@ D-DBG-VERBS1=A names the commands:
   from the side file its `.gnu_debuglink` names, and an image with neither
   answers `` `IMAGE` keeps no symbol table ``. With that side file gone,
   `segments` still lists and `symbols` says where the file should be.
+- `sections [NAME...] [--bytes]` lists the image's section headers in file
+  order, the null one left out (D-IMAGE-SECTIONS1): its name in a column
+  of 20 and its type as readelf names it (`PROGBITS`, `NOBITS`, …; another
+  in hexadecimal) in a column of 12, then `offset`, `address`, `size`,
+  `flags` and `align`, each named. Its flags are readelf's letters in
+  readelf's order (`W`, `A`, `X`, `M`, `S`, `I`, `L`, `O`, `G`, `T`, `C`,
+  `E`), so `.tbss` shows `WAT`. Named, it lists those sections in the order
+  given, each of a name the file holds twice; a name it lacks is refused
+  with ``No section `NAME` ``. `--bytes` ends each row with `from the
+  file` and prints the section's bytes from the file under it, 16 a row:
+  the address, the bytes in hex, then the same bytes as text, a dot for
+  each that doesn't print. The console prints at most 4096 bytes of each
+  section, then `cut at ADDRESS: 4096 of SIZE bytes shown; --do prints
+  the whole section`; a `--do` command prints every byte. A section with
+  no bytes in the file (`.bss`) prints `(no bytes in the file)`. An image
+  with no section headers answers `` `IMAGE` has no section headers ``,
+  one that names a side debug file names it under its rows (`debug info:
+  main.debug`), and a big-endian image is refused. It reads the file at a
+  stop and in a dump alike.
 - `tasks` lists every task by id: its label, its state (queued, running,
   blocked or paused), what it waits on (`channel receive`) and its Jet
   frames; `*` marks the task the program stopped in. Task 1 is the main
@@ -1444,11 +1463,12 @@ D-DBG-VERBS1=A names the commands:
 `--do 'COMMAND'` (repeatable) runs console commands in order, then exits,
 with no prompt (D-DEBUG-LISTING1). Before anything starts, `jet debug
 IMAGE` reads the image's file, which answers `symbols`, `segments`,
-`disas NAME` and `help` with nothing run, even for an image that keeps no
-Jet debug information; plain `disas` there lists all the image's code in
-its executable segments, by function and symbol, or each segment whole as
-`segment 0`, `segment 1` when the image keeps no symbols. The first
-command that needs the program running starts it as the console does,
+`sections`, `disas NAME` and `help` with nothing run, even for an image
+that keeps no Jet debug information; plain `disas` there lists all the
+image's code in its executable segments, by function and symbol, or each
+segment whole as `segment 0`, `segment 1` when the image keeps no
+symbols. The first command that needs the program running starts it as
+the console does,
 shows its first stop, and runs the rest there. The end of the commands or
 `quit` ends the program (an attached one is let go on); a command left
 once the program has ended is refused with a line of its own. A

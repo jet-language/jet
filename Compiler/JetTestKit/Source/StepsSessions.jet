@@ -295,14 +295,9 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         if step.terminal == .Val(shape) {
             spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
         }
-        child := spec.spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
-        input_error := ""
-        if step.stdin == "null" -> child.stdin.close() else if prepared.stdin.len() > 0 {
-            child.stdin.write_bytes(prepared.stdin) ?? {
-                input_error = "session stdin: {err}"
-                ()
-            }
-        }
+        child: kit_exec_spawn(spec, prepared.env.timeout) ?? return kit_steps_action_error(state, "session spawn: {err}")
+        if step.stdin == "null" -> child.stdin.close()
+        input_error: if step.stdin == "null" -> "" else -> kit_exec_feed(child, prepared.stdin, "session stdin")
         state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
         if input_error != "" -> return kit_steps_action_error(state, input_error)
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}

@@ -1,0 +1,96 @@
+# `sections` lists an image's section headers, read from its file. Each row
+# names the section, then its type, offset, address, size, flags and
+# alignment, its fields named as a `segments` row names a program header's.
+# `sections NAME...` lists the named ones in the order given, every section
+# of a name the image holds twice, and refuses a name it lacks. `--bytes`
+# adds each section's bytes from the file, sixteen a row, under a row that
+# ends `from the file`. The console shows at most 4,096 bytes of each and
+# says where it cut; `--do` prints them whole. At a stop and in a crash
+# dump the answer is the file's. A split image names its side file, whose
+# code sections hold no bytes. A file that is not a 64-bit ELF image, or is
+# a big-endian one, is refused. No other tool is on PATH. The fixture's
+# line 2 prints the program's first constant, and line 3 runs after it.
+requires: os-name:linux
+fixture: SectionsListAnImageAndItsBytes.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet build -O2 main.jet
+exit: 0
+step: jet debug {work}/.jet/build/main --do segments --do sections
+exit: 0
+stdout: ~ ".rodata             PROGBITS    offset 0x" # a section row: its name, then its fields, named as a segment's are
+stdout.filter(^= ".text ").line(0): ~ " flags AX   align " # the code: loaded and executable
+stdout.filter(^= ".rodata ").line(0): ~ " flags A    align " # the constants: loaded and read-only
+stdout.filter(^= ".symtab ").line(0): ~ "SYMTAB      offset 0x" # a section the program doesn't load lists too
+stdout: !~ "from the file" # no bytes without `--bytes`
+stdout: !~ "sections 42" # and nothing ran
+capture: code = text stdout.filter(~ " flags r-x align ").line(0).split(" file ", 1).split(" ", 0)
+step: jet debug {work}/.jet/build/main --do 'sections .text'
+exit: 0
+stdout.line(0): ~ " size {cap:code} " # the code's size is the executable segment's size in the file
+stdout: lines = 1 # the one section named
+step: jet debug {work}/.jet/build/main --do 'sections .rodata --bytes'
+exit: 0
+stdout.line(0): ~ "from the file" # the row says where its bytes come from
+stdout.line(1): ~ "  73 65 63 74 69 6f 6e 73 20 34 32 " # the first row of bytes holds the program's first constant
+stdout.line(1): ~ "  sections 42" # and shows it as text
+step: jet debug {work}/.jet/build/main --do 'sections .symtab --bytes'
+exit: 0
+stdout: ~ "from the file\n0x0 " # an unloaded section's bytes, from its address 0
+step: jet debug {work}/.jet/build/main --do 'sections .text --bytes'
+exit: 0
+stdout: !~ "cut at" # `--do` prints the whole section
+stdout: lines >= 2000 # every row of it
+step: jet debug {work}/.jet/build/main --do 'sections .nope'
+exit: 1
+stdout: = "No section `.nope`\n" # a name the image lacks is refused
+step: jet build -O0 main.jet
+exit: 0
+step: jet debug {work}/.jet/build/main --do sections --do 'sections .data --bytes'
+exit: 0
+stdout.filter(^= ".text ").line(0): ~ " flags AX   align " # -O0 lists as -O2 does
+stdout.filter(^= ".rodata ").line(0): ~ " flags A    align "
+capture: data = text stdout.after_first(" from the file\n")
+step: jet debug {work}/.jet/build/main --break main.jet:3
+stdin: sections_list_an_image_and_its_bytes.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  main.jet:3" # a stop, after line 2 wrote the first constant
+stdout: count "bytes shown; --do prints the whole section\n" = 2 # the console cuts each of the two sections
+stdout: ~ ": 4096 of " # after 4,096 bytes
+stdout: ~ " from the file\n{cap:data}" # at the stop `.data`'s bytes are the file's, as before the start
+step: jet run --observe main.jet
+exit: nonzero
+stderr: ~ "dump written: " # the panic leaves a dump
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+capture: image = sole-entry .jet/dumps ext = "image"
+step: jet debug {cap:image} --do 'sections .text .data'
+exit: 0
+stdout.filter(^= ".text "): lines = 2 # the dump's bound image holds two `.text`, and both list
+capture: rows = text stdout
+step: jet debug {cap:dump} --do 'sections .text .data'
+exit: 0
+stdout: ~ "{cap:rows}" # a crash dump answers as its image's file does
+step: jet build -O2 --debug-info=split main.jet
+exit: 0
+step: jet debug {work}/.jet/build/main --do sections
+exit: 0
+stdout: ~ ".gnu_debuglink " # the split image's own sections
+stdout: ~ "debug info: main.debug\n" # and the side file it names
+step: jet debug {work}/.jet/build/main.debug --do 'sections .text --bytes'
+exit: 0
+stdout: ~ "NOBITS      offset 0x" # the side file keeps the code's header
+stdout: ~ " from the file\n(no bytes in the file)\n" # but none of its bytes
+step: jet debug notes.txt --do sections
+exit: 1
+stderr: ~ "Error: Jet.DebuggerUnavailable: " # the native debugger's registered failure
+stderr: ~ "`notes.txt` is not a 64-bit ELF image" # a text file is no image
+copy: .jet/build/main big.elf
+poke: big.elf at 5 hex "02"
+step: jet debug big.elf --do sections
+exit: 1
+stderr: ~ "`big.elf` is a big-endian ELF image" # an image whose data byte says big-endian
+copy: .jet/build/main bare.elf
+poke: bare.elf at 40 hex "0000000000000000"
+step: jet debug bare.elf --do sections
+exit: 0
+stdout: = "`bare.elf` has no section headers\n" # an image with no section table says so

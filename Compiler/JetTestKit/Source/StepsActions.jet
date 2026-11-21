@@ -165,14 +165,8 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
             return kit_steps_action_stopped(state, stopped)
         }
         started: time.instant()
-        child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "spawn: {err}")
-        input_error := ""
-        if prepared.stdin.len() > 0 {
-            child.stdin.write_bytes(prepared.stdin) ?? {
-                input_error = "stdin: {err}"
-                ()
-            }
-        }
+        child: kit_exec_spawn(kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay), prepared.env.timeout) ?? return kit_steps_action_error(state, "spawn: {err}")
+        input_error: kit_exec_feed(child, prepared.stdin, "stdin")
         child.stdin.close()
         state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}

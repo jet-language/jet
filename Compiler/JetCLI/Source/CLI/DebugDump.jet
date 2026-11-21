@@ -10,8 +10,9 @@
 // the run's. `bt`, `frame N`, `locals` and `print` read the stop as a live
 // session reads one, `tasks` lists every task the dump caught, running or
 // parked, with where it is, and `task N` selects task N for them; `events
-// [--last N]` lists the flight ring's records, oldest first, and `symbols`
-// and `segments` the image's symbol table and program headers. Nothing
+// [--last N]` lists the flight ring's records, oldest first, and `symbols`,
+// `segments` and `sections` the image's symbol table, program headers and
+// section headers. Nothing
 // runs: a run-control command says so. A #Secret value shows as redacted, a
 // value the dump cut off past its budget as cut off. The end of stdin or
 // `quit` ends it. With `--do` commands (`dos`) it runs them in order
@@ -38,6 +39,7 @@ jet_cli_debug_dump: fn(path: String, dos: [String], color: Bool) -[FS, Env, IO, 
     shown: native_dump_frame(opened.session, frames, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
     if dos.len() > 0 {
         refused := false
+        opened.session.scripted = true
         loop command in dos {
             if command == "q" || command == "quit" -> break
             answer: native_dump_command(opened.session, command, events, file, lines) ?? return jet_cli_debug_unavailable(err, color)

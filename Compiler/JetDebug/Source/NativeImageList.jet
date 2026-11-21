@@ -1,14 +1,16 @@
 // A built image read from its file with nothing run: what `jet debug
-// IMAGE` answers before it starts the program, and the console's `symbols`
-// and `segments` at a stop and in a crash dump.
+// IMAGE` answers before it starts the program, and the console's
+// `symbols`, `segments` and `sections` at a stop and in a crash dump.
 // `symbols` lists the image's symbol table, `segments` its program
-// headers, and `disassemble` (NativeListing.jet) its code: plain, every
-// function and routine in its executable segments; with a name or a line,
-// what the console lists at a stop. Symbols come from the image's
-// `.symtab`, or the side debug file its `.gnu_debuglink` names when it
-// keeps none (a release image keeps its symbols there); code comes from its
-// loaded segments, so an image with no section headers still lists. An
-// image with no Jet line table lists its code under its symbols alone.
+// headers, `sections` its section headers (with `--bytes`, each section's
+// bytes from the file), and `disassemble` (NativeListing.jet) its code:
+// plain, every function and routine in its executable segments; with a
+// name or a line, what the console lists at a stop. Symbols come from the
+// image's `.symtab`, or the side debug file its `.gnu_debuglink` names
+// when it keeps none (a release image keeps its symbols there); code comes
+// from its loaded segments, so an image with no section headers still
+// lists. An image with no Jet line table lists its code under its symbols
+// alone.
 use {
     native_image_files: core.files
     jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, X64Trace, x64_hex, x64_jetline_find, x64_jetline_text]
@@ -35,11 +37,37 @@ NativeImageSegment: struct {
     align: Int,
 }
 
+// One section header: its name, its type's name (native_image_section_kind)
+// and whether it holds no bytes in the file (SHT_NOBITS), its file offset,
+// its address, its size, its flags as readelf's letters and its alignment.
+NativeImageSection: struct {
+    name: String,
+    kind: String,
+    nobits: Bool,
+    offset: Int,
+    address: Int,
+    size: Int,
+    flags: String,
+    align: Int,
+}
+
 // "\x7fELF" read as a little-endian word, and the class byte of a 64-bit
-// image.
+// image and the data byte of a big-endian one.
 NATIVE_IMAGE_MAGIC: 1179403647
 
 NATIVE_IMAGE_CLASS_64: 2
+
+NATIVE_IMAGE_BIG_ENDIAN: 2
+
+// The section type that takes no bytes in the file, and the section index
+// that says the real one is in the null header's link.
+NATIVE_IMAGE_NOBITS: 8
+
+NATIVE_IMAGE_XINDEX: 0xffff
+
+// The bytes of each section `sections --bytes` shows at the interactive
+// console; a `--do` command shows them all.
+NATIVE_IMAGE_BYTES_SHOWN: 4096
 
 // The program header type of a loaded segment, and the flag of an
 // executable one.
@@ -73,11 +101,14 @@ native_image_listing: fn(binary: String, word: String) -[FS.Read]> String Native
     Ok(native_image_symbols_text(binary, listed))
 }
 
-// The bytes of the 64-bit ELF image at `binary`.
+// The bytes of the 64-bit little-endian ELF image at `binary`.
 native_image_bytes: fn(binary: String) -[FS.Read]> [U8] NativeDebugError! {
     elf: native_image_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the image `{binary}`: {err}"})
     if elf.len() < 64 || native_number(elf, 0, 4, X64DebugEncoding.Unsigned) != NATIVE_IMAGE_MAGIC || native_number(elf, 4, 1, X64DebugEncoding.Unsigned) != NATIVE_IMAGE_CLASS_64 {
         return Err(NativeDebugError{detail: "`{binary}` is not a 64-bit ELF image"})
+    }
+    if native_number(elf, 5, 1, X64DebugEncoding.Unsigned) == NATIVE_IMAGE_BIG_ENDIAN {
+        return Err(NativeDebugError{detail: "`{binary}` is a big-endian ELF image"})
     }
     Ok(elf)
 }
@@ -197,8 +228,163 @@ native_image_segments_text: fn(binary: String, segments: [NativeImageSegment]) -
     text
 }
 
-// The image `symbols` and `segments` read in `session`: a dump's image
-// beside it, else the session's program.
+// `sections` with the operand `operand` (section names, and `--bytes`) of
+// the image at `binary`, read from its file: every section, or those named
+// in the order given (each one of a name the file holds twice), and with
+// `--bytes` each one's bytes under its row, at most
+// NATIVE_IMAGE_BYTES_SHOWN of each unless `whole` (a `--do` command). A
+// name the image lacks is refused. An image that names a side debug file
+// in its `.gnu_debuglink` names it under the rows.
+native_image_sections_answer: fn(binary: String, operand: String, whole: Bool{false}) -[FS.Read]> NativeAnswer NativeDebugError! {
+    elf: native_image_bytes(binary) ?? return Err(err)
+    names := [String]{}
+    bytes := false
+    loop part in operand.split(" ") {
+        if part == "--bytes" -> bytes = true
+        if part != "" && part != "--bytes" -> names.push("{part}")
+    }
+    sections: native_image_sections(elf)
+    if sections.len() == 0 -> return Ok(NativeAnswer{text: "`{binary}` has no section headers\n"})
+    cap: if whole -> 0 else -> NATIVE_IMAGE_BYTES_SHOWN
+    rows := [String]{}
+    if names.len() == 0 {
+        loop section in sections {
+            rows.push(native_image_section_text(elf, section, cap, bytes: bytes))
+        }
+    }
+    refused := false
+    loop name in names {
+        before: rows.len()
+        loop section in sections {
+            if section.name == name {
+                rows.push(native_image_section_text(elf, section, cap, bytes: bytes))
+            }
+        }
+        if rows.len() == before {
+            rows.push("No section `{name}`\n")
+            refused = true
+        }
+    }
+    if native_elf_section(elf, ".gnu_debuglink") == .Val(link) {
+        rows.push("debug info: {x64_jetline_text(link, 0)}\n")
+    }
+    Ok(NativeAnswer{text: rows.join(""), refused: refused})
+}
+
+// `elf`'s section headers in file order, the null one that opens the table
+// left out. A table of more sections than its header can count keeps the
+// count in the null header's size, and the index of the section of names,
+// when it is past that too, in the null header's link.
+native_image_sections: fn(elf: [U8]) -> [NativeImageSection] Never! {
+    found := [NativeImageSection]{}
+    table: native_dump_word(elf, 40)
+    entry: native_number(elf, 58, 2, X64DebugEncoding.Unsigned)
+    if table <= 0 || entry < 64 || table + entry > elf.len() -> return found
+    count := native_number(elf, 60, 2, X64DebugEncoding.Unsigned)
+    if count == 0 -> count = native_dump_word(elf, table + 32)
+    names_index := native_number(elf, 62, 2, X64DebugEncoding.Unsigned)
+    if names_index == NATIVE_IMAGE_XINDEX {
+        names_index = native_number(elf, table + 40, 4, X64DebugEncoding.Unsigned)
+    }
+    names: if names_index > 0 && names_index < count && table + (names_index + 1) * entry <= elf.len() -> native_dump_word(elf, table + names_index * entry + 24) else -> -1
+    loop index in 1..<count {
+        at: table + index * entry
+        if at + 64 > elf.len() -> break
+        kind: native_number(elf, at + 4, 4, X64DebugEncoding.Unsigned)
+        name: if names < 0 -> "" else -> x64_jetline_text(elf, names + native_number(elf, at, 4, X64DebugEncoding.Unsigned))
+        found.push(NativeImageSection{name: name, kind: native_image_section_kind(kind), nobits: kind == NATIVE_IMAGE_NOBITS, offset: native_dump_word(elf, at + 24), address: native_dump_word(elf, at + 16), size: native_dump_word(elf, at + 32), flags: native_image_section_flags(native_dump_word(elf, at + 8)), align: native_dump_word(elf, at + 48)})
+    }
+    found
+}
+
+// The name of section type `kind`, as readelf names it; another type by
+// its number.
+native_image_section_kind: fn(kind: Int) -> String Never! {
+    if {
+        kind == 0 -> "NULL"
+        kind == 1 -> "PROGBITS"
+        kind == NATIVE_IMAGE_SYMTAB -> "SYMTAB"
+        kind == 3 -> "STRTAB"
+        kind == 4 -> "RELA"
+        kind == 5 -> "HASH"
+        kind == 6 -> "DYNAMIC"
+        kind == 7 -> "NOTE"
+        kind == NATIVE_IMAGE_NOBITS -> "NOBITS"
+        kind == 9 -> "REL"
+        kind == 11 -> "DYNSYM"
+        kind == 14 -> "INIT_ARRAY"
+        kind == 15 -> "FINI_ARRAY"
+        kind == 16 -> "PREINIT_ARRAY"
+        kind == 17 -> "GROUP"
+        kind == 19 -> "RELR"
+        kind == 0x6ffffff6 -> "GNU_HASH"
+        kind == 0x6ffffffd -> "VERDEF"
+        kind == 0x6ffffffe -> "VERNEED"
+        kind == 0x6fffffff -> "VERSYM"
+        kind == 0x70000001 -> "X86_64_UNWIND"
+        else -> x64_hex(kind)
+    }
+}
+
+// Section flags `flags` as readelf's letters, in its order: W written, A
+// loaded, X code, M merged, S strings, I info link, L link order, O OS
+// handling, G group, T thread-local, C compressed and E excluded.
+native_image_section_flags: fn(flags: Int) -> String Never! {
+    letters: [String]{"W", "A", "X", "M", "S", "I", "L", "O", "G", "T", "C", "E"}
+    bits: [Int]{0x1, 0x2, 0x4, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x80000000}
+    text := ""
+    loop (index, bit) in bits {
+        if (flags & bit) != 0 -> text = "{text}{letters[index]}"
+    }
+    text
+}
+
+// One row a section header, its fields named as segments names them, as
+// `.text  PROGBITS  offset 0x4000  address 0x402000  size 33839  flags AX
+// align 16`, in columns of 20, 12, 12, 20, 11 and 5. With `bytes` the row
+// ends `from the file`, and the section's bytes follow it
+// (native_image_section_bytes, at most `cap` of them).
+native_image_section_text: fn(elf: [U8], section: NativeImageSection, cap: Int, bytes: Bool{false}) -> String Never! {
+    align: if bytes -> "{native_listing_pad("{section.align}", 5)}from the file" else -> "{section.align}"
+    row: "{native_listing_pad(section.name, 20)}{native_listing_pad(section.kind, 12)}offset {native_listing_pad(x64_hex(section.offset), 12)}address {native_listing_pad(x64_hex(section.address), 20)}size {native_listing_pad("{section.size}", 11)}flags {native_listing_pad(section.flags, 5)}align {align}\n"
+    if !bytes -> return row
+    "{row}{native_image_section_bytes(elf, section, cap)}"
+}
+
+// The bytes of `section` in `elf`, 16 a row: the address, the bytes in hex
+// and the same bytes as text, a dot for each that doesn't print. With a
+// `cap` (0: none) the rows stop after that many bytes and say where. A
+// section with no bytes in the file says so, and one the file ends inside
+// shows the bytes it holds and says where it ends.
+native_image_section_bytes: fn(elf: [U8], section: NativeImageSection, cap: Int) -> String Never! {
+    if section.nobits -> return "(no bytes in the file)\n"
+    room: if section.offset < 0 || section.offset > elf.len() -> 0 else -> elf.len() - section.offset
+    held: if section.size < room -> section.size else -> room
+    shown: if cap > 0 && held > cap -> cap else -> held
+    if shown <= 0 && held == section.size -> return ""
+    width: x64_hex(section.address + ((shown - 1) >> 4) * 16).len() + 2
+    rows := [String]{}
+    loop row in 0..<((shown + 15) >> 4) {
+        at: section.offset + 16 * row
+        end: if 16 * row + 16 < shown -> at + 16 else -> section.offset + shown
+        text := [U8]{}
+        loop byte in elf[at..<end] {
+            value: Int{byte}
+            text.push(if value >= 0x20 && value < 0x7f -> byte else -> U8{0x2e})
+        }
+        rows.push("{native_listing_pad(x64_hex(section.address + 16 * row), width)}{native_listing_pad(native_listing_bytes(elf[at..<end]), 49)}{String.from_bytes(text) ?? ""}\n")
+    }
+    if shown < held {
+        rows.push("cut at {x64_hex(section.address + shown)}: {shown} of {section.size} bytes shown; --do prints the whole section\n")
+    }
+    if held < section.size {
+        rows.push("the file ends at {x64_hex(section.address + held)}: {held} of {section.size} bytes in it\n")
+    }
+    rows.join("")
+}
+
+// The image `symbols`, `segments` and `sections` read in `session`: a
+// dump's image beside it, else the session's program.
 native_image_of: fn(session: &NativeSession) -> String Never! {
     if session.dump == .Val(dumped) && dumped.image != "" -> return dumped.image
     session.binary
@@ -231,17 +417,21 @@ native_image_session: fn(binary: String) -[FS.Read]> NativeSession NativeDebugEr
 
 // One command of `jet debug IMAGE` before the program starts, answered by
 // `session` (native_image_session) from the file: `symbols`, `segments`,
-// `disassemble` and `help`. None for a command that needs the program
-// running, which starts it. `file`, with the text `lines`, is the
-// program's source.
-native_image_command: fn(session: &NativeSession, line: String, file: String, lines: [String]) -> String? NativeDebugError! {
+// `sections`, `disassemble` and `help`, refused when the console would
+// refuse it at a stop. None for a command that needs the program running,
+// which starts it. `file`, with the text `lines`, is the program's source.
+native_image_command: fn(session: &NativeSession, line: String, file: String, lines: [String]) -> NativeAnswer? NativeDebugError! {
     command: line.trim()
     word: command.before(" ")
     operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
     if word == {
         "symbols" | "segments" -> {
             text: native_image_listing(session.binary, word) ?? return Err(err)
-            Ok(Val(text))
+            Ok(Val(NativeAnswer{text: text}))
+        }
+        "sections" -> {
+            answer: native_image_sections_answer(session.binary, operand, whole: session.scripted) ?? return Err(err)
+            Ok(Val(answer))
         }
         "disassemble" | "disas" -> {
             named: loop part in operand.split(" ") {
@@ -250,13 +440,13 @@ native_image_command: fn(session: &NativeSession, line: String, file: String, li
                 }
             } ?? false
             if !named {
-                return Ok(Val(native_image_code_text(session, file, lines, bytes: operand.contains("--bytes"))))
+                return Ok(Val(NativeAnswer{text: native_image_code_text(session, file, lines, bytes: operand.contains("--bytes"))}))
             }
             text: native_disassemble(session, operand, file, lines) ?? return Err(err)
-            Ok(Val(text))
+            Ok(Val(NativeAnswer{text: text}))
         }
-        "h" | "help" -> Ok(Val("{NATIVE_DEBUG_HELP}\n"))
-        "" -> Ok(Val(""))
+        "h" | "help" -> Ok(Val(NativeAnswer{text: "{NATIVE_DEBUG_HELP}\n"}))
+        "" -> Ok(Val(NativeAnswer{text: ""}))
         else -> Ok(None)
     }
 }
@@ -324,13 +514,19 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
     session := native_image_session("/proc/self/exe") ?? panic("session: {err.detail}")
     assert(!session.started)
     segments: native_image_command(session, "segments", "", [String]{}) ?? panic("segments unanswered")
-    assert(segments.contains("flags r-x"))
+    assert(segments.text.contains("flags r-x"))
     symbols: native_image_command(session, "symbols", "", [String]{}) ?? panic("symbols unanswered")
-    assert(symbols.contains("function"))
+    assert(symbols.text.contains("function"))
+    sections: native_image_command(session, "sections .text", "", [String]{}) ?? panic("sections unanswered")
+    assert(sections.text.starts_with(".text ") && sections.text.contains("flags AX"))
+    assert(!sections.refused)
+    missing: native_image_command(session, "sections .text .nope", "", [String]{}) ?? panic("sections unanswered")
+    assert(missing.text.ends_with("No section `.nope`\n"))
+    assert(missing.refused)
     help: native_image_command(session, "help", "", [String]{}) ?? panic("help unanswered")
-    assert_eq(help, "{NATIVE_DEBUG_HELP}\n")
+    assert_eq(help.text, "{NATIVE_DEBUG_HELP}\n")
     nothing: native_image_command(session, "disas no.such.function", "", [String]{}) ?? panic("disas unanswered")
-    assert_eq(nothing, "No function `no.such.function`\n")
+    assert_eq(nothing.text, "No function `no.such.function`\n")
     running_words: [String]{"bt", "continue"}
     loop running in running_words {
         if native_image_command(session, running, "", [String]{}) == {
@@ -338,4 +534,98 @@ native_image_in_runs: fn(runs: [NativeImageSegment], address: Int) -> Bool Never
             .Err(failure) -> panic("{running}: {failure.detail}")
         }
     }
+}
+
+#Test("a section lists as a row of named fields, and its bytes as rows of hex and text, cut at the console's cap") {
+    rodata: NativeImageSection{name: ".rodata", kind: "PROGBITS", nobits: false, offset: 0, address: 0x400120, size: 16, flags: "A", align: 8}
+    elf: [U8]{0x34, 0x32, 0x0a, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0}
+    assert_eq(native_image_section_text(elf, rodata, 0), ".rodata             PROGBITS    offset 0x0         address 0x400120            size 16         flags A    align 8\n")
+    assert_eq(native_image_section_text(elf, rodata, 0, bytes: true), ".rodata             PROGBITS    offset 0x0         address 0x400120            size 16         flags A    align 8    from the file\n0x400120  34 32 0a 00 00 00 00 00 01 00 00 00 00 00 00 00  42..............\n")
+    debug: NativeImageSection{name: ".debug_info", kind: "PROGBITS", nobits: false, offset: 0x251e, address: 0, size: 233, flags: "", align: 1}
+    assert_eq(native_image_section_text(elf, debug, 0), ".debug_info         PROGBITS    offset 0x251e      address 0x0                 size 233        flags      align 1\n")
+    // A last row short of 16 bytes keeps the text column where it is.
+    letters := loop _ in 0..<40 -> U8{0x61}
+    letters[39] = U8{0x7f}
+    run: NativeImageSection{name: ".data", kind: "PROGBITS", nobits: false, offset: 0, address: 0x400120, size: 40, flags: "WA", align: 8}
+    sixteen: "61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61"
+    assert_eq(native_image_section_bytes(letters, run, 0), "0x400120  {sixteen}  aaaaaaaaaaaaaaaa\n0x400130  {sixteen}  aaaaaaaaaaaaaaaa\n0x400140  61 61 61 61 61 61 61 7f                          aaaaaaa.\n")
+    assert_eq(native_image_section_bytes(letters, run, 16), "0x400120  {sixteen}  aaaaaaaaaaaaaaaa\ncut at 0x400130: 16 of 40 bytes shown; --do prints the whole section\n")
+    bss: NativeImageSection{name: ".bss", kind: "NOBITS", nobits: true, offset: 0, address: 0x400200, size: 64, flags: "WA", align: 8}
+    assert_eq(native_image_section_bytes(letters, bss, 0), "(no bytes in the file)\n")
+    past: NativeImageSection{name: ".data", kind: "PROGBITS", nobits: false, offset: 32, address: 0x400120, size: 16, flags: "WA", align: 8}
+    assert_eq(native_image_section_bytes(letters, past, 0), "0x400120  61 61 61 61 61 61 61 7f                          aaaaaaa.\nthe file ends at 0x400128: 8 of 16 bytes in it\n")
+    assert_eq(native_image_section_flags(0x403), "WAT")
+    assert_eq(native_image_section_flags(0x6), "AX")
+    assert_eq(native_image_section_flags(0x80000030), "MSE")
+    assert_eq(native_image_section_kind(8), "NOBITS")
+    assert_eq(native_image_section_kind(0x6ffffff6), "GNU_HASH")
+    assert_eq(native_image_section_kind(0x60000000), "0x60000000")
+}
+
+#Test("sections reads a table past 65,279 sections from its null header, names a side file, and refuses a big-endian image") {
+    dir: native_image_files.temp_dir("jet-image-sections") ?? panic("temp dir: {err}")
+    // A table whose count and names' index are in its null header: .data,
+    // then the names, whose first bytes .data holds. Room is left for a
+    // fourth header and the bytes of its section.
+    elf := loop _ in 0..<384 -> U8{0}
+    native_fix_put(elf, 0, NATIVE_IMAGE_MAGIC, 4)
+    elf[4] = U8{2}
+    elf[5] = U8{1}
+    native_fix_put(elf, 40, 64, 8)
+    native_fix_put(elf, 58, 64, 2)
+    native_fix_put(elf, 62, NATIVE_IMAGE_XINDEX, 2)
+    native_fix_put(elf, 96, 3, 8)
+    native_fix_put(elf, 104, 2, 4)
+    native_fix_put(elf, 128, 1, 4)
+    native_fix_put(elf, 132, 1, 4)
+    native_fix_put(elf, 136, 0x403, 8)
+    native_fix_put(elf, 144, 0x1000, 8)
+    native_fix_put(elf, 152, 320, 8)
+    native_fix_put(elf, 160, 4, 8)
+    native_fix_put(elf, 176, 8, 8)
+    native_fix_put(elf, 192, 7, 4)
+    native_fix_put(elf, 196, 3, 4)
+    native_fix_put(elf, 216, 320, 8)
+    native_fix_put(elf, 224, 29, 8)
+    loop (k, byte) in ".data".bytes() -> elf[321 + k] = byte
+    loop (k, byte) in ".names".bytes() -> elf[327 + k] = byte
+    loop (k, byte) in ".gnu_debuglink".bytes() -> elf[334 + k] = byte
+    listed: native_image_sections(elf)
+    assert_eq(listed.len(), 2)
+    assert_eq(listed[0].name, ".data")
+    assert_eq(listed[0].flags, "WAT")
+    assert_eq(listed[1].name, ".names")
+    assert_eq(listed[1].kind, "STRTAB")
+    path: native_image_files.join(dir.path, "many")
+    native_image_files.write_bytes(path, elf) ?? panic("write: {err}")
+    data: native_image_sections_answer(path, ".data --bytes .data") ?? panic("sections: {err.detail}")
+    row: "{native_listing_pad(".data", 20)}{native_listing_pad("PROGBITS", 12)}offset {native_listing_pad("0x140", 12)}address {native_listing_pad("0x1000", 20)}size {native_listing_pad("4", 11)}flags WAT  align 8    from the file\n0x1000  {native_listing_pad("00 2e 64 61", 49)}..da\n"
+    assert_eq(data.text, "{row}{row}")
+    assert(!data.refused)
+    // An image whose `.gnu_debuglink` names its side file names it under
+    // its rows; this table counts its four sections in its own header.
+    native_fix_put(elf, 60, 4, 2)
+    native_fix_put(elf, 62, 2, 2)
+    native_fix_put(elf, 256, 14, 4)
+    native_fix_put(elf, 260, 1, 4)
+    native_fix_put(elf, 280, 352, 8)
+    native_fix_put(elf, 288, 16, 8)
+    loop (k, byte) in "main.debug".bytes() -> elf[352 + k] = byte
+    native_image_files.write_bytes(path, elf) ?? panic("write: {err}")
+    linked: native_image_sections_answer(path, "") ?? panic("sections: {err.detail}")
+    assert(linked.text.starts_with(".data "))
+    assert(linked.text.ends_with("\ndebug info: main.debug\n"))
+    elf[5] = U8{2}
+    native_image_files.write_bytes(path, elf) ?? panic("write: {err}")
+    if native_image_sections_answer(path, "") == {
+        .Ok(_) -> { panic("a big-endian image listed") }
+        .Err(refused) -> assert_eq(refused.detail, "`{path}` is a big-endian ELF image")
+    }
+    bare := loop _ in 0..<64 -> U8{0}
+    native_fix_put(bare, 0, NATIVE_IMAGE_MAGIC, 4)
+    bare[4] = U8{2}
+    bare[5] = U8{1}
+    native_image_files.write_bytes(path, bare) ?? panic("write: {err}")
+    none: native_image_sections_answer(path, ".text") ?? panic("sections: {err.detail}")
+    assert_eq(none.text, "`{path}` has no section headers\n")
 }

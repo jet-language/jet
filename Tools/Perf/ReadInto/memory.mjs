@@ -80,8 +80,11 @@ function counted(jet, binary) {
   return { allocations, reads, allocations_per_read: allocations / reads, peak_live_heap_bytes: Number(facts[2]) };
 }
 
+// The program's environment strings sit in its first stack pages, so a
+// larger environment raises its peak. Each run starts the program under
+// `env -i`, with no environment at all, so both twins measure the same.
 function peakRss(binary, expected) {
-  const result = run("python3", [timer, "--", binary]);
+  const result = run("python3", [timer, "--", "env", "-i", binary]);
   const sample = JSON.parse(result.stdout.trim().split("\n").at(-1));
   if (sample.exit_code !== 0) throw new Error(`${binary} exited ${sample.exit_code}`);
   const direct = run(binary, []);
