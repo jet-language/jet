@@ -191,10 +191,15 @@ sampling starts by
 sending its own thread 64 signals, plus, under a perf event, the kernel's
 time to write each sample to its thread's ring, which the runtime times as
 sampling starts with a second sampler of the same source at a shallow and a
-deep stack, on the thread's monotonic clock less the time it waited on a run
-queue (its schedstat), so the interrupt's time counts and a busy machine's
-other programs do not; `overhead_reason` gives it as a share of the CPU time
-sampled.
+deep stack, as the median of three back-to-back pairs of a round with that
+sampler on and one with it off, on the thread's monotonic clock less the
+time it waited on a run queue (its schedstat), so the interrupt's time
+counts and a busy machine's other programs do not. Every 1024 drains of the
+starting thread's ring (2 s of its CPU time) its drain timer times one more
+shallow pair with the thread's own sampler held off, and each sample drained
+from then on is charged the median of the last five timings, so the charge
+follows the machine's load and clock as the run goes on; `overhead_reason`
+gives it as a share of the CPU time sampled.
 `jet perf view` sums the rows per function with its share of the
 samples and the CPU time they stand for, at the `interval_us` the trace's
 `perf` receipt section names (none without one),
@@ -232,10 +237,13 @@ skid); time in the kernel takes no sample. A perf event's sample takes no
 signal of its own: the kernel writes it to the thread's ring with the user
 registers, its frame-pointer walk of the user stack (the callchain, at most
 `perf_event_max_stack` entries, 127 where the kernel has no such setting)
-and a copy of the stack's top 512 bytes, and the runtime drains the ring in
-batches: whenever the thread's running task changes (a fiber switch, a task's
-start and finish), at the `SIGPROF` of a timer on the thread's CPU clock once
-each 2 milliseconds of it (16 samples), as the thread ends and at exit. The
+and a copy of the stack's top 320 bytes (every frameless frame the backend
+emits keeps its return address within them), and the runtime drains the ring
+in batches: whenever the thread's running task changes (a fiber switch, a
+task's start and finish), at the `SIGPROF` of a timer on the thread's CPU
+clock once each 4 milliseconds of it (32 samples), as the thread ends and at
+exit. The drain builds each sample's record in the buffer it writes out from,
+so a record is copied once. The
 kernel would signal a sampler's owner at every sample it takes, so no
 sampler's descriptor asks for a signal. The drain steps out of frameless
 frames by the call frame information over the stack copy, then takes the
