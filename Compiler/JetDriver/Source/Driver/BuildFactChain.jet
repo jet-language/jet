@@ -229,16 +229,28 @@ jet_driver_entry_package: fn(load: JetDriverLoadResult) -> JetDriverPackageInfo?
     None
 }
 
-// The refusals of the build's setting writers: a `--set` name no loaded
-// package declares (E0302), and every chain the contribution law refuses
-// (E3521), such as two `--set` or profile values for one setting, or two
-// dependency entries that disagree with no more explicit writer. Every
-// compile checks every chain, `--set` or not. Empty when every writer stands.
+// The refusals of the build's setting writers: a `--set` name, or a profile's
+// dependency setting name (`tool.loud`), that no loaded package declares
+// (E0302), and every chain the contribution law refuses (E3521), such as two
+// `--set` or profile values for one setting, or two dependency entries that
+// disagree with no more explicit writer. Every compile checks every chain,
+// `--set` or not. Empty when every writer stands.
 jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop override in request.setting_overrides {
         if jet_driver_setting_target(load, override.name) != None -> next
         diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
+    }
+    // The loader checks a profile's own setting names; a dependency's waits
+    // for its package (jet_driver_check_profile_settings).
+    loop root in load.packages {
+        if root.identity != load.package_identity -> next
+        loop given in root.profile_settings {
+            if !given.name.contains(".") || jet_driver_setting_target(load, given.name) != None {
+                next
+            }
+            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{given.name}` is undeclared", "build profile `{given.profile}` gives it a value, but no dependency declares such a setting", "write a dependency's setting as `dependency.setting`, as its `settings: {{ … }}` block declares it"))
+        }
     }
     loop package in load.packages {
         loop setting in package.settings {

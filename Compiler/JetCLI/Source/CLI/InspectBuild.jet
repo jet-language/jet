@@ -320,6 +320,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // Each target's compile refuses a dependency effect row the lock doesn't
     // cover under `--locked` (jet_cli_lock_effect_rows).
     selected_options.locked = locked
+    // Resolving drops the options' other fields; the `--set` writers ride on
+    // to every target compile (jet_cli_compile_executable).
+    selected_options.settings = options.settings.copy()
     // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
     // build targets are built native only.
     if build_options_value(selected_options, "os") == "web" {
@@ -689,25 +692,31 @@ jet_cli_check_library: fn(file: String, source: String, sources: [String], gener
     }
 }
 
-// The entry root's package when its manifest declares `settings:`. The values
-// its `build: fn` contributes to them (`b.contribute`) are the package's
-// `[[build.contribution]]` rows of the project lock under `root`, which every
-// compile of the package folds (jet_cli_driver_request).
+// The entry root's package when it or a dependency declares `settings:`. The
+// values its `build: fn` contributes to them (`b.contribute("cache_slots", …)`
+// for its own, `b.contribute("tool.loud", …)` for dependency `tool`'s) are the
+// package's `[[build.contribution]]` rows of the project lock under `root`,
+// which every compile of the package folds (jet_cli_driver_request).
 JetCLISettingsPackage: struct {
     root: String,
     name: String,
 }
 
 // The settings package of `snapshot`'s entry root, read from the snapshot's
-// bytes of its manifest; None when the root declares no setting.
+// bytes of the manifests; None when no root of the snapshot declares a
+// setting.
 jet_cli_settings_package: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLISettingsPackage? Never! {
+    entry := JetCLISettingsPackage?{None}
+    declared := false
     loop root in snapshot.roots {
-        if root.identity != snapshot.entry_root_identity -> next
-        facts := jet_cli_root_package_facts(root) ?? return None
-        if facts.settings.len() == 0 -> return None
-        return Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.move()})
+        facts := jet_cli_root_package_facts(root) ?? next
+        if facts.settings.len() > 0 -> declared = true
+        if root.identity == snapshot.entry_root_identity {
+            entry = Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.move()})
+        }
     }
-    None
+    if !declared -> return None
+    entry
 }
 
 // The package facts `root` declares: its `package.jet`, else a stock entry's
@@ -740,9 +749,9 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
 // program marks a function `#Perf.Profiled`
 // (jet_driver_entry_package_profiled), that build is evaluated first: under
 // `load_generated` the modules it generates load beside the sources, and when
-// the package declares settings the values it contributes are recorded
-// (jet_cli_record_build_contributions), so the compile reads the rows of this
-// evaluation. A `jet build` compile of a package with a `build: fn` has
+// the package or a dependency declares settings the values it contributes are
+// recorded (jet_cli_record_build_contributions), so the compile reads the
+// rows of this evaluation. A `jet build` compile of a package with a `build: fn` has
 // already evaluated it and carries what it generated (Host.jet
 // jet_cli_compile_target), so it passes `load_generated` false and, like any
 // compile that already carries generated modules, is evaluated again only

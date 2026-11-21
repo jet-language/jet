@@ -730,8 +730,15 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
             return build_session_fail(state, "`b.contribute` requires a fact name and one value")
         }
         name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
-        if name.trim() == "" || name.contains(".") {
-            return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
+        // `cache_slots` names the package's own setting; `tool.loud`, one its
+        // dependency `tool` declares.
+        parts: name.split(".").to_list()
+        malformed := name.trim() == "" || parts.len() > 2
+        loop part in parts {
+            if part == "" -> malformed = true
+        }
+        if malformed {
+            return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots` or a dependency's `tool.loud`")
         }
         if args[1] == {
             .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
