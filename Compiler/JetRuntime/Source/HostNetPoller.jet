@@ -222,6 +222,44 @@ net_fd_closed: fn(state: I64) -> Bool {
     waiting
 }
 
+// A fork's hold on the poller (RouteSys.jet jet_sys_fork_raw): every shard
+// lock, in index order, so no child inherits a shard a thread it lacks still
+// held. A descriptor's close takes its shard (net_fd_closed), so a child
+// that closed one in a shard held at the fork would wait for good. A shard's
+// holder wakes parked waiters (net_node_fail), which takes the scheduler's
+// root lock, so the fork takes the shards before the root. No shard holder
+// runs program code (each section only links, frees and arms nodes and
+// wakes their waiters), so no fork comes from a thread that already holds
+// one, and no section takes two shards, so index order cannot deadlock
+// against one. The forking thread blocks on each lock and never parks a
+// fiber.
+net_fork_hold: fn() {
+    root: net_poller_root
+    if (root == I64{0}) {
+        return
+    }
+    index := I64{0}
+    loop index < (I64{16}) {
+        sync_thread_lock(net_shard(root, index))
+        index += I64{1}
+    }
+}
+
+// The parent unlocks every shard, waking its waiters. The child, whose only
+// thread is the forking one, stores each lock's initial state.
+net_fork_release: fn(child: Bool) {
+    root: net_poller_root
+    if (root == I64{0}) {
+        return
+    }
+    index := I64{0}
+    loop index < (I64{16}) {
+        shard: net_shard(root, index)
+        if child -> sync_store(shard, I64{0}) else -> sync_mutex_unlock(shard)
+        index += I64{1}
+    }
+}
+
 net_chain_unlink: fn(head: I64, node: I64, next_offset: I64) {
     cursor := head
     loop net_word(cursor, I64{0}) != (I64{0}) {

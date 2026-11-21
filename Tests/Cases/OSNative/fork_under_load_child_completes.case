@@ -2,11 +2,14 @@
 # carriers allocating and resolving localhost for the whole run while the
 # main task forks 400 times, and every child allocates, resolves and exits 0.
 # The fork gate (RouteSys.jet jet_sys_fork_raw) keeps thread_spawn out and
-# holds the scheduler's root lock, the thread registry's mutex, the stdout
-# lock and every allocator lock across the system call, so no child inherits
-# a lock a thread it lacks still holds; a child that did would block for
-# good and the step would time out
-# (the ungated runtime hangs within a few hundred forks of this load).
+# holds the network poller's shard locks, the scheduler's root lock, the
+# thread registry's mutex, the stdout lock and every allocator lock across
+# the system call, so no child inherits a lock a thread it lacks still
+# holds; a child that did would block for good and the step would time out.
+# The ungated runtime hangs within a few hundred forks of this load. A gate
+# without the shard locks hangs in about one run in seven, in a child whose
+# resolve closes its address-sorting socket while a load task closes one in
+# the same shard.
 requires: os-name:linux
 requires: probe grep -qw localhost /etc/hosts # the children resolve localhost from /etc/hosts
 fixture: ForkUnderLoadChildCompletes.fixture
