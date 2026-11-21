@@ -287,9 +287,15 @@ use {
         name_rows_hash,
         name_rows_set_first,
         name_rows_set_hashed,
+        Name,
         NameTable,
+        name_count,
+        name_empty,
+        name_find,
+        name_index,
         name_intern,
         name_table_sized,
+        name_text,
         ast_job_metadata,
         ast_program,
         EffectModuleSource,
@@ -5682,7 +5688,7 @@ jet_driver_registration_package_policies: fn(request: JetDriverCompileRequest, l
 jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load: JetDriverLoadResult) Never! {
     root_index: jet_driver_entry_package_index(load) ?? return
     root: load.packages[root_index]
-    names := [String:String]{}
+    names := JetDriverDependencyNames{}
     dependency_roots: jet_driver_dependency_roots(load, names)
     loop (index, package) in load.packages {
         if index >= policies.len() -> break
@@ -5691,7 +5697,7 @@ jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load:
             next
         }
         if dependency_roots.len() == 0 -> next
-        name: names.get(package.identity) ?? next
+        name: jet_driver_dependency_name(names, package.identity) ?? next
         policies[index].grant_name = name.copy()
         loop grant in root.authority_grants {
             if grant.package == name -> policies[index].expert_held = grant.rights
@@ -7118,7 +7124,7 @@ jet_driver_effect_budget_root: fn(load: JetDriverLoadResult) -> Int? Never! {
 // Each dependency's source root by its name (Rust `ProgramBundle.dep_roots`),
 // and in `names` its name by its package identity. The entry package is no
 // dependency of itself.
-jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &[String:String]) -> [String:String] Never! {
+jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &JetDriverDependencyNames) -> [String:String] Never! {
     roots := [String:String]{}
     loop package in load.packages {
         loop dependency in package.dependencies {
@@ -7128,12 +7134,33 @@ jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &[String:Strin
                     next
                 }
                 roots[dependency.name] = target.root_path
-                if !names.has_key(target.identity) -> names[target.identity] = dependency.name
+                known: name_count(names.identities)
+                if name_index(name_intern(names.identities, target.identity)) == known {
+                    names.by_identity.push(name_intern(names.names, dependency.name))
+                }
                 break
             }
         }
     }
     roots
+}
+
+// Each dependency's name (jet_driver_dependency_roots): a table of the
+// dependencies' package identities, and by each one's id there the id of
+// its name in a table of the names.
+JetDriverDependencyNames: struct {
+    identities: NameTable{name_table_sized(2)},
+    names: NameTable{name_table_sized(2)},
+    by_identity: [Name]{[Name]{name_empty()}},
+}
+
+// The name of the dependency whose package identity is `identity`, if the
+// build has one.
+jet_driver_dependency_name: fn(names: JetDriverDependencyNames, identity: String) -> String? Never! {
+    id: name_find(names.identities, identity) ?? return None
+    row: name_index(id)
+    if row == 0 -> return None
+    Val(name_text(names.names, names.by_identity[row]))
 }
 
 // A budget spec located in the module that owns it: its span's source file
@@ -7179,7 +7206,7 @@ jet_driver_budget_facts: fn(load: JetDriverLoadResult, graph: SemaRegistrationGr
             if exported -> public_items += 1
         }
     }
-    names := [String:String]{}
+    names := JetDriverDependencyNames{}
     roots: jet_driver_dependency_roots(load, names)
     solved := [String]{}
     loop body in functions {
@@ -7222,9 +7249,9 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
 // a Prelude root (jet_driver_effect_budget_diagnostics). A kind of a Prelude
 // effect stays governed through that effect, and the root package's own
 // effects are its own. Empty when the build has no dependency.
-jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> [String:[String]] Never! {
-    roots := [String:[String]]{}
-    names := [String:String]{}
+jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> JetDriverPackageEffectRoots Never! {
+    roots := JetDriverPackageEffectRoots{}
+    names := JetDriverDependencyNames{}
     if jet_driver_dependency_roots(load, names).len() == 0 -> return roots
     // The effects the build's packages declare, each parent resolved.
     built := (loop _ in graph.modules -> false)
@@ -7260,7 +7287,7 @@ jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegist
 // The package effect roots the effect row `row` names (`view` holds the
 // effect names its module may write), under the function key `key` of
 // `roots`. A dependency is named by `names`, by its package identity.
-jet_driver_package_effect_root_row: fn(roots: &[String:[String]], view: [SemaLibraryEffectName], names: [String:String], root_identity: String, key: String, row: [EffectRowEntry]?) Never! {
+jet_driver_package_effect_root_row: fn(roots: &JetDriverPackageEffectRoots, view: [SemaLibraryEffectName], names: JetDriverDependencyNames, root_identity: String, key: String, row: [EffectRowEntry]?) Never! {
     entries: row ?? return
     found := [String]{}
     loop entry in entries {
@@ -7277,17 +7304,35 @@ jet_driver_package_effect_root_row: fn(roots: &[String:[String]], view: [SemaLib
         effect_name: spelled ?? next
         if !found.contains(effect_name) -> found.push(effect_name)
     }
-    if found.len() > 0 -> roots[key] = found
+    if found.len() == 0 {
+        return
+    }
+    at: name_index(name_intern(roots.keys, key))
+    if at == roots.roots.len() -> roots.roots.push(found) else -> roots.roots[at] = found
+}
+
+// The package effect roots of each function whose row names one
+// (jet_driver_package_effect_roots): a table of the functions' keys, and
+// by each key's id its roots.
+JetDriverPackageEffectRoots: struct {
+    keys: NameTable{name_table_sized(2)},
+    roots: [[String]]{[[String]]{[String]{}}},
+}
+
+// The package effect roots `roots` holds for the function of key `key`.
+jet_driver_package_effect_roots_of: fn(roots: JetDriverPackageEffectRoots, key: String) -> [String] Never! {
+    id: name_find(roots.keys, key) ?? return [String]{}
+    roots.roots[name_index(id)]
 }
 
 // How the root package's manifest names the package effect whose token is
 // `token` (`{package identity}/{Effect}`, then any case or value):
 // `{dependency}.{Effect}`; None for the root package's own effect or one no
 // dependency name reaches.
-jet_driver_package_effect_spelling: fn(token: String, names: [String:String], root_identity: String) -> String? Never! {
+jet_driver_package_effect_spelling: fn(token: String, names: JetDriverDependencyNames, root_identity: String) -> String? Never! {
     split: effect_value_base(token).cut_last("/") ?? return None
     if split.before == root_identity -> return None
-    dependency: names.get(split.before) ?? return None
+    dependency: jet_driver_dependency_name(names, split.before) ?? return None
     effect_name: split.after.split(".").to_list()[0]
     Val("{dependency}.{effect_name}")
 }
@@ -7318,10 +7363,10 @@ JetDriverPackageEffectRows: struct {
 // the package whose code reaches the effect. As for the application's
 // required effects (jet_driver_required_effects), an open-world call's
 // maximal row is a ceiling fact, not a reached effect.
-jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String:Span], package_roots: [String:[String]]) -> JetDriverPackageEffectRows? {
+jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String:Span], package_roots: JetDriverPackageEffectRoots) -> JetDriverPackageEffectRows? {
     root: load.packages[jet_driver_entry_package_index(load) ?? return None]
     // Each dependency's name, by its source root and by its package identity.
-    dep_names := [String:String]{}
+    dep_names := JetDriverDependencyNames{}
     dep_roots := jet_driver_dependency_roots(load, dep_names)
     if dep_roots.len() == 0 && jet_driver_effect_budget_root(load) == None -> return None
     // The program's modules: the package sources the build authorized. Core
@@ -7398,7 +7443,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         }
         // A package effect root a function's row names (no Prelude root
         // covers it, so `direct` doesn't show it).
-        own_roots: package_roots.get(functions[index].key) ?? [String]{}
+        own_roots: jet_driver_package_effect_roots_of(package_roots, functions[index].key)
         loop effect_name in own_roots {
             if !local[index].contains(effect_name) -> local[index].push(effect_name)
         }
@@ -7458,7 +7503,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     program.entry = entry_module
     loop edge in load.imports {
         if edge.source_module_identity != load.entry_module_identity -> next
-        name: dep_names.get(edge.target_package_identity) ?? next
+        name: jet_driver_dependency_name(dep_names, edge.target_package_identity) ?? next
         span: if edge.declaration.kind == {
             .Module(_, module_span) -> module_span
             .Unqualified(_, alias_span, _, _, _) -> alias_span
