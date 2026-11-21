@@ -90,6 +90,33 @@ kit_exec_refused: fn(message: String) -> KitRun {
 // ~/.jet, configuration or caches.
 kit_exec_home: fn(scratch: String) -> String { files.join(scratch, "home") }
 
+// Every child of a run gets one soft stack limit, as it gets a home of its
+// own: a row must not change with the limit of whatever started the kit, and
+// harnesses differ (Tools/Agent/JetEnv.jet runs its stages under 1 GiB, a
+// login shell commonly 8 MiB). A Jet program reads it. Under the runtime's
+// 1 GiB stack budget its main stack is the first of the page-aligned
+// segments a deep recursion grows (JetRuntime StackSegment.jet), so the
+// recursion faults at the same instruction in any environment. At 1 GiB the
+// main stack is the whole budget, and where its guard page falls among the
+// frames moves with the size of the environment and arguments: one more
+// character in PATH can move the fault from a function's entry to its call.
+// The limit is 8 MiB, Linux's usual soft one.
+KIT_STACK_BYTES: 8388608
+
+// Sets the kit's soft stack limit to KIT_STACK_BYTES, within the hard limit,
+// for every child it starts to inherit; why when the system refuses. The
+// kit's own main stack can then grow only that far, and the kit, which
+// recurses shallowly, needs no more.
+kit_exec_stack_limit: fn() -> String? {
+    limit: sys.stack_limit() ?? return Val("{err}")
+    soft := KIT_STACK_BYTES
+    if limit.hard == .Val(most) {
+        if most < soft -> soft = most
+    }
+    sys.set_stack_limit(Val(soft), limit.hard) ?? return Val("{err}")
+    None
+}
+
 // The invoking user's home from the password database; HOME only when the
 // database has no row for this user, and "" when neither is known.
 kit_exec_user_home: fn() -> String {

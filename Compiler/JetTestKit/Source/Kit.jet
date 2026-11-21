@@ -979,6 +979,10 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     }
     jet: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
     jetpack: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
+    // One stack limit for every child, whatever started the run.
+    if kit_exec_stack_limit() == .Val(why) {
+        return kit_execution_refused("ERROR\tselection\t\tstack limit: {why}")
+    }
     base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
     canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements, and the FFI cache when
