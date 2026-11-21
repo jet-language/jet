@@ -289,7 +289,12 @@ task_run: fn(child: I64) {
     sync_store(wrapping(base + I64{32}), saved_wait + I64{1})
     sync_store(wrapping(base + I64{64}), I64{0})
     jet_rt_observe_task_enter(sync_load(wrapping(control + I64{56})))
-    perf_causal_task_start(child, sync_load(wrapping(child + I64{72})))
+    // The body is the code its closure box holds at 8, as Game.jet's
+    // callbacks are named: the invoke helper at 72 is one per result type,
+    // shared by every body that returns it.
+    env: sync_load(wrapping(child + I64{64}))
+    code: if (env == I64{0}) -> sync_load(wrapping(child + I64{72})) else -> sync_load(wrapping(env + I64{8}))
+    perf_causal_task_start(child, code)
     // A paused task waits here before its body starts, and a cancel posted
     // before the start wins: the body never runs. A shield the body opens
     // holds only the cancels that come once it is inside.

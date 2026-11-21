@@ -342,7 +342,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         // copy: the perf argv keeps its words; the trace's recorded argv owns its own.
         full.push(arg.copy())
     }
-    path: jet_cli_perf_session_write(capture, action, full, parsed.out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    path: jet_cli_perf_session_write(capture, action, full, parsed.out) ?? return jet_cli_perf_failed(err.message, color)
     code: if receipt.signal != None -> 1 else -> receipt.code
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: code}
 }
@@ -590,7 +590,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
         capture.receipts.push(stamped)
     }
     capture.policy.allowlist = allowlist
-    path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_failed(err.message, color)
     // How long the snapshot held the program: its allocations and frees
     // waited while the runtime forked the copy that wrote it.
     held: if held_ns == .Val(ns) -> "Heap snapshot: held the program's allocations and frees for {ns /% 1000} µs\n" else -> ""

@@ -288,25 +288,12 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         right.total <=> left.total
     })
     kept: if rows.len() > JET_CLI_PERF_OUTSIDE_ROWS -> JET_CLI_PERF_OUTSIDE_ROWS else -> rows.len()
-    functions := [CanonicalJSON]{}
-    loop k in 0..<kept {
-        row: rows[k]
-        fields := [CanonicalJSONField]{
-            {key: "name", value: CanonicalJSON.String(row.name)},
-            {key: "self", value: CanonicalJSON.Integer("{row.own}")},
-            {key: "total", value: CanonicalJSON.Integer("{row.total}")},
-        }
-        if row.file != "" {
-            fields.push({key: "file", value: CanonicalJSON.String(row.file)})
-            fields.push({key: "line", value: CanonicalJSON.Integer("{row.line}")})
-        }
-        functions.push(CanonicalJSON.Object(fields.move()))
-    }
+    functions: loop k in 0..<kept -> jet_cli_perf_outside_function(rows[k])
     value: CanonicalJSON.Object(
         [CanonicalJSONField]{
             {key: "broken", value: CanonicalJSON.Integer("{broken}")},
             {key: "cut", value: CanonicalJSON.Integer("{cut}")},
-            {key: "functions", value: CanonicalJSON.Array(functions.move())},
+            {key: "functions", value: CanonicalJSON.Array(functions)},
             {key: "lost", value: CanonicalJSON.Integer("{taken.lost}")},
             {
                 key: "packages",
@@ -340,6 +327,22 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
         },
     )
     Ok(TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value})
+}
+
+// The `functions` section's object of function `row`, its keys in the
+// order A-canonical JSON sorts them: its declaration's `file` and `line`
+// when its image's location table names them, then `name`, `self` and
+// `total`.
+jet_cli_perf_outside_function: fn(row: JetCLIPerfOutsideRow) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{}
+    if row.file != "" {
+        fields.push({key: "file", value: CanonicalJSON.String(row.file)})
+        fields.push({key: "line", value: CanonicalJSON.Integer("{row.line}")})
+    }
+    fields.push({key: "name", value: CanonicalJSON.String(row.name)})
+    fields.push({key: "self", value: CanonicalJSON.Integer("{row.own}")})
+    fields.push({key: "total", value: CanonicalJSON.Integer("{row.total}")})
+    CanonicalJSON.Object(fields)
 }
 
 // The row of function `name`, whose code holds link address `link` of an

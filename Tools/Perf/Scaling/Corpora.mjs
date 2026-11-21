@@ -37,7 +37,7 @@ function modules(n, r) {
     const a = r.int(3, 97);
     const b = r.int(2, 31);
     files[`modules/part_${i}.jet`] = [
-      `Record${i}: struct {`, '    id: Int', '    weight: Int', '}', '',
+      `Record${i}: struct {`, '    id: Int,', '    weight: Int', '}', '',
       `record_${i}_make: fn(seed: Int) -> Record${i} { Record${i}{id: seed % 97, weight: (seed * ${a}) % 89} }`, '',
       `record_${i}_score: fn(seed: Int) -> Int {`,
       `    record: record_${i}_make(seed)`,
@@ -69,23 +69,25 @@ function smallFns(n, r) {
 }
 
 // Four functions of n/4 statements each: straight-line updates, branches and
-// a growing set of locals that later statements read.
+// locals, each read by the statement after it (or by a final update when the
+// function ends on one).
 function hugeFns(n, r) {
   const files = {};
   const entries = [];
   for (let f = 0; f < 4; f++) {
     const lines = [`huge_${f}: fn(seed: Int) -> Int {`, `    acc := seed % ${M}`];
-    const locals = [];
-    for (let s = 0; s < n / 4; s++) {
+    const count = Math.ceil(n / 4);
+    for (let s = 0; s < count; s++) {
       const c = r.int(1, 997);
       switch (s % 5) {
         case 0: lines.push(`    acc = (acc * 31 + ${c}) % ${M}`); break;
         case 1: lines.push(`    if acc % ${r.int(2, 13)} == 0 -> acc = (acc + ${c}) % ${M}`); break;
-        case 2: lines.push(`    t${s}: (acc + ${c}) % 1009`); locals.push(`t${s}`); break;
-        case 3: lines.push(`    acc = (acc + ${locals.length ? r.pick(locals) : c} * ${r.int(2, 9)}) % ${M}`); break;
+        case 2: lines.push(`    t${s}: (acc + ${c}) % 1009`); break;
+        case 3: lines.push(`    acc = (acc + t${s - 1} * ${r.int(2, 9)}) % ${M}`); break;
         default: lines.push(`    acc = if acc > ${c * 1000} -> acc - ${c} else -> acc + ${c}`);
       }
     }
+    if (count % 5 === 3) lines.push(`    acc = (acc + t${count - 1}) % ${M}`);
     lines.push('    acc', '}', '');
     files[`huge/huge_${f}.jet`] = lines.join('\n');
     entries.push(`huge_${f}`);
@@ -127,7 +129,7 @@ function wideEnums(n, r) {
   const decl = ['Opcode: enum {'];
   for (let i = 0; i < n; i++) {
     const v = variant(i);
-    decl.push(i % 4 === 0 ? `    ${v}` : i % 4 === 1 ? `    ${v}(Int)` : i % 4 === 2 ? `    ${v}(start: Int, width: Int)` : `    ${v}(String)`);
+    decl.push(i % 4 === 0 ? `    ${v},` : i % 4 === 1 ? `    ${v}(Int),` : i % 4 === 2 ? `    ${v}(start: Int, width: Int),` : `    ${v}(String),`);
   }
   decl.push('}', '');
   const cost = ['opcode_cost: fn(op: Opcode) -> Int {', '    if op == {'];
@@ -160,7 +162,7 @@ function implsTraits(n, r) {
   const traitCount = Math.max(4, Math.floor(n / 8));
   const traits = [];
   for (let k = 0; k < traitCount; k++) {
-    traits.push([`Capability${k}: trait {`, `    measure_${k}: fn(self) -> Int`, `    label_${k}: fn(self) -> String`, '}', '',
+    traits.push([`Capability${k}: trait {`, `    measure_${k}: fn(self) -> Int,`, `    label_${k}: fn(self) -> String`, '}', '',
       `capability_${k}_total: fn(items: [Capability${k}]) -> Int {`, '    total := 0',
       `    loop item in items -> total = (total + item.measure_${k}() + item.label_${k}().len()) % ${M}`, '    total', '}']);
   }
@@ -168,7 +170,7 @@ function implsTraits(n, r) {
   const types = [];
   const entries = [];
   for (let i = 0; i < n; i++) {
-    const lines = [`Entity${i}: struct {`, '    id: Int', '    name: String', '}', ''];
+    const lines = [`Entity${i}: struct {`, '    id: Int,', '    name: String,', '}', ''];
     const chosen = [];
     for (let j = 0; j < 4; j++) {
       const k = (i * 4 + j) % traitCount;
@@ -179,7 +181,7 @@ function implsTraits(n, r) {
         `    label_${k}: fn(self) -> String { "e${i}-c${k}-{self.name}" }`, '}', '');
     }
     lines.push(`impl Entity${i} {`, `    bump: fn(&self) { self.id += ${r.int(1, 9)} }`, '    weight: fn(self) -> Int { self.id + self.name.len() }', '}', '',
-      `entity_${i}_use: fn(seed: Int) -> Int {`, `    entity := Entity${i}{id: seed % 101, name: "n{seed % 13}"}`, '    &entity.bump()', '    total := entity.weight()');
+      `entity_${i}_use: fn(seed: Int) -> Int {`, `    entity := Entity${i}{id: seed % 101, name: "n{seed % 13}"}`, '    entity.bump()', '    total := entity.weight()');
     for (const k of chosen) lines.push(`    total = (total + capability_${k}_total([Capability${k}]{entity})) % ${M}`);
     lines.push('    total', '}');
     types.push(lines);
@@ -196,7 +198,7 @@ function generics(n, r) {
   const files = {};
   const entries = [];
   const lines = [
-    'Slot: struct<T> {', '    value: T', '    mark: Int', '}', '',
+    'Slot: struct<T> {', '    value: T,', '    mark: Int', '}', '',
     'wrap: fn<T>(value: T, mark: Int) -> Slot<T> { Slot<T>{value: value, mark: mark} }', '',
     'first_or: fn<T>(items: [T], fallback: T) -> T {', '    if items.len() > 0 -> return items[0]', '    fallback', '}', '',
     'count_where: fn<T>(items: [T], keep: fn(T) -> Bool) -> Int {', '    total := 0', '    loop item in items {', '        if keep(item) -> total += 1', '    }', '    total', '}', '',
@@ -204,13 +206,13 @@ function generics(n, r) {
   ];
   for (let i = 0; i < n; i++) {
     const a = r.int(2, 97);
-    lines.push(`Thing${i}: struct {`, '    id: Int', '    weight: Int', '}', '',
+    lines.push(`Thing${i}: struct {`, '    id: Int,', '    weight: Int', '}', '',
       `thing_${i}_use: fn(seed: Int) -> Int {`,
       `    things: [Thing${i}]{Thing${i}{id: seed % 31, weight: ${a}}, Thing${i}{id: seed % 17, weight: ${a + 1}}}`,
       `    chosen: first_or(things, Thing${i}{id: 0, weight: 0})`,
       `    heavy: count_where(things, fn(thing) { thing.weight > ${a} })`,
       `    slots: [Slot<Thing${i}>]{wrap(chosen, ${i % 64}), wrap(things[1], heavy)}`,
-      `    (chosen.id + heavy + marks_of(slots)) % ${M}`, '}', '');
+      `    (chosen.id + heavy + marks_of(slots) + slots[1].value.id) % ${M}`, '}', '');
     entries.push(`thing_${i}_use`);
   }
   files['main.jet'] = lines.join('\n');
@@ -256,7 +258,7 @@ function dataTables(n, r) {
     lines.push('    }', '}', '');
   }
   const rows = Math.max(8, Math.floor(n / 8));
-  lines.push('Row: struct {', '    id: Int', '    weight: Int', '    name: String', '}', '', 'row_table: fn() -> [Row] {', '    [Row]{');
+  lines.push('Row: struct {', '    id: Int,', '    weight: Int,', '    name: String', '}', '', 'row_table: fn() -> [Row] {', '    [Row]{');
   for (let i = 0; i < rows; i++) lines.push(`        Row{id: ${i}, weight: ${r.int(0, 999)}, name: "row-${i}"},`);
   lines.push('    }', '}', '', 'name_table: fn() -> [String:Int] {', '    [String:Int]{');
   for (let i = 0; i < rows; i++) lines.push(`        "key-${i}": ${r.int(0, 999)},`);
@@ -264,7 +266,7 @@ function dataTables(n, r) {
     'tables_total: fn(seed: Int) -> Int {', `    acc := seed % ${M}`,
     `    loop k in 0..<4 {`, '        table: if k == {', '            0 -> table_0()', '            1 -> table_1()', '            2 -> table_2()', '            else -> table_3()', '        }',
     `        loop value in table -> acc = (acc * 3 + value) % ${M}`, '    }',
-    `    loop row in row_table() -> acc = (acc + row.weight + row.name.len()) % ${M}`,
+    `    loop row in row_table() -> acc = (acc + row.id + row.weight + row.name.len()) % ${M}`,
     `    loop (key, value) in name_table() -> acc = (acc + key.len() * value) % ${M}`,
     `    (acc + banner().len()) % ${M}`, '}', '');
   files['tables.jet'] = lines.join('\n');
@@ -275,13 +277,14 @@ function dataTables(n, r) {
 // (E0312/E0109 on LocalDate comparisons).
 const CORE_IMPORTS = ['use math: core.math', 'use text: core.text', 'use collections: core.collections', 'use term: core.term'];
 
-// n files, each importing four Core modules.
+// n files, each importing four Core modules and calling into each.
 function imports(n, r) {
   const files = {};
   const entries = [];
   for (let i = 0; i < n; i++) {
     files[`services/service_${i}.jet`] = [...CORE_IMPORTS, '',
-      `service_${i}_value: fn(seed: Int) -> Int { max(seed % 13, ${r.int(1, 12)}) + math.abs_diff(seed, ${r.int(1, 99)}) }`, ''].join('\n');
+      `service_${i}_value: fn(seed: Int) -> Int {`, '    label: "service-{seed % 7}"', `    counts: collections.counter_from([String]{label, "service-${i}"})`,
+      `    max(seed % 13, ${r.int(1, 12)}) + math.abs_diff(seed, ${r.int(1, 99)}) + text.scalar_count(label) + collections.total(counts) + term.style_force("bold", label).len()`, '}', ''].join('\n');
     entries.push(`service_${i}_value`);
   }
   return finish('imports', files, consumerTree(files, entries, 'imports'));
@@ -312,7 +315,7 @@ function errors(n, r) {
     const k = Math.floor(i / 16);
     const lines = [];
     if (i % 16 === 0) {
-      lines.push('#Error', `Fault${k}: enum {`, '    Missing', '    Invalid(Int)', '    Overflow(limit: Int, seen: Int)', '}', '',
+      lines.push('#Error', `Fault${k}: enum {`, '    Missing,', '    Invalid(Int),', '    Overflow(limit: Int, seen: Int)', '}', '',
         `fault_${k}_code: fn(fault: Fault${k}) -> Int {`, '    if fault == {', '        .Missing -> 1', '        .Invalid(value) -> value % 97', '        .Overflow(limit, seen) -> limit + seen', '    }', '}', '');
     }
     const limit = r.int(50, 500);
@@ -396,7 +399,7 @@ export const SHAPES = Object.freeze({
   generics: stress('distinct generic instantiations', 128, generics),
   comptime: stress('comptime (prep) items with record types', 128, comptime),
   'data-tables': stress('literal table elements', 2048, dataTables),
-  imports: stress('files importing five Core modules', 128, imports),
+  imports: stress('files importing four Core modules', 128, imports),
   'call-chains': stress('call depth', 256, callChains),
   errors: stress('fallible functions with propagation and recovery', 128, errors),
   diagnostics: stress('reported errors', 128, diagnostics),

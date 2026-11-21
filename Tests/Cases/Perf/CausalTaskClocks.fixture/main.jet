@@ -1,0 +1,35 @@
+// Many tasks with almost no work, four at a time, so the causal lens's
+// clock reads at each task's start and end (PerfSamples.jet
+// perf_causal_task_start and perf_causal_task_end) take a large share of
+// the CPU time its 8 kHz samples land in. `jet run main.jet -- FILE` runs
+// TASKS of them and writes to FILE its own wall time over them, in
+// nanoseconds, which bounds every time the lens keeps of them (check.jet).
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+TASKS: 60000
+
+// One task's work: a few hundred nanoseconds.
+tiny: fn(seed: Int) -> Int {
+    total := seed
+    loop step in 0..<200 -> total = (total * 31 + step) % 1000003
+    total
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 1 -> panic("usage: main.jet -- FILE")
+    started: time.instant()
+    total := 0
+    loop wave in 0..<TASKS /% 4 {
+        handles: loop offset in 0..<4 -> task tiny(wave * 4 + offset)
+        loop handle in handles -> total += handle.join() ?? 0
+    }
+    wall: started.elapsed().ns
+    if total < 0 -> print("negative")
+    files.write(args[args.len() - 1], "{wall}\n") ?? panic("cannot write {args[args.len() - 1]}")
+    print("done")
+}

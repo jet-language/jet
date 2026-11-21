@@ -23,9 +23,9 @@ exit: 0 # the stop file ends the program
 step: sh -c 'ls -A run/jet | grep -c jet-flight'
 exit: 1 # grep counts no line
 stdout: = "0\n" # at its exit the program removed its ring and image
-step: sh -c 'n=$(wc -c < last.samples); od -A n -t x8 -N 8 -j $((n - 104)) last.samples'
+step: sh -c 'od -A n -v -t u2 -w8 last.samples | awk -f last_records.awk'
 exit: 0
-stdout.trim: = "680a000000000000" # the clock record the exit wrote: 10 words, of the clock record's kind 13
+stdout: = "13 13 3 0\n" # walked record by record from each head's size: the clock record the exit wrote (kind 13), then a 3-word record of that kind ending the file
 step: sh -c 'n=$(wc -c < last.samples); od -A n -t x8 -w24 -j $((n - 24)) last.samples'
 exit: 0
 stdout.trim: = "6803000000000001 0000000000000000 0000000000000001" # then the tally: 3 words, the clock record's kind with 1 for its address, no record lost, the run ended

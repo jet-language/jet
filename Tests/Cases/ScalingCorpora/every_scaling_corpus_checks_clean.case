@@ -1,0 +1,17 @@
+# Every corpus the scaling gate (Tools/Perf/Scaling/Harness) and the
+# compile-throughput cell (Tools/Perf/CompileThroughput/Throughput.jet) time is
+# real Jet. Tools/Perf/Scaling/CheckCorpora writes each shape of the
+# generator's own registry (`shapes()` of the jet_scaling_corpora package)
+# in both layouts at a small size, plus the `mixed` profile, then runs
+# `jet check` on each. A corpus that expects no diagnostic checks clean, with
+# no error and no warning. The `diagnostics` shape reports exactly its expected
+# count of errors. The gate never times a failing compile, so a generator
+# that stops emitting valid Jet would leave the gate with nothing to time;
+# this row names the corpus instead.
+env: JET={jet}
+env: NO_COLOR=1
+step: jet {root}/Tools/Perf/Scaling/CheckCorpora {work}/corpora
+timeout: 600s
+exit: 0
+stdout: ~ "diagnostics-files: ok" # the diagnostics shape reports exactly its expected errors
+stdout: ~ "mixed: ok" # the compile-throughput profile checks clean

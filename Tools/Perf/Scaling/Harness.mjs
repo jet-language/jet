@@ -284,7 +284,7 @@ async function measure(config, compiler, built, dir) {
   if (!events.length) problems.push('no JET_TRACE_FILE trace');
   const expectErrors = built.expect.diagnostics;
   if (expectErrors === 0 && (!result.complete || result.errors)) problems.push(`compile failed (exit ${measured.code}${measured.signal ? `, ${measured.signal}` : ''}, ${result.errors} errors); see ${dir}`);
-  if (expectErrors > 0 && result.errors < expectErrors) problems.push(`reported ${result.errors} of ${expectErrors} expected diagnostics; see ${dir}`);
+  if (expectErrors > 0 && result.errors !== expectErrors) problems.push(`reported ${result.errors} diagnostics, expected exactly ${expectErrors}; see ${dir}`);
   metrics.diagnostics = result.errors;
   return { n: built.n, x: built.kind === 'domain' ? built.code_lines : built.n, code_lines: built.code_lines, source_sha256: built.source_sha256,
     ok: problems.length === 0, problems, open_phases: open, timeout_phase: timeoutPhase, metrics, dir, build_dir: buildDir, exit: measured.code };

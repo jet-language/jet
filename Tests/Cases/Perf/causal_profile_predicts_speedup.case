@@ -37,6 +37,7 @@ exit: 0
 stdout: = "done\n"
 json: file causal.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 2 # the receipt names each lens that ran
 json: file causal.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[1] = "causal" # the causal lens, beside the cpu samples it rides on
+json: file causal.jettrace doc $.content.receipt_sections[?name="causal_tasks"][0].value.bodies #= 2 # a task's body is its spawn site's code: the narrow site and the wide one, never the invoke helper all four share
 step: jet run -A -O0 main.jet -- measure after.txt
 exit: 0
 stdout: = "measured\n"
@@ -50,6 +51,7 @@ stdout: = "measured\n"
 step: jet perf run -A -O1 main.jet --lens=causal --out causal.jettrace
 exit: 0
 stdout: = "done\n"
+json: file causal.jettrace doc $.content.receipt_sections[?name="causal_tasks"][0].value.bodies #= 2 # on every tier
 step: jet run -A -O1 main.jet -- measure after.txt
 exit: 0
 stdout: = "measured\n"
@@ -63,6 +65,7 @@ stdout: = "measured\n"
 step: jet perf run -A -O2 main.jet --lens=causal --out causal.jettrace
 exit: 0
 stdout: = "done\n"
+json: file causal.jettrace doc $.content.receipt_sections[?name="causal_tasks"][0].value.bodies #= 2 # on every tier
 step: jet run -A -O2 main.jet -- measure after.txt
 exit: 0
 stdout: = "measured\n"

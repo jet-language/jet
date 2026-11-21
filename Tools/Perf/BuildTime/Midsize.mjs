@@ -37,14 +37,14 @@ export function jetUnit(i) {
   const { c1, c2, c3, t1, t2, n } = unitConstants(i);
   return `// Unit ${i}: state step, classification, and scoring.
 State${i}: struct {
-    a: Int
-    b: Int
+    a: Int,
+    b: Int,
     c: Int
 }
 
 Kind${i}: enum {
-    Low(Int)
-    Mid(Int)
+    Low(Int),
+    Mid(Int),
     High
 }
 
@@ -78,7 +78,7 @@ unit_${i}: fn(seed: Int) -> Int {
     values := [Int]{}
     loop j in 0..<${n} {
         s = step_${i}(s, j)
-        &values.push(score_${i}(classify_${i}(s.a % 1000)))
+        values.push(score_${i}(classify_${i}(s.a % 1000)))
     }
     total := 0
     loop v in values {
@@ -109,7 +109,7 @@ const (
 )
 
 type Kind${i} struct {
-	int: tag
+	tag int
 	v   int64
 }
 

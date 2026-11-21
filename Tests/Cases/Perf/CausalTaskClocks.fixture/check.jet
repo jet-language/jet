@@ -1,0 +1,78 @@
+// Checks the causal lens's timing of every task main.jet ran (the trace's
+// `causal_tasks` rows) against the wall time main.jet measured over them.
+// Each time the lens keeps of a task is read from clocks outside its
+// sample handler; a read the handler tore (half its own clock words, or
+// another clock's) is off by up to the machine's uptime. None can be: every
+// task started at or after the first one did, ended at or after its start,
+// and ended within the wall time, its thread's CPU time, its pauses and the
+// idle gap before it within that too.
+// `jet run check.jet -- WALL TRACE` prints the rows it checked.
+use {
+    files: core.files
+    process: core.process
+}
+
+// The columns of a `causal_tasks` row (JetCLI CLI/Perf/Causal.jet
+// jet_cli_perf_causal_tasks_section).
+COLUMNS: 13
+
+// The tasks main.jet runs (main.jet TASKS).
+TASKS: 60000
+
+// The integer after `key` in `text`; None when `key` is absent.
+number_after: fn(text: String, key: String) -> Int? {
+    parts: text.split(key).to_list()
+    if parts.len() < 2 -> return None
+    Val(Int.parse(parts[1].split(",").to_list()[0].split("}}").to_list()[0]) ?? return None)
+}
+
+// What is wrong with `row`, a task's timing, against the wall time `wall`;
+// "" when nothing is.
+row_fault: fn(row: [Int], wall: Int) -> String {
+    start: row[1]
+    span: row[2]
+    if start < 0 || start > wall -> return "its start {start} ns is outside the {wall} ns wall time"
+    if span < 0 -> return "it ended {-span} ns before it started"
+    if start + span > wall {
+        return "it ended {start + span} ns after the first start, past the {wall} ns wall time"
+    }
+    if row[5] < 0 || row[5] > wall {
+        return "its thread's CPU time {row[5]} ns is outside the {wall} ns wall time"
+    }
+    if row[6] < 0 || row[6] > wall {
+        return "its pauses' {row[6]} ns are outside the {wall} ns wall time"
+    }
+    if row[12] < -1 || row[12] > wall {
+        return "its idle gap {row[12]} ns is outside the {wall} ns wall time"
+    }
+    ""
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 2 -> panic("usage: check.jet -- WALL TRACE")
+    wall: Int.parse((files.read(args[args.len() - 2]) ?? panic("cannot read {args[args.len() - 2]}")).trim()) ?? panic("no wall time")
+    trace: files.read(args[args.len() - 1]) ?? panic("cannot read {args[args.len() - 1]}")
+    sections: trace.split("\"name\":\"causal_tasks\"").to_list()
+    if sections.len() < 2 -> panic("the trace has no causal_tasks section")
+    section: sections[1]
+    tabled: section.split("\"rows\":[[").to_list()
+    if tabled.len() < 2 -> panic("the causal_tasks section has no rows")
+    rows := 0
+    loop text in tabled[1].split("]],\"seen\"").to_list()[0].split("],[").to_list() {
+        row := [Int]{}
+        loop word in text.split(",").to_list() {
+            row.push(Int.parse(word) ?? panic("a causal_tasks row holds `{word}`, no number"))
+        }
+        if row.len() != COLUMNS {
+            panic("a causal_tasks row holds {row.len()} numbers, not {COLUMNS}")
+        }
+        fault: row_fault(row, wall)
+        if fault != "" -> panic("task row {rows} {row}: {fault}")
+        rows += 1
+    }
+    seen: number_after(section, "\"seen\":") ?? panic("no seen in the causal_tasks section")
+    if seen != rows -> panic("the lens saw {seen} tasks but kept {rows}")
+    if rows < TASKS -> panic("the lens kept {rows} tasks, fewer than the {TASKS} main.jet ran")
+    print("every task's clocks hold")
+}

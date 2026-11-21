@@ -920,8 +920,8 @@ finish: fn(config: Config, compiler: Compiler, started: Started) -> Point Err! {
     if rung.diagnostics == 0 && (!result.complete || result.errors > 0) {
         problems.push("compile failed ({ended}, {result.errors} errors); see {rung.dir}")
     }
-    if rung.diagnostics > 0 && result.errors < rung.diagnostics {
-        problems.push("reported {result.errors} of {rung.diagnostics} expected diagnostics; see {rung.dir}")
+    if rung.diagnostics > 0 && result.errors != rung.diagnostics {
+        problems.push("reported {result.errors} diagnostics, expected exactly {rung.diagnostics}; see {rung.dir}")
     }
     metrics["diagnostics"] = Float{result.errors}
     Ok(Point{n: rung.n, x: rung.x, code_lines: rung.code_lines, source_sha256: rung.source_sha256.copy(), ok: problems.len() == 0, problems: problems, open_phases: open, timeout_phase: timeout_phase, metrics: metrics, dir: rung.dir.copy(), build_dir: rung.build_dir.copy(), exit: exit})

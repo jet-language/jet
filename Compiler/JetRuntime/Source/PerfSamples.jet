@@ -7280,7 +7280,7 @@ PERF_CAUSAL_THREADS: I64{512}
 // the experiment: the time of its first pass and of its last, the global
 // delay at each, the passes after the first), the record being written,
 // then one entry per thread (tid, delay paid, last sample, voluntary
-// context switches by then, a timespec, a struct rusage, the CPU time its
+// context switches by then, two spare words, a struct rusage, the CPU time its
 // pauses took whose samples are still to drop, whether it is pausing, its
 // schedstat run time and wait at the last experiment's end, the task it
 // runs: perf_causal_task_start, and its timing: perf_causal_rows_write),
@@ -7417,7 +7417,7 @@ perf_causal_open: fn(image: I64) -> I64 {
     if (state == I64{0}) { return I64{0} }
     thread_zero(state, PERF_CAUSAL_BYTES)
     if (!perf_causal_table(state, image)) { return I64{0} }
-    now: perf_samples_clock()
+    now: sync_now_ns()
     rt_text_store(wrapping(state + PERF_CAUSAL_START), now)
     rt_text_store(wrapping(state + PERF_CAUSAL_RANDOM), now | I64{1})
     rt_text_store(wrapping(state + PERF_CAUSAL_ROWS), alloc_map_try(wrapping(PERF_CAUSAL_ROWS_MAX * wrapping(PERF_CAUSAL_ROW_WORDS * I64{8}))))
@@ -7520,7 +7520,7 @@ perf_causal_tick: fn(pc: I64, periods: I64) -> I64 {
         } else { _ := sync_add(wrapping(state + PERF_CAUSAL_DELAY), share) }
     }
     if (ready) {
-        perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
+        perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)), true)
     }
     // After the pause: a pause the experiment's end left out of its wall
     // time would still count in its delay and its passes.
@@ -7597,7 +7597,10 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // read their mark takes: with the lens on, a task costs a few stores, a
 // row lookup and three atomic adds more, and for its timing
 // (perf_causal_row) a CPU clock read at each end and a getcpu at its start;
-// with it off, nothing past the state's test.
+// with it off, nothing past the state's test. They run outside the handler,
+// so they read the clocks sync_now_ns and sync_thread_cpu_ns read, whose
+// words no handler writes: a sample landing in a read of the handler's
+// words (perf_samples_clock) would leave it half the handler's.
 perf_causal_task_start: fn(task: I64, body: I64) {
     state: perf_causal_state
     if (state == I64{0}) {
@@ -7612,7 +7615,7 @@ perf_causal_task_start: fn(task: I64, body: I64) {
     if (rt_text_word(wrapping(thread + I64{8})) < delay) {
         rt_text_store(wrapping(thread + I64{8}), delay)
     }
-    now: perf_samples_clock()
+    now: sync_now_ns()
     perf_causal_mark(thread, now)
     idle_from: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_IDLE_FROM))
     running: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK))
@@ -7629,7 +7632,7 @@ perf_causal_task_start: fn(task: I64, body: I64) {
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_PAUSE_CPU), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSE_CPU)))
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_TICKS), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TICKS)))
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CORE), perf_causal_core(thread))
-    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CPU), perf_causal_clock(thread, I64{3}))
+    rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_TASK_CPU), sync_thread_cpu_ns())
 }
 
 perf_causal_task_end: fn(task: I64) {
@@ -7642,8 +7645,8 @@ perf_causal_task_end: fn(task: I64) {
         return
     }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
-    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), delay)
-    now: perf_samples_clock()
+    perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), delay, false)
+    now: sync_now_ns()
     perf_causal_mark(thread, now)
     cell: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_CELL))
     started: rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK)) == task
@@ -7695,7 +7698,7 @@ perf_causal_row: fn(state: I64, thread: I64, now: I64, delay: I64) {
         return
     }
     row: wrapping(rows + wrapping(index * wrapping(PERF_CAUSAL_ROW_WORDS * I64{8})))
-    cpu: perf_causal_clock(thread, I64{3})
+    cpu: sync_thread_cpu_ns()
     rt_text_store(wrapping(row + I64{8}), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_BODY)) - perf_samples_bias))
     rt_text_store(wrapping(row + I64{16}), rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_TASK_FROM)))
     rt_text_store(wrapping(row + I64{24}), now)
@@ -7813,7 +7816,7 @@ perf_causal_woken: fn(blocked: I64) {
     }
     meanwhile: wrapping(sync_load(wrapping(state + PERF_CAUSAL_DELAY)) - blocked)
     rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + meanwhile))
-    perf_causal_mark(thread, perf_causal_clock(thread, I64{1}))
+    perf_causal_mark(thread, sync_now_ns())
 }
 
 // This thread's entry, claimed by its tid on its first sample; 0 when the
@@ -7834,17 +7837,18 @@ perf_causal_thread: fn(state: I64) -> I64 {
 }
 
 // Pay this thread's owed delay, `delay` less the `local` it has paid, and
-// keep what it paid. A pause runs past its request by its own clock reads,
-// by a preemption, and by the samples its spin sets off (perf_causal_tick),
+// keep what it paid; `handler` when the handler pays (perf_causal_clock). A
+// pause runs past its request by its own clock reads, by a preemption, and
+// by the samples its spin sets off (perf_causal_tick),
 // and the excess counts toward the delays inserted after it, as in Coz:
 // were it dropped, every pause would add time the experiment's accounting
 // (its wall time less the delay inserted) leaves in, and every line's
 // prediction would read lower by the pauses' total excess, more the more
 // often its threads pause, so the more samples a second the lens takes.
-perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
+perf_causal_pay: fn(thread: I64, local: I64, delay: I64, handler: Bool) {
     paid := local
     if (local < delay) {
-        paid = wrapping(local + perf_causal_pause(thread, wrapping(delay - local)))
+        paid = wrapping(local + perf_causal_pause(thread, wrapping(delay - local), handler))
     }
     // A pause cut at PERF_CAUSAL_PAUSE_MAX_NS forgives the rest.
     rt_text_store(wrapping(thread + I64{8}), if (paid < delay) -> delay else -> paid)
@@ -7863,34 +7867,34 @@ perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
 // (perf_causal_tick): while it pauses outside the handler its entry says
 // so, and the CPU time it spun is kept for the sample the handler held back.
 // Its wall time and CPU time also add to the entry's totals, for the
-// timing of the task it ran in (perf_causal_row).
-perf_causal_pause: fn(thread: I64, ns: I64) -> I64 {
+// timing of the task it ran in (perf_causal_row). Its clocks are the
+// handler's when `handler` (perf_causal_clock).
+perf_causal_pause: fn(thread: I64, ns: I64, handler: Bool) -> I64 {
     wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
     pausing: wrapping(thread + PERF_CAUSAL_THREAD_PAUSING)
     sync_store(pausing, I64{1})
-    began: perf_causal_clock(thread, I64{1})
-    cpu: perf_causal_clock(thread, I64{3})
+    began: perf_causal_clock(handler, I64{1})
+    cpu: perf_causal_clock(handler, I64{3})
     deadline: wrapping(began + wait)
     now := began
-    loop now < deadline -> now = perf_causal_clock(thread, I64{1})
-    spent: wrapping(perf_causal_clock(thread, I64{3}) - cpu)
+    loop now < deadline -> now = perf_causal_clock(handler, I64{1})
+    spent: wrapping(perf_causal_clock(handler, I64{3}) - cpu)
     _ := sync_add(wrapping(thread + PERF_CAUSAL_THREAD_SPUN), spent)
     sync_store(pausing, I64{0})
-    paused: wrapping(perf_causal_clock(thread, I64{1}) - began)
+    paused: wrapping(perf_causal_clock(handler, I64{1}) - began)
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSED)) + paused))
     rt_text_store(wrapping(thread + PERF_CAUSAL_THREAD_PAUSE_CPU), wrapping(rt_text_word(wrapping(thread + PERF_CAUSAL_THREAD_PAUSE_CPU)) + spent))
     paused
 }
 
 // The clock `clock` (CLOCK_MONOTONIC 1 or CLOCK_THREAD_CPUTIME_ID 3) in
-// nanoseconds, read into this thread's entry's timespec. A pause outside the
-// handler reads its clocks there, not in the handler's words
-// (perf_samples_clock), which a sample taken meanwhile overwrites; such a
-// sample leaves the entry's timespec alone (perf_causal_tick).
-perf_causal_clock: fn(thread: I64, clock: I64) -> I64 {
-    spec: wrapping(thread + I64{32})
-    sync_clock_read(clock, spec)
-    wrapping(wrapping(rt_text_word(spec) * I64{1000000000}) + rt_text_word(wrapping(spec + I64{8})))
+// nanoseconds. In the handler it is read into the handler's words
+// (perf_samples_read); outside it into the words sync_now_ns reads, which
+// no handler writes, so a sample taken meanwhile, which may pause in the
+// handler, never overwrites a read half done.
+perf_causal_clock: fn(handler: Bool, clock: I64) -> I64 {
+    if (handler) { return perf_samples_read(clock) }
+    if (clock == I64{3}) -> sync_thread_cpu_ns() else -> sync_now_ns()
 }
 
 // Whether `pc` is in one of the target's `count` ranges.
@@ -8175,7 +8179,7 @@ perf_causal_progress: fn(name: I64) {
 // experiment: its time and the global delay then, as the first pass's when
 // it is the first, else one more pass after the first; as the last's always.
 perf_causal_pass: fn(state: I64, point: I64) {
-    now: perf_samples_clock()
+    now: sync_now_ns()
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
     if (sync_cas(wrapping(point + I64{8}), I64{0}, now) == I64{0}) {
         sync_store(wrapping(point + I64{24}), delay)

@@ -5,7 +5,7 @@
 # JET_TRACE_FILE trace and prints `JET_PHASE_COUNTERS` lines on both streams,
 # its work growing with N by KIND (above the gate's counter resolution, 64):
 # linear (100 N), quadratic (100 N^2), broken
-# (linear, but exits 3 from N=4), errors (reports two `Error [E…]`
+# (linear, but exits 3 from N=4), errors (reports two `Error: Jet.…`
 # diagnostics and exits 1), malformed (an unparsable counter line) or negative
 # (a negative counter).
 kind=$1
@@ -22,7 +22,7 @@ printf 'JET_PHASE_COUNTERS: {"phase":"parse","tokens":%s}\n' $((3 * n)) >&2
 case $kind in
 broken) if [ "$n" -ge 4 ]; then exit 3; fi ;;
 errors)
-    printf 'Error [E0001] first\nError [E0002] second\n'
+    printf 'Error: Jet.UnknownName: first\nError: Jet.UnknownName: second\n'
     exit 1
     ;;
 malformed) printf 'JET_PHASE_COUNTERS oops\n' ;;

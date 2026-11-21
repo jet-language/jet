@@ -99,31 +99,27 @@ small_fns: fn(n: Int, r: &Seeded) -> [String:String] {
 }
 
 // Four functions of n/4 statements each: straight-line updates, branches and
-// a growing set of locals that later statements read.
+// locals, each read by the statement after it (or by a final update when the
+// function ends on one).
 huge_fns: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop f in 0..<4 {
         body := [String]{"huge_{f}: fn(seed: Int) -> Int {{", "    acc := seed % {M}"}
-        locals := [String]{}
-        loop s in 0..<(n + 3) /% 4 {
+        count: (n + 3) /% 4
+        loop s in 0..<count {
             c: r.int(1, 997)
             body.push(
                 if s % 5 == {
                     0 -> "    acc = (acc * 31 + {c}) % {M}"
                     1 -> "    if acc % {r.int(2, 13)} == 0 -> acc = (acc + {c}) % {M}"
-                    2 -> {
-                        locals.push("t{s}")
-                        "    t{s}: (acc + {c}) % 1009"
-                    }
-                    3 -> {
-                        held: if locals.len() > 0 -> r.pick(locals) else -> "{c}"
-                        "    acc = (acc + {held} * {r.int(2, 9)}) % {M}"
-                    }
+                    2 -> "    t{s}: (acc + {c}) % 1009"
+                    3 -> "    acc = (acc + t{s - 1} * {r.int(2, 9)}) % {M}"
                     else -> "    acc = if acc > {c * 1000} -> acc - {c} else -> acc + {c}"
                 },
             )
         }
+        if count % 5 == 3 -> body.push("    acc = (acc + t{count - 1}) % {M}")
         body.extend(["    acc", "}}", ""])
         files["huge/huge_{f}.jet"] = body.join("\n")
         entries.push("huge_{f}")
@@ -278,7 +274,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
 
                 entity_{i}_use: fn(seed: Int) -> Int {{
                     entity := Entity{i}{{id: seed % 101, name: "n{{seed % 13}}"}}
-                    &entity.bump()
+                    entity.bump()
                     total := entity.weight()
                 """,
             ),
@@ -342,7 +338,7 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
             chosen: first_or(things, Thing{i}{{id: 0, weight: 0}})
             heavy: count_where(things, fn(thing) {{ thing.weight > {a} }})
             slots: [Slot<Thing{i}>]{{wrap(chosen, {i % 64}), wrap(things[1], heavy)}}
-            (chosen.id + heavy + marks_of(slots)) % {M}
+            (chosen.id + heavy + marks_of(slots) + slots[1].value.id) % {M}
         }}
 
         """
@@ -441,7 +437,7 @@ data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
                     }}
                     loop value in table -> acc = (acc * 3 + value) % {M}
                 }}
-                loop row in row_table() -> acc = (acc + row.weight + row.name.len()) % {M}
+                loop row in row_table() -> acc = (acc + row.id + row.weight + row.name.len()) % {M}
                 loop (key, value) in name_table() -> acc = (acc + key.len() * value) % {M}
                 (acc + banner().len()) % {M}
             }}
@@ -454,9 +450,9 @@ data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
     files
 }
 
-// n files, each importing four Core modules. core.time is left out: the
-// generated compiler rejects Core/Time today (E0312/E0109 on LocalDate
-// comparisons).
+// n files, each importing four Core modules and calling into each. core.time
+// is left out: the generated compiler rejects Core/Time today (E0312/E0109 on
+// LocalDate comparisons).
 imports: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
@@ -467,7 +463,11 @@ imports: fn(n: Int, r: &Seeded) -> [String:String] {
         use collections: core.collections
         use term: core.term
 
-        service_{i}_value: fn(seed: Int) -> Int {{ max(seed % 13, {r.int(1, 12)}) + math.abs_diff(seed, {r.int(1, 99)}) }}
+        service_{i}_value: fn(seed: Int) -> Int {{
+            label: "service-{{seed % 7}}"
+            counts: collections.counter_from([String]{{label, "service-{i}"}})
+            max(seed % 13, {r.int(1, 12)}) + math.abs_diff(seed, {r.int(1, 99)}) + text.scalar_count(label) + collections.total(counts) + term.style_force("bold", label).len()
+        }}
 
         """
         entries.push("service_{i}_value")
@@ -660,7 +660,7 @@ shapes: fn() -> [Shape] {
         stress("generics", "distinct generic instantiations", 128, fn(n, seed) { generics(n, seeded(seed, .Scaled)) }),
         stress("comptime", "comptime (prep) items with record types", 128, fn(n, seed) { comptime_items(n, seeded(seed, .Scaled)) }),
         stress("data-tables", "literal table elements", 2048, fn(n, seed) { data_tables(n, seeded(seed, .Scaled)) }),
-        stress("imports", "files importing five Core modules", 128, fn(n, seed) { imports(n, seeded(seed, .Scaled)) }),
+        stress("imports", "files importing four Core modules", 128, fn(n, seed) { imports(n, seeded(seed, .Scaled)) }),
         stress("call-chains", "call depth", 256, fn(n, seed) { call_chains(n, seeded(seed, .Scaled)) }),
         stress("errors", "fallible functions with propagation and recovery", 128, fn(n, seed) { errors(n, seeded(seed, .Scaled)) }),
         stress("diagnostics", "reported errors", 128, fn(n, seed) { diagnostics(n, seeded(seed, .Scaled)) }),
