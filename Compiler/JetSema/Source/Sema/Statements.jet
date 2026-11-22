@@ -37,6 +37,7 @@ use {
         body_each_pattern_child,
         body_each_stmt_child,
         core_source_owns_type,
+        foundation_link_inner,
         NamedSpan,
         NamedType,
         OrFallback,
@@ -8207,6 +8208,11 @@ sema_stmt_check_assignment_place: fn(target: LValue, compound: Bool, environment
                 key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, span)
                 operation: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
                 return Val(sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span))
+            }
+            if foundation_link_inner(checked_base.ty) != None {
+                if !sema_link_check_write_access(base, scopes, span, diagnostics) {
+                    return None
+                }
             }
             return sema_expression_field_checked(checked_base, member, span, None, environment, program, scopes, context, diagnostics)
         }

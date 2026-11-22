@@ -2227,6 +2227,13 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.typed_goals = [TTypedGoal]{}
     context.index_proofs = [TIndexProof]{}
     flat := body_flat_function(built, context.arena.tree)
+    if sema_footprint_has_receiver(func) {
+        if program.registration_graph == .Val(graph) {
+            if sema_registration_module_index(graph, flat.module_identity) == .Val(module_index) {
+                flat.receiver_footprint = sema_footprint_for_method_span(graph.modules[module_index], func.span)
+            }
+        }
+    }
     if stand_in == None -> return sema_function_result(Val(flat), owner_key, context.move())
     flat.stand_in = true
     result := sema_function_result(Val(flat), owner_key, context.move())

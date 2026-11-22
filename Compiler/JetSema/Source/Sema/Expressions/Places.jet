@@ -33,6 +33,7 @@ use {
         diagnostic_with_edit_grade,
         expr_optional_method_call_as_call,
         expr_span,
+        foundation_link_inner,
         boundary_head_carrier_module,
         symbol_key_text,
         checked_symbol_local,
@@ -302,6 +303,11 @@ sema_expression_deref: fn(value: Expr, span: Span, expected: Type?, environment:
             return sema_expr_expected_owned(result, expected, environment, program, diagnostics)
         }
     }
+    // A live link (`@T`) dereferences safely to its target value.
+    if foundation_link_inner(checked.ty) == .Val(link_inner) {
+        result: sema_tree_node(link_inner, TExprKind.Deref{value: checked}, span)
+        return sema_expr_expected_owned(result, expected, environment, program, diagnostics)
+    }
     diagnostics.push(sema_error("E0112", span, "dereference needs a Ptr value", "only a checked pointer carries an element type through `.*`", "use a Ptr<T> value here"))
     None
 }
@@ -439,6 +445,11 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             viewed.ty = inner
             return sema_expression_field_checked(viewed, member, span, expected, environment, program, scopes, context, diagnostics)
         }
+    }
+    // A live link (`@T`) reaches its target's fields directly without `.*`.
+    if foundation_link_inner(base.ty) == .Val(link_inner) {
+        derefed: sema_tree_node(link_inner, TExprKind.Deref{value: base}, base.span)
+        return sema_expression_field_checked(derefed, member, span, expected, environment, program, scopes, context, diagnostics)
     }
     if base.ty == .Tuple(_) {
         tuple_field: sema_expression_tuple_field(base, member, span, diagnostics) ?? return None

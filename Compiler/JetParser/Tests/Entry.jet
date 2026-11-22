@@ -1,4 +1,4 @@
-use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names]
+use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
 
 #Test("generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics") {
     result: parser_test_result("Weird: module<lower>(UPPER: Int) {{ ready: fn() -> Bool {{ return true }} }}\nUse: Weird<String>(32)")
@@ -578,3 +578,57 @@ parse_complete: fn(source: String) {
         assert(!result.diagnostics.is_empty(), "malformed dispatch head must be rejected")
     }
 }
+
+#Test("ptr_from_addr_parses_single_and_dotted_aliases") {
+    source: `use mem: core.mem
+run: fn(addr: Int) {
+    a: mem.Ptr<Int>.from_addr(addr)
+    b: core.mem.Ptr<U8>.from_addr(addr)
+}`
+    result: parser_test_result(source)
+    assert(result.diagnostics.is_empty(), "Ptr<T>.from_addr should parse cleanly: {result.diagnostics:Debug}")
+    result.program.items[0] == .Func(function) ?? panic("expected run function")
+    function.body[0] == .Val(first) ?? panic("expected first binding")
+    first.init == .PtrFromAddr(alias1, _, elem1, _, _, _) ?? panic("expected Expr.PtrFromAddr for mem.Ptr")
+    assert_eq(alias1, "mem")
+    assert_eq(type_name(elem1), "Int")
+    function.body[1] == .Val(second) ?? panic("expected second binding")
+    second.init == .PtrFromAddr(alias2, _, elem2, _, _, _) ?? panic("expected Expr.PtrFromAddr for core.mem.Ptr")
+    assert_eq(alias2, "core.mem")
+    assert_eq(type_name(elem2), "U8")
+}
+
+#Test("live_link_types_and_expressions_parse_and_format") {
+    source: `Node: struct {
+    val: Int,
+    next: @Node?,
+}
+make: fn(items: [@Node], p: @Node, xs: @[Int]) -> @Node {
+    a: @p.val
+    b: @Node{val: 1, next: None}
+    c: @(p)
+    p
+}`
+    result: parser_test_result(source)
+    assert(result.diagnostics.is_empty(), "live link syntax should parse cleanly: {result.diagnostics:Debug}")
+    result.program.items[0] == .Struct(node_def) ?? panic("expected Node struct")
+    assert_eq(type_name(node_def.fields[1].ty), "@Node?")
+    result.program.items[1] == .Func(make_fn) ?? panic("expected make fn")
+    assert_eq(type_name(make_fn.params[0].ty), "[@Node]")
+    assert_eq(type_name(make_fn.params[1].ty), "@Node")
+    assert_eq(type_name(make_fn.params[2].ty), "@[Int]")
+    make_fn.return_type == .Val(ret_ty) ?? panic("expected return type")
+    assert_eq(type_name(ret_ty), "@Node")
+    make_fn.body[0] == .Val(bind_a) ?? panic("expected bind a")
+    bind_a.init == .Call(call_a, _) ?? panic("expected __jet_link call for @p.val")
+    assert_eq(call_a.name, "__jet_link")
+    call_a.args[0].expr == .Field(_, member_a, _, _) ?? panic("expected Field inside @p.val")
+    assert_eq(member_a, "val")
+    make_fn.body[1] == .Val(bind_b) ?? panic("expected bind b")
+    bind_b.init == .Call(call_b, _) ?? panic("expected __jet_link call for @Node")
+    assert_eq(call_b.name, "__jet_link")
+    formatted: parser_test_format(source)
+    assert(formatted.contains("@p.val"))
+    assert(formatted.contains("@Node{{"))
+}
+

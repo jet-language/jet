@@ -530,6 +530,9 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
         .Struct(_, fields) -> {
             members: ir_static_members(m, p, row) ?? return false
             plan := [IRStaticField]{}
+            if ir_rows_comptime_fields(m, p, ty, fields) == .Val(col_fields) {
+                return ir_static_struct(m, p, s, object, offset, ty, members, plan, col_fields)
+            }
             return ir_static_struct(m, p, s, object, offset, ty, members, plan, fields)
         }
         .List(values) -> {

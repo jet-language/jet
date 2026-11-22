@@ -1222,6 +1222,7 @@ sema_type_record_rows_own: fn(fields: [CoreRecordFieldRow], literals: [CoreRecor
 // `lines()` yields, and the `DataGroupedQuery` a query's `group_by` yields,
 // which core.data declares without exporting.
 SEMA_TYPE_COMPILER_CARRIERS: [String]{
+    "@",
     "Camera",
     "DataGroupedQuery",
     "Device",
@@ -1477,6 +1478,9 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
         .Apply(name, args) -> {
             rewritten: loop arg in args -> sema_type_resolve_type_argument(graph, arg, caller, generic_params)
+            if rewritten.len() == 1 && name == "@" {
+                return Type.Apply{name: "@", args: rewritten}
+            }
             if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) {
                 return Type.Apply{name: "Ptr", args: rewritten}
             }

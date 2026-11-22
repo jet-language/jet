@@ -1,0 +1,304 @@
+// Live links (`@T` / `@expr` / `a.same(b)`):
+// - `@T` is a checked live link (Type.Apply{name: "@", args: [T]}).
+// - `@x` links to a place, field, or container item; `@Struct{...}` allocates a
+//   new counted object.
+// - Read access is transitive: an unmarked read parameter or immutable `:`
+//   binding cannot write through any `@T` link it reaches (E0205).
+// - `a == b` compares target values; `a.same(b)` compares link identity.
+// - Escape & lifetime classification: brief checker-bounded links lower to
+//   `TExprKind.Borrow`; kept/escaping links allocate counted storage (local by
+//   default, shared when `#Shared` or crossing a task boundary; `#Local`
+//   crossing a task is refused).
+// - Kept links into growable containers `[T]` are refused with a structured fix
+//   rewriting the element type to `[@T]` (E0212).
+use {
+    jet_foundation.[
+        AccessConvention,
+        Call,
+        CallArg,
+        Diagnostic,
+        Expr,
+        Span,
+        SymbolID,
+        SymbolKind,
+        TMethodRef,
+        TStaticOwner,
+        Type,
+        expr_span,
+        foundation_is_link_type,
+        foundation_link_inner,
+        foundation_link_type,
+        symbol_none,
+        type_name,
+    ]
+    jet_parser.[parse_generated_source]
+}
+
+SemaLinkLifetime: enum {
+    Brief,
+    Kept,
+}
+
+SemaLinkSharing: enum {
+    Local,
+    Shared,
+}
+
+SemaLinkPlan: struct {
+    lifetime: SemaLinkLifetime,
+    sharing: SemaLinkSharing,
+    needs_dynamic_check: Bool,
+    core_call_name: String,
+}
+
+// Classify one `@expr` creation site into brief vs kept storage, local vs
+// thread-safe sharing, and whether a dynamic exclusivity check is required.
+// `shared_pin`: `None` (auto), `Val(true)` (`#Shared`), `Val(false)` (`#Local`).
+sema_link_classify: fn(is_place: Bool, escapes: Bool, crosses_task: Bool, shared_pin: Bool?, static_exclusive: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaLinkPlan {
+    lifetime: if !is_place || escapes -> SemaLinkLifetime.Kept else -> SemaLinkLifetime.Brief
+    sharing: if shared_pin == Val(true) || (shared_pin == None && crosses_task) -> SemaLinkSharing.Shared else -> SemaLinkSharing.Local
+    if shared_pin == Val(false) && crosses_task {
+        diagnostics.push(sema_error("E0205", span, "a `#Local` live link cannot cross a task boundary", "`#Local` pins a link to single-thread non-atomic storage", "mark the type `#Shared` or remove `#Local` so the link uses thread-safe storage"))
+    }
+    needs_dynamic_check: lifetime == SemaLinkLifetime.Kept && !static_exclusive
+    core_call_name: if {
+        !is_place && sharing == SemaLinkSharing.Shared -> "new_shared"
+        !is_place -> "new_local"
+        sharing == SemaLinkSharing.Shared -> "link_shared"
+        else -> "link_local"
+    }
+    SemaLinkPlan{lifetime: lifetime, sharing: sharing, needs_dynamic_check: needs_dynamic_check, core_call_name: core_call_name}
+}
+
+// Whether `operand` is a linkable place (binding, field projection, or index)
+// versus a fresh value/object literal such as `@Node{...}`.
+sema_link_expr_is_place: fn(operand: Expr) -> Bool Never! {
+    if operand == {
+        .Ident(_, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) -> true
+        .Paren(inner, _, _) -> sema_link_expr_is_place(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// A kept link into an item of a growable `[T]` (or `[K: V]`) container must
+// point at an object item (`[@T]` / `[K: @V]`), never raw inline buffer slots
+// that move on growth. Brief checker-bounded links into `[T]` stay allowed as
+// views that pause growth until their last use.
+sema_link_check_container_item: fn(operand: Expr, container_ty: Type, escapes: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if !escapes -> return true
+    if operand == .Index(_, _, _, _, _) {
+        if container_ty == {
+            .List(elem) -> {
+                if !foundation_is_link_type(elem) {
+                    elem_text: type_name(elem)
+                    diagnostics.push(sema_error("E0212", span, "cannot keep a link into an item of `[{elem_text}]`", "a growable list moves inline items when it resizes, so a kept link must point at an object", "change the list element type from `[{elem_text}]` to `[@{elem_text}]`"))
+                    return false
+                }
+            }
+            .Map(key, _, value) -> {
+                if !foundation_is_link_type(value) {
+                    key_text: type_name(key)
+                    val_text: type_name(value)
+                    diagnostics.push(sema_error("E0212", span, "cannot keep a link into a value of `[{key_text}: {val_text}]`", "a growable map moves inline entries when it rehashes, so a kept link must point at an object", "change the map value type from `[{key_text}: {val_text}]` to `[{key_text}: @{val_text}]`"))
+                    return false
+                }
+            }
+            .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        }
+    }
+    true
+}
+
+// Find the root binding name of a link chain (`p`, `p.next`, `p.items[0]`).
+sema_link_root_ident: fn(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Paren(base, _, _) | .Place(base, _, _, _) -> sema_link_root_ident(base)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// Enforce transitive read-only access across `@T` links: an unmarked read
+// parameter or immutable `:` binding cannot write through any `@T` link it
+// reaches (E0205). Write access requires `:=` or an `&` parameter.
+sema_link_check_write_access: fn(target_base: Expr, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    root_name: sema_link_root_ident(target_base) ?? return true
+    binding_index: sema_scope_resolve_index(scopes, root_name) ?? return true
+    binding: scopes.bindings[binding_index]
+    if binding.mutable || binding.access == AccessConvention.Write -> return true
+    why: "read access is transitive across `@T` links, so an immutable binding or unmarked parameter cannot mutate targets reached through it"
+    fix: if binding.symbol.kind == SymbolKind.Parameter -> "mark the parameter writable: `{root_name}: &{type_name(binding.symbol.ty ?? Type.Named{name: "T"})}`" else -> "declare `{root_name}` with `:=` to allow writes through this link"
+    diagnostics.push(sema_error("E0205", span, "cannot write through read-only live link `{root_name}`", why, fix))
+    false
+}
+
+sema_link_call_arg: fn(value: TExpr, borrow: Bool) -> TCallArg Never! {
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: borrow, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
+// Static lowering node for `__jet_link.<op>(...)` consumed by JetIR.
+sema_link_static_call: fn(result_ty: Type, op: String, inner_ty: Type, args: [TCallArg], span: Span) -> TExpr Never! {
+    method_ref: TMethodRef{symbol: symbol_none(), name: op, mangled: false, trait_owner: None, operator_identity: None}
+    sema_tree_node(result_ty, TExprKind.StaticCall{owner: TStaticOwner.User{name: "__jet_link"}, owner_type: None, method: method_ref, type_args: [Type]{inner_ty}, args: args}, span)
+}
+
+// Typecheck `@expr` / `@Struct{...}` (`Call{name: "__jet_link", args: [operand]}`).
+sema_link_check_creation: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    operand: call.args[0].expr
+    span: Span{start: call.name_span.start, end: expr_span(operand).end}
+    inner_expected: if expected == .Val(exp) -> foundation_link_inner(exp) else -> None
+    checked: sema_check_expression(operand, inner_expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    is_place: sema_link_expr_is_place(operand)
+    link_ty: foundation_link_type(checked.ty)
+    // A fresh object literal (`@Node{...}`) is always kept counted storage;
+    // a link to a place defaults to a brief view unless it escapes.
+    escapes: !is_place
+    plan: sema_link_classify(is_place, escapes, false, None, true, span, diagnostics)
+    if is_place {
+        if checked.kind == .Index(container_expr, _, _, _, _, _) {
+            if !sema_link_check_container_item(operand, container_expr.ty, escapes, span, diagnostics) {
+                return None
+            }
+        }
+        // Record a read access on the owner place so conflicting writes/growth
+        // trigger the existing static exclusivity checks (E0204/E0212).
+        _ := sema_ownership_check_use(state, operand, scopes, diagnostics)
+        if plan.lifetime == SemaLinkLifetime.Brief {
+            borrowed: sema_tree_node(link_ty, TExprKind.Borrow{place: checked, access: AccessConvention.Read}, span)
+            return sema_expr_expected(borrowed, expected, environment, program, diagnostics)
+        }
+    }
+    arg: sema_link_call_arg(checked, is_place)
+    built: sema_link_static_call(link_ty, plan.core_call_name, checked.ty, [TCallArg]{arg}, span)
+    sema_expr_expected(built, expected, environment, program, diagnostics)
+}
+
+// Typecheck `a.same(b)` on `@T` live links: compares link identity (`Bool`),
+// whereas `a == b` compares target values.
+sema_link_check_same: fn(receiver_value: TExpr, inner_ty: Type, args: [CallArg], method_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if args.len() != 1 {
+        diagnostics.push(sema_error("E0104", method_span, "`.same(...)` expects 1 argument, got {args.len()}", "`.same(other)` compares whether two live links point at the same target", "call `a.same(b)` with one `@T` link"))
+        return None
+    }
+    link_ty: foundation_link_type(inner_ty)
+    other: sema_check_expression(args[0].expr, Val(link_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if foundation_link_inner(other.ty) == None {
+        diagnostics.push(sema_error("E0108", args[0].span, "`.same(...)` expects a live link `@{type_name(inner_ty)}`, got `{type_name(other.ty)}`", "`.same(other)` compares link identity between two `@T` links", "pass a `@{type_name(inner_ty)}` link, or use `==` to compare values"))
+        return None
+    }
+    span: Span{start: receiver_value.span.start, end: args[0].span.end}
+    call_args: [TCallArg]{
+        sema_link_call_arg(receiver_value, true),
+        sema_link_call_arg(other, true),
+    }
+    compared: sema_link_static_call(Type.Bool, "same", inner_ty, call_args, span)
+    sema_expr_expected(compared, expected, environment, program, diagnostics)
+}
+
+#Test("live link classification enforces lifetime, task-crossing sharing, local pin, and container item rules") {
+    span: Span{start: 0, end: 1}
+    diags := [Diagnostic]{}
+    brief: sema_link_classify(true, false, false, None, true, span, diags)
+    assert(brief.lifetime == SemaLinkLifetime.Brief)
+    assert(brief.sharing == SemaLinkSharing.Local)
+    assert(!brief.needs_dynamic_check)
+    assert(diags.is_empty())
+
+    kept_local: sema_link_classify(false, true, false, None, false, span, diags)
+    assert(kept_local.lifetime == SemaLinkLifetime.Kept)
+    assert(kept_local.sharing == SemaLinkSharing.Local)
+    assert(kept_local.needs_dynamic_check)
+    assert_eq(kept_local.core_call_name, "new_local")
+
+    crossed: sema_link_classify(false, true, true, None, true, span, diags)
+    assert(crossed.sharing == SemaLinkSharing.Shared)
+    assert_eq(crossed.core_call_name, "new_shared")
+    assert(diags.is_empty())
+
+    bad_local: sema_link_classify(false, true, true, Val(false), true, span, diags)
+    assert(bad_local.sharing == SemaLinkSharing.Local)
+    assert_eq(diags.len(), 1)
+    assert_eq(diags[0].code, "E0205")
+
+    // Container item rule: brief link into [Node] is ok; kept link into [Node] is E0212; kept link into [@Node] is ok.
+    parsed_idx: parse_generated_source(`f: fn(xs: [Int]) { p: @xs[0] }`.bytes())
+    assert(parsed_idx.diagnostics.is_empty())
+    parsed_idx.program.items[0] == .Func(idx_fn) ?? panic("expected fn")
+    idx_fn.body[0] == .Val(idx_bind) ?? panic("expected binding")
+    idx_bind.init == .Call(link_call, _) ?? panic("expected link call")
+    idx_expr: link_call.args[0].expr
+    item_diags := [Diagnostic]{}
+    assert(sema_link_check_container_item(idx_expr, Type.List{element: Type.Named{name: "Node"}}, false, span, item_diags))
+    assert(item_diags.is_empty())
+    assert(!sema_link_check_container_item(idx_expr, Type.List{element: Type.Named{name: "Node"}}, true, span, item_diags))
+    assert_eq(item_diags.len(), 1)
+    assert_eq(item_diags[0].code, "E0212")
+    assert(item_diags[0].fix.contains("[@Node]"))
+    ok_diags := [Diagnostic]{}
+    assert(sema_link_check_container_item(idx_expr, Type.List{element: foundation_link_type(Type.Named{name: "Node"})}, true, span, ok_diags))
+    assert(ok_diags.is_empty())
+}
+
+#Test("live links typecheck creation, auto-deref, transitive read-only E0205, value ==, and .same()") {
+    ok_source: `
+Player: struct {
+    hp: Int,
+    get_hp: fn(self) -> Int { self.hp }
+    damage: fn(&self, amount: Int) { self.hp -= amount }
+}
+
+read_hp: fn(p: @Player) -> Int { p.hp + p.get_hp() }
+heal: fn(p: &@Player, n: Int) { p.hp = p.hp + n }
+
+demo: fn() -> Bool {
+    hero := @Player{hp: 10}
+    alias: hero
+    hero.hp = 12
+    hero.damage(2)
+    same_id: hero.same(alias)
+    x: 7
+    lx: @x
+    ly: @7
+    eq_int: lx == ly
+    same_id && eq_int
+}
+`
+    parsed_ok: parse_generated_source(ok_source.bytes())
+    if !parsed_ok.diagnostics.is_empty() {
+        panic("parse ok failed: {parsed_ok.diagnostics[0].code}: {parsed_ok.diagnostics[0].what}")
+    }
+    checked_ok: check_program(parsed_ok.program, "test", "test.jet", [SemaSourceSegment]{})
+    if !checked_ok.diagnostics.is_empty() {
+        panic("check ok failed: {checked_ok.diagnostics[0].code}: {checked_ok.diagnostics[0].what}")
+    }
+
+    bad_source: `
+Player: struct {
+    hp: Int,
+    damage: fn(&self, amount: Int) { self.hp -= amount }
+}
+
+bad_write_param: fn(p: @Player) {
+    p.hp = 0
+}
+
+bad_write_local: fn() {
+    p: @Player{hp: 10}
+    p.hp = 5
+}
+
+bad_write_method: fn(p: @Player) {
+    p.damage(1)
+}
+`
+    parsed_bad: parse_generated_source(bad_source.bytes())
+    if !parsed_bad.diagnostics.is_empty() {
+        panic("parse bad failed: {parsed_bad.diagnostics[0].code}: {parsed_bad.diagnostics[0].what}")
+    }
+    checked_bad: check_program(parsed_bad.program, "test", "test.jet", [SemaSourceSegment]{})
+    e0205 := 0
+    loop diag in checked_bad.diagnostics {
+        if diag.code == "E0205" -> e0205 += 1
+    }
+    assert_eq(e0205, 3)
+}

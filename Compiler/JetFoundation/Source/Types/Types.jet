@@ -63,6 +63,21 @@ foundation_named_type: fn(name: String) -> Type Never! {
     }
 }
 
+// Canonical live-link type `@T` (`Type.Apply{name: "@", args: [T]}`), matching
+// `Ptr<T>`, `View<T>`, and `Cell<T>` without breaking downstream Type matches.
+foundation_link_type: fn(inner: Type) -> Type Never! {
+    Type.Apply{name: "@", args: [Type]{inner}}
+}
+
+foundation_link_inner: fn(ty: Type) -> Type? Never! {
+    if ty == .Apply(name, args) && name == "@" && args.len() == 1 -> return Val(args[0])
+    None
+}
+
+foundation_is_link_type: fn(ty: Type) -> Bool Never! {
+    if ty == .Apply(name, args) -> name == "@" && args.len() == 1 else -> false
+}
+
 TypeTupleField: struct {
     name: String,
     ty: Type,
@@ -1401,6 +1416,7 @@ type_name: fn(ty: Type) -> String Never! {
         .Named(name) -> name
         .Apply(name, args) -> if {
             name == "Ptr" && args.len() == 1 -> "*{type_name(args[0])}"
+            name == "@" && args.len() == 1 -> "@{type_name(args[0])}"
             else -> {
                 dimensions_opt: compute_shape_dimensions(ty)
                 if dimensions_opt == {

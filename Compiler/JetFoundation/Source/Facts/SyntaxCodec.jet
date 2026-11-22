@@ -3463,20 +3463,6 @@ body_codec_get_lambdabody: fn(bytes: [U8], input: &BodyCodecIn) -> LambdaBody Ne
     }
 }
 
-body_codec_put_opt_list_string: fn(out: &BodyCodecOut, value: [String]?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_list_string(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_list_string: fn(bytes: [U8], input: &BodyCodecIn) -> [String]? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_list_string(bytes, input))
-    None
-}
-
 body_codec_put_lambdameta: fn(out: &BodyCodecOut, value: LambdaMeta) Never! {
     body_codec_put_bool(out, value.escapes)
     body_codec_put_bool(out, value.runtime_erased)

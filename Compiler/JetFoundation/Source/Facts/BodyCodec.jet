@@ -105,6 +105,32 @@ body_codec_get_opt_viewprovenancemap: fn(bytes: [U8], input: &BodyCodecIn) -> Vi
     None
 }
 
+body_codec_put_list_string: fn(out: &BodyCodecOut, values: [String]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_string(out, value)
+}
+
+body_codec_get_list_string: fn(bytes: [U8], input: &BodyCodecIn) -> [String] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [String]{}
+    loop _ in 0..<count -> values.push(body_codec_get_string(bytes, input))
+    values
+}
+
+body_codec_put_opt_list_string: fn(out: &BodyCodecOut, value: [String]?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_list_string(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_list_string: fn(bytes: [U8], input: &BodyCodecIn) -> [String]? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_list_string(bytes, input))
+    None
+}
+
 body_codec_put_list_tgenericparam: fn(out: &BodyCodecOut, values: [TGenericParam]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_tgenericparam(out, value)
@@ -143,18 +169,6 @@ body_codec_put_opt_int: fn(out: &BodyCodecOut, value: Int?) Never! {
 body_codec_get_opt_int: fn(bytes: [U8], input: &BodyCodecIn) -> Int? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_int(bytes, input))
     None
-}
-
-body_codec_put_list_string: fn(out: &BodyCodecOut, values: [String]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_string(out, value)
-}
-
-body_codec_get_list_string: fn(bytes: [U8], input: &BodyCodecIn) -> [String] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [String]{}
-    loop _ in 0..<count -> values.push(body_codec_get_string(bytes, input))
-    values
 }
 
 body_codec_put_opt_kernelproof: fn(out: &BodyCodecOut, value: KernelProof?) Never! {
@@ -278,6 +292,7 @@ body_codec_put_fnbody: fn(out: &BodyCodecOut, value: FnBody) Never! {
     body_codec_put_bool(out, value.gc_return)
     body_codec_put_bool(out, value.gc_scope)
     body_codec_put_opt_viewprovenancemap(out, value.return_view_provenance)
+    body_codec_put_opt_list_string(out, value.receiver_footprint)
     body_codec_put_list_tgenericparam(out, value.generic_params)
     body_codec_put_bool(out, value.is_main)
     body_codec_put_int(out, value.line)
@@ -335,39 +350,40 @@ body_codec_get_fnbody: fn(bytes: [U8], input: &BodyCodecIn) -> FnBody Never! {
     f19: body_codec_get_bool(bytes, input)
     f20: body_codec_get_bool(bytes, input)
     f21: body_codec_get_opt_viewprovenancemap(bytes, input)
-    f22: body_codec_get_list_tgenericparam(bytes, input)
-    f23: body_codec_get_bool(bytes, input)
-    f24: body_codec_get_int(bytes, input)
-    f25: body_codec_get_bool(bytes, input)
+    f22: body_codec_get_opt_list_string(bytes, input)
+    f23: body_codec_get_list_tgenericparam(bytes, input)
+    f24: body_codec_get_bool(bytes, input)
+    f25: body_codec_get_int(bytes, input)
     f26: body_codec_get_bool(bytes, input)
-    f27: body_codec_get_opt_tunsafegate(bytes, input)
-    f28: body_codec_get_bool(bytes, input)
-    f29: body_codec_get_opt_int(bytes, input)
-    f30: body_codec_get_bool(bytes, input)
+    f27: body_codec_get_bool(bytes, input)
+    f28: body_codec_get_opt_tunsafegate(bytes, input)
+    f29: body_codec_get_bool(bytes, input)
+    f30: body_codec_get_opt_int(bytes, input)
     f31: body_codec_get_bool(bytes, input)
-    f32: body_codec_get_list_string(bytes, input)
-    f33: body_codec_get_bool(bytes, input)
+    f32: body_codec_get_bool(bytes, input)
+    f33: body_codec_get_list_string(bytes, input)
     f34: body_codec_get_bool(bytes, input)
     f35: body_codec_get_bool(bytes, input)
-    f36: body_codec_get_opt_kernelproof(bytes, input)
-    f37: body_codec_get_bool(bytes, input)
-    f38: body_codec_get_string(bytes, input)
+    f36: body_codec_get_bool(bytes, input)
+    f37: body_codec_get_opt_kernelproof(bytes, input)
+    f38: body_codec_get_bool(bytes, input)
     f39: body_codec_get_string(bytes, input)
-    f40: body_codec_get_int(bytes, input)
+    f40: body_codec_get_string(bytes, input)
     f41: body_codec_get_int(bytes, input)
-    f42: body_codec_get_list_int(bytes, input)
-    f43: body_codec_get_tfunckind(bytes, input)
-    f44: body_codec_get_list_toriginprojection(bytes, input)
-    f45: body_codec_get_list_ttypedgoal(bytes, input)
-    f46: body_codec_get_list_tindexproof(bytes, input)
-    f47: body_codec_get_list_bodycontract(bytes, input)
-    f48: body_codec_get_list_span(bytes, input)
-    f49: body_codec_get_list_string(bytes, input)
-    f50: body_codec_get_string(bytes, input)
-    f51: body_codec_get_list_bodyeffectscoperegion(bytes, input)
-    f52: body_codec_get_bool(bytes, input)
-    f53: body_codec_get_bodytree(bytes, input)
-    FnBody{name: f0, module_name: f1, module_identity: f2, key: f3, source_file: f4, source_span: f5, failure_carrier: f6, effects: f7, web_bucket: f8, web_reason: f9, web_marker: f10, endpoint: f11, system_run: f12, role: f13, visibility: f14, foreign: f15, params: f16, web_param_reconstructions: f17, ret: f18, gc_return: f19, gc_scope: f20, return_view_provenance: f21, generic_params: f22, is_main: f23, line: f24, synthetic: f25, is_unsafe: f26, unsafe_gate: f27, is_pure: f28, memo_bound: f29, memo_unbounded: f30, is_reactive: f31, reactive_upgrades: f32, is_inline: f33, is_inline_always: f34, is_scalar: f35, kernel_proof: f36, uses_stack_sentry: f37, heap: f38, stack: f39, frame_bound: f40, max_depth: f41, body: f42, kind: f43, origin_facts: f44, typed_goals: f45, index_proofs: f46, pre: f47, masked: f48, fixed_tags: f49, effect_scope: f50, effect_scope_regions: f51, stand_in: f52, tree: f53}
+    f42: body_codec_get_int(bytes, input)
+    f43: body_codec_get_list_int(bytes, input)
+    f44: body_codec_get_tfunckind(bytes, input)
+    f45: body_codec_get_list_toriginprojection(bytes, input)
+    f46: body_codec_get_list_ttypedgoal(bytes, input)
+    f47: body_codec_get_list_tindexproof(bytes, input)
+    f48: body_codec_get_list_bodycontract(bytes, input)
+    f49: body_codec_get_list_span(bytes, input)
+    f50: body_codec_get_list_string(bytes, input)
+    f51: body_codec_get_string(bytes, input)
+    f52: body_codec_get_list_bodyeffectscoperegion(bytes, input)
+    f53: body_codec_get_bool(bytes, input)
+    f54: body_codec_get_bodytree(bytes, input)
+    FnBody{name: f0, module_name: f1, module_identity: f2, key: f3, source_file: f4, source_span: f5, failure_carrier: f6, effects: f7, web_bucket: f8, web_reason: f9, web_marker: f10, endpoint: f11, system_run: f12, role: f13, visibility: f14, foreign: f15, params: f16, web_param_reconstructions: f17, ret: f18, gc_return: f19, gc_scope: f20, return_view_provenance: f21, receiver_footprint: f22, generic_params: f23, is_main: f24, line: f25, synthetic: f26, is_unsafe: f27, unsafe_gate: f28, is_pure: f29, memo_bound: f30, memo_unbounded: f31, is_reactive: f32, reactive_upgrades: f33, is_inline: f34, is_inline_always: f35, is_scalar: f36, kernel_proof: f37, uses_stack_sentry: f38, heap: f39, stack: f40, frame_bound: f41, max_depth: f42, body: f43, kind: f44, origin_facts: f45, typed_goals: f46, index_proofs: f47, pre: f48, masked: f49, fixed_tags: f50, effect_scope: f51, effect_scope_regions: f52, stand_in: f53, tree: f54}
 }
 
 body_codec_put_span: fn(out: &BodyCodecOut, value: Span) Never! {

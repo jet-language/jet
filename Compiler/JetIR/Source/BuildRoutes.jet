@@ -1206,6 +1206,9 @@ ir_route_equal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: 
 // Builtin methods (ir_builtin_route_plan): Lists inline, Strings through
 // their runtime routes.
 ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int Never! {
+    if ir_rows_builtin(m, p, b, receiver, operation, args, span) == .Val(rows_result) {
+        return rows_result
+    }
     receiver_ty: ir_ty(p, b, receiver)
     if operation == .IterNext -> return ir_lazy_next(m, p, b, ty, receiver, span)
     if operation == .ListTryNew -> return ir_list_try_empty(m, p, b, ty, false, args, span)

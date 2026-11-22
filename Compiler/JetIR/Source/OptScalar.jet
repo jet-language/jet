@@ -32,6 +32,7 @@
 // (stored, returned, offset other than as a view, lent inside a Loop),
 // when two accesses of one offset have different types, when fields
 // overlap or leave the storage, or when a field is itself an aggregate.
+use jet_foundation.[compiler_threads_single, name_rows_set]
 
 ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Never! {
     has_stack := false
@@ -594,5 +595,110 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
             assert_eq(f.scattered.len(), 0)
             loop op in f.op -> assert(op != .StackAddress, "storage with no loan goes")
         }
+    }
+}
+
+#Test("Disjoint field borrows of one local survive &self calls across O0, O1, and O2") {
+    loop level in ([Int]{0, 1, 2}) {
+        m := ir_module_new()
+        word: ir_word_row(m)
+        ptr: ir_pointer_row(m)
+        // Callee 0: record_log(&self, delta) mutates field at offset 0 only.
+        callee := ir_function_new("record_log", "test:disjoint.jet.record_log", "", "disjoint.jet", 1)
+        p_self: ir_slot(callee, ptr, IRSlotKind.Param, ir_intern_name(m, "self"), 1)
+        p_delta: ir_slot(callee, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
+        callee.param_count = 2
+        cur: ir_slot(callee, word, IRSlotKind.Temp, -1, 0)
+        next_val: ir_slot(callee, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(callee, IROp.Load, cur, p_self, 0, -1, 2)
+        _ := ir_emit(callee, IROp.Add, next_val, cur, p_delta, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(callee, IROp.Store, -1, p_self, 0, next_val, 2)
+        _ := ir_emit(callee, IROp.Return, -1, -1, -1, -1, 3)
+        callee_id: m.functions.len()
+        name_rows_set(m.function_rows, callee.key, callee_id)
+        m.functions.push(callee)
+
+        // Callee 1: bump(&x) mutates the disjoint field passed by address.
+        bump := ir_function_new("bump", "test:disjoint.jet.bump", "", "disjoint.jet", 5)
+        b_ptr: ir_slot(bump, ptr, IRSlotKind.Param, ir_intern_name(m, "x"), 5)
+        bump.param_count = 1
+        b_cur: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
+        b_one: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
+        b_out: ir_slot(bump, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(bump, IROp.Load, b_cur, b_ptr, 0, -1, 6)
+        _ := ir_emit(bump, IROp.Const, b_one, 7, -1, -1, 6)
+        _ := ir_emit(bump, IROp.Add, b_out, b_cur, b_one, IR_OVERFLOW_WRAP, 6)
+        _ := ir_emit(bump, IROp.Store, -1, b_ptr, 0, b_out, 6)
+        _ := ir_emit(bump, IROp.Return, -1, -1, -1, -1, 7)
+        bump_id: m.functions.len()
+        name_rows_set(m.function_rows, bump.key, bump_id)
+        m.functions.push(bump)
+
+        // Caller: 24-byte local struct `s` (log@0, hits@8, tag@16); holds two
+        // disjoint field borrows `h = &s.hits` and `t = &s.tag` across
+        // `&self.log` calls `record_log(s, 5)` and `record_log(s, 3)` plus `bump(h)`.
+        run := ir_function_new("run", "test:disjoint.jet.run", "", "disjoint.jet", 10)
+        run.result = word
+        s: ir_slot(run, ptr, IRSlotKind.Local, ir_intern_name(m, "s"), 10)
+        c0: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        c10: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        c100: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        h: ir_slot(run, ptr, IRSlotKind.Local, ir_intern_name(m, "h"), 11)
+        t: ir_slot(run, ptr, IRSlotKind.Local, ir_intern_name(m, "t"), 12)
+        d5: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        d3: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        tv: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        c20: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        tv2: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        r_log: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        r_h: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        r_t: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        sum1: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        sum2: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(run, IROp.StackAddress, s, 24, 8, -1, 10)
+        _ := ir_emit(run, IROp.Const, c0, 0, -1, -1, 10)
+        _ := ir_emit(run, IROp.Const, c10, 10, -1, -1, 10)
+        _ := ir_emit(run, IROp.Const, c100, 100, -1, -1, 10)
+        _ := ir_emit(run, IROp.Store, -1, s, 0, c0, 10)
+        _ := ir_emit(run, IROp.Store, -1, s, 8, c10, 10)
+        _ := ir_emit(run, IROp.Store, -1, s, 16, c100, 10)
+        _ := ir_emit(run, IROp.Offset, h, s, 8, -1, 11)
+        _ := ir_emit(run, IROp.Offset, t, s, 16, -1, 12)
+        _ := ir_emit(run, IROp.Const, d5, 5, -1, -1, 13)
+        a1: ir_args(run, [Int]{s, d5})
+        _ := ir_emit(run, IROp.Call, -1, callee_id, a1, 2, 13)
+        a_bump: ir_args(run, [Int]{h})
+        _ := ir_emit(run, IROp.Call, -1, bump_id, a_bump, 1, 14)
+        _ := ir_emit(run, IROp.Const, d3, 3, -1, -1, 15)
+        a2: ir_args(run, [Int]{s, d3})
+        _ := ir_emit(run, IROp.Call, -1, callee_id, a2, 2, 15)
+        _ := ir_emit(run, IROp.Load, tv, t, 0, -1, 16)
+        _ := ir_emit(run, IROp.Const, c20, 20, -1, -1, 16)
+        _ := ir_emit(run, IROp.Add, tv2, tv, c20, IR_OVERFLOW_WRAP, 16)
+        _ := ir_emit(run, IROp.Store, -1, t, 0, tv2, 16)
+        _ := ir_emit(run, IROp.Load, r_log, s, 0, -1, 17)
+        _ := ir_emit(run, IROp.Load, r_h, h, 0, -1, 17)
+        _ := ir_emit(run, IROp.Load, r_t, t, 0, -1, 17)
+        _ := ir_emit(run, IROp.Add, sum1, r_log, r_h, IR_OVERFLOW_WRAP, 17)
+        _ := ir_emit(run, IROp.Add, sum2, sum1, r_t, IR_OVERFLOW_WRAP, 17)
+        _ := ir_emit(run, IROp.Return, -1, sum2, -1, -1, 17)
+        run_id: m.functions.len()
+        name_rows_set(m.function_rows, run.key, run_id)
+        m.functions.push(run)
+        m.entry = run_id
+
+        opts := ir_opt_options(level)
+        opts.verify = true
+        opts.inline = IROptInline.Marked
+        report: ir_optimize_module(m, opts, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        // Because `h` escapes to the non-inlined `bump`, `s` must remain stack-backed at every O-level.
+        has_stack := false
+        loop op in m.functions[run_id].op {
+            if op == .StackAddress -> has_stack = true
+        }
+        assert(has_stack, "local storage with live disjoint field borrow passed to call keeps its stack frame")
+        compiled: ir_x64_compile_module(m, compiler_threads_single())
+        assert_eq(compiled.errors.len(), 0)
     }
 }

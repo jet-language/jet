@@ -2281,6 +2281,11 @@ ir_struct_members_in: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], lay
     if definition.kind == .Struct(fields, _) {
         inner := laying
         inner.push(ir_instance_identity(definition.key, args))
+        if args.len() == 1 && ir_rows_is_core_def(p, row) {
+            if ir_rows_struct_members_in(m, p, args[0], inner, resolve) == .Val(col_members) {
+                return Val(col_members)
+            }
+        }
         members := [IRMember]{}
         sizes := [Int]{}
         aligns := [Int]{}
