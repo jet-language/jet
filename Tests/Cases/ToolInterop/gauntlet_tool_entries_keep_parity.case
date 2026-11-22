@@ -1,0 +1,39 @@
+# Every gauntlet tool entry under Tools/Gauntlet/Entries stays proved after a
+# cutover: untimed parity runs both sides of every discovered tool entry (no
+# hand list) and compares each case with its expected print and exit status.
+# First prove the check fails on a planted stale expected file, passes once
+# repaired, and then passes across every tool entry in the repository.
+requires: tool:bash
+requires: tool:git
+requires: tool:node
+requires: tool:python3
+mkdir: planted/Tools/Gauntlet/Entries/Planted/Expected
+write: planted/Tools/Original.sh = "#!/usr/bin/env bash\necho fresh\n"
+write: planted/Tools/Twin.jet = "run: fn() { print(\"fresh\") }\n"
+write: planted/Tools/Gauntlet/Entries/Planted/entry.json = "{\"name\":\"Planted\",\"mode\":\"tool\",\"tool\":{\"original\":\"Tools/Original.sh\",\"jet\":\"Tools/Twin.jet\",\"cases\":[{\"args\":[],\"expected\":\"Expected/out.txt\"}]}}\n"
+write: planted/Tools/Gauntlet/Entries/Planted/Expected/out.txt = "stale\n"
+step: jet {root}/Tools/Gauntlet/PortBars.jet --parity --repo {work}/planted
+timeout: 120s
+exit: 1
+stdout: ~ "Planted\tparity\tFAIL\t" # a planted stale expected file fails parity
+stdout: ~ "port parity: 1 entries, 0 pass, 1 fail" # summary counts the failure
+write: planted/Tools/Gauntlet/Entries/Planted/Expected/out.txt = "fresh\n"
+step: jet {root}/Tools/Gauntlet/PortBars.jet --parity --repo {work}/planted
+timeout: 120s
+exit: 0
+stdout: ~ "Planted\tparity\tPASS\t1/1 cases do the job" # repaired expected file passes
+stdout: ~ "port parity: 1 entries, 1 pass, 0 fail" # summary counts the pass
+step: jet {root}/Tools/Agent/JetEnv.jet --norust jet {root}/Tools/Gauntlet/PortBars.jet --parity --jobs 4 --shard 1/2 --repo {root}
+unset: JET_STORE_DIR
+timeout: 600s
+exit: 0
+stdout: ~ "port parity: " # dynamically discovered entries (shard 1/2) ran
+stdout: ~ ", 0 fail" # every shard 1/2 tool entry keeps parity
+stdout: !~ "\tparity\tFAIL\t" # no shard 1/2 tool entry regressed
+step: jet {root}/Tools/Agent/JetEnv.jet --norust jet {root}/Tools/Gauntlet/PortBars.jet --parity --jobs 4 --shard 2/2 --repo {root}
+unset: JET_STORE_DIR
+timeout: 600s
+exit: 0
+stdout: ~ "port parity: " # dynamically discovered entries (shard 2/2) ran
+stdout: ~ ", 0 fail" # every shard 2/2 tool entry keeps parity
+stdout: !~ "\tparity\tFAIL\t" # no shard 2/2 tool entry regressed
