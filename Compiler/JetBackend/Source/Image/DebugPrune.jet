@@ -32,6 +32,7 @@
 //   rows as the object block holds them. Strings: the compilation
 //   directory at 0, then the names and the paths, each string once, NUL
 //   terminated.
+use jet_foundation.[compiler_take_rows]
 
 // The bytes of each debug group in `debug.names` order, relocated, with
 // the dropped functions' records removed.
@@ -39,12 +40,22 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
     groups := [[U8]]{}
     loop group in 0..<debug.names.len() {
         bytes := [U8]{}
-        loop row in debug.rows[group] {
-            link_pad_to(bytes, c.live_addr[row], 0)
-            link_place_row(c, bytes, pieces, row)
+        rows: debug.rows[group]
+        if rows.len() == 1 && c.live_addr[rows[0]] == 0 && pieces.bytes.len() > 0 && pieces.chunks[rows[0]].len() == 0 {
+            row: rows[0]
+            bytes = compiler_take_rows<U8>(pieces.bytes[row])
+            c.errors.extend(pieces.errors[row])
+        } else {
+            if debug.sizes[group] > 0 {
+                bytes.try_reserve(debug.sizes[group]) ?? panic("reserve failed")
+            }
+            loop row in rows {
+                link_pad_to(bytes, c.live_addr[row], 0)
+                link_place_row(c, bytes, pieces, row)
+            }
         }
         link_pad_to(bytes, debug.sizes[group], 0)
-        groups.push(bytes)
+        groups.push(bytes.move())
     }
     info := -1
     abbrev := -1

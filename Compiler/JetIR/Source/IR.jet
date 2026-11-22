@@ -729,6 +729,38 @@ ir_module_new: fn() -> IRModule Never! {
     IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}}
 }
 
+// Frees every per-part build memo that ir_merge never reads (everything
+// except functions, types, names, data, debug metadata, host_literals, and
+// function_rows for drop-glue lookup).
+ir_module_drop_build_memos: fn(m: &IRModule) Never! {
+    m.type_rows = name_rows()
+    m.key_rows = name_rows()
+    m.key_lists = [[Int]]{}
+    m.name_rows = name_rows()
+    m.data_rows = name_rows()
+    m.constant_rows = name_rows()
+    m.layouts = name_rows()
+    m.struct_members = name_rows()
+    m.variant_members = name_rows()
+    m.enum_sizes = name_rows()
+    m.handle_rows = name_rows()
+    m.value_types = TypeTable{}
+    m.value_rows = [Int]{}
+    m.close_free = [Int:Bool]{}
+    m.scalar_rows = [Int]{}
+    m.ids = [Int]{}
+    m.instances = name_rows()
+    m.queue = [IRQueued]{}
+    m.lambdas = [IRLambdaJob]{}
+    m.close_glue = name_rows()
+    m.helper_errors = name_rows()
+    m.helper_messages = [String]{}
+    m.quiet_routes = name_table_sized(2)
+    m.quiet_exports = [U8]{}
+    m.quiet_stops = [U8]{}
+    m.lazy_can_clone = [Int]{}
+}
+
 ir_kind_name: fn(kind: IRTypeKind) -> String Never! {
     if kind == {
         .Unit -> "Unit"

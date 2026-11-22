@@ -21,8 +21,7 @@ use {
         jet_driver_overridden_entry_writers,
         JetDriverBuildPackageSettings,
         jet_driver_physical_path,
-        jet_driver_entry_package_has_build,
-        jet_driver_entry_package_profiled,
+        jet_driver_entry_build_probe,
         jet_driver_present_diagnostics,
         jet_driver_build_plan_json,
         jet_driver_build_explanation,
@@ -787,10 +786,9 @@ JetCLIContributedRequest: struct {
 
 jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_generated: Bool, color: Bool) -> JetCLIContributedRequest {
     request := owned_request.move()
-    declared: jet_driver_entry_package_has_build(request)
-    if !declared && !jet_driver_entry_package_profiled(request) {
-        return {request: request.move(), refusal: None}
-    }
+    probe: jet_driver_entry_build_probe(request)
+    if !probe.has_build && !probe.profiled -> return {request: request.move(), refusal: None}
+    declared: probe.has_build
     settings: jet_cli_settings_package(request.authorized_sources)
     if settings == None && ((!load_generated && declared) || request.generated_modules.len() > 0) {
         return {request: request.move(), refusal: None}

@@ -1852,7 +1852,8 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         kept_keys.push(p.functions[kept].key.copy())
     }
     if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
-    waves: ir_build_waves_kept(p, roots, true, threads, trace_sink)
+    release_program: !p.checks.debug_views
+    waves: ir_build_waves_kept(p, roots, true, threads, trace_sink, release_program: release_program)
     built := waves.result.move()
     loop key in kept_keys {
         at: name_rows_get_text(built.program.function_rows, key) ?? next

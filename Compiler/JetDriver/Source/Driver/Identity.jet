@@ -495,6 +495,15 @@ JetDriverCompileRequest: struct {
     toolchain_tree: Shared<JetDriverToolchainTree>?{None},
     // A debugger's question at a stop (JetDriverEvalAsk): None for none.
     eval_ask: JetDriverEvalAsk?{None},
+    // A load completed while probing for `build: fn` or `#Perf.Profiled`
+    // (BuildQueries.jet jet_driver_entry_build_probe), carried forward into
+    // compile or build-plan stages so the sources are parsed once.
+    preloaded: [JetDriverPreloaded]{[JetDriverPreloaded]{}},
+}
+
+JetDriverPreloaded: struct {
+    load: JetDriverLoadResult,
+    use_driven: Bool,
 }
 
 // `jet debug`'s evaluator asks the compile how `text` checks at the stop at

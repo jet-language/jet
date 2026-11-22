@@ -347,6 +347,14 @@ ir_opt_inline_marked_module: fn(m: &IRModule, report: &IROptReport) Never! {
 // E0917); `jet build`, `jet run` and `jet test` trace it as the counter
 // `ir.opt.marked_calls` (JetCLI Host.jet jet_cli_native_program).
 ir_opt_marked_calls: fn(m: IRModule) -> Int Never! {
+    any := false
+    loop f in m.functions {
+        if f.inline_always {
+            any = true
+            break
+        }
+    }
+    if !any -> return 0
     count := 0
     loop f in m.functions {
         loop (at, code) in f.op {

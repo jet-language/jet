@@ -489,7 +489,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // staged compile of `build: fn`, its native run, and the final checked
     // compile when it runs (`build.plan.load`, `.stage`, `.run`, `.check`).
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.load")
-    plan_load: jet_driver_load(request)
+    plan_load: jet_driver_preloaded_take(request.preloaded, true) ?? jet_driver_load(request)
     // Every authorized source the bundle holds is a check node, also the
     // members the staging compile below leaves unloaded (build_entry_reach).
     load_checks: jet_driver_build_load_checks(request, plan_load)
@@ -1183,17 +1183,8 @@ priv jet_driver_build_run_config: fn(request: JetDriverCompileRequest, session: 
     config
 }
 
-// Whether the entry package declares a `build: fn`, the build entry
-// jet_driver_query_build_plan evaluates, read from the loaded sources alone.
-// False when the sources don't load: the compile reports why. A package
-// none of whose sources writes both the name `build` and the type `Build`
-// declares none, and its sources aren't loaded for the answer
-// (jet_driver_entry_package_may_have_build): the load parses every module
-// the program reaches, a second time for each compile
-// (JetCLI InspectBuild.jet jet_cli_contributed_request).
-jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool {
-    if !jet_driver_entry_package_may_have_build(request) -> return false
-    load: jet_driver_load(request)
+// Whether a loaded program declares `build: fn(b: Build)` in its entry package.
+jet_driver_load_has_build: fn(load: JetDriverLoadResult) -> Bool Never! {
     if !load.complete -> return false
     // The entry module's row of `load.modules`.
     entry := -1
@@ -1208,6 +1199,50 @@ jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool
         }
     }
     false
+}
+
+JetDriverBuildProbe: struct {
+    has_build: Bool,
+    profiled: Bool,
+}
+
+jet_driver_preloaded_put: fn(request: &JetDriverCompileRequest, load: &&JetDriverLoadResult, use_driven: Bool) Never! {
+    request.preloaded = [JetDriverPreloaded]{JetDriverPreloaded{load: load.move(), use_driven: use_driven}}
+}
+
+jet_driver_preloaded_take: fn(preloaded: &[JetDriverPreloaded], use_driven: Bool) -> JetDriverLoadResult? Never! {
+    if preloaded.len() == 0 || preloaded[0].use_driven != use_driven -> return None
+    entry := preloaded.pop() ?? return None
+    Val(entry.load.move())
+}
+
+// Probes both `build: fn` and `#Perf.Profiled` in at most one load, storing
+// the completed load on `request.preloaded` so the compile or build-plan step
+// reuses it without re-parsing the sources.
+jet_driver_entry_build_probe: fn(request: &JetDriverCompileRequest) -> JetDriverBuildProbe {
+    may_build: jet_driver_entry_package_may_have_build(request)
+    may_profiled: jet_driver_sources_may_mark_profiled(request)
+    if !may_build && !may_profiled -> return JetDriverBuildProbe{has_build: false, profiled: false}
+    use_driven: !request.every_core_body && request.core_tests == ""
+    if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
+    load := jet_driver_load_reach(request, use_driven)
+    if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
+    has_build: may_build && jet_driver_load_has_build(load)
+    profiled: may_profiled && load.complete && jet_driver_load_marks_profiled(load)
+    jet_driver_preloaded_put(request, load.move(), use_driven)
+    JetDriverBuildProbe{has_build: has_build, profiled: profiled}
+}
+
+// Whether the entry package declares a `build: fn`, the build entry
+// jet_driver_query_build_plan evaluates, read from the loaded sources alone.
+// False when the sources don't load: the compile reports why. A package
+// none of whose sources writes both the name `build` and the type `Build`
+// declares none, and its sources aren't loaded for the answer
+// (jet_driver_entry_package_may_have_build).
+jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool {
+    if !jet_driver_entry_package_may_have_build(request) -> return false
+    load: jet_driver_load(request)
+    jet_driver_load_has_build(load)
 }
 
 // Whether a program whose entry package declares no `build: fn` builds with
