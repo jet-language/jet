@@ -1913,7 +1913,6 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
         return None
     }
-    source_args := call.args
     args := call.args
     root_mark: diagnostics.len()
     binding := sema_call_bind_direct(call.name, candidate.signature, args, call.name_span, diagnostics) ?? {
@@ -1921,6 +1920,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         return None
     }
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
+        source_args := call.args
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, program, scopes, state, tail_store, context)
         sema_call_lambda_failure_facts(inferred_facts, candidate.generic_params, params, binding, source_args, environment, program, scopes, state, tail_store, context)
         if sema_call_http_source_json_target(candidate, environment, program) {
@@ -2005,10 +2005,10 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, scopes, context, diagnostics)
         return None
     }
-    sema_call_lint_shared_loop_arguments(source_args, environment, scopes, diagnostics)
+    sema_call_lint_shared_loop_arguments(call.args, environment, scopes, diagnostics)
     callee_facts: sema_contract_function_facts(environment, program, candidate.symbol.id)
     if callee_facts == .Val(facts) {
-        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, source_args, scopes, state, diagnostics) {
+        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, call.args, scopes, state, diagnostics) {
             return None
         }
     }

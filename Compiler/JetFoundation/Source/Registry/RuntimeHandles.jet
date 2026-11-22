@@ -9,23 +9,24 @@
 // each key's first row, frozen at build time, searched by halving instead of
 // a scan of every row.
 ir_key_row: fn(keys: [String], rows: [Int], key: String) -> Int? Never! {
-    low := 0
-    high := keys.len()
+    low := I64{0}
+    high := I64{keys.len()}
     loop low < high {
-        middle: low + (high - low) /% 2
-        if {
-            keys[middle] == key -> return Val(rows[middle])
-            keys[middle] < key -> low = middle + 1
-            else -> high = middle
+        middle: (low + high) >> I64{1}
+        mid: Int{middle}
+        order: keys[mid] <=> key
+        if order == {
+            .Equal -> return Val(rows[mid])
+            .Less -> low = wrapping(middle + I64{1})
+            .Greater -> high = middle
         }
     }
     None
 }
 
-// The rows of the index ir_key_row searches, computed at build time from a
-// table's per-row `keys`: the rows ordered by key (ascending bytes; a stable
-// merge sort, so equal keys keep table order), keeping each key's first row.
-ir_key_index: fn(keys: [String]) -> [Int] Never! {
+// The rows of `keys` ordered by key (ascending bytes; stable merge sort,
+// preserving duplicate keys in table order).
+ir_key_order: fn(keys: [String]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<keys.len() -> order.push(index)
     width := 1
@@ -51,6 +52,26 @@ ir_key_index: fn(keys: [String]) -> [Int] Never! {
         order = merged
         width *= 2
     }
+    order
+}
+
+// First position in sorted `keys` equal to `key`, or -1 when absent.
+ir_key_first_at: fn(keys: [String], key: String) -> Int Never! {
+    low := I64{0}
+    high := I64{keys.len()}
+    loop low < high {
+        middle: (low + high) >> I64{1}
+        if keys[Int{middle}] < key -> low = wrapping(middle + I64{1}) else -> high = middle
+    }
+    at: Int{low}
+    if at < keys.len() && keys[at] == key -> at else -> -1
+}
+
+// The rows of the index ir_key_row searches, computed at build time from a
+// table's per-row `keys`: the rows ordered by key (ascending bytes; a stable
+// merge sort, so equal keys keep table order), keeping each key's first row.
+ir_key_index: fn(keys: [String]) -> [Int] Never! {
+    order: ir_key_order(keys)
     rows := [Int]{}
     loop row in order {
         if rows.len() > 0 && keys[rows[rows.len() - 1]] == keys[row] -> next

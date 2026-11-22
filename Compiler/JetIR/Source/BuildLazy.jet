@@ -71,16 +71,25 @@ ir_lazy_kind: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
 // visits each type once; a type already seen adds nothing to the
 // conjunction.
 ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .Option(inner) -> return ir_lazy_can_clone(m, p, inner, seen)
+        .Map(key_ty, _, value_ty) -> return ir_lazy_can_clone(m, p, key_ty, seen) && ir_lazy_can_clone(m, p, value_ty, seen)
+        .Result(ok, err) -> return ir_lazy_can_clone(m, p, ok, seen) && ir_lazy_can_clone(m, p, err, seen)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !ir_lazy_can_clone(m, p, field.ty, seen) -> return false
+            }
+            return true
+        }
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> {}
+    }
     if ir_lazy_definition(p, ty) == .Val(row) {
         if p.types[row].single_use -> return false
         if p.types[row].kind == {
             .Distinct(base, _) | .Alias(base) -> return ir_lazy_can_clone(m, p, base, seen)
             .Struct(_, _) | .Enum(_, _) | .UnitFamily(_, _) -> {}
         }
-    }
-    if ty == {
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_lazy_can_clone(m, p, inner, seen)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Measure(_) -> {}
     }
     if ir_iter_element(ty) != None -> return false
     if ir_value_type(m, p, ty) == .Val(row) {
@@ -92,6 +101,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
     seen[key] = true
     storage: ir_lazy_storage(p, ty)
     if storage == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
         .List(inner) | .Option(inner) -> return ir_lazy_can_clone(m, p, inner, seen)
         .Map(key_ty, _, value_ty) -> return ir_lazy_can_clone(m, p, key_ty, seen) && ir_lazy_can_clone(m, p, value_ty, seen)
         .Result(ok, err) -> return ir_lazy_can_clone(m, p, ok, seen) && ir_lazy_can_clone(m, p, err, seen)
@@ -100,7 +110,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
                 if !ir_lazy_can_clone(m, p, field.ty, seen) -> return false
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if ir_lazy_definition(p, storage) == .Val(row) {
         if p.types[row].kind == {
@@ -133,6 +143,10 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
 }
 
 ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
     seen := [String:Bool]{}
     ir_lazy_can_clone(m, p, ty, seen)
 }

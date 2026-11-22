@@ -96,7 +96,7 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
     loop at < count {
         byte: bytes[at]
         if byte < (U8{128}) {
-            if !(byte == (U8{95}) || (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))) {
+            if !((byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95}) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))) {
                 at += 1
                 next
             }
@@ -108,16 +108,25 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             }
         }
         start: at
+        needs_suffix_scan := false
+        prev_digit := false
         loop at < count {
             run_byte: bytes[at]
             if run_byte < (U8{128}) {
-                if !(run_byte == (U8{95}) || (run_byte >= (U8{48}) && run_byte <= (U8{57})) || (run_byte >= (U8{65}) && run_byte <= (U8{90})) || (run_byte >= (U8{97}) && run_byte <= (U8{122}))) {
+                is_lower: run_byte >= (U8{97}) && run_byte <= (U8{122})
+                is_digit: !is_lower && run_byte >= (U8{48}) && run_byte <= (U8{57})
+                if !(is_lower || run_byte == (U8{95}) || (run_byte >= (U8{65}) && run_byte <= (U8{90})) || is_digit) {
                     break
                 }
+                if prev_digit && !is_digit -> needs_suffix_scan = true
+                if run_byte == (U8{102}) -> needs_suffix_scan = true
+                prev_digit = is_digit
                 at += 1
             } else {
                 end: sema_units_scalar_end(bytes, at)
                 if !sema_units_ident(bytes, at, end) -> break
+                if prev_digit -> needs_suffix_scan = true
+                prev_digit = false
                 at = end
             }
         }
@@ -130,16 +139,18 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
             if start == 0 || bytes[start - 1] != (U8{46}) -> unqualified[id] = true
         }
         // Every scalar start of the run, as the ident loop above visited them.
-        offset := start
-        loop offset < at {
-            here: bytes[offset]
-            if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) {
-                sema_units_mention_suffix(suffixes, names, bytes, offset, at, false)
+        if needs_suffix_scan {
+            offset := start
+            loop offset < at {
+                here: bytes[offset]
+                if offset > start && bytes[offset - 1] >= (U8{48}) && bytes[offset - 1] <= (U8{57}) && (here < (U8{48}) || here > (U8{57})) {
+                    sema_units_mention_suffix(suffixes, names, bytes, offset, at, false)
+                }
+                if here == (U8{102}) && offset + 5 <= at && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) {
+                    sema_units_mention_suffix(suffixes, names, bytes, offset + 5, at, true)
+                }
+                offset = if here < (U8{128}) -> offset + 1 else -> sema_units_scalar_end(bytes, offset)
             }
-            if here == (U8{102}) && offset + 5 <= at && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) {
-                sema_units_mention_suffix(suffixes, names, bytes, offset + 5, at, true)
-            }
-            offset = if here < (U8{128}) -> offset + 1 else -> sema_units_scalar_end(bytes, offset)
         }
     }
     sorted := [SemaUnitSuffixMention]{}

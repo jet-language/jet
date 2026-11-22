@@ -706,13 +706,13 @@ ir_source_line_starts: fn(bytes: [U8]) -> [Int] Never! {
 // a checked source.
 ir_source_line_of: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row: p.source_rows.get(path) ?? return None
-    low := 0
-    high := p.source_lines[row].len()
+    low := I64{0}
+    high := I64{p.source_lines[row].len()}
     loop low < high {
-        middle: (low + high) /% 2
-        if p.source_lines[row][middle] <= offset -> low = middle + 1 else -> high = middle
+        middle: Int{(low + high) >> I64{1}}
+        if p.source_lines[row][middle] <= offset -> low = I64{middle} + I64{1} else -> high = I64{middle}
     }
-    Val(low)
+    Val(Int{low})
 }
 
 // The 1-based character column of byte `offset` of `path`: 1 when the file is
@@ -720,15 +720,18 @@ ir_source_line_of: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
 ir_source_column: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     row: p.source_rows.get(path) ?? return Val(1)
     if offset < 0 || offset > p.source_bytes[row].len() -> return None
-    column := 1
-    at := offset
-    loop at > 0 && p.source_bytes[row][at - 1] != (U8{10}) {
-        at -= 1
-        if p.source_bytes[row][at] < (U8{128}) || p.source_bytes[row][at] >= (U8{192}) {
-            column += 1
+    column := I64{1}
+    at := I64{offset}
+    zero: I64{0}
+    loop at > zero {
+        at -= I64{1}
+        byte: p.source_bytes[row][Int{at}]
+        if byte == (U8{10}) -> break
+        if byte < (U8{128}) || byte >= (U8{192}) {
+            column += I64{1}
         }
     }
-    Val(column)
+    Val(Int{column})
 }
 
 // Line `line` of `path` without its line break: "" when the file is not a
@@ -3616,30 +3619,75 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     dropped := [Bool]{}
     loop _ in 0..<count -> dropped.push(false)
     any := false
+    min_w := count
+    max_w := -1
     loop slot in written {
         if slot >= f.param_count && slot < count {
             dropped[slot] = true
             any = true
+            if slot < min_w -> min_w = slot
+            if slot > max_w -> max_w = slot
         }
     }
     if !any {
         return
     }
-    loop at in 0..<f.op.len() {
-        row: IR_LINT_OPS[ir_op_code(f.op[at])]
-        ir_slot_kept(dropped, row.dst, f.dst[at])
-        ir_slot_kept(dropped, row.a, f.a[at])
-        ir_slot_kept(dropped, row.b, f.b[at])
-        ir_slot_kept(dropped, row.c, f.c[at])
-        if row.b == .Args {
-            loop k in f.b[at]..<(f.b[at] + f.c[at]) {
-                ir_slot_kept(dropped, IRLintRole.Slot, f.args[k])
+    inst_count: f.op.len()
+    loop at in 0..<inst_count {
+        op: f.op[at]
+        d: f.dst[at]
+        a: f.a[at]
+        b: f.b[at]
+        c: f.c[at]
+        if op == .Call || op == .CallRuntime || op == .CallIndirect {
+            if d >= min_w && d <= max_w -> dropped[d] = false
+            if op == .CallIndirect && a >= min_w && a <= max_w -> dropped[a] = false
+            loop k in b..<(b + c) {
+                arg: f.args[k]
+                if arg >= min_w && arg <= max_w -> dropped[arg] = false
             }
+            next
+        }
+        if (d < min_w || d > max_w) && (a < min_w || a > max_w) && (b < min_w || b > max_w) && (c < min_w || c > max_w) {
+            next
+        }
+        if op == {
+            .Nop | .Block | .Loop | .Else | .End | .Br | .Unreachable -> {}
+            .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress -> {
+                if d >= min_w && d <= max_w -> dropped[d] = false
+            }
+            .Copy | .Move | .Neg | .Not | .Convert | .Load | .Offset | .Sqrt | .IntBig -> {
+                if d >= min_w && d <= max_w -> dropped[d] = false
+                if a >= min_w && a <= max_w -> dropped[a] = false
+            }
+            .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat -> {
+                if d >= min_w && d <= max_w -> dropped[d] = false
+                if a >= min_w && a <= max_w -> dropped[a] = false
+                if b >= min_w && b <= max_w -> dropped[b] = false
+            }
+            .Drop | .Close | .If | .BrIf | .Return -> {
+                if a >= min_w && a <= max_w -> dropped[a] = false
+            }
+            .CopyBytes -> {
+                if a >= min_w && a <= max_w -> dropped[a] = false
+                if b >= min_w && b <= max_w -> dropped[b] = false
+            }
+            .Store | .StreamStore -> {
+                if a >= min_w && a <= max_w -> dropped[a] = false
+                if c >= min_w && c <= max_w -> dropped[c] = false
+            }
+            .Call | .CallRuntime | .CallIndirect -> {}
         }
     }
-    loop slot in f.splits -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
-    loop slot in f.binds -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
-    loop slot in f.scattered -> ir_slot_kept(dropped, IRLintRole.Slot, slot)
+    loop slot in f.splits {
+        if slot >= min_w && slot <= max_w -> dropped[slot] = false
+    }
+    loop slot in f.binds {
+        if slot >= min_w && slot <= max_w -> dropped[slot] = false
+    }
+    loop slot in f.scattered {
+        if slot >= min_w && slot <= max_w -> dropped[slot] = false
+    }
     renamed := [Int]{}
     kept := 0
     loop slot in 0..<count {
@@ -3653,22 +3701,71 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
     if kept == count {
         return
     }
-    loop at in 0..<f.op.len() {
-        row: IR_LINT_OPS[ir_op_code(f.op[at])]
-        f.dst[at] = ir_slot_renamed(renamed, row.dst, f.dst[at])
-        f.a[at] = ir_slot_renamed(renamed, row.a, f.a[at])
-        f.b[at] = ir_slot_renamed(renamed, row.b, f.b[at])
-        f.c[at] = ir_slot_renamed(renamed, row.c, f.c[at])
+    loop at in 0..<inst_count {
+        op: f.op[at]
+        if op == {
+            .Nop | .Block | .Loop | .Else | .End | .Br | .Unreachable -> {}
+            .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress -> {
+                d: f.dst[at]
+                if d >= min_w -> f.dst[at] = renamed[d]
+            }
+            .Call | .CallRuntime -> {
+                d: f.dst[at]
+                if d >= min_w -> f.dst[at] = renamed[d]
+            }
+            .CallIndirect -> {
+                d: f.dst[at]
+                if d >= min_w -> f.dst[at] = renamed[d]
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+            }
+            .Copy | .Move | .Neg | .Not | .Convert | .Load | .Offset | .Sqrt | .IntBig -> {
+                d: f.dst[at]
+                if d >= min_w -> f.dst[at] = renamed[d]
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+            }
+            .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat -> {
+                d: f.dst[at]
+                if d >= min_w -> f.dst[at] = renamed[d]
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+                b: f.b[at]
+                if b >= min_w -> f.b[at] = renamed[b]
+            }
+            .Drop | .Close | .If | .BrIf | .Return -> {
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+            }
+            .CopyBytes -> {
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+                b: f.b[at]
+                if b >= min_w -> f.b[at] = renamed[b]
+            }
+            .Store | .StreamStore -> {
+                a: f.a[at]
+                if a >= min_w -> f.a[at] = renamed[a]
+                c: f.c[at]
+                if c >= min_w -> f.c[at] = renamed[c]
+            }
+        }
     }
-    loop k in 0..<f.args.len() -> f.args[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.args[k])
+    loop k in 0..<f.args.len() {
+        arg: f.args[k]
+        if arg >= min_w -> f.args[k] = renamed[arg]
+    }
     loop k in 0..<f.splits.len() {
-        f.splits[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.splits[k])
+        s: f.splits[k]
+        if s >= min_w -> f.splits[k] = renamed[s]
     }
     loop k in 0..<f.binds.len() {
-        f.binds[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.binds[k])
+        s: f.binds[k]
+        if s >= min_w -> f.binds[k] = renamed[s]
     }
     loop k in 0..<f.scattered.len() {
-        f.scattered[k] = ir_slot_renamed(renamed, IRLintRole.Slot, f.scattered[k])
+        s: f.scattered[k]
+        if s >= min_w -> f.scattered[k] = renamed[s]
     }
     types := [Int]{}
     kinds := [IRSlotKind]{}

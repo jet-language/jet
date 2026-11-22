@@ -900,7 +900,7 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
                 // Read in place: binding the nominal copied the row and its
                 // Item. Single-level matches read the alias in place; a nested
                 // `.SourceAST(.TypeAlias(definition))` pattern clones the Item.
-                if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                if graph.modules[row.module_index].nominals[row.row].kind == SemaRegistrationNominalKind.TypeAlias && graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                     if item == .TypeAlias(definition) {
                         if definition.type_params.len() == 0 && definition.target == .Named(_) {
                             return sema_type_graph_resolve_named(graph, type_name(definition.target), sema_registration_module_index(graph, graph.modules[row.module_index].nominals[row.row].symbol.module_identity) ?? -1)
@@ -1480,17 +1480,18 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) {
                 return Type.Apply{name: "Ptr", args: rewritten}
             }
-            head: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
+            is_generic: sema_type_name_is_generic(generic_params, name)
+            head: if is_generic -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets; under
             // JET_KEEP_GOING an alias expands only from a settled module row
             // (sema_registration_module_settled), so a cycle reported in its
             // module is never followed.
-            if !sema_type_name_is_generic(generic_params, name) {
-                row := sema_type_resolve_nominal_row_at(graph, Type.Apply{name: head, args: rewritten}, caller)
+            if !is_generic {
+                row := sema_type_resolve_nominal_row_at(graph, Type.Named{name: head}, caller)
                 if row == .Val(alias_row) {
-                    nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
-                    if nominal.kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == nominal.generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
+                    if graph.modules[alias_row.module_index].nominals[alias_row.row].kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == graph.modules[alias_row.module_index].nominals[alias_row.row].generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
+                        nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
                         item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
                         if item == .TypeAlias(definition) {
                             names: loop parameter in definition.type_params -> parameter.name

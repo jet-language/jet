@@ -57,8 +57,8 @@ ir_opt_glue_is_light: fn(m: IRModule, f: IRFunction) -> Bool Never! {
         op: f.op[at]
         if op == .Load || op == .Return || op == .Nop -> next
         if op != .Drop -> return false
-        row: m.types[f.slot_type[f.a[at]]]
-        if row.kind != .Int && (row.kind != .String || row.drop != "jet_rt_string_drop") {
+        type_row: f.slot_type[f.a[at]]
+        if m.types[type_row].kind != .Int && (m.types[type_row].kind != .String || m.types[type_row].drop != "jet_rt_string_drop") {
             return false
         }
     }

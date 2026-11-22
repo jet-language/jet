@@ -1056,13 +1056,15 @@ symbol_table_range: fn(table: SymbolTable, id: SymbolID) -> Int Never! {
 
 // The range of id `value`: the last one whose base is at most `value`.
 symbol_table_range_of: fn(table: SymbolTable, value: Int) -> Int Never! {
-    low := 0
-    high := table.ranges.len() - 1
+    count: table.ranges.len()
+    if count <= 1 || value < table.ranges[1].base -> return 0
+    low := I64{1}
+    high := I64{count - 1}
     loop low < high {
-        middle: (low + high + 1) /% 2
-        if table.ranges[middle].base <= value -> low = middle else -> high = middle - 1
+        middle: wrapping(low + high + I64{1}) >> I64{1}
+        if table.ranges[Int{middle}].base <= value -> low = middle else -> high = wrapping(middle - I64{1})
     }
-    low
+    Int{low}
 }
 
 // The key of `id`; `locals` holds a local one.

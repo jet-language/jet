@@ -637,15 +637,15 @@ sema_function_memory_scope_may_annotate: fn(stmts: [Stmt], chain: [PolicyDeclara
 }
 
 sema_function_memory_scope_has_policy: fn(stmts: [Stmt]) -> Bool Never! {
-    loop stmt in stmts {
-        if stmt == {
+    loop i in 0..<stmts.len() {
+        if stmts[i] == {
             .Policy(_, _, _) -> return true
             .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) -> {
                 if sema_function_memory_scope_has_policy(body) -> return true
             }
             .Switch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    if sema_function_memory_scope_has_policy(arm.body) -> return true
+                loop a in 0..<arms.len() {
+                    if sema_function_memory_scope_has_policy(arms[a].body) -> return true
                 }
                 if else_body == .Val(else_statements) {
                     if sema_function_memory_scope_has_policy(else_statements) -> return true

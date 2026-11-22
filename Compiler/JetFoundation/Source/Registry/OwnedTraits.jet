@@ -98,11 +98,17 @@ OwnedLaw: struct {
     source: String,
 }
 
+owned_trait_keys: fn(rows: [OwnedTrait]) -> [String] Never! {
+    loop row in rows -> row.name
+}
+
+OWNED_TRAIT_KEY_ROWS: #run ir_key_index(owned_trait_keys(OWNED_TRAITS))
+
+OWNED_TRAIT_KEYS: #run ir_key_index_keys(owned_trait_keys(OWNED_TRAITS), OWNED_TRAIT_KEY_ROWS)
+
 owned_trait: fn(name: String) -> OwnedTrait? Never! {
-    loop owned in OWNED_TRAITS {
-        if owned.name == name -> return Val(owned)
-    }
-    None
+    row: ir_key_row(OWNED_TRAIT_KEYS, OWNED_TRAIT_KEY_ROWS, name) ?? return None
+    Val(OWNED_TRAITS[row])
 }
 
 // Whether the owned trait declares a method of this name.

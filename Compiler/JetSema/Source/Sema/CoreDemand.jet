@@ -59,6 +59,7 @@ use jet_foundation.[
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
+    body_node_index,
     compiler_threads_admit,
     compiler_threads_failure_text,
     compiler_threads_partition,
@@ -831,12 +832,12 @@ sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, value
     }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
-        node: body_node(function.tree, expression)
+        idx: body_node_index(function.tree, expression)
         named := DeclID?{None}
-        if node.kind == .FnValue(kind) {
+        if function.tree.nodes[idx].kind == .FnValue(kind) {
             if kind == .NamedFn(value, _) -> named = value
         }
-        if node.kind == .GlobalShared(initializer, _) -> named = Val(initializer)
+        if function.tree.nodes[idx].kind == .GlobalShared(initializer, _) -> named = Val(initializer)
         if named == .Val(decl) {
             if decl.row.index() < graph.decls.rows.len() {
                 id: graph.decls.rows[decl.row].symbol
@@ -846,7 +847,7 @@ sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, value
                 }
             }
         }
-        body_each_expr_child(function.tree, node, fn(child: Int) { pending.push(child) })
+        body_each_expr_child(function.tree, function.tree.nodes[idx], fn(child: Int) { pending.push(child) })
     }
 }
 
@@ -1573,9 +1574,9 @@ sema_core_demand_body_reads: fn(function: FnBody, reads: &SemaCoreDemandReads) N
     }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
-        node: body_node(function.tree, expression)
-        sema_core_demand_expr_reads(node, reads)
-        body_each_expr_child(function.tree, node, fn(child: Int) { pending.push(child) })
+        idx: body_node_index(function.tree, expression)
+        sema_core_demand_expr_reads(function.tree.nodes[idx], reads)
+        body_each_expr_child(function.tree, function.tree.nodes[idx], fn(child: Int) { pending.push(child) })
     }
 }
 

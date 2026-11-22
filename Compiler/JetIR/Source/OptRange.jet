@@ -293,24 +293,27 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     string_bytes_id: name_rows_value(m.name_rows, "jet_string_bytes") ?? -2
     any := false
     loop value in 0..<count {
-        ty: m.types[f.slot_type[s.val_slot[value]]]
-        exact: ty.kind == .Int
-        word: ty.kind == .Word
-        narrow: word && ty.bits > 0 && ty.bits < 64
+        type_row: f.slot_type[s.val_slot[value]]
+        type_kind: m.types[type_row].kind
+        type_bits: m.types[type_row].bits
+        type_signed: m.types[type_row].signed
+        exact: type_kind == .Int
+        word: type_kind == .Word
+        narrow: word && type_bits > 0 && type_bits < 64
         if exact || word -> any = true
         r.ranged.push(exact || word)
         r.exact.push(exact)
-        r.unsigned.push(word && !ty.signed)
+        r.unsigned.push(word && !type_signed)
         r.narrow.push(narrow)
         cap_lo: if {
             !narrow -> IR_RANGE_LOW
-            ty.signed -> 0 - (1 << (ty.bits - 1))
+            type_signed -> 0 - (1 << (type_bits - 1))
             else -> 0
         }
         cap_hi: if {
             !narrow -> IR_RANGE_HIGH
-            ty.signed -> (1 << (ty.bits - 1)) - 1
-            else -> (1 << ty.bits) - 1
+            type_signed -> (1 << (type_bits - 1)) - 1
+            else -> (1 << type_bits) - 1
         }
         r.cap_lo.push(cap_lo)
         r.cap_hi.push(cap_hi)
@@ -1320,9 +1323,10 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             next
         }
         if (op == .Shl || op == .Shr) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_b[at]) {
-            shifted: m.types[f.slot_type[f.a[at]]]
-            if shifted.kind != .Word -> next
-            width: if shifted.bits > 0 && shifted.bits < 64 -> shifted.bits else -> 64
+            shifted_row: f.slot_type[f.a[at]]
+            if m.types[shifted_row].kind != .Word -> next
+            shifted_bits: m.types[shifted_row].bits
+            width: if shifted_bits > 0 && shifted_bits < 64 -> shifted_bits else -> 64
             count: ir_range_at(f, s, r, ir_ssa_find(s, s.use_b[at]), block)
             if !ir_range_inline(count) || count.lo < 0 || count.hi >= width -> next
             f.c[at] = IR_OVERFLOW_WRAP
