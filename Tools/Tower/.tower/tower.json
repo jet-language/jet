@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113210,
+    "rev": 113215,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34798,8 +34798,8 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-22T18:55:05.222Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
     {
@@ -131491,6 +131491,186 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-22T15:11:25.103Z"
+    },
+    {
+      "id": "D-STRUCT-UPDATE1",
+      "cardId": "c00ys8fj",
+      "group": "syntax",
+      "title": "Struct and record update syntax with trailing ...base",
+      "situation": "Updating one or two fields of a struct while keeping the rest unchanged is common in configs, web state, and compilers. Today Jet requires repeating every unchanged field by name, or copying into a mutable variable and assigning fields one by one. Repeating ten fields hides the one field that actually changed and copies fields you meant to replace. This vote decides whether Jet adds struct update syntax; we recommend trailing three-dot spread syntax matching Jet's existing expression spread.",
+      "gist": "How should Jet build an updated struct or record when only a few fields change?",
+      "lesson": "A struct or record holds named fields. Jet already uses three dots (...) to spread lists and call arguments in expressions, and two dots (..) for ranges and pattern rests. Every option keeps field visibility and ownership rules unchanged.",
+      "explainer": "",
+      "story": "Sam builds HTTP and compiler configuration records with twelve fields. When overriding just a port or timeout, Sam wants an immutable one-liner that highlights the changed field without copying fields being replaced.",
+      "inWild": "let next = Config { port: 9090, ..base };\n// Rust Book ch05-01 (https://doc.rust-lang.org/book/ch05-01-defining-structs.html#creating-instances-from-other-instances-with-struct-update-syntax)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Trailing ...base spread",
+          "detail": "Allow one trailing `, ...base` after at least one explicit field or pun in a struct literal (`Config{port: 9090, ...base}`) or unnamed record (`{max: 100, ...bounds}`). Requiring at least one explicit field forbids `{...base}` and `Config{...base}`, preserving Jet's brace-record rule with zero block ambiguity and avoiding a duplicate `.copy()` spelling.\n\nJet already uses `...` for expression spreads in lists (`[...a, x]`) and calls (`f(...xs)`), while `..` in expressions is the range operator (`a..b`). Keeping `...` for struct and record updates preserves one expression-spread sigil everywhere. Omitted stored fields move when `base` is a temporary, last use, or `...base.move()`, and copy when `base` stays live (`#Policy(copies: .Explicit)` requires `...base.copy()`); replaced fields drop without copying.",
+          "technical": "Reconciles `SIGIL_SPREAD` (`...`, `PackageFiles.jet:58`, `Expr.Spread` at `Expressions.jet:1231`) with `TOKEN_DOT_DOT` (`..`, `Spellings.jet:78,84-86`). Register `Type{field: value, ...base}` in `Spellings.jet`. The parser allows one trailing `...expr` only after at least one named or punned field, keeping `parser_literal_fields_ahead` (`Expressions.jet:726`) unambiguous.\n\nSema requires `base` to match the exact target struct or unnamed record type (enum payloads excluded) and checks `priv` visibility on every omitted stored field. Computed `name: T -> expr` fields are skipped (explicit overrides stay E0339), and `state { ... }` (`Spellings.jet:19`) carries over from `base`. `base` evaluates once under normal move/copy and `#Policy(copies: .Explicit)` rules.",
+          "code": "next: Config{port: 9090, ...base}\nbounds2: {max: 100, ...bounds}"
+        },
+        {
+          "key": "B",
+          "name": "Trailing ..base spread",
+          "detail": "Allow one trailing `, ..base` after at least one explicit field or pun in a struct or unnamed record literal. Ownership, visibility, computed-field, and typestate rules match Option A.\n\nThis matches Rust's struct update syntax and rhymes visually with Jet's struct pattern rest (`Type{port: p, ..}`). However, it splits Jet's expression grammar into `...` for lists and calls versus `..` for structs and records, overloading the `..` range token.",
+          "technical": "Same parser, sema, visibility, ownership, computed-field, and typestate rules as Option A. Uses `TOKEN_DOT_DOT` (`..`) instead of `SIGIL_SPREAD` (`...`) in trailing struct and record update position (probed on `c7b432d894`: currently fails with `Jet.InvalidStatement`).",
+          "code": "next: Config{port: 9090, ..base}\nbounds2: {max: 100, ..bounds}"
+        },
+        {
+          "key": "C",
+          "name": "Keep explicit fields or mutable copy",
+          "detail": "Add no struct or record update syntax. Callers either list every field manually or mutate a copy (`next := base.copy()`, then assign `next.port = 9090`).\n\nThis adds zero grammar, but forces a mutable variable and copies overwritten fields too, wasting heap allocations and failing on structs with move-only fields.",
+          "technical": "No parser, syntax registry, or sema changes; both `...` and `..` remain invalid inside struct and record literal expressions.",
+          "code": "next := base.copy()\nnext.port = 9090\nbounds2 := bounds.copy()\nbounds2.max = 100"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Trailing ..base struct update moves or copies only omitted fields; https://doc.rust-lang.org/book/ch05-01-defining-structs.html#creating-instances-from-other-instances-with-struct-update-syntax.",
+          "code": "let next = Config { port: 9090, ..base };"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Object spread uses ...base matching array spread [...a], though JS allows leading and multiple spreads; https://www.typescriptlang.org/docs/handbook/2/objects.html.",
+          "code": "const next = { ...base, port: 9090 };"
+        },
+        {
+          "lang": "Gleam",
+          "note": "Gleam uses ..base inside record updates (Config(..base, port: 9090)); https://tour.gleam.run/data-types/record-updates/.",
+          "code": "let next = Config(..base, port: 9090)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Trailing ...base puts changed fields first, skips copying replaced fields, and keeps ... as Jet's one expression-spread mark across calls, lists, structs, and records.",
+        "gains": [
+          "One expression-spread token (...) everywhere; .. stays exclusively ranges and pattern rests.",
+          "Requiring one explicit field avoids block ambiguity and prevents a duplicate .copy() spelling."
+        ],
+        "losses": [
+          {
+            "loss": "Differs by one dot from trailing .. in struct patterns.",
+            "mitigation": "The parser teaches `...base` when someone writes `..base` inside a struct or record literal."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B splits expression spreading across ... (lists and calls) and .. (structs and records)."
+          },
+          {
+            "key": "C",
+            "reason": "C forces mutable copies or verbose field lists that copy overwritten fields."
+          }
+        ],
+        "tradeoff": "Struct updates use ... like every other expression spread instead of .. like struct patterns."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: gemini. Adversarial model family: gemini. Fresh agent: GoalsOrder. Audited against SKILL.md, clarity.md, Spellings.jet, PackageFiles.jet, spec.md, and JetParser/Expressions.jet, repairing three-dot versus two-dot spread reconciliation, block disambiguation, ownership/computed/state rules, and Option B framing."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should Jet build an updated struct or record when only a few fields change?",
+        "lesson": "A struct or record holds named fields. Jet already uses three dots (...) to spread lists and call arguments in expressions, and two dots (..) for ranges and pattern rests. Every option keeps field visibility and ownership rules unchanged.",
+        "trio": {
+          "current": {
+            "note": "Today you must repeat every unchanged field or mutate a full copy.",
+            "code": "next := base.copy()\nnext.port = 9090\nbounds2 := bounds.copy()\nbounds2.max = 100"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust puts changed fields first and reads only omitted fields from the trailing base.",
+            "code": "// https://doc.rust-lang.org/book/ch05-01-defining-structs.html\nlet next = Config { port: 9090, ..base };"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Trailing ...base spread",
+            "gist": "List changed fields first and end with , ...base.",
+            "gains": [
+              "Reuses Jet's existing ... expression spread from lists and calls.",
+              "Changed fields stand out first; replaced fields are never copied.",
+              "At least one explicit field keeps unnamed records distinct from blocks."
+            ],
+            "losses": [
+              "Differs by one dot from Jet's trailing .. in struct patterns."
+            ],
+            "proposed": {
+              "code": "next: Config{port: 9090, ...base}\nbounds2: {max: 100, ...bounds}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Trailing ..base spread",
+            "gist": "List changed fields first and end with , ..base.",
+            "gains": [
+              "Matches Rust's struct update spelling and Jet's .. struct patterns.",
+              "Changed fields stand out first; replaced fields are never copied."
+            ],
+            "losses": [
+              "Splits expression spread into ... for lists/calls and .. for structs.",
+              "Reuses Jet's .. range operator token inside expression braces."
+            ],
+            "proposed": {
+              "code": "next: Config{port: 9090, ..base}\nbounds2: {max: 100, ..bounds}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep explicit fields or mutable copy",
+            "gist": "Add no update syntax; copy into a mutable binding or list all fields.",
+            "gains": [
+              "Adds zero new syntax to the expression grammar."
+            ],
+            "losses": [
+              "Copies overwritten fields too and requires a mutable local.",
+              "Explicit field lists break whenever a struct gains a field."
+            ],
+            "proposed": {
+              "code": "next := base.copy()\nnext.port = 9090\nbounds2 := bounds.copy()\nbounds2.max = 100"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Trailing ...base puts changed fields first, skips copying replaced fields, and keeps ... as Jet's one expression-spread mark across calls, lists, structs, and records.",
+          "gains": [
+            "One expression-spread token (...) everywhere; .. stays exclusively ranges and pattern rests.",
+            "Requiring one explicit field avoids block ambiguity and prevents a duplicate .copy() spelling."
+          ],
+          "losses": [
+            {
+              "loss": "Differs by one dot from trailing .. in struct patterns.",
+              "mitigation": "The parser teaches `...base` when someone writes `..base` inside a struct or record literal."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B splits expression spreading across ... (lists and calls) and .. (structs and records)."
+            },
+            {
+              "key": "C",
+              "reason": "C forces mutable copies or verbose field lists that copy overwritten fields."
+            }
+          ],
+          "tradeoff": "Struct updates use ... like every other expression spread instead of .. like struct patterns."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "GoalsOrder",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-22T18:53:57.824Z"
     }
   ],
   "questions": [
@@ -133824,6 +134004,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T18:55:05.222Z",
+      "by": "Orchestrator",
+      "action": "decision.post",
+      "ref": "D-STRUCT-UPDATE1",
+      "note": "reviewed by GoalsOrder"
+    },
+    {
+      "at": "2026-11-22T18:55:03.139Z",
+      "by": "GoalsOrder",
+      "action": "decision.review",
+      "ref": "D-STRUCT-UPDATE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-22T18:54:17.187Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-STRUCT-UPDATE1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-22T18:53:58.855Z",
+      "by": "GoalsOrder",
+      "action": "decision.review",
+      "ref": "D-STRUCT-UPDATE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-22T18:53:57.824Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-STRUCT-UPDATE1",
+      "note": "Struct and record update syntax with trailing ...base (draft)"
+    },
     {
       "at": "2026-11-22T18:48:50.510Z",
       "by": "Orchestrator",
