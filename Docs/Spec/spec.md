@@ -3665,8 +3665,8 @@ The fallible allocation family is separate from plain abort-on-failure calls:
 `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
 `Map.try_insert`, `String.try_push`, and each allocator's `try_alloc` return
 `AllocError { requested_bytes, allocator }`. A plain `new`, `alloc`, or
-mutation retains its abort-on-failure behavior. The AOT emitter and the
-interpreter carry the same fallible result; they do not choose a
+mutation retains its abort-on-failure behavior. Every optimization level
+(`O0`, `O1`, and `O2`) carries the same fallible result; they do not choose a
 different allocation policy. A value `try_alloc` accepts belongs to its
 allocator as an `alloc` value does: it closes and drops once, at reset or
 close, and the Result carrying its view owns none of it. `AllocError` is a
@@ -3697,6 +3697,49 @@ cannot prove those properties is rejected. The example and diagnostics are
 [`Examples/Memory/Allocation/ArenaRegions.jet`](../../Examples/Memory/Allocation/ArenaRegions.jet),
 [`Tests/UI/arena_view_escape.stderr`](../../Tests/UI/arena_view_escape.stderr),
 and [`Tests/UI/arena_view_after_reset.stderr`](../../Tests/UI/arena_view_after_reset.stderr). (D-ALLOC2, D-REGION1)
+
+### Memory, pointer, sentry, context, and GC status
+
+What builds and passes goldens on `O0`, `O1`, and `O2` today, and what remains
+unbuilt:
+
+- **Arenas (`Arena`, `Bump`, `Pool`, `Fixed`, `try_alloc`, scope-bound views)**:
+  built and proven by
+  [`Examples/Memory/Allocation/Arena.jet`](../../Examples/Memory/Allocation/Arena.jet),
+  [`Examples/Memory/Allocation/ArenaRegions.jet`](../../Examples/Memory/Allocation/ArenaRegions.jet),
+  [`Examples/Memory/Allocation/FixedBacking.jet`](../../Examples/Memory/Allocation/FixedBacking.jet),
+  [`Examples/Memory/Allocation/TryAllocation.jet`](../../Examples/Memory/Allocation/TryAllocation.jet),
+  [`Examples/Memory/Allocation/UserAllocator.jet`](../../Examples/Memory/Allocation/UserAllocator.jet),
+  [`Examples/Memory/Allocation/ProgramAllocator/run.jet`](../../Examples/Memory/Allocation/ProgramAllocator/run.jet),
+  and [`Examples/Memory/Allocation/PoolStaleID.jet`](../../Examples/Memory/Allocation/PoolStaleID.jet).
+- **Raw pointers (`mem.Ptr<T>`)**: built and proven by
+  [`Examples/LowLevel/PointerCastDeref.jet`](../../Examples/LowLevel/PointerCastDeref.jet),
+  [`Examples/Memory/Unsafe/UnsafeSentries.jet`](../../Examples/Memory/Unsafe/UnsafeSentries.jet),
+  and [`Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet).
+- **Lifetime sentries**: built and proven by
+  [`Examples/Memory/Unsafe/UnsafeSentries.jet`](../../Examples/Memory/Unsafe/UnsafeSentries.jet),
+  [`Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet),
+  [`Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet),
+  and [`Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet`](../../Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet).
+- **`#Context`**: `#Context(allocator:)`, `context.allocator`, `#ContextKey` /
+  `context.get`, `context.logger`, `context.print`, `context.on_stop`,
+  `context.trace`, `context.deadline`, `context.thread`, and spawned-task
+  inheritance are built and proven by
+  [`Examples/Memory/Allocation/ContextAllocator.jet`](../../Examples/Memory/Allocation/ContextAllocator.jet),
+  [`Examples/Memory/Allocation/ContextAllocatorRead.jet`](../../Examples/Memory/Allocation/ContextAllocatorRead.jet),
+  [`Examples/Concurrency/ContextKeys.jet`](../../Examples/Concurrency/ContextKeys.jet),
+  [`Examples/Concurrency/ContextLogger.jet`](../../Examples/Concurrency/ContextLogger.jet),
+  [`Examples/Concurrency/ContextPrintStyle.jet`](../../Examples/Concurrency/ContextPrintStyle.jet),
+  [`Examples/Concurrency/ContextOnStop.jet`](../../Examples/Concurrency/ContextOnStop.jet),
+  [`Examples/Concurrency/ContextTrace.jet`](../../Examples/Concurrency/ContextTrace.jet),
+  [`Examples/Concurrency/ContextReads.jet`](../../Examples/Concurrency/ContextReads.jet),
+  and [`Examples/Concurrency/ContextTaskInherit.jet`](../../Examples/Concurrency/ContextTaskInherit.jet).
+  Not built yet (`#5025`): library-wide allocator routing for every heap container inside `#Context(allocator:)` and `#Memo` context-keyed caching with `Context` removed from `EffectRoots`.
+  Not built yet (`#3502`): extended `#Context` visibility and task/FFI edges.
+- **`#Policy(gc)`**: scoped cyclic promotion and `jet audit memory` exercised
+  ledgers are built and proven by
+  [`Examples/Memory/Allocation/GCCyclic.jet`](../../Examples/Memory/Allocation/GCCyclic.jet).
+  Not built yet (`#6295`): `jet fix memory` exact repair and cross-run persisted memory ledger rows.
 
 ## Imports and visibility
 

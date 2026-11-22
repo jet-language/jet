@@ -126,16 +126,16 @@ capture.
 
 ## Checklist for new surfaces
 
-Before editing a terminal surface, cite this document and answer:
+Before editing a terminal surface, cite this document and record:
 
-1. Which semantic events does it emit?
-2. What is the first useful human summary and its drill-down action?
-3. Which keys accept, cancel, navigate, or request EOF?
-4. Which renderer owns TTY, pipe, JSON, color, width, and quiet behavior?
-5. What happens when the terminal is narrow, resized, piped, or unavailable?
-6. How are raw-mode settings restored on every exit path?
-7. Which capture covers normal output, color suppression, cancellation, and
-   diagnostics?
+1. The semantic events the surface emits.
+2. The first useful human summary and its drill-down action.
+3. The keys that accept, cancel, navigate, or request EOF.
+4. The renderer that owns TTY, pipe, JSON, color, width, and quiet behavior.
+5. The behavior when the terminal is narrow, resized, piped, or unavailable.
+6. How raw-mode settings are restored on every exit path.
+7. The capture that covers normal output, color suppression, cancellation, and
+   diagnostics.
 
 The interaction contract is maintained here; implementation checks belong in the
 TUI fixtures and tests for each surface.

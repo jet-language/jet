@@ -109,3 +109,34 @@ doc_links_broken_in_text: fn(doc_path: String, text: String) -> [String] {
     assert_eq(found.len(), 1)
     assert(found[0].contains("Tests/Cases/DoesNotExist"))
 }
+
+ADOPTION_DOCS: [String]{
+    "Docs/Spec/Reference/migration-tier-map.md",
+    "Docs/Spec/Reference/mixed-repo.md",
+}
+
+#Test("docs_links_resolve") {
+    guards_enter_root()
+    docs := [String]{}
+    loop path in ADOPTION_DOCS -> docs.push(path)
+    loop path in s3_truth_md_paths("Docs/Spec/Guides") -> docs.push(path)
+    docs.sort()
+    assert(docs.len() > 0, "no adoption or guide documents found")
+    broken := [String]{}
+    loop doc in docs {
+        text: doc_links_files.read(doc) ?? panic("read {doc}: {err}")
+        loop item in doc_links_broken_in_text(doc, text) -> broken.push(item)
+    }
+    loop doc in ADOPTION_DOCS {
+        text: doc_links_files.read(doc) ?? panic("read {doc}: {err}")
+        evidence_count := 0
+        loop raw_target in doc_links_extract_targets(text) {
+            resolved: doc_links_resolve(doc, raw_target)
+            if resolved.starts_with("Tests/") || resolved.starts_with("Examples/") || resolved.starts_with("Compiler/") || resolved.starts_with("Jetpack/") || resolved.starts_with("Tools/") {
+                evidence_count += 1
+            }
+        }
+        assert(evidence_count > 0, "adoption doc {doc} must link to committed repo evidence")
+    }
+    assert(broken.len() == 0, "broken links in adoption and guide docs:\n{broken.join("\n")}")
+}
