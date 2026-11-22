@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113178,
+    "rev": 113180,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35337,6 +35337,11 @@
         {
           "at": "2026-11-22",
           "by": "Orchestrator",
+          "text": "Pareto Stream B Wave 1 landed at dev 12ef858012 (Stage-1/Stage-2 -O2 exact fixed point 549,015,628 bytes, CodegenCeiling 9/9, CompilerData 1156 ok [Build.jet 56->52], UnsafeRatchet 1670 ok, copy_ratchet StaticLink 53->52 & Pipeline 95->94, Tests/Guards 217/217 PASS). Live cold uncached Throughput.jet (1.07M LOC, 12t): check 36,020->42,924 LOC/s (+19.2%), wall 29.73s->24.95s (-4.78s), CPU 153.99s->132.44s (-21.55s), insns 905.15B->841.61B (-63.54B), outside 4.63s->0.43s (-90.7%); O0 18,296->20,017 LOC/s (+9.4%), wall 58.52s->53.49s (-5.03s), CPU 162.61s->150.91s (-11.70s), insns 2,328.58B->2,265.26B (-63.32B), RSS -87 MiB. Cold jet run script30.jet 167.16ms->156.21ms (-10.95ms)."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
           "text": "Pareto 2-Stream Plan toward 30M LOC/s (owner-approved 2026-11-22, 2 compiler-perf subagents only; card burndown paused): Stream A (CodegenOpt worktree; owns JetFoundation/JetLexer/JetParser/JetSema/JetEval/JetRuntime) + Stream B (GoalsOrder worktree; owns JetCLI/JetDriver/JetBackend/JetIR/build.jet/Toolchain). Wave 1 (finishing now): Stream A Sema/Types/Names/Effects/Taint/CoreUsage/Places hot paths (-28.4B check insns, -590 MiB O0 RSS + Wave 1b); Stream B JetCLI/JetDriver parallel sweep/JetIR/StaticLink (-63.5B check insns, -63.3B O0 insns, outside s 4.63s->0.43s, script30.jet 167.2->156.2ms). After Wave 1 lands on dev/master: pause both subagents for clean unloaded Gauntlet + Throughput.jet + hyperfine refresh and post delta to Tower Latest Briefing. Wave 2A (~1.5-2.5h): Stream B true single-pass -O0 fast selector (c8) + cold jet run init cut (20ms->3-5ms); Stream A JetRuntime short-string path + comptime.prefetch (c14-c15) + lex-time u32 interning foundation. Wave 2B (~2.5-4h): Stream B streaming parallel module pipeline (c6, O0 wall ~50s->10-15s) + jet run hello.jet <2ms/<4MiB; Stream A Arena/SoA AST+Types (c7) + SIMD lexer (check ~100k->300k-600k LOC/s)."
         },
         {
@@ -36127,7 +36132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-22T14:35:56.855Z",
+      "updated": "2026-11-22T14:42:10.667Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 40
     },
@@ -69646,6 +69651,11 @@
         {
           "at": "2026-11-22",
           "by": "Orchestrator",
+          "text": "Pareto Stream B Wave 1 landed at dev 12ef858012 (217/217 Guards PASS, 9/9 CodegenCeiling PASS): cold jet run script30.jet 167.16ms->156.21ms (-10.95ms), check outside s 4.63s->0.43s, check insns -63.54B, O0 insns -63.32B. Waiting on Stream A Wave 1b to land, then running clean unloaded Gauntlet refresh + Tower Latest Briefing."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
           "text": "Pareto 2-Stream Startup & Gauntlet Plan (owner-approved 2026-11-22): Immediately after Wave 1 (Stream A Sema/Types + Stream B JetCLI/JetDriver/JetIR) lands on dev/master and syncs to origin, pause both subagents on an idle host to run clean unloaded Gauntlet refresh (replacing stale 2026-11-19 status.json), unloaded Throughput.jet, hyperfine cold jet run hello.jet/script30.jet vs lua/luajit/python3 (c29-c32), and ScriptBench w02/w05/w13, then post high-level delta vs 2026-11-19 via tower briefing post. Wave 2A/2B targets: cold jet run hello.jet 20.04ms/50.7MiB -> <2.0ms/<4MiB (c29,c30,c32), script30.jet 167.2ms -> <25ms (c31), ScriptBench w02 37.4ms -> <35ms (#6086), w05 256ms -> 140-170ms (#6083)."
         },
         {
@@ -70029,7 +70039,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:38.317Z",
-      "updated": "2026-11-22T14:35:57.729Z",
+      "updated": "2026-11-22T14:42:11.458Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 38
     },
@@ -133521,6 +133531,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T14:42:11.459Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0lt36hf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T14:42:10.667Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-22T14:35:57.729Z",
       "by": "Orchestrator",
