@@ -16,6 +16,7 @@ use {
         BodyIfCond,
         BodyPatternShape,
         BodyTree,
+        CompilerThreads,
         Diagnostic,
         FnBody,
         Func,
@@ -30,6 +31,9 @@ use {
         StructureFactKind,
         Type,
         checked_expr_type_id,
+        compiler_threads_admit,
+        compiler_threads_failure_text,
+        compiler_threads_partition,
         comptime_walk_identifiers,
         core_bare_source_module,
         core_module_has_type,
@@ -281,7 +285,7 @@ sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegi
     }
 }
 
-sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
+sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
     // A skipped body (sema_checked_unusable_bodies) leaves its references
     // uncounted, so no verdict holds.
@@ -335,17 +339,21 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             break false
         }
     } ?? true
-    member_uses: if members_known -> sema_liveness_member_uses(graph, modules) else -> SemaLivenessMemberUses.empty()
+    member_uses: if members_known -> sema_liveness_member_uses(graph, modules, threads) else -> SemaLivenessMemberUses.empty()
     application: sema_liveness_application(graph)
+    foreign_aliases_by_module := [[String]]{}
+    loop _ in 0..<graph.modules.len() -> foreign_aliases_by_module.push([String]{})
+    loop edge in graph.edges {
+        if edge.foreign_binding == .Val(binding) {
+            if sema_registration_module_index(graph, edge.source_module_identity) == .Val(source_row) {
+                foreign_aliases_by_module[source_row].push(binding.alias)
+            }
+        }
+    }
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
         start: verdicts.len()
-        foreign_aliases := [String]{}
-        loop edge in graph.edges {
-            if edge.source_module_identity != module_row.module_identity -> next
-            if edge.foreign_binding == .Val(binding) -> foreign_aliases.push(binding.alias)
-        }
-        sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.source_file, verdicts)
+        sema_liveness_unused_imports(module_row.program, foreign_aliases_by_module[module_index], module_row.source_file, verdicts)
         sema_liveness_unused_bindings(modules[module_index].diagnostics, module_row.source_file, verdicts)
         loop function in module_row.functions {
             symbol: function.symbol
@@ -817,10 +825,61 @@ sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: &NameTable
     }
 }
 
-sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -[Mem.Alloc]> SemaLivenessMemberUses Never! {
-    uses := SemaLivenessMemberUses.empty()
+sema_liveness_member_uses_merge: fn(into: &SemaLivenessMemberUses, part: SemaLivenessMemberUses) {
+    sema_liveness_merge(into.fields, part.fields)
+    sema_liveness_merge(into.field_names, part.field_names)
+    loop (id, _) in part.cases -> into.cases[id] = true
+    sema_liveness_merge(into.case_names, part.case_names)
+    sema_liveness_merge(into.read_types, part.read_types)
+    sema_liveness_merge(into.built_types, part.built_types)
+    if part.program_index -> into.program_index = true
+}
+
+sema_liveness_member_uses_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], markers: NameTable, bounds: [Int], from: Int, workers: Int, parts: &[SemaLivenessMemberUses?]) {
+    if from >= workers - 1 {
+        parts[from] = Val(sema_liveness_member_uses_range(graph, modules, markers, bounds[from], bounds[from + 1]))
+        return
+    }
+    task.group sema_liveness_member_threads {
+        head: task sema_liveness_member_uses_range(graph, modules, markers, bounds[from], bounds[from + 1])
+        sema_liveness_member_uses_parts(graph, modules, markers, bounds, from + 1, workers, parts)
+        parts[from] = Val(head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+}
+
+sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], threads: CompilerThreads) -> SemaLivenessMemberUses {
     markers: sema_liveness_user_markers(graph)
-    loop (module_index, checked) in modules {
+    weights := [Int]{}
+    total_work := 0
+    loop module_index in 0..<modules.len() {
+        weight: if graph.modules[module_index].source_origin == SemaSourceOrigin.Snapshot -> modules[module_index].functions.len() + 1 else -> 1
+        weights.push(weight)
+        total_work += weight
+    }
+    workers: compiler_threads_admit(threads, modules.len(), total_work, 256, 0, 0)
+    uses := SemaLivenessMemberUses.empty()
+    if workers <= 1 {
+        uses = sema_liveness_member_uses_range(graph, modules, markers, 0, modules.len())
+    } else {
+        bounds: compiler_threads_partition(weights, workers)
+        parts := [SemaLivenessMemberUses?]{}
+        loop _ in 0..<workers -> parts.push(None)
+        sema_liveness_member_uses_parts(graph, modules, markers, bounds, 0, workers, parts)
+        parts.reverse()
+        loop parts.len() > 0 {
+            taken := parts.pop() ?? break
+            if taken.move() == .Val(part) -> sema_liveness_member_uses_merge(uses, part)
+        }
+    }
+    sema_liveness_member_closure(graph, uses.read_types)
+    sema_liveness_member_closure(graph, uses.built_types)
+    uses
+}
+
+sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], markers: NameTable, from: Int, to: Int) -[Mem.Alloc]> SemaLivenessMemberUses Never! {
+    uses := SemaLivenessMemberUses.empty()
+    loop module_index in from..<to {
+        checked: modules[module_index]
         module_row: graph.modules[module_index]
         // Foreign code reads and builds every type its signatures hold.
         loop foreign in module_row.foreign_functions {
@@ -965,8 +1024,6 @@ sema_liveness_member_uses: fn(graph: SemaRegistrationGraph, modules: [SemaGraphM
             }
         }
     }
-    sema_liveness_member_closure(graph, uses.read_types)
-    sema_liveness_member_closure(graph, uses.built_types)
     uses
 }
 

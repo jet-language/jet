@@ -3730,6 +3730,9 @@ sema_registration_prepare_job: fn(job: &&SemaRegistrationPrepareJob) -> SemaRegi
     codecs := owned.codecs.move()
     diagnostics := [Diagnostic]{}
     module_row := sema_registration_prepare_module_row(input, owned.module_text, symbols, templates, policies, settings, codecs, diagnostics)
+    if !module_is_core(module_row.module_identity) && module_row.package_identity != "jet:canonical-prelude" && module_row.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY {
+        sema_footprint_populate_module(module_row)
+    }
     keys := symbols.ranges.pop() ?? panic("a prepared module lost its symbol range")
     SemaRegistrationPreparedRow{module_row: module_row.move(), symbols: keys.move(), diagnostics: diagnostics.move()}
 }
@@ -4995,13 +4998,17 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
 // The loader emits one edge per source import, including each import declared
 // inside an inline `name: module { … }` body (its `source_scope`), so every
 // such declaration is a source declaration of its file.
-sema_registration_declared_import_spans: fn(module_index: Int, imports: [ImportDecl], items: [Item], spans: &[String:Bool]) Never! {
+sema_registration_span_key: fn(span: Span) -> Int Never! {
+    span.start * 4294967296 + span.end
+}
+
+sema_registration_declared_import_spans: fn(imports: [ImportDecl], items: [Item], spans: &[Int:Bool]) Never! {
     loop declaration in imports {
-        spans["{module_index}|{declaration.span.start}|{declaration.span.end}"] = true
+        spans[sema_registration_span_key(declaration.span)] = true
     }
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            sema_registration_declared_import_spans(module_index, code_module.imports, body, spans)
+            sema_registration_declared_import_spans(code_module.imports, body, spans)
         }
     }
 }
@@ -5558,7 +5565,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() {
         sema_registration_note_root_functions(graph, module_index)
-        if graph.core_seal || (!module_is_core(graph.modules[module_index].module_identity) && graph.modules[module_index].package_identity != "jet:canonical-prelude" && graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY) {
+        if graph.core_seal {
             sema_footprint_populate_module(graph.modules[module_index])
         }
     }
@@ -5647,18 +5654,20 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         if graph.has_unit_families -> break
     }
 
-    // Source import spans by "{module}|{start}|{end}" (top-level and inline
-    // `name: module { use … }` imports alike) and edge spans by
-    // "{source ModuleID}|{start}|{end}", each built once: matching every edge
-    // against its module's imports and every import against every edge made
-    // registration M³ and M⁴ for a package of M files.
-    declared_spans := [String:Bool]{}
+    // Per-module packed span sets (`sema_registration_span_key`), avoiding
+    // string formatting and hashing across every import edge.
+    declared_spans := [[Int:Bool]]{}
+    edge_spans := [[Int:Bool]]{}
     loop declared_module in 0..<graph.modules.len() {
-        sema_registration_declared_import_spans(declared_module, graph.modules[declared_module].program.imports, graph.modules[declared_module].program.items, declared_spans)
+        module_spans := [Int:Bool]{}
+        sema_registration_declared_import_spans(graph.modules[declared_module].program.imports, graph.modules[declared_module].program.items, module_spans)
+        declared_spans.push(module_spans.move())
+        edge_spans.push([Int:Bool]{})
     }
-    edge_spans := [String:Bool]{}
     loop edge in edges {
-        edge_spans["{edge.source_module_identity.id}|{edge.declaration.span.start}|{edge.declaration.span.end}"] = true
+        if sema_registration_module_index(graph, edge.source_module_identity) == .Val(edge_mod) {
+            edge_spans[edge_mod][sema_registration_span_key(edge.declaration.span)] = true
+        }
     }
     registered := SemaRegistrationImportIndex{spans: [String:Bool]{}, aliases: [String:Bool]{}}
     loop edge in edges {
@@ -5669,7 +5678,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
             next
         }
         source_module_index: source_index ?? 0
-        declared: declared_spans.get("{source_module_index}|{edge.declaration.span.start}|{edge.declaration.span.end}") != None
+        declared: declared_spans[source_module_index].get(sema_registration_span_key(edge.declaration.span)) != None
         if {
             !declared -> {
                 sema_registration_push_graph_diagnostic(graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has no source declaration", "semantic preparation only registers imports present in the source program", "retain the original ImportDecl when constructing the resolved edge"))
@@ -5728,7 +5737,8 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         loop declaration in graph.modules[aliased_module].program.imports {
             if sema_inline_module_alias_import(declaration) -> aliased.push(declaration)
         }
-        source_identity: graph.modules[aliased_module].module_identity.copy()
+        if aliased.len() == 0 -> next
+        source_identity: graph.modules[aliased_module].module_identity
         loop declaration in aliased {
             bound := false
             loop edge in edges {
@@ -5760,7 +5770,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         import_count: graph.modules[module_index].program.imports.len()
         loop import_index in 0..<import_count {
             declaration := graph.modules[module_index].program.imports[import_index]
-            found: edge_spans.get("{graph.modules[module_index].module_identity.id}|{declaration.span.start}|{declaration.span.end}") != None
+            found: edge_spans[module_index].get(sema_registration_span_key(declaration.span)) != None
             if !found && !sema_module_meta_import(declaration) {
                 sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0003", declaration.span, "an import declaration has no resolved graph edge", "semantic preparation never resolves private or dependency imports by bare name", "provide the loader-resolved target module identity"))
             }

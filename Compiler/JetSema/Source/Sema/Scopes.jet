@@ -1088,6 +1088,8 @@ SemaScopeTable: struct {
     // sema_scope_push_binding, so name resolution never rescans `bindings`.
     name_slots: NameRows,
     name_positions: [[Int]],
+    base_table: [SemaScopeTable]{[SemaScopeTable]{}},
+    base_binding_count: Int{0},
     loop_labels: [SemaScopeLoopLabel],
     hardware_transfers: [SemaHardwareDMATransferFact],
     hardware_definite_transfers: [SemaHardwareDMATransferFact],
@@ -2053,6 +2055,8 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         bindings: source.bindings.copy(),
         name_slots: source.name_slots.copy(),
         name_positions: source.name_positions.copy(),
+        base_table: source.base_table,
+        base_binding_count: source.base_binding_count,
         loop_labels: source.loop_labels.copy(),
         hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
         hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
@@ -2133,8 +2137,10 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     }
     loop table.bindings.len() > mark.bindings {
         last: table.bindings.len() - 1
-        if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) {
-            _ := table.name_positions[slot].pop()
+        if last >= table.base_binding_count {
+            if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) {
+                _ := table.name_positions[slot].pop()
+            }
         }
         _ := table.bindings.pop()
     }
@@ -2331,6 +2337,14 @@ sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol, key: St
         loop index in table.name_positions[slot] {
             binding: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
+        }
+    }
+    if table.base_binding_count > 0 {
+        if name_rows_get_text(table.base_table[0].name_slots, symbol.name) == .Val(slot) {
+            loop index in table.base_table[0].name_positions[slot] {
+                binding: table.bindings[index]
+                if binding.frame == 0 && !binding.compiler_builtin -> return false
+            }
         }
     }
     sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
@@ -2593,37 +2607,134 @@ sema_scope_build_time: fn(table: SemaScopeTable, function_name: String) -> Bool 
     table.comptime_execution_depth > 0 || (table.location_function ?? function_name) == "build"
 }
 
-sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
-    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
-    pos_len: table.name_positions[slot].len()
-    if table.lookup_counters == None {
-        if pos_len == 0 -> return None
-        if pos_len == 1 {
-            index: table.name_positions[slot][0]
-            b_frame: table.bindings[index].frame
-            if b_frame == table.current -> return Val(index)
-            if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
-            frame := table.frames[table.current].parent
-            loop frame >= 0 {
-                if frame == b_frame -> return Val(index)
-                frame = table.frames[frame].parent
-            }
-            return None
-        }
-        last_index: table.name_positions[slot][pos_len - 1]
-        if table.bindings[last_index].frame == table.current -> return Val(last_index)
-        frame := table.current
+sema_scope_resolve_in_positions: fn(table: SemaScopeTable, positions: [Int]) -> Int? Never! {
+    pos_len: positions.len()
+    if pos_len == 0 -> return None
+    if pos_len == 1 {
+        index: positions[0]
+        b_frame: table.bindings[index].frame
+        if b_frame == table.current -> return Val(index)
+        if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
+        frame := table.frames[table.current].parent
         loop frame >= 0 {
-            cursor := pos_len - 1
-            loop cursor >= 0 {
-                index: table.name_positions[slot][cursor]
-                if table.bindings[index].frame == frame -> return Val(index)
-                cursor -= 1
-            }
+            if frame == b_frame -> return Val(index)
             frame = table.frames[frame].parent
         }
         return None
     }
+    last_index: positions[pos_len - 1]
+    if table.bindings[last_index].frame == table.current -> return Val(last_index)
+    frame := table.current
+    loop frame >= 0 {
+        cursor := pos_len - 1
+        loop cursor >= 0 {
+            index: positions[cursor]
+            if table.bindings[index].frame == frame -> return Val(index)
+            cursor -= 1
+        }
+        frame = table.frames[frame].parent
+    }
+    None
+}
+
+sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
+    if table.base_binding_count > 0 {
+        local_slot: sema_scope_name_slot(table, name)
+        base_slot: name_rows_get_text(table.base_table[0].name_slots, name)
+        if local_slot == None {
+            bs: base_slot ?? return sema_scope_counted(table, 0, None)
+            if table.lookup_counters == None {
+                return sema_scope_resolve_in_positions(table, table.base_table[0].name_positions[bs])
+            }
+            compares := 0
+            pos_len: table.base_table[0].name_positions[bs].len()
+            frame := table.current
+            loop frame >= 0 {
+                cursor := pos_len - 1
+                loop cursor >= 0 {
+                    compares += 1
+                    index: table.base_table[0].name_positions[bs][cursor]
+                    if table.bindings[index].frame == frame {
+                        return sema_scope_counted(table, compares, Val(index))
+                    }
+                    cursor -= 1
+                }
+                frame = table.frames[frame].parent
+            }
+            return sema_scope_counted(table, compares, None)
+        }
+        if base_slot == None {
+            if table.lookup_counters == None {
+                return sema_scope_resolve_in_positions(table, table.name_positions[local_slot])
+            }
+            compares := 0
+            pos_len: table.name_positions[local_slot].len()
+            frame := table.current
+            loop frame >= 0 {
+                cursor := pos_len - 1
+                loop cursor >= 0 {
+                    compares += 1
+                    index: table.name_positions[local_slot][cursor]
+                    if table.bindings[index].frame == frame {
+                        return sema_scope_counted(table, compares, Val(index))
+                    }
+                    cursor -= 1
+                }
+                frame = table.frames[frame].parent
+            }
+            return sema_scope_counted(table, compares, None)
+        }
+        local_len: table.name_positions[local_slot].len()
+        base_len: table.base_table[0].name_positions[base_slot].len()
+        if table.lookup_counters == None {
+            frame := table.current
+            loop frame >= 0 {
+                cursor := local_len - 1
+                loop cursor >= 0 {
+                    index: table.name_positions[local_slot][cursor]
+                    if table.bindings[index].frame == frame -> return Val(index)
+                    cursor -= 1
+                }
+                b_cursor := base_len - 1
+                loop b_cursor >= 0 {
+                    index: table.base_table[0].name_positions[base_slot][b_cursor]
+                    if table.bindings[index].frame == frame -> return Val(index)
+                    b_cursor -= 1
+                }
+                frame = table.frames[frame].parent
+            }
+            return None
+        }
+        compares := 0
+        frame := table.current
+        loop frame >= 0 {
+            cursor := local_len - 1
+            loop cursor >= 0 {
+                compares += 1
+                index: table.name_positions[local_slot][cursor]
+                if table.bindings[index].frame == frame {
+                    return sema_scope_counted(table, compares, Val(index))
+                }
+                cursor -= 1
+            }
+            b_cursor := base_len - 1
+            loop b_cursor >= 0 {
+                compares += 1
+                index: table.base_table[0].name_positions[base_slot][b_cursor]
+                if table.bindings[index].frame == frame {
+                    return sema_scope_counted(table, compares, Val(index))
+                }
+                b_cursor -= 1
+            }
+            frame = table.frames[frame].parent
+        }
+        return sema_scope_counted(table, compares, None)
+    }
+    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    if table.lookup_counters == None {
+        return sema_scope_resolve_in_positions(table, table.name_positions[slot])
+    }
+    pos_len: table.name_positions[slot].len()
     compares := 0
     frame := table.current
     loop frame >= 0 {
@@ -2681,6 +2792,44 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
     found
 }
 
+sema_scope_resolve_at_in_positions: fn(table: SemaScopeTable, positions: [Int], use_span: Span) -> Int? Never! {
+    pos_len: positions.len()
+    if pos_len == 0 -> return None
+    if pos_len == 1 {
+        index: positions[0]
+        b_frame: table.bindings[index].frame
+        if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
+        if !table.position_free && table.bindings[index].symbol.span.start > use_span.start {
+            if table.frames[b_frame].parent >= 0 -> return None
+        }
+        if b_frame == table.current -> return Val(index)
+        frame := table.frames[table.current].parent
+        loop frame >= 0 {
+            if frame == b_frame -> return Val(index)
+            frame = table.frames[frame].parent
+        }
+        return None
+    }
+    last_index: positions[pos_len - 1]
+    if table.bindings[last_index].frame == table.current && (table.frames[table.current].parent < 0 || table.position_free || table.bindings[last_index].symbol.span.start <= use_span.start) {
+        return Val(last_index)
+    }
+    frame := table.current
+    loop frame >= 0 {
+        module_frame: table.frames[frame].parent < 0
+        cursor := pos_len - 1
+        loop cursor >= 0 {
+            index: positions[cursor]
+            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                return Val(index)
+            }
+            cursor -= 1
+        }
+        frame = table.frames[frame].parent
+    }
+    None
+}
+
 // The binding of `name` visible at `use_span`. Inside a body a binding is
 // visible only after its declaration, except in a position-free table (a
 // contract condition). Module-level bindings (the root frame:
@@ -2688,44 +2837,111 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
 // or staged symbol's span may come from another file, so position never
 // hides them.
 sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
-    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
-    pos_len: table.name_positions[slot].len()
-    if table.lookup_counters == None {
-        if pos_len == 0 -> return None
-        if pos_len == 1 {
-            index: table.name_positions[slot][0]
-            b_frame: table.bindings[index].frame
-            if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
-            if !table.position_free && table.bindings[index].symbol.span.start > use_span.start {
-                if table.frames[b_frame].parent >= 0 -> return None
+    if table.base_binding_count > 0 {
+        local_slot: sema_scope_name_slot(table, name)
+        base_slot: name_rows_get_text(table.base_table[0].name_slots, name)
+        if local_slot == None {
+            bs: base_slot ?? return sema_scope_counted(table, 0, None)
+            if table.lookup_counters == None {
+                return sema_scope_resolve_at_in_positions(table, table.base_table[0].name_positions[bs], use_span)
             }
-            if b_frame == table.current -> return Val(index)
-            frame := table.frames[table.current].parent
+            compares := 0
+            pos_len: table.base_table[0].name_positions[bs].len()
+            frame := table.current
             loop frame >= 0 {
-                if frame == b_frame -> return Val(index)
+                module_frame: table.frames[frame].parent < 0
+                cursor := pos_len - 1
+                loop cursor >= 0 {
+                    compares += 1
+                    index: table.base_table[0].name_positions[bs][cursor]
+                    if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                        return sema_scope_counted(table, compares, Val(index))
+                    }
+                    cursor -= 1
+                }
+                frame = table.frames[frame].parent
+            }
+            return sema_scope_counted(table, compares, None)
+        }
+        if base_slot == None {
+            if table.lookup_counters == None {
+                return sema_scope_resolve_at_in_positions(table, table.name_positions[local_slot], use_span)
+            }
+            compares := 0
+            pos_len: table.name_positions[local_slot].len()
+            frame := table.current
+            loop frame >= 0 {
+                module_frame: table.frames[frame].parent < 0
+                cursor := pos_len - 1
+                loop cursor >= 0 {
+                    compares += 1
+                    index: table.name_positions[local_slot][cursor]
+                    if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                        return sema_scope_counted(table, compares, Val(index))
+                    }
+                    cursor -= 1
+                }
+                frame = table.frames[frame].parent
+            }
+            return sema_scope_counted(table, compares, None)
+        }
+        local_len: table.name_positions[local_slot].len()
+        base_len: table.base_table[0].name_positions[base_slot].len()
+        if table.lookup_counters == None {
+            frame := table.current
+            loop frame >= 0 {
+                module_frame: table.frames[frame].parent < 0
+                cursor := local_len - 1
+                loop cursor >= 0 {
+                    index: table.name_positions[local_slot][cursor]
+                    if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                        return Val(index)
+                    }
+                    cursor -= 1
+                }
+                b_cursor := base_len - 1
+                loop b_cursor >= 0 {
+                    index: table.base_table[0].name_positions[base_slot][b_cursor]
+                    if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                        return Val(index)
+                    }
+                    b_cursor -= 1
+                }
                 frame = table.frames[frame].parent
             }
             return None
         }
-        last_index: table.name_positions[slot][pos_len - 1]
-        if table.bindings[last_index].frame == table.current && (table.frames[table.current].parent < 0 || table.position_free || table.bindings[last_index].symbol.span.start <= use_span.start) {
-            return Val(last_index)
-        }
+        compares := 0
         frame := table.current
         loop frame >= 0 {
             module_frame: table.frames[frame].parent < 0
-            cursor := pos_len - 1
+            cursor := local_len - 1
             loop cursor >= 0 {
-                index: table.name_positions[slot][cursor]
+                compares += 1
+                index: table.name_positions[local_slot][cursor]
                 if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
-                    return Val(index)
+                    return sema_scope_counted(table, compares, Val(index))
                 }
                 cursor -= 1
             }
+            b_cursor := base_len - 1
+            loop b_cursor >= 0 {
+                compares += 1
+                index: table.base_table[0].name_positions[base_slot][b_cursor]
+                if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                    return sema_scope_counted(table, compares, Val(index))
+                }
+                b_cursor -= 1
+            }
             frame = table.frames[frame].parent
         }
-        return None
+        return sema_scope_counted(table, compares, None)
     }
+    slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    if table.lookup_counters == None {
+        return sema_scope_resolve_at_in_positions(table, table.name_positions[slot], use_span)
+    }
+    pos_len: table.name_positions[slot].len()
     compares := 0
     frame := table.current
     loop frame >= 0 {
@@ -2761,15 +2977,10 @@ sema_scope_resolve_key: fn(table: SemaScopeTable, name: String) -> String? {
 }
 
 // A body thread's own copy of the post-summary module scope `source` (the
-// shared read-only module scope of a parallel body pass). Rows, frames, name
-// positions and every small field are copied, but a row's function type is
-// not: it is most of a module row, and it stays in `source`, which the pass
-// moves into the environment's `module_scope` for the threads to read
-// (sema_scope_binding_type). The copied row holds the empty function type
-// instead, so a check that only asks whether a binding is a function, a
-// copy, a view or a guard answers as it would for the real type; a check that
-// reads the signature reads it through the accessors. Body threads never edit
-// a module row's type, so the copy and the source agree for the whole pass.
+// shared read-only module scope of a parallel body pass). The module's name
+// index stays shared in `base_name_slots` / `base_name_positions` with zero
+// copy, and each row's function type stays in `source` (read through
+// `environment.module_scope` via sema_scope_binding_type).
 sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     count: source.bindings.len()
     bindings := [SemaScopeBinding]{}
@@ -2799,22 +3010,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
                 },
             )
         } else {
-            bindings.push(
-                SemaScopeBinding{
-                    frame: source.bindings[i].frame,
-                    symbol: source.bindings[i].symbol,
-                    key: source.bindings[i].key,
-                    mutable: source.bindings[i].mutable,
-                    access: source.bindings[i].access,
-                    integer_bounds: source.bindings[i].integer_bounds,
-                    string_view: source.bindings[i].string_view,
-                    compiler_builtin: source.bindings[i].compiler_builtin,
-                    prepared: source.bindings[i].prepared,
-                    pending_prepared: source.bindings[i].pending_prepared,
-                    origin: source.bindings[i].origin,
-                    place_alias: source.bindings[i].place_alias,
-                },
-            )
+            bindings.push(source.bindings[i])
         }
         light.push(function_type)
     }
@@ -2822,8 +3018,10 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         module_identity: source.module_identity,
         frames: source.frames.copy(),
         bindings: bindings.move(),
-        name_slots: source.name_slots.copy(),
-        name_positions: source.name_positions.copy(),
+        name_slots: if source.base_binding_count > 0 -> source.name_slots.copy() else -> name_rows(),
+        name_positions: if source.base_binding_count > 0 -> source.name_positions.copy() else -> [[Int]]{},
+        base_table: if source.base_binding_count > 0 -> source.base_table else -> [SemaScopeTable]{source},
+        base_binding_count: if source.base_binding_count > 0 -> source.base_binding_count else -> count,
         loop_labels: source.loop_labels.copy(),
         hardware_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_transfers),
         hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(source.hardware_definite_transfers),
@@ -2842,14 +3040,14 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         writes_explicit: source.writes_explicit,
         failures_explicit: source.failures_explicit,
         context_allocation: source.context_allocation,
-        policy_modules: source.policy_modules.copy(),
-        policy_rows: source.policy_rows.copy(),
+        policy_modules: source.policy_modules,
+        policy_rows: source.policy_rows,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
         location_function: source.location_function,
         light_types: light.move(),
         lookup_counters: source.lookup_counters,
-        method_return_views: source.method_return_views.copy(),
+        method_return_views: source.method_return_views,
     }
 }
 
