@@ -1,0 +1,36 @@
+// Elementary `core.math` functions keep `F32` arguments at `F32` width with
+// no widening to `Float` (`F64`), producing identical bits on O0, O1, and O2.
+use math: core.math
+
+keep_f32: fn(value: F32) -> F32 { value }
+
+run: fn() {
+    x: F32{0.5}
+    y: F32{2.0}
+    print("sin={math.to_bits(keep_f32(math.sin(x)))}")
+    print("cos={math.to_bits(keep_f32(math.cos(x)))}")
+    print("tan={math.to_bits(keep_f32(math.tan(x)))}")
+    print("asin={math.to_bits(keep_f32(math.asin(x)))}")
+    print("acos={math.to_bits(keep_f32(math.acos(x)))}")
+    print("atan={math.to_bits(keep_f32(math.atan(x)))}")
+    print("atan2={math.to_bits(keep_f32(math.atan2(x, y)))}")
+    print("cosh={math.to_bits(keep_f32(math.cosh(x)))}")
+    print("tanh={math.to_bits(keep_f32(math.tanh(x)))}")
+    print("atanh={math.to_bits(keep_f32(math.atanh(x)))}")
+    print("exp={math.to_bits(keep_f32(math.exp(x)))}")
+    print("exp2={math.to_bits(keep_f32(math.exp2(x)))}")
+    print("exp10={math.to_bits(keep_f32(math.exp10(x)))}")
+    print("exp_m1={math.to_bits(keep_f32(math.exp_m1(x)))}")
+    print("ln={math.to_bits(keep_f32(math.ln(y)))}")
+    print("log2={math.to_bits(keep_f32(math.log2(y)))}")
+    print("log10={math.to_bits(keep_f32(math.log10(y)))}")
+    print("ln_1p={math.to_bits(keep_f32(math.ln_1p(x)))}")
+    print("sqrt={math.to_bits(keep_f32(math.sqrt(y)))}")
+    print("cbrt={math.to_bits(keep_f32(math.cbrt(y)))}")
+    print("pow_r={math.to_bits(keep_f32(math.pow_r(y, x)))}")
+    print("floor={keep_f32(math.floor(F32{2.75}))}")
+    print("ceil={keep_f32(math.ceil(F32{2.25}))}")
+    print("round={keep_f32(math.round(F32{2.5}))}")
+    print("trunc={keep_f32(math.trunc(F32{-2.75}))}")
+    print("abs={keep_f32(math.abs(F32{-0.5}))}")
+}

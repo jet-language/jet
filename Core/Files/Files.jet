@@ -364,6 +364,23 @@ FileReader: struct {
         core.files.__reader_advise(self, advice_code(advice))
     }
 
+    /// Read up to `max` bytes from the current position; returns an empty list
+    /// at end of file.
+    read: fn(&self, max: Int) -[Time.Wait]> [U8] IOError! { rt.reader_read(self, max) }
+
+    /// Read the remaining bytes in chunks of up to `size` bytes each.
+    /// Returns `IOError.InvalidInput` when `size <= 0`.
+    chunks: fn(&self, size: Int) -[Time.Wait]> [[U8]] IOError! {
+        if size <= 0 -> return Err(io_err("read", self.stored_path, "chunk size must be positive"))
+        out := [[U8]]{}
+        loop {
+            part: rt.reader_read(self, size)
+            if part.len() == 0 -> break
+            out.push(part)
+        }
+        Ok(out)
+    }
+
     impl Reader {
         read_bytes: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
             rt.reader_read(self, limit)
@@ -375,8 +392,8 @@ FileReader: struct {
     }
 }
 
-/// An open file for writing. `write`, `write_line` and `write_bytes` are
-/// buffered; `flush` hands the bytes to the system and
+/// An open file for writing. `write`, `write_line`, `write_bytes` and
+/// `write_all` are buffered; `flush` hands the bytes to the system and
 /// `fsync` also makes them durable.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
@@ -399,6 +416,9 @@ FileWriter: struct {
     /// to `size`, the new bytes zero; a longer one keeps its length.
     /// `IOError.Unsupported` reports a file system that cannot reserve.
     allocate: fn(self, size: Int) -[FS.Write]> IOError! { core.files.__writer_allocate(self, size) }
+
+    /// Write every byte in `bytes` to the buffered handle.
+    write_all: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! { rt.writer_write_all(self, bytes) }
 
     /// `write_bytes` hands over every byte; the bytes are buffered until
     /// `flush`, `fsync` or close. `write` and `write_line` are the Prelude
@@ -3432,4 +3452,35 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
     assert_eq(resolve("/x/y/../z/") ?? panic("absolute"), "/x/z")
     assert_eq(resolve("/") ?? panic("root"), "/")
     assert_eq(resolve("a/./b") ?? panic("relative"), "{sys.current_dir() ?? panic("cwd")}/a/b")
+}
+
+#Test("FileReader and FileWriter handle methods cover read, chunks, seek, stat, write_all, fsync, and set_mode") {
+    root: temp_dir("file-handles-kat") ?? panic("temp_dir")
+    path: join(root.path, "sample.bin")
+    writer := create(path) ?? panic("create")
+    writer.write("abc") ?? panic("write")
+    writer.write_all("defghij".bytes()) ?? panic("write_all")
+    writer.flush() ?? panic("flush")
+    writer.fsync() ?? panic("fsync")
+    if rt.os_family() == "unix" -> writer.set_mode(0o640) ?? panic("set_mode")
+    wstat: writer.stat() ?? panic("writer.stat")
+    assert_eq(wstat.size, 10)
+    if rt.os_family() == "unix" -> assert_eq(wstat.mode % 512, 0o640)
+
+    reader := open(path) ?? panic("open")
+    rstat: reader.stat() ?? panic("reader.stat")
+    assert_eq(rstat.size, 10)
+    head: reader.read(4) ?? panic("read")
+    assert_eq(String.from_bytes(head) ?? panic("utf8"), "abcd")
+    reader.seek(2) ?? panic("seek")
+    rest_chunks: reader.chunks(3) ?? panic("chunks")
+    assert_eq(rest_chunks.len(), 3)
+    assert_eq(String.from_bytes(rest_chunks[0]) ?? panic("c0"), "cde")
+    assert_eq(String.from_bytes(rest_chunks[1]) ?? panic("c1"), "fgh")
+    assert_eq(String.from_bytes(rest_chunks[2]) ?? panic("c2"), "ij")
+    if reader.chunks(0) == {
+        .Ok(_) -> { assert(false) }
+        .Err(.InvalidInput(_)) -> {}
+        .Err(_) -> assert(false)
+    }
 }

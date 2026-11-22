@@ -15,6 +15,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [Decimal](Decimal.jet) — Decimal literals use exact base-10 arithmetic.
 - [ExpMinusOne](ExpMinusOne.jet) — 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and full precision for small x, where exp2(x) - 1 cancels.
 - [F32CorrectlyRounded](F32CorrectlyRounded.jet) — An all-F32 call of a correctly rounded function returns the correctly rounded F32, never the Float result rounded a second time.
+- [F32SameWidth](F32SameWidth.jet) — Elementary `core.math` functions accept `F32` and return `F32` at the same width with no widening.
 - [FloatExactOps](FloatExactOps.jet) — IEEE 754 exact operations: ties-to-even rounding, rounding into a fixed width, the IEEE remainder, signed-zero min and max, total order and NaN payloads.
 - [FloatToInt](FloatToInt.jet) — An integer head converts a Float exactly: a whole, finite value in the head's range becomes that integer, and any other value stops.
 - [FloatToIntStop](FloatToIntStop.jet) — An integer head stops on a Float that isn't whole; it never rounds.
