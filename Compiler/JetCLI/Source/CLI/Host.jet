@@ -235,11 +235,13 @@ use {
         LockFile,
         ManifestEntry,
         PackageFacts,
+        PackageStrictness,
         WorkspaceDeclarationCache,
         pkg_format_source,
         pkg_check_project_gate,
         pkg_manifest_diagnostic_from_row,
         pkg_manifest_parse_diagnostic,
+        pkg_strictness_manifest_line,
     ]
     jetpack_foundation.[ENV_FILE, PACKAGE_FILE]
     jetpack_publication.[publication_emit_spdx, publication_load_publish_lock]
@@ -3511,14 +3513,21 @@ jet_cli_new_extra_files: fn(template: String) -> [[String]] Never! {
 // `add_authority_hold` for each hold the template's `run.jet` needs).
 jet_cli_new_manifest: fn(name: String, template: String, annotated: Bool) -> String Never! {
     allow := "IO, Mem.Alloc"
+    strictness_line := ""
     if template == {
-        "cli" -> allow = "{allow}, Exec.Args"
+        "cli" -> {
+            allow = "{allow}, Exec.Args"
+            strictness_line = pkg_strictness_manifest_line(PackageStrictness.app())
+        }
         "ui" -> allow = "{allow}, Exec.Args, Browser"
-        "web" -> allow = "{allow}, Browser"
+        "web" -> {
+            allow = "{allow}, Browser"
+            strictness_line = pkg_strictness_manifest_line(PackageStrictness.app())
+        }
         "browser-test" -> allow = "{allow}, FS.Read, Net, Time"
         else -> {}
     }
-    head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{JET_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [{allow}] }}\n\n"
+    head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{JET_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\n{strictness_line}authority: {{ allow: [{allow}] }}\n\n"
     if annotated {
         return "{head}// Jet package dependencies:\n// deps: {{\n//     helpers:  ../helpers,\n//     parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},\n// }}\n"
     }
