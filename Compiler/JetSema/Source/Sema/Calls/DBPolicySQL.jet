@@ -1,0 +1,904 @@
+// Compiles a `Table.guard(policy)` row policy's `Op.Read` path into SQL
+// key-lookup semi-joins (`core.db.Table.__guard_plan`). A policy whose reads
+// on `Op.Read` are key lookups (`store.table("name", ...).get(key)`) over
+// the row's `#Codable` scalar fields and/or the caller's account compiles into
+// `EXISTS (SELECT 1 FROM "<name>" AS __jp<i> WHERE ...)` so queries enforce
+// the policy in one SQL statement. Any other policy gets a `per_row\t<reason>`
+// plan, runs per row memoized per key in the transaction (`DBState.looked`),
+// and is named by `jet inspect choices`.
+use jet_foundation.[
+    BinOp,
+    Expr,
+    Func,
+    Pattern,
+    Stmt,
+    SwitchArm,
+    Type,
+    UnOp,
+    core_identity_in_module,
+    module_text,
+]
+
+POLICY_SYM_UNKNOWN: 0
+
+POLICY_SYM_ROW: 1
+
+POLICY_SYM_ROW_FIELD: 2
+
+POLICY_SYM_OP_READ: 3
+
+POLICY_SYM_WHO: 4
+
+POLICY_SYM_CALLER: 5
+
+POLICY_SYM_STORE: 6
+
+POLICY_SYM_TABLE: 7
+
+POLICY_SYM_LOOKUP: 8
+
+POLICY_SYM_LOOKUP_EXISTS: 9
+
+POLICY_SYM_FOUND_ROW: 10
+
+POLICY_SYM_FOUND_FIELD: 11
+
+POLICY_SYM_BOOL: 12
+
+POLICY_SYM_INT: 13
+
+POLICY_SYM_STR: 14
+
+POLICY_SYM_OK: 15
+
+POLICY_SYM_ERR: 16
+
+POLICY_SYM_NONE: 17
+
+POLICY_SYM_VAL: 18
+
+POLICY_SYM_AND: 19
+
+POLICY_SYM_OP_OTHER: 20
+
+SemaPolicySym: struct {
+    kind: Int,
+    text: String,
+    flag: Bool,
+    lookup_index: Int,
+    inner_kind: Int,
+    inner_text: String,
+    inner_flag: Bool,
+    inner_lookup: Int,
+    left_lookup: Int,
+    right_lookup: Int,
+}
+
+SemaPolicyBinding: struct {
+    name: String,
+    value: SemaPolicySym,
+}
+
+SemaPolicyJoinCol: struct {
+    join_col: String,
+    source_kind: String,
+    source_value: String,
+}
+
+SemaPolicyLookup: struct {
+    table: String,
+    columns: [SemaPolicyJoinCol],
+}
+
+SemaPolicyEvalState: struct {
+    row_fields: [SemaDataFilterField],
+    lookups: [SemaPolicyLookup],
+    requires_account: Bool,
+    failed_reason: String,
+}
+
+SemaPolicyBlockResult: struct {
+    returned: Bool,
+    value: SemaPolicySym,
+}
+
+SemaDBPolicyPlan: struct {
+    policy_name: String,
+    join_spec: String,
+}
+
+sema_policy_sym_plain: fn(kind: Int) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: kind, text: "", flag: false, lookup_index: -1, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: -1, right_lookup: -1}
+}
+
+sema_policy_sym_text: fn(kind: Int, text: String) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: kind, text: "{text}", flag: false, lookup_index: -1, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: -1, right_lookup: -1}
+}
+
+sema_policy_sym_bool: fn(flag: Bool) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: POLICY_SYM_BOOL, text: "", flag: flag, lookup_index: -1, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: -1, right_lookup: -1}
+}
+
+sema_policy_sym_lookup: fn(kind: Int, index: Int) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: kind, text: "", flag: false, lookup_index: index, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: -1, right_lookup: -1}
+}
+
+sema_policy_sym_wrap: fn(kind: Int, inner: SemaPolicySym) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: kind, text: "", flag: false, lookup_index: -1, inner_kind: inner.kind, inner_text: "{inner.text}", inner_flag: inner.flag, inner_lookup: inner.lookup_index, left_lookup: inner.left_lookup, right_lookup: inner.right_lookup}
+}
+
+sema_policy_sym_unwrap: fn(value: SemaPolicySym) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: value.inner_kind, text: "{value.inner_text}", flag: value.inner_flag, lookup_index: value.inner_lookup, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: value.left_lookup, right_lookup: value.right_lookup}
+}
+
+sema_policy_sym_and: fn(left: Int, right: Int) -> SemaPolicySym Never! {
+    SemaPolicySym{kind: POLICY_SYM_AND, text: "", flag: false, lookup_index: -1, inner_kind: POLICY_SYM_UNKNOWN, inner_text: "", inner_flag: false, inner_lookup: -1, left_lookup: left, right_lookup: right}
+}
+
+sema_policy_env_get: fn(env: [SemaPolicyBinding], name: String) -> SemaPolicySym Never! {
+    at := env.len() - 1
+    loop at >= 0 {
+        if env[at].name == name -> return env[at].value
+        at -= 1
+    }
+    sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+}
+
+sema_policy_env_set: fn(env: &[SemaPolicyBinding], name: String, value: SemaPolicySym) Never! {
+    at := env.len() - 1
+    loop at >= 0 {
+        if env[at].name == name {
+            env[at].value = value
+            return
+        }
+        at -= 1
+    }
+    env.push(SemaPolicyBinding{name: "{name}", value: value})
+}
+
+sema_policy_fail: fn(state: &SemaPolicyEvalState, reason: String) Never! {
+    if state.failed_reason == "" -> state.failed_reason = "{reason}"
+}
+
+sema_db_is_table_type: fn(name: String, parameters: [Type]) -> Bool Never! {
+    parameters.len() == 2 && (name == "Table" || (core_identity_in_module(name, "core.db") && name.ends_with(".Table")))
+}
+
+sema_db_policy_find_func: fn(name: String, module_hint: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Func? Never! {
+    graph: program.registration_graph ?? return None
+    current_name: module_text(graph.module_table, environment.module_identity)
+    // Prefer the current module when unqualified.
+    if module_hint == "" {
+        loop mod_idx in 0..<graph.modules.len() {
+            if graph.modules[mod_idx].module_name != current_name -> next
+            loop item in graph.modules[mod_idx].program.items {
+                if item == .Func(func) && func.name == name -> return Val(func)
+            }
+        }
+    }
+    loop mod_idx in 0..<graph.modules.len() {
+        mod_name: graph.modules[mod_idx].module_name
+        if module_hint != "" && mod_name != module_hint && !mod_name.ends_with(".{module_hint}") {
+            next
+        }
+        loop item in graph.modules[mod_idx].program.items {
+            if item == .Func(func) && func.name == name -> return Val(func)
+        }
+    }
+    None
+}
+
+sema_policy_str_literal: fn(expr: Expr) -> String? Never! {
+    if expr == .Paren(inner, _, _) -> return sema_policy_str_literal(inner)
+    if expr == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
+        }
+        if text.contains("\t") || text.contains("\n") -> return None
+        return Val(text)
+    }
+    None
+}
+
+sema_policy_is_op_variant: fn(expr: Expr, variant: String) -> Bool Never! {
+    if expr == .Paren(inner, _, _) -> return sema_policy_is_op_variant(inner, variant)
+    if expr == .EnumLit(_, name, _, args, _, _, _) -> return name == variant && args.len() == 0
+    if expr == .Field(base, member, _, _) && member == variant {
+        if base == .Ident(owner, _, _) && owner == "Op" -> return true
+        if base == .Field(_, owner, _, _) && owner == "Op" -> return true
+    }
+    false
+}
+
+sema_policy_is_row_field: fn(fields: [SemaDataFilterField], member: String) -> Bool Never! {
+    loop field in fields {
+        if field.name == member -> return true
+    }
+    false
+}
+
+sema_policy_key_struct_ok: fn(type_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    definition: sema_comparability_definition(environment, program, environment.module_identity, type_name) ?? return false
+    if !sema_data_filter_derived(definition) -> return false
+    if definition.kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.skip || field.computed -> next
+            if (field.shape_names.json ?? field.shape_names.text) != field.name -> return false
+        }
+        return true
+    }
+    false
+}
+
+sema_policy_col_from_sym: fn(join_col: String, sym: SemaPolicySym) -> SemaPolicyJoinCol? Never! {
+    if sym.kind == POLICY_SYM_ROW_FIELD {
+        return Val(SemaPolicyJoinCol{join_col: "{join_col}", source_kind: "field", source_value: "{sym.text}"})
+    }
+    if sym.kind == POLICY_SYM_CALLER {
+        return Val(SemaPolicyJoinCol{join_col: "{join_col}", source_kind: "caller", source_value: ""})
+    }
+    if sym.kind == POLICY_SYM_INT {
+        return Val(SemaPolicyJoinCol{join_col: "{join_col}", source_kind: "int", source_value: "{sym.text}"})
+    }
+    if sym.kind == POLICY_SYM_BOOL {
+        return Val(SemaPolicyJoinCol{join_col: "{join_col}", source_kind: "bool", source_value: if sym.flag -> "true" else -> "false"})
+    }
+    if sym.kind == POLICY_SYM_STR {
+        return Val(SemaPolicyJoinCol{join_col: "{join_col}", source_kind: "text", source_value: "{sym.text}"})
+    }
+    None
+}
+
+sema_policy_eval_key_lookup: fn(table_name: String, key_expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+    if key_expr == .Paren(inner, _, _) {
+        return sema_policy_eval_key_lookup(table_name, inner, env, state, depth, environment, program)
+    }
+    columns := [SemaPolicyJoinCol]{}
+    record_name := ""
+    record_fields := [jet_foundation.ExprField]{}
+    is_record := false
+    if key_expr == .StructLit(type_name, _, _, _, fields, _, _, _) {
+        record_name = "{type_name}"
+        record_fields = fields
+        is_record = true
+    } else if key_expr == .TypedLit(head, body, _, _) {
+        if head == .Val(head_ty) && head_ty == .Named(type_name) && body == .Fields(fields) {
+            record_name = "{type_name}"
+            record_fields = fields
+            is_record = true
+        }
+    }
+    if is_record {
+        if !sema_policy_key_struct_ok(record_name, environment, program) {
+            sema_policy_fail(state, "key struct `{record_name}` is not a derived `#Codable` record")
+            return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+        }
+        loop field in record_fields {
+            val: sema_policy_eval_expr(field.value, env, state, depth, environment, program)
+            col: sema_policy_col_from_sym(field.name, val) ?? {
+                sema_policy_fail(state, "key lookup on `{table_name}` uses a non-column key expression")
+                return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+            }
+            columns.push(col)
+        }
+    } else {
+        val: sema_policy_eval_expr(key_expr, env, state, depth, environment, program)
+        col: sema_policy_col_from_sym("key", val) ?? {
+            sema_policy_fail(state, "key lookup on `{table_name}` uses a non-column key expression")
+            return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+        }
+        columns.push(col)
+    }
+    if columns.len() == 0 {
+        sema_policy_fail(state, "key lookup on `{table_name}` has no key columns")
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    idx: state.lookups.len()
+    state.lookups.push(SemaPolicyLookup{table: "{table_name}", columns: columns})
+    sema_policy_sym_lookup(POLICY_SYM_LOOKUP, idx)
+}
+
+sema_policy_eval_binary: fn(op: BinOp, left_expr: Expr, right_expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+    left: sema_policy_eval_expr(left_expr, env, state, depth, environment, program)
+    right: sema_policy_eval_expr(right_expr, env, state, depth, environment, program)
+    if op == BinOp.Eq || op == BinOp.Ne {
+        is_eq: op == BinOp.Eq
+        if left.kind == POLICY_SYM_OP_READ && right.kind == POLICY_SYM_OP_READ {
+            return sema_policy_sym_bool(is_eq)
+        }
+        if left.kind == POLICY_SYM_OP_READ && right.kind == POLICY_SYM_OP_OTHER {
+            return sema_policy_sym_bool(!is_eq)
+        }
+        if right.kind == POLICY_SYM_OP_READ && left.kind == POLICY_SYM_OP_OTHER {
+            return sema_policy_sym_bool(!is_eq)
+        }
+        if left.kind == POLICY_SYM_LOOKUP && right.kind == POLICY_SYM_NONE && !is_eq {
+            return sema_policy_sym_lookup(POLICY_SYM_LOOKUP_EXISTS, left.lookup_index)
+        }
+        if right.kind == POLICY_SYM_LOOKUP && left.kind == POLICY_SYM_NONE && !is_eq {
+            return sema_policy_sym_lookup(POLICY_SYM_LOOKUP_EXISTS, right.lookup_index)
+        }
+        if left.kind == POLICY_SYM_VAL && left.inner_kind == POLICY_SYM_CALLER && right.kind == POLICY_SYM_NONE && !is_eq {
+            state.requires_account = true
+            return sema_policy_sym_bool(true)
+        }
+        if right.kind == POLICY_SYM_VAL && right.inner_kind == POLICY_SYM_CALLER && left.kind == POLICY_SYM_NONE && !is_eq {
+            state.requires_account = true
+            return sema_policy_sym_bool(true)
+        }
+        if left.kind == POLICY_SYM_BOOL && right.kind == POLICY_SYM_BOOL {
+            return sema_policy_sym_bool(if is_eq -> left.flag == right.flag else -> left.flag != right.flag)
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if op == BinOp.And {
+        if (left.kind == POLICY_SYM_BOOL && !left.flag) || (right.kind == POLICY_SYM_BOOL && !right.flag) {
+            return sema_policy_sym_bool(false)
+        }
+        if left.kind == POLICY_SYM_BOOL && left.flag -> return right
+        if right.kind == POLICY_SYM_BOOL && right.flag -> return left
+        if left.kind == POLICY_SYM_LOOKUP_EXISTS && right.kind == POLICY_SYM_LOOKUP_EXISTS {
+            return sema_policy_sym_and(left.lookup_index, right.lookup_index)
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if op == BinOp.Or {
+        if (left.kind == POLICY_SYM_BOOL && left.flag) || (right.kind == POLICY_SYM_BOOL && right.flag) {
+            return sema_policy_sym_bool(true)
+        }
+        if left.kind == POLICY_SYM_BOOL && !left.flag -> return right
+        if right.kind == POLICY_SYM_BOOL && !right.flag -> return left
+        if left.kind == POLICY_SYM_FOUND_FIELD && right.kind == POLICY_SYM_LOOKUP_EXISTS && left.lookup_index == right.lookup_index {
+            return right
+        }
+        if right.kind == POLICY_SYM_FOUND_FIELD && left.kind == POLICY_SYM_LOOKUP_EXISTS && left.lookup_index == right.lookup_index {
+            return left
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+}
+
+sema_policy_eval_expr: fn(expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+    if expr == .Paren(inner, _, _) {
+        return sema_policy_eval_expr(inner, env, state, depth, environment, program)
+    }
+    if expr == .Place(inner, _, _, _) {
+        return sema_policy_eval_expr(inner, env, state, depth, environment, program)
+    }
+    if expr == .Copy(inner, _, _) {
+        return sema_policy_eval_expr(inner, env, state, depth, environment, program)
+    }
+    if expr == .Ident(name, _, _) -> return sema_policy_env_get(env, name)
+    if expr == .Bool(flag, _, _) -> return sema_policy_sym_bool(flag)
+    if expr == .Int(value, _, _, _, _) -> return sema_policy_sym_text(POLICY_SYM_INT, "{value}")
+    if expr == .Str(_, _, _) {
+        if sema_policy_str_literal(expr) == .Val(text) {
+            return sema_policy_sym_text(POLICY_SYM_STR, text)
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .Absent(_, _) -> return sema_policy_sym_plain(POLICY_SYM_NONE)
+    if expr == .Present(inner, _, _) {
+        return sema_policy_sym_wrap(POLICY_SYM_VAL, sema_policy_eval_expr(inner, env, state, depth, environment, program))
+    }
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if variant == "None" && args.len() == 0 -> return sema_policy_sym_plain(POLICY_SYM_NONE)
+        if variant == "Val" && args.len() == 1 {
+            if args[0] == .Positional(inner) {
+                return sema_policy_sym_wrap(POLICY_SYM_VAL, sema_policy_eval_expr(inner, env, state, depth, environment, program))
+            }
+            if args[0] == .Named(_, inner) {
+                return sema_policy_sym_wrap(POLICY_SYM_VAL, sema_policy_eval_expr(inner, env, state, depth, environment, program))
+            }
+        }
+        if variant == "Read" && args.len() == 0 -> return sema_policy_sym_plain(POLICY_SYM_OP_READ)
+        if (variant == "Insert" || variant == "Update" || variant == "Delete") && args.len() == 0 {
+            return sema_policy_sym_plain(POLICY_SYM_OP_OTHER)
+        }
+    }
+    if expr == .Ok(inner, _, _) {
+        return sema_policy_sym_wrap(POLICY_SYM_OK, sema_policy_eval_expr(inner, env, state, depth, environment, program))
+    }
+    if expr == .Err(_, _, _) -> return sema_policy_sym_plain(POLICY_SYM_ERR)
+    if sema_policy_is_op_variant(expr, "Read") -> return sema_policy_sym_plain(POLICY_SYM_OP_READ)
+    if sema_policy_is_op_variant(expr, "Insert") || sema_policy_is_op_variant(expr, "Update") || sema_policy_is_op_variant(expr, "Delete") {
+        return sema_policy_sym_plain(POLICY_SYM_OP_OTHER)
+    }
+    if expr == .Field(base, member, _, _) {
+        owner: sema_policy_eval_expr(base, env, state, depth, environment, program)
+        if owner.kind == POLICY_SYM_ROW {
+            if sema_policy_is_row_field(state.row_fields, member) {
+                return sema_policy_sym_text(POLICY_SYM_ROW_FIELD, member)
+            }
+            sema_policy_fail(state, "row field `{member}` has no SQL field column")
+            return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+        }
+        if owner.kind == POLICY_SYM_FOUND_ROW {
+            return sema_policy_sym_lookup(POLICY_SYM_FOUND_FIELD, owner.lookup_index)
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .Unary(op, inner, _, _) {
+        if op == UnOp.Not {
+            val: sema_policy_eval_expr(inner, env, state, depth, environment, program)
+            if val.kind == POLICY_SYM_BOOL -> return sema_policy_sym_bool(!val.flag)
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .Binary(op, left, right, _, _) {
+        return sema_policy_eval_binary(op, left, right, env, state, depth, environment, program)
+    }
+    if expr == .Try(inner, _, _, _, _) {
+        val: sema_policy_eval_expr(inner, env, state, depth, environment, program)
+        if val.kind == POLICY_SYM_LOOKUP -> return val
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .OrFallback(inner, fallback, _, _, _) {
+        val: sema_policy_eval_expr(inner, env, state, depth, environment, program)
+        if val.kind == POLICY_SYM_VAL && val.inner_kind == POLICY_SYM_CALLER {
+            if fallback == .Return(ret_expr, _) {
+                if ret_expr == .Val(ret_val) {
+                    fb: sema_policy_eval_expr(ret_val, env, state, depth, environment, program)
+                    if fb.kind == POLICY_SYM_OK && fb.inner_kind == POLICY_SYM_BOOL && !fb.inner_flag {
+                        state.requires_account = true
+                        return sema_policy_sym_plain(POLICY_SYM_CALLER)
+                    }
+                }
+            }
+        }
+        if val.kind == POLICY_SYM_LOOKUP {
+            if fallback == .Return(ret_expr, _) {
+                if ret_expr == .Val(ret_val) {
+                    if ret_val == .Err(_, _, _) -> return val
+                    if ret_val == .Call(call, _) && call.name == "Err" -> return val
+                }
+            }
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .If(cond, then_body, then_val, else_body, else_val, _, _) {
+        if cond == .PatternTest(subject, _, _, _) {
+            return sema_policy_eval_if_match(expr, subject, env, state, depth, environment, program)
+        }
+        cond_val: sema_policy_eval_expr(cond, env, state, depth, environment, program)
+        if cond_val.kind == POLICY_SYM_BOOL {
+            if cond_val.flag {
+                block: sema_policy_eval_stmts(then_body, env, state, depth, environment, program)
+                if block.returned -> return block.value
+                return sema_policy_eval_expr(then_val, env, state, depth, environment, program)
+            } else {
+                block: sema_policy_eval_stmts(else_body, env, state, depth, environment, program)
+                if block.returned -> return block.value
+                return sema_policy_eval_expr(else_val, env, state, depth, environment, program)
+            }
+        }
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .MethodCall(receiver, method, _, _, _, args, _) {
+        recv: sema_policy_eval_expr(receiver, env, state, depth, environment, program)
+        if recv.kind == POLICY_SYM_CALLER && method == "raw" && args.len() == 0 {
+            return sema_policy_sym_plain(POLICY_SYM_CALLER)
+        }
+        if (method == "copy" || method == "move") && args.len() == 0 -> return recv
+        if recv.kind == POLICY_SYM_STORE && method == "table" && args.len() >= 1 {
+            if sema_policy_str_literal(args[0].expr) == .Val(table_name) {
+                return sema_policy_sym_text(POLICY_SYM_TABLE, table_name)
+            }
+            sema_policy_fail(state, "table name is not a string literal")
+            return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+        }
+        if recv.kind == POLICY_SYM_TABLE {
+            if method == "get" && args.len() == 1 {
+                return sema_policy_eval_key_lookup(recv.text, args[0].expr, env, state, depth, environment, program)
+            }
+            sema_policy_fail(state, "reads `{recv.text}` with `{method}()` instead of a key lookup")
+            return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+        }
+        if receiver == .Ident(mod_alias, _, _) && depth < 4 {
+            if sema_db_policy_find_func(method, mod_alias, environment, program) == .Val(func) {
+                return sema_policy_eval_call_func(func, args, env, state, depth + 1, environment, program)
+            }
+        }
+        sema_policy_fail(state, "calls `.{method}()` outside key lookups")
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    if expr == .Call(call, _) {
+        if call.name == "Ok" && call.args.len() == 1 {
+            return sema_policy_sym_wrap(POLICY_SYM_OK, sema_policy_eval_expr(call.args[0].expr, env, state, depth, environment, program))
+        }
+        if call.name == "Err" && call.args.len() == 1 {
+            return sema_policy_sym_plain(POLICY_SYM_ERR)
+        }
+        if call.name == "Val" && call.args.len() == 1 {
+            return sema_policy_sym_wrap(POLICY_SYM_VAL, sema_policy_eval_expr(call.args[0].expr, env, state, depth, environment, program))
+        }
+        if depth < 4 {
+            if sema_db_policy_find_func(call.name, "", environment, program) == .Val(func) {
+                return sema_policy_eval_call_func(func, call.args, env, state, depth + 1, environment, program)
+            }
+        }
+        sema_policy_fail(state, "calls `{call.name}()` outside key lookups")
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+}
+
+sema_policy_eval_call_func: fn(func: Func, args: [jet_foundation.CallArg], caller_env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+    if func.params.len() != args.len() {
+        sema_policy_fail(state, "calls `{func.name}()` with mismatched arity")
+        return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    }
+    inner_env := [SemaPolicyBinding]{}
+    loop i in 0..<func.params.len() {
+        val: sema_policy_eval_expr(args[i].expr, caller_env, state, depth, environment, program)
+        inner_env.push(SemaPolicyBinding{name: "{func.params[i].name}", value: val})
+    }
+    result: sema_policy_eval_stmts(func.body, inner_env, state, depth, environment, program)
+    result.value
+}
+
+sema_policy_pattern_has_variant: fn(pattern: Pattern, name: String) -> Bool Never! {
+    if pattern == .Variant(variant, _, _, _) -> return variant == name
+    if pattern == .Or(alts, _) {
+        loop alt in alts {
+            if sema_policy_pattern_has_variant(alt, name) -> return true
+        }
+    }
+    false
+}
+
+sema_policy_pattern_account_binding: fn(pattern: Pattern) -> String? Never! {
+    if pattern == .Variant(variant, bindings, _, _) && variant == "Account" && bindings.len() == 1 {
+        if bindings[0] == .Bind(name, _) -> return Val("{name}")
+        if bindings[0] == .Wildcard -> return Val("_")
+    }
+    None
+}
+
+sema_policy_clone_env: fn(env: [SemaPolicyBinding]) -> [SemaPolicyBinding] Never! {
+    out := [SemaPolicyBinding]{}
+    loop b in env {
+        v: b.value
+        out.push(
+            SemaPolicyBinding{
+                name: "{b.name}",
+                value: SemaPolicySym{
+                    kind: v.kind,
+                    text: "{v.text}",
+                    flag: v.flag,
+                    lookup_index: v.lookup_index,
+                    inner_kind: v.inner_kind,
+                    inner_text: "{v.inner_text}",
+                    inner_flag: v.inner_flag,
+                    inner_lookup: v.inner_lookup,
+                    left_lookup: v.left_lookup,
+                    right_lookup: v.right_lookup,
+                },
+            },
+        )
+    }
+    out
+}
+
+sema_policy_if_branch_stmts: fn(body: &&[Stmt], tail: Expr) -> [Stmt] Never! {
+    out := body.move()
+    out.push(Stmt.Expr{expr: tail})
+    out
+}
+
+// Evaluates a desugared value-producing `if subject == { .Arm -> ... }` chain
+// (`Expr.If` with `.PatternTest` conditions). Evaluates `subject` once so a
+// key lookup repeated in each desugared arm is recorded only once.
+sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+    subj: sema_policy_eval_expr(subject, env, state, depth, environment, program)
+    arms := [SwitchArm]{}
+    else_body := [Stmt]?{None}
+    cursor := root
+    loop {
+        if cursor == .If(cond, then_body, then_val, eb, ev, span, _) {
+            if cond == .PatternTest(_, _, _, _) {
+                arms.push(SwitchArm{cond: cond, body: sema_policy_if_branch_stmts(then_body.move(), then_val), span: span, through: None})
+                if eb.len() == 0 && ev == .If(_, _, _, _, _, _, _) {
+                    cursor = ev
+                    next
+                }
+                if eb.len() == 0 && ev == .NoElse(_, _) -> break
+                else_body = Val(sema_policy_if_branch_stmts(eb.move(), ev))
+                break
+            }
+        }
+        break
+    }
+    if subj.kind == POLICY_SYM_WHO {
+        return sema_policy_eval_who_switch(arms, else_body, env, state, depth, environment, program).value
+    }
+    if subj.kind == POLICY_SYM_LOOKUP {
+        return sema_policy_eval_lookup_switch(subj.lookup_index, arms, env, state, depth, environment, program).value
+    }
+    sema_policy_fail(state, "branches on values outside key lookups")
+    sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+}
+
+sema_policy_eval_who_switch: fn(arms: [SwitchArm], else_body: [Stmt]?, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+    account_arm := -1
+    account_name := ""
+    anon_arm := -1
+    loop i in 0..<arms.len() {
+        if arms[i].cond == .PatternTest(_, pat, _, _) {
+            if sema_policy_pattern_account_binding(pat) == .Val(bind_name) {
+                account_arm = i
+                account_name = bind_name
+            }
+            if sema_policy_pattern_has_variant(pat, "Anonymous") -> anon_arm = i
+        }
+    }
+    if account_arm < 0 {
+        sema_policy_fail(state, "branches on `who` without an `.Account` arm")
+        return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+    }
+    anon_ok := false
+    if anon_arm >= 0 {
+        anon_env := sema_policy_clone_env(env)
+        anon_res: sema_policy_eval_stmts(arms[anon_arm].body, anon_env, state, depth, environment, program)
+        if anon_res.value.kind == POLICY_SYM_NONE || (anon_res.value.kind == POLICY_SYM_OK && anon_res.value.inner_kind == POLICY_SYM_BOOL && !anon_res.value.inner_flag) {
+            anon_ok = true
+        }
+    } else if else_body == .Val(body) {
+        anon_env := sema_policy_clone_env(env)
+        anon_res: sema_policy_eval_stmts(body, anon_env, state, depth, environment, program)
+        if anon_res.value.kind == POLICY_SYM_NONE || (anon_res.value.kind == POLICY_SYM_OK && anon_res.value.inner_kind == POLICY_SYM_BOOL && !anon_res.value.inner_flag) {
+            anon_ok = true
+        }
+    }
+    if !anon_ok {
+        sema_policy_fail(state, "anonymous caller branch is not a simple denial")
+        return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+    }
+    state.requires_account = true
+    if account_name != "" && account_name != "_" {
+        sema_policy_env_set(env, account_name, sema_policy_sym_plain(POLICY_SYM_CALLER))
+    }
+    sema_policy_eval_stmts(arms[account_arm].body, env, state, depth, environment, program)
+}
+
+sema_policy_pat_first_bind: fn(bindings: [jet_foundation.PatSlot]) -> String Never! {
+    if bindings.len() == 1 {
+        if bindings[0] == .Bind(name, _) -> return "{name}"
+    }
+    "_"
+}
+
+sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+    ok_arm := -1
+    ok_bind := ""
+    val_arm := -1
+    val_bind := ""
+    none_arm := -1
+    err_arm := -1
+    loop i in 0..<arms.len() {
+        if arms[i].cond == .PatternTest(_, pat, _, _) {
+            if pat == .Ok(bind, _, _, _) {
+                ok_arm = i
+                ok_bind = "{bind}"
+            } else if pat == .Present(bind, _, _, _) {
+                val_arm = i
+                val_bind = "{bind}"
+            } else if pat == .Absent(_) { none_arm = i } else if pat == .Err(_, _, _, _) {
+                err_arm = i
+            } else if pat == .Variant(vname, bindings, _, _) {
+                if vname == "Ok" {
+                    ok_arm = i
+                    ok_bind = sema_policy_pat_first_bind(bindings)
+                } else if vname == "Val" {
+                    val_arm = i
+                    val_bind = sema_policy_pat_first_bind(bindings)
+                } else if vname == "None" { none_arm = i } else if vname == "Err" { err_arm = i }
+            }
+        }
+    }
+    // Pattern 1: `.Ok(found)` + `.Err(e)`
+    if ok_arm >= 0 && err_arm >= 0 {
+        if ok_bind != "" && ok_bind != "_" {
+            sema_policy_env_set(env, ok_bind, sema_policy_sym_lookup(POLICY_SYM_LOOKUP, lookup_index))
+        }
+        return sema_policy_eval_stmts(arms[ok_arm].body, env, state, depth, environment, program)
+    }
+    // Pattern 2: `.Val(m)` + `.None` (+ `.Err(e)`)
+    if val_arm >= 0 && none_arm >= 0 {
+        val_env := sema_policy_clone_env(env)
+        if val_bind != "" && val_bind != "_" {
+            sema_policy_env_set(val_env, val_bind, sema_policy_sym_lookup(POLICY_SYM_FOUND_ROW, lookup_index))
+        }
+        val_res: sema_policy_eval_stmts(arms[val_arm].body, val_env, state, depth, environment, program)
+        none_env := sema_policy_clone_env(env)
+        none_res: sema_policy_eval_stmts(arms[none_arm].body, none_env, state, depth, environment, program)
+        // Direct value/return switch: `.Val` -> Ok(true), `.None` -> Ok(false).
+        val_is_true: val_res.value.kind == POLICY_SYM_OK && val_res.value.inner_kind == POLICY_SYM_BOOL && val_res.value.inner_flag
+        none_is_false: none_res.value.kind == POLICY_SYM_OK && none_res.value.inner_kind == POLICY_SYM_BOOL && !none_res.value.inner_flag
+        if val_is_true && none_is_false {
+            return SemaPolicyBlockResult{returned: val_res.returned && none_res.returned, value: sema_policy_sym_wrap(POLICY_SYM_OK, sema_policy_sym_lookup(POLICY_SYM_LOOKUP_EXISTS, lookup_index))}
+        }
+        // Flag-assignment switch: `.Val(m) { member = true; owner = m.owner }`, `.None {}`.
+        if !val_res.returned && !none_res.returned {
+            loop i in 0..<env.len() {
+                before: env[i].value
+                after_val: sema_policy_env_get(val_env, env[i].name)
+                after_none: sema_policy_env_get(none_env, env[i].name)
+                if before.kind == POLICY_SYM_BOOL && !before.flag && after_none.kind == POLICY_SYM_BOOL && !after_none.flag {
+                    if after_val.kind == POLICY_SYM_BOOL && after_val.flag {
+                        env[i].value = sema_policy_sym_lookup(POLICY_SYM_LOOKUP_EXISTS, lookup_index)
+                    } else if after_val.kind == POLICY_SYM_FOUND_FIELD && after_val.lookup_index == lookup_index {
+                        env[i].value = after_val
+                    }
+                }
+            }
+            return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+        }
+    }
+    sema_policy_fail(state, "key lookup branch inspects row contents beyond presence")
+    SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+}
+
+sema_policy_eval_stmts: fn(stmts: [Stmt], env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+    last := sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+    loop i in 0..<stmts.len() {
+        stmt: stmts[i]
+        if stmt == .Val(binding) {
+            val: sema_policy_eval_expr(binding.init, env, state, depth, environment, program)
+            sema_policy_env_set(env, binding.name, val)
+            last = val
+            next
+        }
+        if stmt == .Assign(target, op, _, value) {
+            if target == .Local(name, _) && op == None {
+                val: sema_policy_eval_expr(value, env, state, depth, environment, program)
+                sema_policy_env_set(env, name, val)
+                last = val
+                next
+            }
+            sema_policy_fail(state, "assigns outside local flags")
+            return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+        }
+        if stmt == .Return(ret_expr, _) {
+            val: if ret_expr == .Val(inner) -> sema_policy_eval_expr(inner, env, state, depth, environment, program) else -> sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
+            return SemaPolicyBlockResult{returned: true, value: val}
+        }
+        if stmt == .Expr(expr) {
+            last = sema_policy_eval_expr(expr, env, state, depth, environment, program)
+            next
+        }
+        if stmt == .Switch(subject, arms, else_body, _) {
+            subj: sema_policy_eval_expr(subject, env, state, depth, environment, program)
+            if subj.kind == POLICY_SYM_WHO {
+                res: sema_policy_eval_who_switch(arms, else_body, env, state, depth, environment, program)
+                if res.returned -> return res
+                last = res.value
+                next
+            }
+            if subj.kind == POLICY_SYM_LOOKUP {
+                res: sema_policy_eval_lookup_switch(subj.lookup_index, arms, env, state, depth, environment, program)
+                if res.returned -> return res
+                last = res.value
+                next
+            }
+            if subj.kind == POLICY_SYM_BOOL && subj.flag {
+                matched := false
+                loop arm in arms {
+                    cond_val: sema_policy_eval_expr(arm.cond, env, state, depth, environment, program)
+                    if cond_val.kind == POLICY_SYM_BOOL {
+                        if cond_val.flag {
+                            res: sema_policy_eval_stmts(arm.body, env, state, depth, environment, program)
+                            if res.returned -> return res
+                            last = res.value
+                            matched = true
+                            break
+                        }
+                        next
+                    }
+                    sema_policy_fail(state, "branch condition depends on runtime values outside key lookups")
+                    return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+                }
+                if !matched && else_body == .Val(body) {
+                    res: sema_policy_eval_stmts(body, env, state, depth, environment, program)
+                    if res.returned -> return res
+                    last = res.value
+                }
+                next
+            }
+            sema_policy_fail(state, "branches on values outside key lookups")
+            return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+        }
+        if stmt == .While(_, _, _, _, _) || stmt == .For(_, _, _, _, _, _, _, _, _) || stmt == .Loop(_, _, _, _) || stmt == .CountedLoop(_, _, _, _, _, _, _) {
+            sema_policy_fail(state, "uses a loop")
+            return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+        }
+        sema_policy_fail(state, "uses control flow outside key lookups")
+        return SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
+    }
+    SemaPolicyBlockResult{returned: false, value: last}
+}
+
+sema_policy_collect_used_lookups: fn(sym: SemaPolicySym, out: &[Int]) -> Bool Never! {
+    if sym.kind == POLICY_SYM_LOOKUP_EXISTS {
+        if !out.contains(sym.lookup_index) -> out.push(sym.lookup_index)
+        return true
+    }
+    if sym.kind == POLICY_SYM_AND {
+        if !out.contains(sym.left_lookup) -> out.push(sym.left_lookup)
+        if !out.contains(sym.right_lookup) -> out.push(sym.right_lookup)
+        return true
+    }
+    if sym.kind == POLICY_SYM_BOOL && sym.flag -> return true
+    false
+}
+
+sema_policy_encode_join: fn(requires_account: Bool, lookups: [SemaPolicyLookup], used: [Int]) -> String Never! {
+    lines := [String]{"join\t{if requires_account -> "1" else -> "0"}"}
+    loop idx in used {
+        lookup: lookups[idx]
+        lines.push("table\t{lookup.table}")
+        loop col in lookup.columns {
+            lines.push("col\t{col.join_col}\t{col.source_kind}\t{col.source_value}")
+        }
+    }
+    lines.join("\n")
+}
+
+// Analyzes `policy_arg` passed to `Table<K, T>.guard(policy_arg)` and returns
+// its display name plus the compiled join spec (`join\t...`) or a per-row
+// explanation (`per_row\t...`).
+sema_db_policy_plan: fn(policy_arg: Expr, row_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDBPolicyPlan Never! {
+    policy_name := "<lambda>"
+    params := [String]{}
+    body := [Stmt]{}
+    if policy_arg == .Ident(name, _, _) {
+        policy_name = "{name}"
+        func: sema_db_policy_find_func(name, "", environment, program) ?? return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy function `{name}` is not visible as source"}
+        loop param in func.params -> params.push("{param.name}")
+        body = func.body
+    } else if policy_arg == .Field(base, name, _, _) && base == .Ident(alias, _, _) {
+        policy_name = "{alias}.{name}"
+        func: sema_db_policy_find_func(name, alias, environment, program) ?? return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy function `{alias}.{name}` is not visible as source"}
+        loop param in func.params -> params.push("{param.name}")
+        body = func.body
+    } else if policy_arg == .Lambda(lambda, _) {
+        loop param in lambda.params -> params.push("{param.name}")
+        if lambda.body == .Block(stmts) -> body = stmts else if lambda.body == .Expr(expr) {
+            body = [Stmt]{Stmt.Expr{expr: expr}}
+        }
+    } else {
+        return SemaDBPolicyPlan{policy_name: "<value>", join_spec: "per_row\tpolicy is a dynamic function value"}
+    }
+    if params.len() != 4 {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy does not take (row, op, who, store)"}
+    }
+    row_fields: sema_data_filter_fields(row_type, environment, program)
+    if row_fields.len() == 0 {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\trow type has no SQL field columns"}
+    }
+    env := [SemaPolicyBinding]{
+        SemaPolicyBinding{name: "{params[0]}", value: sema_policy_sym_plain(POLICY_SYM_ROW)},
+        SemaPolicyBinding{name: "{params[1]}", value: sema_policy_sym_plain(POLICY_SYM_OP_READ)},
+        SemaPolicyBinding{name: "{params[2]}", value: sema_policy_sym_plain(POLICY_SYM_WHO)},
+        SemaPolicyBinding{name: "{params[3]}", value: sema_policy_sym_plain(POLICY_SYM_STORE)},
+    }
+    state := SemaPolicyEvalState{row_fields: row_fields, lookups: [SemaPolicyLookup]{}, requires_account: false, failed_reason: ""}
+    result: sema_policy_eval_stmts(body, env, state, 0, environment, program)
+    if state.failed_reason != "" {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\t{state.failed_reason}"}
+    }
+    if result.value.kind != POLICY_SYM_OK {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy read path does not reduce to key lookups"}
+    }
+    inner: sema_policy_sym_unwrap(result.value)
+    used := [Int]{}
+    if !sema_policy_collect_used_lookups(inner, used) {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy read result depends on data beyond key presence"}
+    }
+    if used.len() == 0 && !state.requires_account {
+        return SemaDBPolicyPlan{policy_name: policy_name, join_spec: "per_row\tpolicy has no key lookups"}
+    }
+    SemaDBPolicyPlan{policy_name: policy_name, join_spec: sema_policy_encode_join(state.requires_account, state.lookups, used)}
+}

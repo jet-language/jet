@@ -281,6 +281,58 @@ jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: Sy
     }
 }
 
+jet_cli_str_literal: fn(function: FnBody, node_id: Int) -> String Never! {
+    text := ""
+    if body_node(function.tree, node_id).kind == .StrLit(parts) {
+        loop part in parts {
+            if part == .Literal(piece) -> text = "{text}{piece}"
+        }
+    }
+    text
+}
+
+jet_cli_policy_choice_text: fn(policy_name: String, join_spec: String) -> String Never! {
+    lines: join_spec.split("\n").to_list()
+    if lines.len() > 0 {
+        head: lines[0].split("\t").to_list()
+        if head.len() >= 2 && head[0] == "join" {
+            tables := [String]{}
+            loop i in 1..<lines.len() {
+                parts: lines[i].split("\t").to_list()
+                if parts.len() == 2 && parts[0] == "table" && !tables.contains(parts[1]) {
+                    tables.push("{parts[1]}")
+                }
+            }
+            if tables.len() > 0 {
+                return "row policy `{policy_name}` compiles into queries as a SQL join on `{tables.join("`, `")}`"
+            }
+            return "row policy `{policy_name}` compiles into queries as a caller check (no per-row reads)"
+        }
+        if head.len() >= 2 && head[0] == "per_row" {
+            return "row policy `{policy_name}` runs per row, memoized per key in the transaction ({head[1]})"
+        }
+    }
+    "row policy `{policy_name}` runs per row, memoized per key in the transaction"
+}
+
+// The row-policy choices of the program's own `functions`, at the function's
+// line: each `Table.guard(policy)` call lowered to `Table.__guard_plan`,
+// naming whether its read path compiles into queries as a SQL join or runs
+// per row, memoized per key in the transaction.
+jet_cli_policy_choices: fn(functions: [FnBody], _decls: DeclTable, _symbols: SymbolTable, out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || module_is_core(function.module_identity) -> next
+        loop node in function.tree.nodes {
+            if node.kind == .MethodCall(_, method, _, args) && method.name == "__guard_plan" && args.len() == 3 {
+                policy_name: jet_cli_str_literal(function, args[0].value)
+                join_spec: jet_cli_str_literal(function, args[1].value)
+                choice: jet_cli_function_choice("rights", function, jet_cli_policy_choice_text(policy_name, join_spec))
+                if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+            }
+        }
+    }
+}
+
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
     if !json {
         text := "Choices: scope={scope} source={file} profile={profile}\n"
@@ -351,6 +403,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_rights_choices(inputs.functions, choices)
             jet_cli_context_choices(inputs.functions, choices)
             jet_cli_live_read_choices(inputs.functions, inputs.decls, inputs.symbols, choices)
+            jet_cli_policy_choices(inputs.functions, inputs.decls, inputs.symbols, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

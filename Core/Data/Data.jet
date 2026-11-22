@@ -408,6 +408,7 @@ Group: struct<K, V> {
 // query and ignores the condition.
 priv QueryCell: struct<T> {
     run: fn(String, [String]) -> [T] DataError!,
+    count_by: (fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?,
 }
 
 priv QueryState: struct {
@@ -434,6 +435,116 @@ Query: struct<T> {
     limit: fn(self, count: Int) -> Query<T> Never! {
         most: if self.__take == .Val(held) && held < count -> held else -> count
         Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most)}
+    }
+
+    // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
+    // when `column` names a table's field column and the source supports SQL
+    // grouping, otherwise reads the query's rows and counts in memory.
+    __count_by_int: fn(self, column: String, key: &&fn(T) -[]> Int) -[DB.Read]> [Int:Int] DataError! {
+        if column != "" {
+            if query_count_by_sql<T>(self, column, "", [String]{}) == {
+                .Ok(found) -> {
+                    if found == .Val(groups) {
+                        if groups.len() > self.__limits.max_groups {
+                            return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
+                        }
+                        out := [Int:Int]{}
+                        parsed := true
+                        loop entry in groups {
+                            if Int.parse(entry.key) == .Ok(number) -> out[number] = entry.count else {
+                                parsed = false
+                                break
+                            }
+                        }
+                        if parsed -> return Ok(out)
+                    }
+                }
+                .Err(failure) -> return Err(failure)
+            }
+        }
+        rows: self.collect() ?? return Err(err)
+        limits: self.__limits.copy()
+        out := [Int:Int]{}
+        loop row in rows {
+            group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
+            if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
+                if out.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.count_by"))
+                }
+                out[group_key] = 1
+            }
+        }
+        Ok(out)
+    }
+
+    __count_by_string: fn(self, column: String, key: &&fn(T) -[]> String) -[DB.Read]> [String:Int] DataError! {
+        if column != "" {
+            if query_count_by_sql<T>(self, column, "", [String]{}) == {
+                .Ok(found) -> {
+                    if found == .Val(groups) {
+                        if groups.len() > self.__limits.max_groups {
+                            return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
+                        }
+                        out := [String:Int]{}
+                        loop entry in groups -> out[entry.key.copy()] = entry.count
+                        return Ok(out)
+                    }
+                }
+                .Err(failure) -> return Err(failure)
+            }
+        }
+        rows: self.collect() ?? return Err(err)
+        limits: self.__limits.copy()
+        out := [String:Int]{}
+        loop row in rows {
+            group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
+            if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
+                if out.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.count_by"))
+                }
+                out[group_key] = 1
+            }
+        }
+        Ok(out)
+    }
+
+    __count_by_bool: fn(self, column: String, key: &&fn(T) -[]> Bool) -[DB.Read]> [Bool:Int] DataError! {
+        if column != "" {
+            if query_count_by_sql<T>(self, column, "", [String]{}) == {
+                .Ok(found) -> {
+                    if found == .Val(groups) {
+                        if groups.len() > self.__limits.max_groups {
+                            return Err(data_error(DataErrorKind.Limit, "max_groups {self.__limits.max_groups} exceeded", "query.count_by"))
+                        }
+                        out := [Bool:Int]{}
+                        parsed := true
+                        loop entry in groups {
+                            if entry.key == "1" || entry.key == "true" -> out[true] = entry.count else if entry.key == "0" || entry.key == "false" {
+                                out[false] = entry.count
+                            } else {
+                                parsed = false
+                                break
+                            }
+                        }
+                        if parsed -> return Ok(out)
+                    }
+                }
+                .Err(failure) -> return Err(failure)
+            }
+        }
+        rows: self.collect() ?? return Err(err)
+        limits: self.__limits.copy()
+        out := [Bool:Int]{}
+        loop row in rows {
+            group_key: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.count_by"))
+            if out.get(group_key) == .Val(held) -> out[group_key] = held + 1 else {
+                if out.len() >= limits.max_groups {
+                    return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.count_by"))
+                }
+                out[group_key] = 1
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -756,7 +867,11 @@ priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run:
 }
 
 priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move()}}, __take: None}
+    query_narrowing_grouped<T>(steps, one_shot, limits, run.move(), None)
+}
+
+priv query_narrowing_grouped: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!, count_by: &&(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?) -> Query<T> Never! {
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move(), count_by: count_by.move()}}, __take: None}
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -792,10 +907,27 @@ priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> 
     Ok(out)
 }
 
+// Grouped row counts over `column` narrowed by SQL `condition` and `values`,
+// or None when the query's source cannot run a SQL `GROUP BY` (for example a
+// non-table query, a limited query, or a non-joinable row policy).
+priv query_count_by_sql: fn<T>(query: Query<T>, column: String, condition: String, values: [String]) -[DB.Read]> [{key: String, count: Int}]? DataError! {
+    if query.__take != None -> return Ok(None)
+    cell: query.__cell.guard_read()
+    counter: cell.value.count_by ?? return Ok(None)
+    if query.__one_shot {
+        state := query.__state.guard_edit()
+        if state.value.consumed {
+            return Err(data_error(DataErrorKind.State, "query has already been collected", "query.count_by"))
+        }
+        state.value.consumed = true
+    }
+    counter(column, condition, values)
+}
+
 // A reusable query over a source that reads its rows narrowed by a SQL
 // condition (QueryCell): a database table's `query()`.
-__query_narrowed: fn<T>(step: String, read: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
-    query_narrowing<T>([String]{step}, false, DataLimits.safe(), read)
+__query_narrowed: fn<T>(step: String, read: &&fn(String, [String]) -> [T] DataError!, count_by: &&(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?{None}) -> Query<T> Never! {
+    query_narrowing_grouped<T>([String]{step}, false, DataLimits.safe(), read.move(), count_by.move())
 }
 
 // `data.query(rows)`: a reusable scan of an in-memory row list.
@@ -1125,18 +1257,35 @@ __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
 // not write it so, and then `values` is unused (QueryCell). They come before
 // the predicate, which may take the locals they read.
 __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: &&fn(T) -> Bool) -> Query<T> Never! {
-    query_narrowing<T>(query_steps(query.__steps, "filter"), false, query.__limits.copy(), fn(outer: String, bound: [String]) {
-        joined := if condition == "" -> [String]{} else -> values.copy()
-        joined.extend(bound.copy())
-        narrowed: if condition == "" -> outer.copy() else if outer == "" -> condition.copy() else -> "({condition}) AND ({outer})"
-        rows: query_read<T>(query, narrowed, joined) ?? return Err(err)
-        out := [T]{}
-        loop row in rows {
-            keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
-            if keep -> out.push(row.copy())
-        }
-        Ok(out)
-    })
+    count_by: if condition != "" && query.__take == None -> {
+        source: query.copy()
+        filter_condition: condition.copy()
+        filter_values: values.copy()
+        Val(fn(column: String, outer: String, bound: [String]) -[DB.Read]> [{key: String, count: Int}]? DataError! {
+            joined := filter_values.copy()
+            joined.extend(bound.copy())
+            narrowed: if outer == "" -> filter_condition.copy() else -> "({filter_condition}) AND ({outer})"
+            query_count_by_sql<T>(source, column, narrowed, joined)
+        })
+    } else -> None
+    query_narrowing_grouped<T>(
+        query_steps(query.__steps, "filter"),
+        false,
+        query.__limits.copy(),
+        fn(outer: String, bound: [String]) {
+            joined := if condition == "" -> [String]{} else -> values.copy()
+            joined.extend(bound.copy())
+            narrowed: if condition == "" -> outer.copy() else if outer == "" -> condition.copy() else -> "({condition}) AND ({outer})"
+            rows: query_read<T>(query, narrowed, joined) ?? return Err(err)
+            out := [T]{}
+            loop row in rows {
+                keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
+                if keep -> out.push(row.copy())
+            }
+            Ok(out)
+        },
+        count_by,
+    )
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.

@@ -1,0 +1,23 @@
+# `Query.count_by` compiles to one SQL `GROUP BY` query, and `my_projects`
+# runs two statements whatever the number of projects (policies included),
+# because key-lookup policies compile into the query as a SQL join. A policy
+# that inspects row contents beyond key presence runs per row, memoized per
+# key in the transaction, and `jet inspect choices` names both.
+fixture: CountByIsOneQuery.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = count_by_is_one_query.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
+step choices: jet inspect choices main.jet
+exit: 0
+stdout: ~ "in projects: row policy `project_policy` compiles into queries as a SQL join on `members`" # key-lookup policy compiled as SQL join
+stdout: ~ "in tasks: row policy `task_policy` compiles into queries as a SQL join on `members`" # key-lookup policy compiled as SQL join
+stdout: ~ "in audits: row policy `audit_policy` runs per row, memoized per key in the transaction" # non-joinable policy runs per row memoized

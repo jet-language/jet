@@ -6390,14 +6390,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3211,
+      "line": 3360,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3595,
+      "line": 3744,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -12836,8 +12836,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 388:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 397:5 | "vault recipient export provider boundary" |
 | Core | Core/DB/Query.jet | 172:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Data/Data.jet | 3211:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3595:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3360:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3744:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Encoding/CBOR.jet | 110:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |

@@ -1,0 +1,41 @@
+// A parameter or result typed with a state (or state group) carries that
+// typestate, so calling another state's method through it is refused (E0150).
+Order: struct {
+    state {
+        Draft -> Confirmed, Canceled
+        Confirmed -> Shipped, Canceled
+        Shipped
+        Canceled
+        Open: Draft | Confirmed
+    }
+
+    id: Int,
+
+    start: fn(id: Int) -> Order.Draft { Order{id: id} }
+
+    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+
+    ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+
+    label: fn(self: &Order.Confirmed) -> String { "confirmed:{self.id}" }
+
+    cancel: fn(self: &&Order.Open) -> Order.Canceled { self }
+}
+
+make_draft: fn(id: Int) -> Order.Draft { Order.start(id) }
+
+ship_draft_param: fn(order: &&Order.Draft) -> String { "{order.ship().id}" }
+
+ship_open_group_param: fn(order: &&Order.Open) -> String { "{order.ship().id}" }
+
+label_draft_param: fn(order: &Order.Draft) -> String { order.label() }
+
+ship_confirmed_param: fn(order: &&Order.Confirmed) -> Order.Shipped { order.ship() }
+
+run: fn() {
+    ok: make_draft(1).confirm()
+    _ := ship_confirmed_param(ok.move())
+    _ := make_draft(2).ship()
+    draft: make_draft(3)
+    _ := draft.ship()
+}
