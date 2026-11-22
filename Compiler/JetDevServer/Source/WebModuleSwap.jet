@@ -387,9 +387,15 @@ WebModuleSwapPlan: struct {
 
     applied_snapshot: fn(self) -> WebModuleSwapSnapshot {
         snapshot := self.candidate
-        loop kept in self.preserved {
+        preserved := self.preserved
+        preserved.reverse()
+        loop preserved.len() > 0 {
+            kept: preserved.pop() ?? break
             loop index in 0..<snapshot.state.len() {
-                if snapshot.state[index].same_slot(kept) -> snapshot.state[index] = kept
+                if snapshot.state[index].same_slot(kept) {
+                    snapshot.state[index] = kept.move()
+                    break
+                }
             }
         }
         snapshot

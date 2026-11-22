@@ -110,7 +110,7 @@ CoreMemberStatus: struct {
 
 canvas_find: fn(checker: LSPChecker, path: String, src: String, query: String) -> String Err! {
     context: open_query_context(checker, path, src)
-    needle: query.trim()
+    needle: "{query.trim()}"
     if needle.is_empty() -> return Ok(query_ok("find", src, "[]", "\"impact\":null,\"diff\":null"))
     // Lowered once: each search below compares against it.
     lowered: needle.to_ascii_lower()
@@ -140,7 +140,7 @@ canvas_find: fn(checker: LSPChecker, path: String, src: String, query: String) -
 
 canvas_project_find: fn(checker: LSPChecker, entry: String, selected_path: String, selected_src: String, query: String, expected_project_revision: String?) -> String Err! {
     context: open_project_query_context(checker, entry, selected_path, selected_src, expected_project_revision)
-    needle: query.trim()
+    needle: "{query.trim()}"
     // Lowered once: each search below compares against it.
     lowered: needle.to_ascii_lower()
     results := [String]{}
