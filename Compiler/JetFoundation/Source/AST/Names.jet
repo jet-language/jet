@@ -72,13 +72,8 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
     if table.ends[id] - first != len -> return false
     if len == 0 -> return true
     if table.bytes[first] != bytes[start] -> return false
-    mut_a := I64{first} + I64{1}
-    mut_b := I64{start} + I64{1}
-    limit := I64{end}
-    loop mut_b < limit {
-        if table.bytes[Int{mut_a}] != bytes[Int{mut_b}] -> return false
-        mut_a += I64{1}
-        mut_b += I64{1}
+    loop offset in 1..<len {
+        if table.bytes[first + offset] != bytes[start + offset] -> return false
     }
     true
 }
@@ -91,7 +86,8 @@ name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) ->
     loop {
         entry: table.slots[slot]
         if entry == 0 -> break
-        if name_bytes_equal(table, entry - 1, hash, bytes, start, end) -> return slot
+        id: entry - 1
+        if table.hashes[id] == hash && name_bytes_equal(table, id, hash, bytes, start, end) -> return slot
         slot = (slot + 1) & mask
     }
     slot

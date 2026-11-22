@@ -192,26 +192,12 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
     // depends on which part built what. Each struct's members are also one
     // line each as the emission log prints them (X64Module.jet
     // ir_x64_log_fields), in merged row order.
-    logged := [[String]]{}
-    loop _ in 0..<out.types.len() -> logged.push([String]{})
     loop part in 0..<parts.len() {
         // The part's member lists the merged rows take, by list.
         wanted := [Int:Int]{}
         loop (local, list) in parts[part].debug_members {
             row: ir_merge_reached_type(g, part, local)
             if row < 0 || out.debug_members.get(row) != None -> next
-            identity: ir_type_name(parts[part].types[local].ty)
-            loop member in parts[part].member_lists[list] {
-                size: if member.boxed || member.ty < 0 -> 8 else -> parts[part].types[member.ty].size
-                // The member's checked type last (it may hold spaces): a
-                // reader folds an offset into a nested list or Option by it.
-                ty: if {
-                    member.boxed -> "box"
-                    member.ty < 0 -> "-"
-                    else -> ir_type_name(parts[part].types[member.ty].ty)
-                }
-                logged[row].push("field {identity} {member.offset} {size} {member.name} {ty}")
-            }
             out.debug_members[row] = -1
             wanted[list] = row
         }
@@ -260,7 +246,6 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             out.variant_lists.push(found.move())
         }
     }
-    loop lines in logged.move() -> out.struct_fields.extend(lines.move())
     loop (row, part) in g.name_part -> out.names.push(parts[part].names[g.name_local[row]].copy())
     loop (row, part) in g.data_part {
         local: g.data_local[row]

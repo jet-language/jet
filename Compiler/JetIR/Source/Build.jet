@@ -1473,33 +1473,33 @@ ir_function_id: fn(m: &IRModule, p: IRProgram, key: String, type_args: [Type]) -
 
 // ir_function_id of the checked function at row `row`.
 ir_function_row_id: fn(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) -> Int? Never! {
-    function: p.functions[row]
     // A Core stand-in has no body to build: only calls bound to the Core
     // image reach it.
-    if function.stand_in -> return None
-    if type_args.len() == 0 || (function.generic_params.len() == 0 && ir_owner_binders(p, function).len() == 0) {
+    if p.functions[row].stand_in -> return None
+    if type_args.len() == 0 && m.ids[row] >= 0 -> return Val(m.ids[row])
+    if type_args.len() == 0 || (p.functions[row].generic_params.len() == 0 && ir_owner_binders(p, p.functions[row]).len() == 0) {
         if m.ids[row] >= 0 -> return Val(m.ids[row])
         id: m.functions.len()
-        made := ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line)
-        made.inline_always = function.is_inline_always
-        made.frame_bound = function.frame_bound
-        made.max_depth = function.max_depth
+        made := ir_function_new(p.functions[row].name, p.functions[row].key, ir_symbol_name(p.functions[row]), p.functions[row].source_file, p.functions[row].line)
+        made.inline_always = p.functions[row].is_inline_always
+        made.frame_bound = p.functions[row].frame_bound
+        made.max_depth = p.functions[row].max_depth
         m.functions.push(made)
-        name_rows_set(m.function_rows, function.key, id)
+        name_rows_set(m.function_rows, p.functions[row].key, id)
         m.ids[row] = id
         m.queue.push(IRQueued{row: row, id: id, args: [Type]{}})
         return Val(id)
     }
     // An instance binds every one of its type parameters.
-    if type_args.len() != ir_generic_names(p, function).len() -> return None
+    if type_args.len() != ir_generic_names(p, p.functions[row]).len() -> return None
     spelled: loop arg in type_args -> type_carrier_identity(arg)
     concrete: type_args.copy()
-    instance: "{function.key}<{spelled.join(", ")}>"
+    instance: "{p.functions[row].key}<{spelled.join(", ")}>"
     if name_rows_value(m.instances, instance) == .Val(known) -> return Val(known)
     id: m.functions.len()
-    made := ir_hashed_function(function.name, instance, "{ir_symbol_name(function)}__", function.source_file, function.line)
-    made.inline_always = function.is_inline_always
-    made.max_depth = function.max_depth
+    made := ir_hashed_function(p.functions[row].name, instance, "{ir_symbol_name(p.functions[row])}__", p.functions[row].source_file, p.functions[row].line)
+    made.inline_always = p.functions[row].is_inline_always
+    made.max_depth = p.functions[row].max_depth
     m.functions.push(made)
     name_rows_set(m.function_rows, instance, id)
     name_rows_set(m.instances, instance, id)
@@ -1732,12 +1732,11 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     }
     kept_keys := [String]{}
     loop kept in kept_rows {
-        function: p.functions[kept]
-        if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None {
+        if p.functions[kept].generic_params.len() > 0 || ir_owner_binders(p, p.functions[kept]).len() > 0 || p.intrinsics.get(p.functions[kept].key) != None {
             next
         }
-        roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
-        kept_keys.push(function.key.copy())
+        roots.push(IRWaveJob{key: p.functions[kept].key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
+        kept_keys.push(p.functions[kept].key.copy())
     }
     if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
     waves: ir_build_waves_kept(p, roots, true, threads, trace_sink)
@@ -2231,18 +2230,16 @@ ir_build_queued: fn(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure], que
         m.functions[queued.id] = b.f.move()
         return
     }
-    // copy: the checked function is read while later calls queue more rows.
-    function: p.functions[queued.row].copy()
     if queued.args.len() > 0 {
-        names: ir_generic_names(p, function)
-        types: sema_instance_types(function.tree.types, names, queued.args)
+        names: ir_generic_names(p, p.functions[queued.row])
+        types: sema_instance_types(p.functions[queued.row].tree.types, names, queued.args)
         b.instance = IRInstance{names: names, args: queued.args.copy(), types: types}
     }
     b.row = queued.row
     b.bounds = ir_bounds_mode(p, queued.row)
     b.entry = queued.row == p.entry && queued.args.len() == 0
-    ir_build_function(m, p, b, function)
-    ir_keep_failures(failures, b, m.functions[queued.id].key, function.name, function.source_file, function.source_span)
+    ir_build_function(m, p, b, p.functions[queued.row])
+    ir_keep_failures(failures, b, m.functions[queued.id].key, p.functions[queued.row].name, p.functions[queued.row].source_file, p.functions[queued.row].source_span)
     ir_resolve_deferred(m, p, b)
     m.functions[queued.id] = b.f.move()
 }
@@ -3333,9 +3330,9 @@ ir_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, value: Int) N
     if ir_kind_of(m, b, value) == .Aggregate && !b.fresh[value] {
         // An aggregate read from another place gets storage of its own.
         value_row: b.f.slot_type[value]
-        row: m.types[value_row]
-        ir_emit(b.f, IROp.StackAddress, slot, row.size, row.align, -1, b.line)
-        ir_emit(b.f, IROp.CopyBytes, -1, slot, value, row.size, b.line)
+        size: m.types[value_row].size
+        ir_emit(b.f, IROp.StackAddress, slot, size, m.types[value_row].align, -1, b.line)
+        ir_emit(b.f, IROp.CopyBytes, -1, slot, value, size, b.line)
         ir_aggregate_take(m, p, b, value, slot)
         return
     }
@@ -4948,9 +4945,9 @@ ir_native_index: fn(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> I
         word_row: ir_word_row(m)
         return ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{position}, word_row)
     }
-    row: m.types[b.f.slot_type[position]]
-    if kind == .Word && row.size == 8 -> return position
-    ir_fail_slot(b, span, "list position of {row.ty}")
+    pos_row: b.f.slot_type[position]
+    if kind == .Word && m.types[pos_row].size == 8 -> return position
+    ir_fail_slot(b, span, "list position of {m.types[pos_row].ty}")
 }
 
 // The address of element `index` of the list at `list`, after the bounds

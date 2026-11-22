@@ -286,17 +286,17 @@ ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [Str
 // Whether an accumulated value of type row `ty` qualifies: an exact Int or a
 // word with no drop.
 ir_opt_accumulate_value: fn(m: IRModule, ty: Int) -> Bool Never! {
-    row: m.types[ty]
-    row.kind == .Int || (row.kind == .Word && row.drop == "")
+    kind: m.types[ty].kind
+    kind == .Int || (kind == .Word && m.types[ty].drop == "")
 }
 
 // Whether a parameter of type row `ty` qualifies: an exact Int, which the
 // loop clones, or a scalar with no drop, which it copies.
 ir_opt_accumulate_param: fn(m: IRModule, ty: Int) -> Bool Never! {
-    row: m.types[ty]
-    if row.kind == .Int -> return true
-    if row.drop != "" -> return false
-    row.kind == .Bool || row.kind == .Word || row.kind == .Float || row.kind == .Float32 || row.kind == .Char
+    kind: m.types[ty].kind
+    if kind == .Int -> return true
+    if m.types[ty].drop != "" -> return false
+    kind == .Bool || kind == .Word || kind == .Float || kind == .Float32 || kind == .Char
 }
 
 // Whether instruction `at` is an associative operation of the result's
@@ -307,12 +307,12 @@ ir_opt_accumulate_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     a: f.a[at]
     b: f.b[at]
     if a < 0 || b < 0 || f.slot_type[a] != f.result || f.slot_type[b] != f.result -> return false
-    row: m.types[f.result]
-    exact: row.kind == .Int && f.c[at] == IR_OVERFLOW_TRAP
-    word: row.kind == .Word
+    kind: m.types[f.result].kind
+    exact: kind == .Int && f.c[at] == IR_OVERFLOW_TRAP
+    word: kind == .Word
     if op == {
         .Add | .Mul -> exact || (word && f.c[at] == IR_OVERFLOW_WRAP)
-        .BitAnd -> exact || (word && row.signed)
+        .BitAnd -> exact || (word && m.types[f.result].signed)
         .BitOr | .BitXor -> exact || word
         .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Sub | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
@@ -341,8 +341,8 @@ ir_opt_accumulate_pure: fn(m: IRModule, f: IRFunction, at: Int, clone: Int) -> B
         }
         .CallRuntime -> clone >= 0 && f.a[at] == clone && f.c[at] == 1
         .Drop -> {
-            row: m.types[f.slot_type[f.a[at]]]
-            row.drop == "" || row.kind == .Int
+            drop_row: f.slot_type[f.a[at]]
+            m.types[drop_row].drop == "" || m.types[drop_row].kind == .Int
         }
         .Nop | .ConstText | .ConstBigInt | .Close | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
@@ -434,9 +434,9 @@ ir_opt_accumulate_ends_at: fn(m: IRModule, f: IRFunction, branch: Int, call: Int
     by: ir_opt_accumulate_const(f, if f.a[stepped] == p -> f.b[stepped] else -> f.a[stepped], stepped) ?? return false
     step: if plus -> by else -> 0 - by
     if (below && step > -1) || (!below && step < 1) -> return false
-    row: m.types[f.slot_type[p]]
-    if row.kind == .Int -> return true
-    _: ir_opt_word(ir_x64_shape(row), limit + step, true) ?? return false
+    p_row: f.slot_type[p]
+    if m.types[p_row].kind == .Int -> return true
+    _: ir_opt_word(ir_x64_shape(m.types[p_row]), limit + step, true) ?? return false
     true
 }
 

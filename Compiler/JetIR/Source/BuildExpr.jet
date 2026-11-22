@@ -1263,9 +1263,10 @@ ir_assign_aggregate: fn(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns
     if value == slot {
         return
     }
-    row: m.types[b.f.slot_type[slot]]
-    if !owns -> ir_emit(b.f, IROp.StackAddress, slot, row.size, row.align, -1, b.line)
-    ir_emit(b.f, IROp.CopyBytes, -1, slot, value, row.size, b.line)
+    type_row: b.f.slot_type[slot]
+    size: m.types[type_row].size
+    if !owns -> ir_emit(b.f, IROp.StackAddress, slot, size, m.types[type_row].align, -1, b.line)
+    ir_emit(b.f, IROp.CopyBytes, -1, slot, value, size, b.line)
 }
 
 // A pinned borrowed argument or receiver (`pin = &place`, sema's
@@ -3814,23 +3815,22 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
         method_key = ir_method_key(m, p, concrete, method)
     }
     row: ir_function_row(p, method_key) ?? return ir_fail_slot(b, span, "static call outside the checked program: {method.name}")
-    function: p.functions[row]
-    expected: function.generic_params.len()
+    expected: p.functions[row].generic_params.len()
     if expected > 0 && type_args.len() > 0 && type_args.len() != expected {
         return ir_fail_slot(b, span, "static call of {method.name} with {type_args.len()} of {expected} type arguments")
     }
     // The owner's arguments: the ones sema instantiated the owner type with
     // (`Box.new(7)` at `Box<Int>`, `Box<Int>.empty()`).
     all := [Type]{}
-    if ir_owner_binders(p, function).len() > 0 {
+    if ir_owner_binders(p, p.functions[row]).len() > 0 {
         written: owner_type ?? return ir_fail_slot(b, span, "missing checked fact: static call of {method.name} without its owner type")
         concrete: ir_fact(p, b, written, span)
         if ir_failed(b) -> return -1
-        all = ir_owner_args(p, function, concrete) ?? return ir_fail_slot(b, span, "missing checked fact: static call of {method.name} on {ir_type_name(concrete)}, which does not spell its owner's type arguments")
+        all = ir_owner_args(p, p.functions[row], concrete) ?? return ir_fail_slot(b, span, "missing checked fact: static call of {method.name} on {ir_type_name(concrete)}, which does not spell its owner's type arguments")
     }
     loop arg in ir_facts(p, b, type_args, span) -> all.push(arg)
     if ir_failed(b) -> return -1
-    if ir_decoding_read(p, function, all) == .Val(read) {
+    if ir_decoding_read(p, p.functions[row], all) == .Val(read) {
         if ir_function_row(p, read.key) == None {
             return ir_fail_slot(b, span, "missing Core decode read {read.key}")
         }
@@ -4568,21 +4568,20 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
 // values of rows `left` and `right`; the result is "equal", "compare", or ""
 // when the call stays a call.
 ir_tag_method: fn(m: IRModule, p: IRProgram, row: Int, left: Int, right: Int) -> String Never! {
-    function: p.functions[row]
-    if !function.synthetic || function.generic_params.len() > 0 || left != right || function.kind == .TopLevel {
+    if !p.functions[row].synthetic || p.functions[row].generic_params.len() > 0 || left != right || p.functions[row].kind == .TopLevel {
         return ""
     }
-    if function.name != "equal" && function.name != "compare" -> return ""
+    if p.functions[row].name != "equal" && p.functions[row].name != "compare" -> return ""
     if m.types[left].kind != .Word || ir_untag(m.types[left].ty) == .Union(_) || ir_enum_def(m, p, left) == None {
         return ""
     }
-    returned: ir_executable_return(function) ?? return ""
+    returned: ir_executable_return(p.functions[row]) ?? return ""
     ordered := false
     if returned == .Named(name) -> ordered = ir_short_name(name) == "Ordering"
-    if (function.name == "equal" && returned != Type.Bool) || (function.name == "compare" && !ordered) {
+    if (p.functions[row].name == "equal" && returned != Type.Bool) || (p.functions[row].name == "compare" && !ordered) {
         return ""
     }
-    function.name.copy()
+    p.functions[row].name.copy()
 }
 
 // A derived `equal` (the Prelude Equatable derive) of a type the runtime
@@ -4877,10 +4876,10 @@ ir_place_address_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, n
         if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate {
             return binding.slot
         }
-        row: m.types[b.f.slot_type[binding.slot]]
+        slot_size: m.types[b.f.slot_type[binding.slot]].size
         pointer_row: ir_pointer_row(m)
         cell: ir_temp(m, b, pointer_row)
-        ir_emit(b.f, IROp.StackAddress, cell, if row.size < 8 -> 8 else -> row.size, 8, -1, b.line)
+        ir_emit(b.f, IROp.StackAddress, cell, if slot_size < 8 -> 8 else -> slot_size, 8, -1, b.line)
         ir_emit(b.f, IROp.Store, -1, cell, 0, binding.slot, b.line)
         backs.push(IRWriteBack{cell: cell, slot: binding.slot})
         return cell
@@ -8894,12 +8893,11 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
     adapter := name_rows_value(m.function_rows, adapter_key) ?? -1
     if adapter < 0 {
         function_row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "named function {key} outside the checked program")
-        function: p.functions[function_row].copy()
-        if function.generic_params.len() > 0 {
+        if p.functions[function_row].generic_params.len() > 0 {
             return ir_fail_slot(b, span, "generic named function as a value")
         }
-        if function.params.len() != params.len() {
-            return ir_fail_slot(b, span, "named function {function.name} as a value of {params.len()} parameters")
+        if p.functions[function_row].params.len() != params.len() {
+            return ir_fail_slot(b, span, "named function {p.functions[function_row].name} as a value of {params.len()} parameters")
         }
         // Every row is known before the adapter is registered, so a value
         // the builder cannot make leaves no half-built function behind.
@@ -8909,11 +8907,11 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         value_rows := [Int]{}
         loop (index, param) in params {
             value_row: ir_value_type(m, p, param) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param)}")
-            writes: function.params[index].convention == .Write
+            writes: p.functions[function_row].params[index].convention == .Write
             value_rows.push(if writes && m.types[value_row].kind != .Aggregate -> ir_pointer_row(m) else -> value_row)
         }
         param_rows := [Int]{}
-        loop param in function.params {
+        loop param in p.functions[function_row].params {
             param_row: ir_value_type(m, p, param.ty) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param.ty)}")
             param_rows.push(param_row)
         }
@@ -8924,29 +8922,29 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
                 result_row = ret_row
             }
         }
-        callee_return: ir_executable_return(function) ?? Type.Named{name: "Unit"}
+        callee_return: ir_executable_return(p.functions[function_row]) ?? Type.Named{name: "Unit"}
         callee_row := -1
         if !ir_unit_type(callee_return) && !ir_never_type(callee_return) {
             callee_ret_row: ir_value_type(m, p, callee_return) ?? return ir_type_fail(b, span, callee_return)
             callee_row = callee_ret_row
         }
-        target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "named function {function.name} as a value")
+        target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "named function {p.functions[function_row].name} as a value")
         adapter = m.functions.len()
-        m.functions.push(ir_hashed_function("{function.name}.value", adapter_key, "{ir_symbol_name(function)}__value_", function.source_file, function.line))
+        m.functions.push(ir_hashed_function("{p.functions[function_row].name}.value", adapter_key, "{ir_symbol_name(p.functions[function_row])}__value_", p.functions[function_row].source_file, p.functions[function_row].line))
         name_rows_set(m.function_rows, adapter_key, adapter)
         a := ir_builder_new(m.functions[adapter].copy())
-        a.line = function.line
+        a.line = p.functions[function_row].line
         _: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))
         values := [Int]{}
         loop (index, value_row) in value_rows {
-            values.push(ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, function.params[index].local.name)))
+            values.push(ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, p.functions[function_row].params[index].local.name)))
         }
         a.f.result = result_row
         // The value's caller keeps its arguments: a move parameter of the
         // function gets its own copy, and a written one passes the address
         // (or aggregate) the caller lent straight through.
         arguments := [Int]{}
-        loop (index, param) in function.params {
+        loop (index, param) in p.functions[function_row].params {
             if param.convention == .Write {
                 arguments.push(values[index])
                 next
@@ -8967,7 +8965,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
                 // returns Ok().
                 result = ir_result_box(m, p, a, result_ty, true, -1)
             } else {
-                ir_fail(a, span, "named function {function.name} returns nothing as a value of {ir_type_name(ty)}")
+                ir_fail(a, span, "named function {p.functions[function_row].name} returns nothing as a value of {ir_type_name(ty)}")
             }
         }
         if a.error != "" {

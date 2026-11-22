@@ -615,7 +615,10 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 // data rows its DataAddress and ConstText instructions read go in `hot`, or
 // in `cold` when the instruction is on its way to a stop (ir_x64_dying).
 ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionTables Never! {
-    f: m.functions[row]
+    ir_x64_function_tables_in(m, m.functions[row], names)
+}
+
+ir_x64_function_tables_in: fn(m: IRModule, f: IRFunction, names: [String]) -> IRX64FunctionTables Never! {
     tables := IRX64FunctionTables{uses: IRX64Uses{}, lengths: [Int]{}, texts: IRX64TextRows{}, headers: [Int:Int]{}, ints: IRX64TextRows{}, fma: -1, simd: -1, logged: ir_x64_log_names(f, names)}
     _ := ir_x64_use_text(tables, f.source_file)
     if f.asm != None && ir_x64_simd_leaf_kind(f.key) >= 0 {
@@ -626,32 +629,51 @@ ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
     // The DataAddress and ConstText instructions, with the row each reads.
     reads := [Int]{}
     read_rows := [Int]{}
+    data_len: m.data.len()
+    names_len: m.names.len()
     loop at in 0..<f.op.len() {
-        ir_x64_add_stop_texts(tables, stops, m, f, at)
-        if f.op[at] == .DataAddress && f.a[at] >= 0 && f.a[at] < m.data.len() {
-            reads.push(at)
-            read_rows.push(f.a[at])
-        }
-        if f.op[at] == .ConstText {
-            data: f.a[at]
-            if data >= 0 && data < m.data.len() {
-                if tables.headers.get(data) == None {
-                    tables.headers[data] = ir_x64_add_use(tables, IRX64UseKind.Header, data, "", 24)
+        op: f.op[at]
+        if op == {
+            .Add | .Sub | .Neg | .Mul | .Div | .Rem | .FloorDiv | .Mod -> {
+                ir_x64_add_stop_texts(tables, stops, m, f, at)
+            }
+            .DataAddress -> {
+                data: f.a[at]
+                if data >= 0 && data < data_len {
+                    reads.push(at)
+                    read_rows.push(data)
                 }
-                reads.push(at)
-                read_rows.push(tables.headers[data])
             }
-        }
-        if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
-            text: m.names[f.a[at]]
-            _ := ir_x64_use_text(tables, text)
-            if ir_x64_text_rows_get(tables.ints, text) < 0 && ir_x64_static_int_fits(text) {
-                word: ir_x64_add_use(tables, IRX64UseKind.StaticInt, -1, text.copy(), 8)
-                ir_x64_text_rows_set(tables.ints, text, word)
+            .ConstText -> {
+                data: f.a[at]
+                if data >= 0 && data < data_len {
+                    if tables.headers.get(data) == None {
+                        tables.headers[data] = ir_x64_add_use(tables, IRX64UseKind.Header, data, "", 24)
+                    }
+                    reads.push(at)
+                    read_rows.push(tables.headers[data])
+                }
             }
-        }
-        if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {
-            tables.fma = ir_x64_add_use(tables, IRX64UseKind.Fma, -1, "", 1)
+            .ConstBigInt -> {
+                name_row: f.a[at]
+                if name_row >= 0 && name_row < names_len {
+                    text: m.names[name_row]
+                    _ := ir_x64_use_text(tables, text)
+                    if ir_x64_text_rows_get(tables.ints, text) < 0 && ir_x64_static_int_fits(text) {
+                        word: ir_x64_add_use(tables, IRX64UseKind.StaticInt, -1, text.copy(), 8)
+                        ir_x64_text_rows_set(tables.ints, text, word)
+                    }
+                }
+            }
+            .CallRuntime -> {
+                if tables.fma < 0 {
+                    name_row: f.a[at]
+                    if name_row >= 0 && name_row < names_len && m.names[name_row] == "jet_std_math_fma" {
+                        tables.fma = ir_x64_add_use(tables, IRX64UseKind.Fma, -1, "", 1)
+                    }
+                }
+            }
+            .Nop | .Const | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     if reads.len() > 0 {
@@ -831,7 +853,23 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     ir_tail_calls(m, threads)
     log := [String]{}
     if names.len() > 0 {
-        loop line in m.struct_fields -> log.push(line.copy())
+        if m.struct_fields.len() > 0 {
+            loop line in m.struct_fields -> log.push(line.copy())
+        } else {
+            loop row in 0..<m.types.len() {
+                list: m.debug_members.get(row) ?? next
+                identity: ir_type_name(m.types[row].ty)
+                loop member in m.member_lists[list] {
+                    size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
+                    ty: if {
+                        member.boxed -> "box"
+                        member.ty < 0 -> "-"
+                        else -> ir_type_name(m.types[member.ty].ty)
+                    }
+                    log.push("field {identity} {member.offset} {size} {member.name} {ty}")
+                }
+            }
+        }
     }
     count: m.functions.len()
     weights := [Int]{}

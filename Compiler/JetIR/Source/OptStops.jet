@@ -805,9 +805,10 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
     }
     if idx < 0 || limit < 0 || idx == limit -> return none
     if f.slot_type[idx] != f.slot_type[limit] -> return none
-    ty: m.types[f.slot_type[idx]]
-    is_int: ty.kind == .Int
-    is_word: ty.kind == .Word && ty.signed && ty.size == 8
+    idx_row: f.slot_type[idx]
+    idx_kind: m.types[idx_row].kind
+    is_int: idx_kind == .Int
+    is_word: idx_kind == .Word && m.types[idx_row].signed && m.types[idx_row].size == 8
     if !is_int && !is_word -> return none
     if is_int && !ir_overflow_wraps(f.c[head]) -> return none
     if ir_version_writes(f, at, end, limit) -> return none
@@ -861,8 +862,8 @@ ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: In
         if op == .BrIf && f.b[k] == depth -> return none
         if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Neg || op == .Shl || op == .Shr {
             if f.a[k] >= 0 {
-                op_ty: m.types[f.slot_type[f.a[k]]]
-                if (op_ty.kind == .Int || op_ty.kind == .Word) && f.c[k] != IR_OVERFLOW_WRAP && f.c[k] != IR_OVERFLOW_NONNEG {
+                op_kind: m.types[f.slot_type[f.a[k]]].kind
+                if (op_kind == .Int || op_kind == .Word) && f.c[k] != IR_OVERFLOW_WRAP && f.c[k] != IR_OVERFLOW_NONNEG {
                     return none
                 }
             }

@@ -24,18 +24,18 @@ ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if op == .Offset -> return true
     dst: f.dst[at]
     if dst < 0 -> return false
-    ty: m.types[f.slot_type[dst]]
+    kind: m.types[f.slot_type[dst]].kind
     if op == .Const {
-        return ty.kind == .Word || ty.kind == .Int || ty.kind == .Bool
+        return kind == .Word || kind == .Int || kind == .Bool
     }
     if op == .Add || op == .Sub || op == .Mul {
-        return (ty.kind == .Word || ty.kind == .Int) && f.c[at] == IR_OVERFLOW_WRAP
+        return (kind == .Word || kind == .Int) && f.c[at] == IR_OVERFLOW_WRAP
     }
     if op == .BitAnd || op == .BitOr || op == .BitXor {
-        return ty.kind == .Word || ty.kind == .Bool
+        return kind == .Word || kind == .Bool
     }
     if op == .Neg || op == .Not {
-        return ty.kind == .Word || ty.kind == .Bool || ty.kind == .Float || ty.kind == .Float32
+        return kind == .Word || kind == .Bool || kind == .Float || kind == .Float32
     }
     if op == .Convert -> return true
     false
@@ -122,8 +122,8 @@ ir_licm_memory_pure: fn(m: IRModule, stop_keys: [Bool], f: IRFunction, safe_rout
 // Known dereferenceable byte size of pointer/aggregate slot `slot` (0 if unknown).
 ir_licm_base_size: fn(m: IRModule, f: IRFunction, write_at: [Int], slot: Int) -> Int Never! {
     if slot < 0 || slot >= f.slot_type.len() -> return 0
-    ty: m.types[f.slot_type[slot]]
-    if slot < f.param_count && ty.kind == .Aggregate && ty.size > 0 -> return ty.size
+    type_row: f.slot_type[slot]
+    if slot < f.param_count && m.types[type_row].kind == .Aggregate && m.types[type_row].size > 0 -> return m.types[type_row].size
     def: write_at[slot]
     if def >= 0 && f.op[def] == .StackAddress && f.a[def] > 0 -> return f.a[def]
     0
@@ -249,8 +249,8 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
                 if op != .Load && !is_char_len && !ir_licm_pure_op(m, f, k) -> next
                 dst: ir_x64_write(f, k)
                 if dst < f.param_count || writes[dst] != 1 || dropped[dst] -> next
-                dst_ty: m.types[f.slot_type[dst]]
-                if dst_ty.drop != "" && dst_ty.kind != .Int -> next
+                dst_row: f.slot_type[dst]
+                if m.types[dst_row].drop != "" && m.types[dst_row].kind != .Int -> next
 
                 // Check all slot operands are invariant in this loop.
                 ir_x64_reads_into(f, k, reads)
@@ -274,12 +274,12 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
                 if op == .Load {
                     if !mem_pure -> next
-                    if dst_ty.drop != "" && !(dst_ty.kind == .Int && f.c[k] == IR_LOAD_LENGTH) -> next
+                    if m.types[dst_row].drop != "" && !(m.types[dst_row].kind == .Int && f.c[k] == IR_LOAD_LENGTH) -> next
                     if !always_runs[k - loop_at] {
                         base: f.a[k]
                         offset: f.b[k]
                         base_size: ir_licm_base_size(m, f, write_at, base)
-                        if base_size <= 0 || offset < 0 || offset + dst_ty.size > base_size -> next
+                        if base_size <= 0 || offset < 0 || offset + m.types[dst_row].size > base_size -> next
                     }
                 }
 

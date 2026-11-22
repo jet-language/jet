@@ -3312,10 +3312,11 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     }
     if c.eh_debug {
         frame: link_debug_frame(c)
+        frame_len: frame.len()
         elf64_pad(out, 4)
         start: out.len()
-        out.extend(frame.copy())
-        headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
+        out.extend(frame.move())
+        headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame_len, link: 0, info: 0, align: 4, entry_size: 0})
     }
 
     // Symbols: every named local function and object of a loaded section,
@@ -3351,12 +3352,14 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     }
     elf64_pad(out, 8)
     symtab_at: out.len()
-    out.extend(symtab.copy())
+    symtab_len: symtab.len()
+    out.extend(symtab.move())
     strtab_index: headers.len() + 2
-    headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
+    headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab_len, link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: out.len()
-    out.extend(strtab.copy())
-    headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
+    strtab_len: strtab.len()
+    out.extend(strtab.move())
+    headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab_len, link: 0, info: 0, align: 1, entry_size: 0})
     shoff: link_write_section_headers(out, 0, headers)
     link_elf_sections(out, shoff, headers.len() + 2)
 }
