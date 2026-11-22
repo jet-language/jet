@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113111,
+    "rev": 113114,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34487,7 +34487,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Track B plan (owner order A → B → C → E → D)\n\n### B1. Entry-point cutover (D-ENTRY-CTX1, D-ENTRY-RUN1). One commit.\n- **Types:** BuildContext → Build, TestSuite → Test, a new Dev context. BenchSuite and the bench command are removed (benchmarks are measurement tests).\n- **Build:** `fn build(b: Build)` returns nothing. The driver takes the plan from the Build session after the call (BuildQueries.jet currently demands a returned BuildPlan, E3502). `b.plan()` stays only as an introspection query for graph/receipt_diff.\n- **Run:** `fn run()` returns nothing; `-> App` programs call `.serve()`. The runtime host owns serve, and dev hot swap hooks it.\n- **Sites:** sema Calls/BuildContext.jet, CheckProgram entry selection, eval BuildServices/CompilerServices, driver BuildAdapter/BuildQueries, codegen BuildMethods, Liveness, CoreRecordRows, the E3502 row text, the Host.jet @build.jet scaffold, Core/build, Jetpack (36/44 refs), Examples (9) and tests (~96).\n- **Proof:** census, then a chain.\n\n### B2. `jet build Compiler/`\n- Compiler/package.jet becomes a workspace of the compiler packages, with one `fn build(b: Build)` that builds the jet CLI from Compiler/JetCli.\n- It replaces sources.list, Compiler/Bootstrap/assemble.mjs (which still writes edition 2028), native-compiler.mjs --assemble-only, the shell chain, prlimit and env.\n- `--trace` / `--trace=<file>` as already ruled.\n- Gaps measured 2026-10-18 (module resolution across path deps) are fixed in the driver.\n- **Proof:** `jet build Compiler/` reproduces the assembled compiler; then the release proof (stage 1/2/3 fixed point) moves into `jet build Compiler/ --release` or a `fn test`.\n\n### B3. Generators become comptime (`prep` over source data)\n- **Order:** prelude markers/derives/units, Core rows (CoreCallRows, CoreRecordRows, CoreEnumRows, CoreSourceOwned, CoreSources), runtime message tables, unicode chunks, C-ABI routes last (it needs the runtime emit).\n- Each step deletes the generator and its committed output.\n\n### B4. Checks become tests\n- The ~60 `--check` scripts become `fn test(t: Test)` / #Test.\n- The fixture gate becomes `jet test tests/ui`, with blessing through `jet test --bless`.\n\n### B5. Remaining tooling ported by area (#5072); Tower last.",
       "checkSteps": null,
@@ -34621,11 +34621,11 @@
         {
           "n": 1,
           "text": "From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit. Proof: from a clean checkout, `jet build Compiler/` exits 0 with a scrubbed environment (`env -i PATH=$PATH HOME=$HOME`), and the built jet passes `jet test Compiler --profile cases --filter CLICommands/`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:56:54.504Z"
+          "evidence": "1dc9c80bf4: scrubbed env -i PATH=<built-jet-dir>:$PATH HOME=$HOME jet build Compiler/ exited 0 (wall 62.02s, no .mjs, no --runtime-dir, no env vars, no prlimit); rebuilt jet passed Tests/Cases/CLICommands/ (28 PASS, 0 FAIL, 1 pre-existing KNOWN-FAILING #6418)",
+          "at": "2026-11-22T09:55:59.805Z"
         },
         {
           "n": 2,
@@ -34639,11 +34639,11 @@
         {
           "n": 3,
           "text": "Root of c1: with the store off, the hermetic executor applies the store s byte limits (BUILD_MAX_ACTION_FILE_BYTES 512 MiB, BUILD_MAX_ACTION_TOTAL_BYTES 1 GiB, Jetpack/Store/Source/Build/Cache.jet) to plain work: build_move_output refuses an output over 512 MiB before renaming it, although it reads no byte, and build_snapshot_declared_inputs and build_stage_inputs read every input whole into memory to stage a copy. The compiler build s core-embed output jet is 528,605,260 B on p325, 8 MB under the limit; the scrubbed build fails there with E3505 \"cache entry exceeds its byte limit\". Fix: the limits bound only bytes held for the store when it is on; publication renames (the cross-device fallback streams the copy); inputs are hashed by streaming and staged by link or read-only bind, not held in memory; a refusal names the action, the file and its size. Proof: an executor test publishing and staging a sparse file over 1 GiB with the store off, plus the c1 scrubbed build, with build peak RSS before and after.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T17:23:58.058Z"
+          "evidence": "1dc9c80bf4: Jetpack/Store/Source/Build/{Cache,Executor}.jet + Jetpack/Foundation/Source/NativeSandbox.jet + RuntimePack.jet: store byte limits apply only when store is on; inputs stream-hashed in 1 MiB chunks and staged by read-only bwrap bind mount on Linux (streaming copy fallback); outputs renamed with streaming atomic fallback; refusals name action, file and size. Executor unit test stages & publishes >1 GiB (1.1e9 B) sparse files with store off and verifies store-on refusal naming action/file/size (1/1 PASS); jet build -O1 --threads 12 Compiler wall 62.43s -> 56.03s (-10.3%), peak_rss 5290.8 MiB -> 5542.3 MiB (parent compile peak); scrubbed build peak_rss 6289.7 MiB; Tests/Guards 211/211 PASS",
+          "at": "2026-11-22T09:56:00.626Z"
         }
       ],
       "refs": [],
@@ -34657,9 +34657,10 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 3
+      "updated": "2026-11-22T09:56:02.144Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-22T09:56:02.144Z"
     },
     {
       "id": "c00ys8fj",
@@ -133455,6 +133456,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T09:56:02.144Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hnphts",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-22T09:56:00.626Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hnphts",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-22T09:55:59.805Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hnphts",
+      "note": "#1"
+    },
     {
       "at": "2026-11-22T09:34:44.658Z",
       "by": "Orchestrator",
