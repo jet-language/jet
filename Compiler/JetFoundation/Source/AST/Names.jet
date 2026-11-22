@@ -68,8 +68,11 @@ name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
 name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
     if table.hashes[id] != hash -> return false
     first: name_start(table, id)
-    if table.ends[id] - first != end - start -> return false
-    loop offset in 0..<(end - start) {
+    len: end - start
+    if table.ends[id] - first != len -> return false
+    if len == 0 -> return true
+    if table.bytes[first] != bytes[start] -> return false
+    loop offset in 1..<len {
         if table.bytes[first + offset] != bytes[start + offset] -> return false
     }
     true
@@ -78,10 +81,13 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
 // The slot of `bytes[start..<end]` (whose `name_hash` is `hash`) in
 // `table`: the one holding its id, or the empty one a new id takes.
 name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) -> Int Never! {
-    slot := hash & table.mask
-    loop table.slots[slot] != 0 {
-        if name_bytes_equal(table, table.slots[slot] - 1, hash, bytes, start, end) -> return slot
-        slot = (slot + 1) & table.mask
+    mask: table.mask
+    slot := hash & mask
+    loop {
+        entry: table.slots[slot]
+        if entry == 0 -> break
+        if name_bytes_equal(table, entry - 1, hash, bytes, start, end) -> return slot
+        slot = (slot + 1) & mask
     }
     slot
 }
@@ -343,11 +349,14 @@ name_rows: fn() -> NameRows Never! {
 // The key index of `text` (whose name_rows_hash is `hash`), if the map ever
 // held it.
 name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
-    slot := hash & map.mask
-    loop map.slots[slot] != 0 {
-        key: map.slots[slot] - 1
+    mask: map.mask
+    slot := hash & mask
+    loop {
+        entry: map.slots[slot]
+        if entry == 0 -> break
+        key: entry - 1
         if map.hashes[key] == hash && map.texts[key] == text -> return Val(key)
-        slot = (slot + 1) & map.mask
+        slot = (slot + 1) & mask
     }
     None
 }

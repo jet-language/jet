@@ -142,6 +142,22 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
         }
     }
     if !has_loop -> return 0
+    safe_routes: ir_licm_safe_routes(m)
+    char_len_route: name_rows_value(m.name_rows, "jet_char_len") ?? -2
+    ir_opt_licm_with(m, stop_keys, safe_routes, char_len_route, f)
+}
+
+ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_len_route: Int, f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    if count < 4 -> return 0
+    has_loop := false
+    loop at in 0..<count {
+        if f.op[at] == .Loop {
+            has_loop = true
+            break
+        }
+    }
+    if !has_loop -> return 0
 
     slots: f.slot_type.len()
     writes := loop _ in 0..<slots -> 0
@@ -159,8 +175,6 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
         }
     }
 
-    safe_routes: ir_licm_safe_routes(m)
-    char_len_route: name_rows_value(m.name_rows, "jet_char_len") ?? -2
     // Collect loops innermost-first (reverse order of Loop opener index).
     loops := [Int]{}
     idx := count - 1

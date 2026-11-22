@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
-    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
+    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
@@ -257,8 +257,8 @@ ir_window_cells_in: fn(m: &IRModule, p: IRProgram, b: IRBuilder, nodes: [BodyNod
 ir_window_cells_named: fn(m: &IRModule, p: IRProgram, b: IRBuilder, stmts: [StmtKind], names: &[String]) Never! {
     loop statement in stmts {
         if statement == .Let(_, _, init, _, _, _) {
-            if ir_body_node(p, b, init).kind == .Borrow(inner, access) {
-                if access == .Write && ir_body_node(p, b, inner).kind == .Local(local) {
+            if ir_body_node_write_borrow_inner(p, b, init) == .Val(inner) {
+                if ir_body_node(p, b, inner).kind == .Local(local) {
                     if ir_value_type(m, p, ir_ty(p, b, inner)) == .Val(row) {
                         if ir_scalar_row(m, row) && !names.contains(local.name) {
                             names.push(local.name)
@@ -438,7 +438,7 @@ ir_stmt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     ir_stmt_body(m, p, b, statement)
     b.statement_depth = depth
     ir_release_statement_guards(m, b, mark)
-    span: ir_stmt_kind_span(ir_body_stmt(p, b, statement))
+    span: ir_body_stmt_span(p, b, statement)
     ir_call_sites_mark(p, b, first, span)
 }
 
@@ -459,7 +459,17 @@ ir_release_statement_guards: fn(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
 ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     // An explicit move is taken by the statement that reads it.
     b.moving = -1
-    if ir_body_stmt(p, b, statement) == {
+    if statement >= IR_FIRST_STMT_INDEX {
+        stmt: ir_body_stmt(p, b, statement)
+        ir_stmt_body_in(m, p, b, statement, stmt)
+        return
+    }
+    if b.row < 0 -> panic("{b.f.name}: statement {statement} read without a checked body")
+    ir_stmt_body_in(m, p, b, statement, p.functions[b.row].tree.stmts[statement])
+}
+
+ir_stmt_body_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, stmt: StmtKind) Never! {
+    if stmt == {
         .Let(local, let_ty, init, _, _, span) -> {
             if b.map_take == statement {
                 b.map_take = -1
@@ -470,9 +480,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // write borrow's edits reach the owner. A range borrow keeps its
             // View value below, and a `Pin<T>` (`mem.pin(place)`) the
             // place's address.
-            if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) && ir_pin_target(p, ir_ty(p, b, init)) == None {
-                if local.deref || !(ir_body_node(p, b, borrowed).kind == .Slice(_, _, _, _, _)) {
-                    return ir_bind_pin(m, p, b, local, init, span)
+            if local.address_lifetime == None && local.persist_key == None {
+                if ir_body_node_borrow_inner(p, b, init) == .Val(borrowed) && ir_pin_target(p, ir_ty(p, b, init)) == None {
+                    if local.deref || !ir_body_node_is_slice(p, b, borrowed) {
+                        return ir_bind_pin(m, p, b, local, init, span)
+                    }
                 }
             }
             if local.deref || local.address_lifetime != None || local.persist_key != None {
@@ -483,7 +495,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if let_ty == .Annotated(_, _) {
 
             }
-            if ir_body_node(p, b, init).kind == .Uninit {
+            if ir_body_node_is_uninit(p, b, init) {
                 binder_ty: ir_fact(p, b, local.ty, span)
                 return ir_bind_uninit(m, p, b, local, binder_ty, span)
             }
@@ -493,8 +505,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // A place-borrowing `place ?? leave` lends its payload
             // (ir_or_fallback): the value is the payload where the place
             // holds it, not fresh, and binds below as any place does.
-            if local.place_borrow && !ir_masking(b) && ir_body_node(p, b, init).kind == .OrFallback(operand, _, _) {
-                b.or_lend = operand
+            if local.place_borrow && !ir_masking(b) {
+                if ir_body_node_or_fallback_operand(p, b, init) == .Val(operand) {
+                    b.or_lend = operand
+                }
             }
             value: ir_expr(m, p, b, init)
             b.or_lend = -1
@@ -530,7 +544,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             }
             // An integer literal's constant is the binding's own value (a
             // folded `name: 8 * 4`, #6125): it moves in instead of cloning.
-            if ir_body_node(p, b, init).kind == .IntLit(_, _) -> b.fresh[value] = true
+            if ir_body_node_is_int_lit(p, b, init) -> b.fresh[value] = true
             ir_bind_local(m, p, b, local, value, span)
             bound: b.bindings[b.bindings.len() - 1].slot
             ir_close_arm(m, p, b, bound, false, span)
@@ -704,6 +718,12 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_stmt_line(p, b, span)
             if ir_masked_branch(p, b, span) {
                 return ir_masked_if(m, p, b, condition, then_body, else_body, span)
+            }
+            if else_body == .Val(otherwise) && ir_body_stmts_is_no_else(p, b, otherwise) && ir_cond_is_pure_no_binds(p, b, condition) {
+                ir_scope_open(b)
+                ir_stmts(m, p, b, then_body)
+                ir_scope_close(m, b)
+                return
             }
             ir_scope_open(b)
             named: b.bindings.len()
@@ -1995,7 +2015,7 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
     slot: ir_expr_slot(m, p, b, expression)
     b.split_armed = outer
     ir_fix_expr(m, p, b, expression, slot)
-    span: ir_body_node(p, b, expression).span
+    span: ir_body_node_span(p, b, expression)
     ir_call_sites_mark(p, b, first, span)
     slot
 }
@@ -2012,7 +2032,7 @@ ir_expr_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) ->
     b.split_armed = true
     slot: ir_expr_slot(m, p, b, expression)
     b.split_armed = outer
-    span: ir_body_node(p, b, expression).span
+    span: ir_body_node_span(p, b, expression)
     ir_call_sites_mark(p, b, first, span)
     if b.split.len() > 0 -> return -1
     ir_fix_expr(m, p, b, expression, slot)
@@ -2025,8 +2045,7 @@ ir_expr_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) ->
 ir_splits: fn(p: IRProgram, b: IRBuilder, expression: Int) -> Bool Never! {
     ty: ir_ty(p, b, expression)
     if !ir_is_result(ty) || ir_view_result(ty) -> return false
-    if ir_body_node(p, b, expression).kind == .HandleMethod(_, _, _) -> return true
-    ir_body_node(p, b, expression).kind == .CoreCall(_, _, _, _, _, _)
+    ir_body_node_is_split_call(p, b, expression)
 }
 
 // The line `debug`'s trace `write` (THostCall.DebugTrace) hands its
@@ -2044,9 +2063,18 @@ ir_debug_trace_line: fn(p: IRProgram, b: IRBuilder, write: Int) -> Int? Never! {
 }
 
 ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    if expression <= IR_FIRST_NODE_ID {
+        node: ir_body_node(p, b, expression)
+        return ir_expr_slot_in(m, p, b, expression, node)
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {expression} read without a checked body")
+    idx: body_node_index(p.functions[b.row].tree, expression)
+    ir_expr_slot_in(m, p, b, expression, p.functions[b.row].tree.nodes[idx])
+}
+
+ir_expr_slot_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, node: BodyNode) -> Int Never! {
     expression_ty: ir_ty(p, b, expression)
     if ir_failed(b) -> return -1
-    node: ir_body_node(p, b, expression)
     span: node.span
     if node.kind == {
         .IntLit(value, _) -> {
@@ -2232,6 +2260,18 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             }
             if ir_masked_branch(p, b, span) {
                 return ir_masked_if_value(m, p, b, cond, then_body, then_value, else_body, else_value, expression_ty, span)
+            }
+            if else_body.len() == 0 && ir_body_node_is_no_else(p, b, else_value) && ir_cond_is_pure_no_binds(p, b, cond) {
+                ir_scope_open(b)
+                kept := -1
+                if !(ir_unit_type(expression_ty) || ir_never_type(expression_ty)) {
+                    kept_ty: ir_value_type(m, p, expression_ty) ?? return ir_type_fail(b, span, expression_ty)
+                    kept = ir_temp(m, b, kept_ty)
+                }
+                ir_branch_value(m, p, b, then_body, then_value, kept)
+                ir_scope_close(m, b)
+                if kept >= 0 -> b.fresh[kept] = ir_has_drop(m, b, kept)
+                return kept
             }
             ir_scope_open(b)
             named: b.bindings.len()
@@ -4779,10 +4819,20 @@ ir_write_base: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: S
     ir_load_at(m, b, address, 0, row)
 }
 
-// Whether a write through `place` passes a List element, a Map entry or a
+// // Whether a write through `place` passes a List element, a Map entry or a
 // recursive edge (a struct member held in a wrapper box).
 ir_place_needs_address: fn(m: &IRModule, p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
-    if ir_body_node(p, b, place).kind == {
+    if place <= IR_FIRST_NODE_ID {
+        node: ir_body_node(p, b, place)
+        return ir_place_needs_address_in(m, p, b, node)
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {place} read without a checked body")
+    idx: body_node_index(p.functions[b.row].tree, place)
+    ir_place_needs_address_in(m, p, b, p.functions[b.row].tree.nodes[idx])
+}
+
+ir_place_needs_address_in: fn(m: &IRModule, p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool Never! {
+    if node.kind == {
         .Borrow(inner, _) -> return ir_place_needs_address(m, p, b, inner)
         .Move(inner) -> return ir_place_needs_address(m, p, b, inner)
         .Field(receiver, field) -> return ir_place_boxed_member(m, p, b, receiver, field.name) || ir_place_needs_address(m, p, b, receiver)
@@ -4804,15 +4854,25 @@ ir_place_boxed_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: In
 // cell read back after the call (`backs`), a struct member or a list element
 // its address.
 ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs: &[IRWriteBack], span: Span) -> Int Never! {
+    if place <= IR_FIRST_NODE_ID {
+        node: ir_body_node(p, b, place)
+        return ir_place_address_in(m, p, b, place, node, backs, span)
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {place} read without a checked body")
+    idx: body_node_index(p.functions[b.row].tree, place)
+    ir_place_address_in(m, p, b, place, p.functions[b.row].tree.nodes[idx], backs, span)
+}
+
+ir_place_address_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, node: BodyNode, backs: &[IRWriteBack], span: Span) -> Int Never! {
     place_ty: ir_ty(p, b, place)
-    if ir_body_node(p, b, place).kind == .Borrow(inner, _) {
+    if node.kind == .Borrow(inner, _) {
         return ir_place_address(m, p, b, inner, backs, span)
     }
-    if ir_body_node(p, b, place).kind == .Move(inner) {
+    if node.kind == .Move(inner) {
         return ir_place_address(m, p, b, inner, backs, span)
     }
     if ir_pin_target(p, place_ty) != None -> return ir_pin_window(m, p, b, place, span)
-    if ir_body_node(p, b, place).kind == .Local(local) {
+    if node.kind == .Local(local) {
         binding: ir_lookup_local(b, local) ?? return ir_fail_slot(b, span, "write of unknown local {local.name}")
         if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate {
             return binding.slot
@@ -4825,7 +4885,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         backs.push(IRWriteBack{cell: cell, slot: binding.slot})
         return cell
     }
-    if ir_body_node(p, b, place).kind == .Field(receiver, field) {
+    if node.kind == .Field(receiver, field) {
         base: ir_place_address(m, p, b, receiver, backs, span)
         if ir_failed(b) -> return -1
         receiver_ty: ir_ty(p, b, receiver)
@@ -4847,7 +4907,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         ir_emit(b.f, IROp.Offset, address, holder, offset, -1, b.line)
         return address
     }
-    if ir_body_node(p, b, place).kind == .Index(base, index, kind, _, _, _) {
+    if node.kind == .Index(base, index, kind, _, _, _) {
         if kind == .Map || kind == .MapOr {
             return ir_map_place_address(m, p, b, base, index, kind == .MapOr, backs, span)
         }
@@ -4872,7 +4932,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         ir_emit(b.f, IROp.Offset, address, element, 0, -1, b.line)
         return address
     }
-    if ir_body_node(p, b, place).kind == .SharedGuardValue(guard) {
+    if node.kind == .SharedGuardValue(guard) {
         // `&guard.value`: the cell's slot itself, written in place.
         payload: ir_shared_guard_payload(m, p, b, guard, span)
         if payload < 0 -> return -1
@@ -4882,7 +4942,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         ir_emit(b.f, IROp.Offset, address, payload, 0, -1, b.line)
         return address
     }
-    if ir_body_node(p, b, place).kind == .PoolSlot(pool, id, _, _, line, source_line) {
+    if node.kind == .PoolSlot(pool, id, _, _, line, source_line) {
         // `&pool[id]`: the live value's own storage, written in place.
         payload: ir_pool_slot_address(m, p, b, pool, id, line, source_line, span)
         if ir_failed(b) || payload < 0 -> return -1
@@ -4894,7 +4954,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     }
     // `ptr.*` as a write place (`ptr.*.method()` on a `&self` method): the
     // pointee's own storage at the pointer, once the sentry passes the write.
-    if ir_body_node(p, b, place).kind == .Deref(pointer) {
+    if node.kind == .Deref(pointer) {
         row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
         target := -1
         if ir_allocator_view_type(ir_ty(p, b, pointer)) {
@@ -4912,7 +4972,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     }
     // `&total` of a `#Persist` binding: its module storage cell, written in
     // place (sema admits only `#Persist` module state as a write place).
-    if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
+    if node.kind == .ConstRef(symbol) {
         constant_key: ir_body_symbol_key(p, b, symbol)
         at: p.constants.get(constant_key) ?? return ir_fail_slot(b, span, "constant {constant_key} without a declaration")
         if p.constant_defs[at].is_storage {
@@ -4922,7 +4982,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     }
     // `f(xs[a..b])`: the write window over the list's range, a list of
     // fixed length the callee edits in place.
-    if ir_body_node(p, b, place).kind == .Slice(base, start, end, range, location) {
+    if node.kind == .Slice(base, start, end, range, location) {
         list_ty: ir_ty(p, b, base)
         if ir_untag(list_ty) == .List(_) {
             list_row: ir_value_type(m, p, list_ty) ?? return ir_type_fail(b, span, list_ty)
@@ -4934,7 +4994,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     // fresh aggregate is its own place, which the call releases after the
     // callee wrote it; any other moves into a frame cell, read back out after
     // the call, where it ends (ir_write_backs).
-    temporary: if ir_body_node(p, b, place).kind == {
+    temporary: if node.kind == {
         .Call(_, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> true
         .List(_, _) | .ListLit(_) | .Tuple(_) | .Map(_) | .MapLit(_) -> true
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .TypePath(_) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .EnumCtor(_, _, _) | .Lambda(_) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) -> true
@@ -4955,7 +5015,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         backs.push(IRWriteBack{cell: cell, slot: ir_fresh_temp(m, b, row), ends: true})
         return cell
     }
-    place_kind: ir_expr_kind_name(ir_body_node(p, b, place).kind)
+    place_kind: ir_expr_kind_name(node.kind)
     ir_fail_slot(b, span, "write place {place_kind}")
 }
 

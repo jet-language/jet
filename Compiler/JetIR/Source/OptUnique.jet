@@ -29,6 +29,22 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // <list type>: made unique before the Loop`, or `declined (<why>)`.
 
 ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
+    has_loop := false
+    has_unique := false
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .Loop {
+            has_loop = true
+            if has_unique -> break
+        } else if op == .Call {
+            callee: f.a[at]
+            if callee >= 0 && callee < keys.len() && keys[callee].starts_with("#unique<") {
+                has_unique = true
+                if has_loop -> break
+            }
+        }
+    }
+    if !has_loop || !has_unique -> return 0
     count: f.slot_type.len()
     facts: ir_opt_facts(f)
     // The header or struct base each slot points into (-1: none), and how

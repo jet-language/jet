@@ -42,13 +42,21 @@ use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_valu
 
 // Turns each local box of `f` into frame storage; returns how many.
 ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+    if f.asm != None || f.op.len() == 0 -> return 0
     alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? -2
     value: name_rows_value(m.name_rows, "jet_rt_alloc_value") ?? -2
     if alloc == -2 && value == -2 -> return 0
+    has_alloc := false
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .CallRuntime && (f.a[at] == alloc || f.a[at] == value) && f.c[at] == 2 && f.dst[at] >= f.param_count {
+            has_alloc = true
+            break
+        }
+    }
+    if !has_alloc -> return 0
     unique: name_rows_value(m.name_rows, "jet_rt_block_unique") ?? -2
     release: name_rows_value(m.name_rows, "jet_rt_block_release") ?? -2
     free: name_rows_value(m.name_rows, "jet_rt_free") ?? -2
-    if f.asm != None || f.op.len() == 0 -> return 0
     facts: ir_opt_facts(f)
     count: f.slot_type.len()
     // Each candidate slot's box size (-1: not a local box).

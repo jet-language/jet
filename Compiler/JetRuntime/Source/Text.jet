@@ -457,14 +457,18 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
 #Export(c) jet_rt_string_clone: fn(value: I64) -> I64 {
     cap: rt_text_word(wrapping(value + I64{16}))
     if (cap > I64{0}) {
-        jet_rt_rc_retain(wrapping(value - I64{8}))
+        count: wrapping(value - I64{8})
+        if (rc_load(count) >= I64{0}) {
+            if (rc_add(count, I64{1}) == I64{9223372036854775807}) { rt_seq_capacity_overflow_stop() }
+        }
         return value
     }
     if (cap != RT_TEXT_FRAME) { return value }
-    owner: rt_text_builder_with_capacity(rt_text_len(value))
+    len: rt_text_len(value)
+    owner: rt_text_builder_with_capacity(len)
     if (owner != I64{0}) {
-        rt_text_store(wrapping(owner + I64{8}), rt_text_len(value))
-        rt_text_bytes_copy(rt_text_data(owner), rt_text_data(value), rt_text_len(value))
+        rt_text_store(wrapping(owner + I64{8}), len)
+        rt_text_bytes_copy(rt_text_data(owner), rt_text_data(value), len)
     }
     owner
 }
@@ -829,18 +833,44 @@ rt_text_low_byte: fn(diff: I64) -> I64 {
 }
 
 rt_text_equal_bytes: fn(left: I64, right: I64, len: I64) -> Bool {
-    rt_text_first_difference(left, right, len) == len
+    if (left == right) { return true }
+    if (len >= I64{8}) {
+        words: wrapping(len - (len & I64{7}))
+        at := I64{0}
+        loop at < words {
+            if (rt_text_word(wrapping(left + at)) != rt_text_word(wrapping(right + at))) { return false }
+            at = wrapping(at + I64{8})
+        }
+        if (at < len) {
+            last: wrapping(len - I64{8})
+            return rt_text_word(wrapping(left + last)) == rt_text_word(wrapping(right + last))
+        }
+        return true
+    }
+    if (left & I64{4095} <= I64{4088} && right & I64{4095} <= I64{4088}) {
+        mask: wrapping((I64{1} << ((len & I64{7}) * I64{8})) - I64{1})
+        return ((rt_text_word(left) ~ rt_text_word(right)) & mask) == I64{0}
+    }
+    at := I64{0}
+    loop at < len {
+        if (rt_text_byte(wrapping(left + at)) != rt_text_byte(wrapping(right + at))) { return false }
+        at = wrapping(at + I64{1})
+    }
+    true
 }
 
 #Export(c) jet_rt_string_compare: fn(left: I64, right: I64) -> I64 {
+    if left == right -> return I64{0}
     left_len: rt_text_len(left)
     right_len: rt_text_len(right)
     len: if left_len < right_len -> left_len else -> right_len
     a: rt_text_data(left)
     b: rt_text_data(right)
-    at: rt_text_first_difference(a, b, len)
-    if (at < len) {
-        return if (rt_text_byte(wrapping(a + at)) < rt_text_byte(wrapping(b + at))) -> I64{-1} else -> I64{1}
+    if a != b {
+        at: rt_text_first_difference(a, b, len)
+        if (at < len) {
+            return if (rt_text_byte(wrapping(a + at)) < rt_text_byte(wrapping(b + at))) -> I64{-1} else -> I64{1}
+        }
     }
     if {
         left_len < right_len -> I64{-1}
@@ -850,7 +880,38 @@ rt_text_equal_bytes: fn(left: I64, right: I64, len: I64) -> Bool {
 }
 
 #Export(c) jet_rt_string_eq: fn(left: I64, right: I64) -> Bool {
-    rt_text_len(left) == rt_text_len(right) && rt_text_equal_bytes(rt_text_data(left), rt_text_data(right), rt_text_len(left))
+    if left == right -> return true
+    len: rt_text_len(left)
+    if len != rt_text_len(right) -> return false
+    if (len == I64{0}) -> return true
+    a: rt_text_data(left)
+    b: rt_text_data(right)
+    if a == b -> return true
+    if (len >= I64{8}) {
+        if (rt_text_word(a) != rt_text_word(b)) { return false }
+        if (len == I64{8}) { return true }
+        words: len & I64{-8}
+        at := I64{8}
+        loop at < words {
+            if (rt_text_word(wrapping(a + at)) != rt_text_word(wrapping(b + at))) { return false }
+            at = wrapping(at + I64{8})
+        }
+        if (at < len) {
+            last: wrapping(len - I64{8})
+            return rt_text_word(wrapping(a + last)) == rt_text_word(wrapping(b + last))
+        }
+        return true
+    }
+    if ((a & I64{4095}) <= I64{4088} && (b & I64{4095}) <= I64{4088}) {
+        mask: wrapping((I64{1} << ((len & I64{7}) * I64{8})) - I64{1})
+        return ((rt_text_word(a) ~ rt_text_word(b)) & mask) == I64{0}
+    }
+    at := I64{0}
+    loop at < len {
+        if (rt_text_byte(wrapping(a + at)) != rt_text_byte(wrapping(b + at))) { return false }
+        at = wrapping(at + I64{1})
+    }
+    true
 }
 
 // A counted heap text answers from its cache word; otherwise only the bytes

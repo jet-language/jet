@@ -71,19 +71,19 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         changed += ir_opt_unreachable(f, report)
         if changed > 0 -> ir_opt_facts_refill(f, facts)
         step := ir_opt_fuse_compares(m, f, facts, report)
-        if step > 0 -> ir_opt_facts_refill(f, facts)
+        if step > 0 -> ir_opt_facts_refill_counts(f, facts)
         changed += step
         step = ir_opt_common(m, f, facts)
-        if step > 0 -> ir_opt_facts_refill(f, facts)
+        if step > 0 -> ir_opt_facts_refill_counts(f, facts)
         changed += step
         step = ir_opt_propagate(m, f, facts, report)
-        if step > 0 -> ir_opt_facts_refill(f, facts)
+        if step > 0 -> ir_opt_facts_refill_counts(f, facts)
         changed += step
         step = ir_opt_addresses(m, f, facts)
-        if step > 0 -> ir_opt_facts_refill(f, facts)
+        if step > 0 -> ir_opt_facts_refill_counts(f, facts)
         changed += step
         step = ir_opt_coalesce(f, facts, report)
-        if step > 0 -> ir_opt_facts_refill(f, facts)
+        if step > 0 -> ir_opt_facts_refill_counts(f, facts)
         changed += step
         changed += ir_opt_dead(m, f, facts, report)
         reshaped := ir_opt_structure(f, report)
@@ -92,7 +92,7 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         fresh = reshaped == 0
         // A later round that changed nothing up to here finds the function
         // as the last round's compaction (or short circuits) left it.
-        if changed > 0 || round == 0 {
+        if changed > 0 || (round == 0 && f.op.contains(IROp.Nop)) {
             if fresh -> ir_opt_compact_facts(f, facts) else -> ir_opt_compact(f)
         }
         step = ir_opt_short_circuits(f, facts, fresh, report)
@@ -141,16 +141,16 @@ ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
         end.push(-1)
         els.push(-1)
     }
-    open := [Int]{}
+    open := [I64]{}
     loop at in 0..<f.op.len() {
-        if f.op[at] == {
-            .Block | .Loop | .If -> { open.push(at) }
-            .Else -> { els[open[open.len() - 1]] = at }
-            .End -> {
-                opener: open.pop() ?? panic("ir_opt_nesting: End without an open construct")
-                end[opener] = at
-            }
-            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
+        op: f.op[at]
+        if op == .Block || op == .Loop || op == .If {
+            open.push(I64{at})
+        } else if op == .Else {
+            els[Int{open[open.len() - 1]}] = at
+        } else if op == .End {
+            opener: Int{open.pop() ?? panic("ir_opt_nesting: End without an open construct")}
+            end[opener] = at
         }
     }
     OptNesting{end: end, els: els}
@@ -1437,7 +1437,7 @@ ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: &OptFacts, report: &IROptRep
     total := ir_opt_dead_sweep(m, f, facts)
     removed := total
     loop removed > 0 {
-        ir_opt_facts_refill(f, facts)
+        ir_opt_facts_refill_counts(f, facts)
         removed = ir_opt_dead_sweep(m, f, facts)
         total += removed
     }
@@ -1568,6 +1568,14 @@ ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // that leaves past it counts one construct fewer. One Block at a time, in
 // order, each over the depths the previous ones left.
 ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
+    has_block := false
+    loop op in f.op {
+        if op == .Block {
+            has_block = true
+            break
+        }
+    }
+    if !has_block -> return 0
     nesting: ir_opt_nesting(f)
     changed := 0
     loop at in 0..<f.op.len() {

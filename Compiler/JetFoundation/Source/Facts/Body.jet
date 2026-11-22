@@ -76,16 +76,16 @@ body_rows_fitted: fn<T>(rows: &&[T]) -> [T] Never! {
     fitted
 }
 
-// The row of node `id`. A body's source ids run mostly unbroken to its last
-// row, so the row as far from the end as `id` is from the last id is tried
-// first: it is the answer when it holds `id` and no row before it does.
-// Otherwise the rows are searched.
-body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
+// The index of node `id` in `tree.nodes`. A body's source ids run mostly
+// unbroken to its last row, so the row as far from the end as `id` is from
+// the last id is tried first: it is the answer when it holds `id` and no
+// row before it does. Otherwise the rows are searched.
+body_node_index: fn(tree: BodyTree, id: Int) -> Int Never! {
     count: tree.nodes.len()
     if count > 0 {
         guess: count - 1 - (tree.nodes[count - 1].id - id)
         if guess >= 0 && guess < count && tree.nodes[guess].id == id {
-            if guess == 0 || tree.nodes[guess - 1].id < id -> return tree.nodes[guess]
+            if guess == 0 || tree.nodes[guess - 1].id < id -> return guess
         }
     }
     low := 0
@@ -94,8 +94,13 @@ body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
         middle: (low + high) /% 2
         if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
     }
-    if low < count && tree.nodes[low].id == id -> return tree.nodes[low]
+    if low < count && tree.nodes[low].id == id -> return low
     panic("body tree has no node {id}")
+}
+
+// The row of node `id`.
+body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
+    tree.nodes[body_node_index(tree, id)]
 }
 
 #Test("a node and its type row are found by id across gaps in the ids") {

@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -2287,6 +2287,194 @@ ir_body_stmt: fn(p: IRProgram, b: IRBuilder, index: Int) -> StmtKind Never! {
     if index >= IR_FIRST_STMT_INDEX -> return b.made.stmts[index - IR_FIRST_STMT_INDEX].copy()
     if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
     body_stmt(p.functions[b.row].tree, index)
+}
+
+// The index of builder-made node `id` in `b.made.nodes`.
+ir_made_node_index: fn(b: IRBuilder, id: Int) -> Int Never! {
+    loop (idx, node) in b.made.nodes {
+        if node.id == id -> return idx
+    }
+    panic("{b.f.name}: builder node {id} was never made")
+}
+
+// Span of node `id` without cloning its NodeKind payload.
+ir_body_node_span: fn(p: IRProgram, b: IRBuilder, id: Int) -> Span Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].span
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].span
+}
+
+// Span of statement `index` without cloning its StmtKind payload.
+ir_body_stmt_span: fn(p: IRProgram, b: IRBuilder, index: Int) -> Span Never! {
+    if index >= IR_FIRST_STMT_INDEX -> return ir_stmt_kind_span(b.made.stmts[index - IR_FIRST_STMT_INDEX])
+    if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
+    ir_stmt_kind_span(p.functions[b.row].tree.stmts[index])
+}
+
+ir_body_node_is_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Local(_)
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Local(_)
+}
+
+ir_body_node_is_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(_, _)
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(_, _)
+}
+
+ir_body_node_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
+    if id <= IR_FIRST_NODE_ID {
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(value, _) -> return Val(value)
+        return None
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(value, _) -> return Val(value)
+    None
+}
+
+ir_body_node_is_uninit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Uninit
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Uninit
+}
+
+ir_body_node_is_move: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Move(_)
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Move(_)
+}
+
+ir_body_node_is_slice: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Slice(_, _, _, _, _)
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Slice(_, _, _, _, _)
+}
+
+ir_body_node_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
+    if id <= IR_FIRST_NODE_ID {
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, _) -> return Val(inner)
+        return None
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, _) -> return Val(inner)
+    None
+}
+
+ir_body_node_write_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
+    if id <= IR_FIRST_NODE_ID {
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, access) && access == .Write -> return Val(inner)
+        return None
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, access) && access == .Write -> return Val(inner)
+    None
+}
+
+ir_body_node_or_fallback_operand: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
+    if id <= IR_FIRST_NODE_ID {
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .OrFallback(operand, _, _) -> return Val(operand)
+        return None
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .OrFallback(operand, _, _) -> return Val(operand)
+    None
+}
+
+ir_body_node_is_split_call: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID {
+        idx: ir_made_node_index(b, id)
+        return b.made.nodes[idx].kind == .HandleMethod(_, _, _) || b.made.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
+    }
+    if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
+    idx: body_node_index(p.functions[b.row].tree, id)
+    p.functions[b.row].tree.nodes[idx].kind == .HandleMethod(_, _, _) || p.functions[b.row].tree.nodes[idx].kind == .CoreCall(_, _, _, _, _, _)
+}
+
+ir_body_node_is_no_else: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID {
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .Never(reason, _) -> return reason == "no else arm"
+        return false
+    }
+    if b.row < 0 -> return false
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Never(reason, _) -> return reason == "no else arm"
+    false
+}
+
+ir_body_stmts_is_no_else: fn(p: IRProgram, b: IRBuilder, stmts: [Int]) -> Bool Never! {
+    if stmts.len() != 1 -> return false
+    id: stmts[0]
+    if id >= IR_FIRST_STMT_INDEX {
+        if b.made.stmts[id - IR_FIRST_STMT_INDEX] == .ExprStmt(val, _) -> return ir_body_node_is_no_else(p, b, val)
+        return false
+    }
+    if b.row < 0 -> return false
+    if p.functions[b.row].tree.stmts[id] == .ExprStmt(val, _) -> return ir_body_node_is_no_else(p, b, val)
+    false
+}
+
+ir_shape_has_no_binds: fn(shape: BodyPatternShape) -> Bool Never! {
+    if shape == .Absent(_) -> return true
+    if shape == .Variant(_, bindings, _, _) {
+        loop binding in bindings {
+            if binding != .Wildcard -> return false
+        }
+        return true
+    }
+    if shape == .Or(alternatives, _) {
+        loop alt in alternatives {
+            if !ir_shape_has_no_binds(alt) -> return false
+        }
+        return true
+    }
+    false
+}
+
+ir_expr_is_pure_atom_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool Never! {
+    if node.kind == .Local(_) -> return true
+    if node.kind == .EnumLit(_, _, _) -> return true
+    if node.kind == .IntLit(_, _) -> return true
+    if node.kind == .BoolLit(_) -> return true
+    if node.kind == .CharLit(_) -> return true
+    if node.kind == .Absent -> return true
+    if node.kind == .Field(recv, _) -> return ir_expr_is_pure_atom(p, b, recv)
+    false
+}
+
+ir_expr_is_pure_atom: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return ir_expr_is_pure_atom_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    if b.row < 0 -> return false
+    ir_expr_is_pure_atom_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
+}
+
+ir_expr_is_pure_tag_test_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool Never! {
+    if node.kind == .BoolLit(_) -> return true
+    if node.kind == .PatternMatches(subj, pat) {
+        return ir_expr_is_pure_atom(p, b, subj) && ir_shape_has_no_binds(pat.shape)
+    }
+    if node.kind == .Binary(op, _, _, lhs, rhs) {
+        if op == .Or || op == .And {
+            return ir_expr_is_pure_tag_test(p, b, lhs) && ir_expr_is_pure_tag_test(p, b, rhs)
+        }
+        if op == .Eq || op == .Ne {
+            return ir_expr_is_pure_atom(p, b, lhs) && ir_expr_is_pure_atom(p, b, rhs)
+        }
+    }
+    false
+}
+
+ir_expr_is_pure_tag_test: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
+    if id <= IR_FIRST_NODE_ID -> return ir_expr_is_pure_tag_test_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    if b.row < 0 -> return false
+    ir_expr_is_pure_tag_test_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
+}
+
+ir_cond_is_pure_no_binds: fn(p: IRProgram, b: IRBuilder, cond: BodyIfCond) -> Bool Never! {
+    if cond == {
+        .Plain(value) -> ir_expr_is_pure_tag_test(p, b, value)
+        .And(left, right) -> ir_cond_is_pure_no_binds(p, b, left) && ir_cond_is_pure_no_binds(p, b, right)
+        .IfLet(pattern, subject) -> ir_expr_is_pure_atom(p, b, subject) && ir_shape_has_no_binds(pattern.shape)
+    }
 }
 
 // The checked type of `value`: its row in the expression-type column of the

@@ -34,6 +34,14 @@
 // overlap or leave the storage, or when a field is itself an aggregate.
 
 ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Never! {
+    has_stack := false
+    loop op in f.op {
+        if op == .StackAddress {
+            has_stack = true
+            break
+        }
+    }
+    if !has_stack -> return 0
     facts: ir_opt_facts(f)
     count: f.slot_type.len()
     candidate := [Bool]{}

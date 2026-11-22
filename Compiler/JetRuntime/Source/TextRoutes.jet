@@ -45,17 +45,20 @@
     data: rt_text_data(value)
     len: rt_text_len(value)
     hash := wrapping(len * I64{-7046029254386353131}) ~ I64{-3750763034362895579}
-    words: len - len % I64{8}
+    words: len & I64{-8}
     at := I64{0}
     loop at < words {
-        hash = rt_text_hash_fold(hash, rt_text_word(wrapping(data + at)))
-        at += I64{8}
+        mixed: wrapping((hash ~ rt_text_word(wrapping(data + at))) * I64{-7046029254386353131})
+        hash = mixed ~ ((mixed >> I64{29}) & I64{34359738367})
+        at = wrapping(at + I64{8})
     }
     if at < len {
         tail := I64{0}
         // The 1..7 tail bytes, low first: len's low bits are their count.
-        if (wrapping(data + at) & I64{7} == I64{0}) {
-            tail = rt_text_word(wrapping(data + at)) & (I64{1} << ((len & I64{7}) * I64{8})) - I64{1}
+        // Any address at offset <= 4088 within a 4KiB page stays in the mapped page.
+        addr: wrapping(data + at)
+        if ((addr & I64{4095}) <= I64{4088}) {
+            tail = rt_text_word(addr) & wrapping((I64{1} << ((len & I64{7}) * I64{8})) - I64{1})
         } else {
             end := len
             loop end > at {
@@ -63,7 +66,8 @@
                 tail = (tail << I64{8}) | rt_text_byte(wrapping(data + end))
             }
         }
-        hash = rt_text_hash_fold(hash, tail)
+        mixed: wrapping((hash ~ tail) * I64{-7046029254386353131})
+        hash = mixed ~ ((mixed >> I64{29}) & I64{34359738367})
     }
     hash ~= (hash >> I64{33}) & I64{2147483647}
     hash = wrapping(hash * I64{-49064778989728563})

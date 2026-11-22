@@ -477,7 +477,7 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
         if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] {
             next
         }
-        loop k in at..<(f.c[at + 1] + 1) -> f.op[k] = IROp.Nop
+        loop k in at..<(f.c[at + 1] + 1) -> ir_opt_kill(f, k)
         removed = true
     }
     if removed -> ir_opt_compact(f)
@@ -519,7 +519,7 @@ ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
         later: ir_opt_polls_reach(f, poll, trap, turn, end + 1)
         if later < 0 -> next
         if f.a[at] == turn -> f.a[later] = turn
-        loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
+        loop k in at..<(end + 1) -> ir_opt_kill(f, k)
         folded = true
     }
     if folded -> ir_opt_compact(f)
@@ -718,7 +718,11 @@ ir_opt_strip_mine: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
-    if turn < 0 -> return 0
+    ir_opt_strip_mine_with(m, f, poll, trap, turn)
+}
+
+ir_opt_strip_mine_with: fn(m: IRModule, f: &IRFunction, poll: Int, trap: Int, turn: Int) -> Int Never! {
+    if f.asm != None || f.cold || f.op.len() == 0 || turn < 0 -> return 0
     has_turn := false
     loop at in 0..<f.op.len() {
         if f.op[at] == .Call && f.a[at] == turn {
