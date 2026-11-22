@@ -2291,7 +2291,7 @@ sema_effect_unsafe_site: fn(gate: TUnsafeGate) -> String Never! {
 sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], gate: TUnsafeGate, span: Span?) Never! {
     node_index: if walk == {
         .Collect(index) | .LambdaBody(index) -> index
-        .Unsafe(_) | .PreludeDemands(_) | .Region(_, _) -> {
+        .Unsafe(_) | .Region(_, _) -> {
             return
         }
     }
@@ -3843,7 +3843,7 @@ sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
 sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
     node_index: if walk == {
         .Collect(index) | .LambdaBody(index) -> index
-        .Unsafe(_) | .PreludeDemands(_) -> {
+        .Unsafe(_) -> {
             return
         }
         .Region(index, region) -> if sema_effect_span_contains(region, span) -> index else -> {
@@ -7183,13 +7183,11 @@ sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: S
 // The walkers over a checked flat body: the one a child visit continues
 // with, and its own arguments (sema_effect_walk_expr,
 // sema_effect_check_unsafe_expr, sema_effect_walk_region_expr, and
-// FailureLaw's prelude-conversion demand walk
-// sema_prelude_conversion_demands_enter, whose state is its one row).
+// lambda body walking).
 SemaEffectWalk: enum {
     Collect(node_index: Int),
     Unsafe(audited: Bool),
     Region(node_index: Int, region: Span),
-    PreludeDemands(state: Shared<SemaPreludeDemandWalk>),
     LambdaBody(node_index: Int),
 }
 
@@ -7212,10 +7210,6 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
         .Collect(node_index) -> if sema_effect_walk_expr_enter(nodes, node_index, tree, expression, node, facts, diagnostics, caller) -> Val(walk) else -> None
         .Unsafe(audited) -> if sema_effect_check_unsafe_enter(nodes, facts, caller, tree, node, audited, diagnostics) -> Val(walk) else -> None
         .Region(node_index, region) -> sema_effect_walk_region_enter(nodes, node_index, tree, expression, node, region, facts, diagnostics, caller)
-        .PreludeDemands(state) -> {
-            sema_prelude_conversion_demands_enter(state, node)
-            Val(walk)
-        }
         .LambdaBody(node_index) -> {
             // A lambda body's value reads and stops are the enclosing node's,
             // as its calls are the enclosing node's edges; so are the bounded

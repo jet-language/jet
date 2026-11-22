@@ -94,7 +94,10 @@ IRSsa: struct {
 }
 
 ir_ssa_find: fn(s: IRSsa, value: Int) -> Int Never! {
-    at := value
+    if value < 0 -> return value
+    next: s.repl[value]
+    if next == value -> return value
+    at := next
     loop at >= 0 && s.repl[at] != at -> at = s.repl[at]
     at
 }
@@ -453,6 +456,14 @@ ir_ssa_prune: fn(s: &IRSsa) Never! {
             slot: s.val_slot[value]
             s.repl[value] = if same >= 0 -> same else -> ir_ssa_undef(s, slot)
             changed = true
+        }
+    }
+    loop value in 0..<s.repl.len() {
+        next: s.repl[value]
+        if next != value {
+            root := next
+            loop root >= 0 && s.repl[root] != root -> root = s.repl[root]
+            s.repl[value] = root
         }
     }
 }

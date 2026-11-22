@@ -243,6 +243,10 @@ sema_function_memory_visit: fn(walk: &SemaFunctionMemoryWalk, module_identity: M
         if walk.wanted.get(row) != None -> walk.fetched[row] = function
         return
     }
+    if outer.len() == 0 && declarations.len() == 0 {
+        walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), name: function.name, span: function.span, function: None, chain: [PolicyDeclaration]{}, transfer_root: transfer_root})
+        return
+    }
     chain: sema_function_memory_function_policies(outer, declarations, function)
     rewritable := Func?{None}
     if sema_function_memory_scope_may_annotate(function.body, chain) -> rewritable = Val(function)
