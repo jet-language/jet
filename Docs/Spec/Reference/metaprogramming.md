@@ -258,7 +258,7 @@ text or raw `[U8]` data into the program, while
 [`find.jet`](../../../Examples/Metaprogramming/Comptime/Find.jet) returns sorted
 relative paths with their input identity. An empty `find` result is still a
 typed empty `[String]`; the comptime tier-parity case
-[`find_empty.jet`](../../../Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/comptime_find_empty/find_empty.jet) proves it.
+[`find_empty.jet`](../../../Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndO0/comptime_find_empty/find_empty.jet) proves it.
 
 These Tier 1 inputs are ordinary effect-governed calls: `embed_file`,
 `embed_bytes` and `find` read `FS.Read`, and `net.fetch` reaches `Net`. A

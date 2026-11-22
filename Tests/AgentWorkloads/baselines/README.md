@@ -1,4 +1,4 @@
-# Frozen interpreter baseline
+# Frozen O0 baseline
 
 `receipt.tsv` records one run of every frozen task under Bash, Python, and Node on the declared machine. `outputs/` stores the raw stdout and stderr bytes from those runs. Each row carries the shared policy digest from `tests/agent_workloads.rs`; the receipt uses the corpus scoring string from `domain_contract.tsv`; it is evidence, not a second runner or scoring model.
 

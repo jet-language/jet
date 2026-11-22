@@ -2363,7 +2363,7 @@ updates the stored map, and nested field or indexed-record writes update the
 payload rather than a copied read. This also holds inside `#Transact` and through
 an expert edit guard. Direct indexed `+=`/`-=` still follows the ordinary E0164
 rule: use a total update with an explicit missing-key fallback instead. See the
-[compound-place test](../../Tests/Cases/SharedTransaction/SharedCompoundPlacesMatchO0O1O2AndInterpreter.fixture/run.jet).
+[compound-place test](../../Tests/Cases/SharedTransaction/SharedCompoundPlacesMatchO0O1O2.fixture/run.jet).
 
 ```jet
 AppConfig: struct {

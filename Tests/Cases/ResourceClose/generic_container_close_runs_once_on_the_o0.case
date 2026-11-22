@@ -1,0 +1,16 @@
+# tests/resource_close.rs::generic_container_close_runs_once_on_the_O0 at tests/resource_close.rs:529; hand-port
+# The o0 run retires: jet has no O0 tier (`jet run --interpret` is E2102); the default run keeps the claim,
+# and the O1 and O2 runs close each owned field, list item and payload exactly once too.
+fixture: GenericContainerCloseRunsOnceOnTheO0.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run main.jet
+exit: 0
+stdout: = generic_container_close_runs_once_on_the_o0.resource_close_containers.out # tests/resource_close.rs:543 default_run
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = generic_container_close_runs_once_on_the_o0.resource_close_containers.out
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = generic_container_close_runs_once_on_the_o0.resource_close_containers.out

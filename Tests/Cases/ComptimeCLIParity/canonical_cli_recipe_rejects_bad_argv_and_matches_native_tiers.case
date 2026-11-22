@@ -26,7 +26,7 @@ env: JET_STORE_DIR={work}/cache/help-default-typed.jet/run
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == typed_help # Original help_body byte equality (drops first line, absent LF fails).
-mkdir: cache/help-interpreter-typed.jet
+mkdir: cache/help-O0-typed.jet
 step: {work}/.jet/build/typed --not-a-real-option
 exit: 2
 stdout: empty
@@ -40,7 +40,7 @@ exit: 2
 stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/unknown-interpreter-typed.jet
+mkdir: cache/unknown-O0-typed.jet
 step: {work}/.jet/build/typed surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -58,7 +58,7 @@ stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle
 stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/surplus-interpreter-typed.jet
+mkdir: cache/surplus-O0-typed.jet
 step builder_help: {work}/.jet/build/builder --help
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
@@ -69,7 +69,7 @@ env: JET_STORE_DIR={work}/cache/help-default-builder.jet/run
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == builder_help # Original help_body byte equality (drops first line, absent LF fails).
-mkdir: cache/help-interpreter-builder.jet
+mkdir: cache/help-O0-builder.jet
 step: {work}/.jet/build/builder --not-a-real-option
 exit: 2
 stdout: empty
@@ -83,7 +83,7 @@ exit: 2
 stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/unknown-interpreter-builder.jet
+mkdir: cache/unknown-O0-builder.jet
 step: {work}/.jet/build/builder surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -101,7 +101,7 @@ stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle
 stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/surplus-interpreter-builder.jet
+mkdir: cache/surplus-O0-builder.jet
 step positionals_help: {work}/.jet/build/positionals --help
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
@@ -112,7 +112,7 @@ env: JET_STORE_DIR={work}/cache/help-default-positionals.jet/run
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == positionals_help # Original help_body byte equality (drops first line, absent LF fails).
-mkdir: cache/help-interpreter-positionals.jet
+mkdir: cache/help-O0-positionals.jet
 step: {work}/.jet/build/positionals add --not-a-real-option
 exit: 2
 stdout: empty
@@ -126,7 +126,7 @@ exit: 2
 stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/unknown-interpreter-positionals.jet
+mkdir: cache/unknown-O0-positionals.jet
 step: {work}/.jet/build/positionals add accepted surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -144,7 +144,7 @@ stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle
 stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
-mkdir: cache/surplus-interpreter-positionals.jet
+mkdir: cache/surplus-O0-positionals.jet
 step named_aot: {work}/.jet/build/positionals add bare-loses --text named-wins
 exit: 0
 stdout: ~ "named-wins" # Original contains named value.
@@ -157,5 +157,5 @@ exit: 0
 stdout: ~ "named-wins" # Original contains named value.
 stdout: !~ "bare-loses" # Original excludes positional value.
 stdout: == named_aot # Original whole stdout byte equality.
-mkdir: cache/named-interpreter
+mkdir: cache/named-O0
 
