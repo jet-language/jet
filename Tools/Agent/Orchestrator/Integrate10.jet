@@ -224,9 +224,7 @@ run: fn() {
         _ := process.run_all(loop s in applied.filter(fn(s) { files.read_or("{s}/tests", "") != "" }) -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
-        failing: loop name in named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }) {
-            name.removesuffix(".rc")
-        }
+        failing: named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }).map(fn(name) { name.removesuffix(".rc") })
         if failing.len() > 0 {
             loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
             _ := unpack(w, base, "{i}/basetree")

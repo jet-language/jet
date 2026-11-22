@@ -261,7 +261,7 @@ export async function runBuildSystemAxisAdapter(axis, { runDir, jetBin, repoDir 
   });
   let receipt = null;
   try { receipt = JSON.parse(await fsp.readFile(receiptPath, "utf8")); } catch { /* reported below */ }
-  const blockers = receipt ? [...receipt.failures] : [`the BuildSystem harness exited ${exit} without a receipt`];
+  const blockers = receipt ? [...receipt.failures] : [`the build-system harness exited ${exit} without a receipt`];
   const metrics = {};
   const cells = {};
   for (const cell of receipt?.cells ?? []) {

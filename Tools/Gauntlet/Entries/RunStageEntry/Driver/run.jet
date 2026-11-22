@@ -55,6 +55,11 @@ Reading: enum {
     Measured,
 }
 
+is_number: fn(value: Dyn?) -> Bool {
+    item: value ?? return false
+    item == .Int(_) || item == .Float(_) || item == .Number(_)
+}
+
 // `value` at `key` with each measurement, and what follows from one, as
 // `<measured>`.
 masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
@@ -62,8 +67,13 @@ masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
         .Int(_) | .Float(_) | .Number(_) -> if KEPT.contains(key) -> value.copy() else -> Dyn.Text("<measured>")
         .Array(items) -> Dyn.Array(items.map(fn(item) { masked(item, key, reading) }))
         .Object(_) -> {
+            numeric_comparison: reading == .Measured && is_number(value.get("jet")) && is_number(value.get("peer"))
             out := Dyn.object()
             loop field in members(value) {
+                if numeric_comparison && (field.key == "verdict" || field.key == "evidence" || field.key == "reason") {
+                    out[field.key] = Dyn.Text("<measured>")
+                    next
+                }
                 inner: if reading == .Measured || key == "comparisons" || field.key == "cache_state" -> Reading.Measured else -> Reading.Plain
                 out[field.key] = masked(field.value, if key == "verdicts" -> "verdict" else -> field.key, inner)
             }

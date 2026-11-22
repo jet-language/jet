@@ -2557,10 +2557,28 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         }
         // The build stands unless a set-aside job changed a compiler input;
         // the ratchets always rerun on what is left.
-        rechecked: if compiler -> precommit_batch(dir, composed, log).code else -> ratchets(dir)
+        rechecked_code := 0
+        if compiler {
+            rebuilt_checked: precommit_batch(dir, composed, log)
+            rechecked_code = rebuilt_checked.code
+            built = rebuilt_checked.census
+        } else {
+            rechecked_code = ratchets(dir)
+        }
         stages.push(Stage{name: if compiler -> "rebuild" else -> "ratchets", seconds: epoch() - started})
-        if rechecked != 0 {
+        if rechecked_code != 0 {
             say(log, "PRECOMMIT FAILED after the set-aside; reverting")
+            revert_batch(dir, composed.applied, composed.all, log)
+            return finish(log, stages, 5)
+        }
+    }
+    if built {
+        started = epoch()
+        s1_dir: "{scratch_root()}/discovery/r14/snap/Compiler/JetCLI/.jet/build"
+        probe: batch_s2_probe(dir, pre, composed, work, s1_dir, log)
+        stages.push(Stage{name: "s2-probe", seconds: epoch() - started})
+        if !probe.ok {
+            say(log, "S2 PROBE FAILED ({probe.summary}); reverting")
             revert_batch(dir, composed.applied, composed.all, log)
             return finish(log, stages, 5)
         }
@@ -3257,6 +3275,255 @@ train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log:
         }
     }
     Tested{red: red, unowned: unowned}
+}
+
+// --- s2 self-compile probe (`batch`) ----------------------------------------
+//
+// Builds an s2 compiler from the batch's s1 (or reuses a cached s2 for the
+// same compiler source identity) and runs the BackendIce cases and the
+// ProcessExitUnmapped golden against both s1 and s2. Any row whose verdict
+// differs between s1 and s2 (or a missing row / differing exit status) fails
+// the batch naming the s1/s2 split before committing.
+
+S2_PROBE_CASES_FILTER: "BackendIce"
+
+S2_PROBE_GOLDEN_FILTER: "ProcessExitUnmapped"
+
+S2_PROBE_SECONDS: 900
+
+PROBE_VERDICTS: [String]{"PASS", "FAIL", "KNOWN-FAILING", "UNEXPECTED-PASS", "UNSUPPORTED", "SKIP-HOST", "OPT-IN", "REFUSED", "ERROR", "TIMEOUT"}
+
+ProbeRow: struct {
+    suite: String,
+    path: String,
+    tier: String,
+    verdict: String,
+}
+
+ProbeRun: struct {
+    suite: String,
+    code: Int,
+    rows: [ProbeRow],
+    pass_count: Int,
+    fail_count: Int,
+    other_count: Int,
+}
+
+S2Build: struct {
+    ok: Bool,
+    reused: Bool,
+    dir: String,
+    error: String,
+}
+
+S2ProbeVerdict: struct {
+    ok: Bool,
+    reused: Bool,
+    s2_dir: String,
+    source_identity: String,
+    s1_rows: Int,
+    s2_rows: Int,
+    splits: [String],
+    summary: String,
+}
+
+// Parse `VERDICT<TAB>PATH<TAB>TIER...` rows from `jet test` output.
+parse_probe_rows: fn(suite: String, text: String, code: Int) -> ProbeRun Never! {
+    rows := [ProbeRow]{}
+    pass_count := 0
+    fail_count := 0
+    other_count := 0
+    loop line in text.lines() {
+        fields: line.split("\t").to_list()
+        if fields.len() < 3 -> next
+        verdict: fields[0].trim()
+        if !PROBE_VERDICTS.contains(verdict) -> next
+        path: fields[1].trim()
+        tier: fields[2].trim()
+        if path == "" -> next
+        rows.push(ProbeRow{suite: suite.copy(), path: path, tier: tier, verdict: verdict.copy()})
+        if {
+            verdict == "PASS" -> pass_count += 1
+            verdict == "FAIL" || verdict == "ERROR" || verdict == "TIMEOUT" || verdict == "REFUSED" -> fail_count += 1
+            else -> other_count += 1
+        }
+    }
+    ProbeRun{suite: suite, code: code, rows: rows, pass_count: pass_count, fail_count: fail_count, other_count: other_count}
+}
+
+// Compare s1 and s2 rows for one probe suite. Any differing row verdict,
+// missing row, empty probe output, or differing exit code is an s1/s2 split.
+diff_probe_runs: fn(s1: ProbeRun, s2: ProbeRun) -> [String] Never! {
+    splits := [String]{}
+    if s1.rows.len() == 0 || s2.rows.len() == 0 {
+        splits.push("s1/s2 split ({s1.suite}): probe produced no rows (s1={s1.rows.len()} rc={s1.code}, s2={s2.rows.len()} rc={s2.code})")
+        return splits
+    }
+    loop r1 in s1.rows {
+        found := false
+        loop r2 in s2.rows {
+            if r2.path == r1.path && r2.tier == r1.tier {
+                found = true
+                if r2.verdict != r1.verdict {
+                    splits.push("s1/s2 split ({s1.suite}): {r1.path} ({r1.tier}): s1={r1.verdict} s2={r2.verdict}")
+                }
+                break
+            }
+        }
+        if !found {
+            splits.push("s1/s2 split ({s1.suite}): {r1.path} ({r1.tier}): s1={r1.verdict} s2=MISSING")
+        }
+    }
+    loop r2 in s2.rows {
+        found := false
+        loop r1 in s1.rows {
+            if r1.path == r2.path && r1.tier == r2.tier {
+                found = true
+                break
+            }
+        }
+        if !found {
+            splits.push("s1/s2 split ({s2.suite}): {r2.path} ({r2.tier}): s1=MISSING s2={r2.verdict}")
+        }
+    }
+    if splits.len() == 0 && s1.code != s2.code {
+        splits.push("s1/s2 split ({s1.suite}): exit status differs (s1 rc={s1.code}, s2 rc={s2.code})")
+    }
+    splits
+}
+
+s2_cache_dir: fn(scratch: String, source_identity: String) -> String Never! {
+    "{scratch}/discovery/s2-cache/{crypto.sha256(source_identity.bytes()).hex()}"
+}
+
+s2_cache_ready: fn(cache: String, source_identity: String) -[FS]> Bool Never! {
+    if !files.is_file("{cache}/jet") || !files.is_file("{cache}/jet-runtime/native.key") -> return false
+    (files.read("{cache}/SOURCE_IDENTITY") ?? "").trim() == source_identity
+}
+
+// Build an s2 compiler from `s1_dir` over `tree`, or reuse the cached s2 for
+// `source_identity`.
+ensure_s2: fn(tree: String, s1_dir: String, identity: String, source_identity: String, work: String, log: String) -[Exec, Env, FS, IO, Time.Wait]> S2Build Never! {
+    cache: s2_cache_dir(scratch_root(), source_identity)
+    if s2_cache_ready(cache, source_identity) {
+        say(log, "s2-probe: reused s2 at {cache} (source identity {source_identity})")
+        return S2Build{ok: true, reused: true, dir: cache, error: ""}
+    }
+    s1_jet: "{s1_dir}/jet"
+    if !files.is_file(s1_jet) {
+        return S2Build{ok: false, reused: false, dir: "", error: "s1/s2 split: s1 compiler missing at {s1_jet}"}
+    }
+    s2_snap: "{work}/s2-snap"
+    files.remove_all(s2_snap) ?? ()
+    files.copy_dir(tree, s2_snap) ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 snapshot copy failed: {err}"}
+    files.remove_all("{s2_snap}/Compiler/JetCLI/.jet/build") ?? ()
+    env := compile_env(identity, s2_snap, "")
+    env.push(Setting{name: "JET", value: s1_jet.copy()})
+    argv: [String]{s1_jet, "{s2_snap}/Tools/Agent/JetEnv.jet", s1_jet, "build", "-O1", "--threads", "12", "Compiler"}
+    build_log: "{work}/s2-build"
+    code: run_heavy(s2_snap, 1800, BUILD_MEMORY, CENSUS_CPUS, argv, env, build_log)
+    built_dir: "{s2_snap}/Compiler/JetCLI/.jet/build"
+    if code != 0 || !files.is_file("{built_dir}/jet") || !files.is_file("{built_dir}/jet-runtime/native.key") {
+        tail: "{files.read("{build_log}.out") ?? ""}{files.read("{build_log}.err") ?? ""}".trim_end().last_lines(4).join(" | ")
+        return S2Build{ok: false, reused: false, dir: "", error: "s1/s2 split: s2 build from s1 failed (rc={code}): {clip(tail, 300)}"}
+    }
+    stage: "{cache}.tmp.{sys.pid()}"
+    files.remove_all(stage) ?? ()
+    files.create_dir_all(stage) ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 cache dir cannot be created: {err}"}
+    files.copy("{built_dir}/jet", "{stage}/jet") ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 jet copy failed: {err}"}
+    files.set_mode("{stage}/jet", 0o755) ?? ()
+    if files.is_file("{built_dir}/jet.debug") {
+        files.copy("{built_dir}/jet.debug", "{stage}/jet.debug") ?? ()
+    }
+    files.copy_dir("{built_dir}/jet-runtime", "{stage}/jet-runtime") ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 jet-runtime copy failed: {err}"}
+    files.write("{stage}/IDENTITY", "{identity}\n") ?? ()
+    files.write("{stage}/SOURCE_IDENTITY", "{source_identity}\n") ?? ()
+    files.remove_all(cache) ?? ()
+    files.create_dir_all(files.dirname(cache)) ?? ()
+    files.rename(stage, cache) ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 cache rename failed: {err}"}
+    say(log, "s2-probe: built s2 from s1 at {cache} (source identity {source_identity})")
+    S2Build{ok: true, reused: false, dir: cache, error: ""}
+}
+
+run_probe_suite: fn(tree: String, jet_dir: String, identity: String, suite: String, profile: String, filter: String, out_log: String) -[Exec, Env, FS, Time.Wait]> ProbeRun Never! {
+    path: process.env_nonempty("PATH") ?? ""
+    argv: [String]{"{jet_dir}/jet", "test", "Compiler", "--profile", profile, "--filter", filter}
+    spec := process.cmd(argv).cwd(tree).timeout(time.duration_seconds(S2_PROBE_SECONDS)).output_limit(67108864)
+    spec = spec.env("PATH", "{jet_dir}:{path}").env("JET", "{jet_dir}/jet").env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
+    receipt: spec.run() ?? {
+        files.write(out_log, "s2-probe could not start {jet_dir}/jet: {err}\n") ?? ()
+        return parse_probe_rows(suite, "", 127)
+    }
+    combined: process.combined_output(receipt)
+    files.write(out_log, combined) ?? ()
+    parse_probe_rows(suite, combined, exit_code(receipt))
+}
+
+probe_counts_text: fn(run: ProbeRun) -> String Never! {
+    "{run.rows.len()} rows ({run.pass_count} PASS, {run.fail_count} FAIL, {run.other_count} other, rc={run.code})"
+}
+
+// Run both probe suites (BackendIce cases and ProcessExitUnmapped golden)
+// against `s1_dir` and `s2_dir`, log row counts and any s1/s2 split to `log`,
+// and return the verdict.
+compare_s1_s2_probe: fn(tree: String, s1_dir: String, s2_dir: String, identity: String, source_identity: String, reused: Bool, out_dir: String, log: String) -[Exec, Env, FS, IO, Time.Wait]> S2ProbeVerdict Never! {
+    files.create_dir_all(out_dir) ?? ()
+    s1_ice: run_probe_suite(tree, s1_dir, identity, "BackendIce", "cases", S2_PROBE_CASES_FILTER, "{out_dir}/s1-backend-ice.out")
+    s2_ice: run_probe_suite(tree, s2_dir, identity, "BackendIce", "cases", S2_PROBE_CASES_FILTER, "{out_dir}/s2-backend-ice.out")
+    ice_splits: diff_probe_runs(s1_ice, s2_ice)
+    say(log, "s2-probe BackendIce: s1={probe_counts_text(s1_ice)} s2={probe_counts_text(s2_ice)} splits={ice_splits.len()}")
+
+    s1_exit: run_probe_suite(tree, s1_dir, identity, "ProcessExitUnmapped", "golden", S2_PROBE_GOLDEN_FILTER, "{out_dir}/s1-process-exit.out")
+    s2_exit: run_probe_suite(tree, s2_dir, identity, "ProcessExitUnmapped", "golden", S2_PROBE_GOLDEN_FILTER, "{out_dir}/s2-process-exit.out")
+    exit_splits: diff_probe_runs(s1_exit, s2_exit)
+    say(log, "s2-probe ProcessExitUnmapped: s1={probe_counts_text(s1_exit)} s2={probe_counts_text(s2_exit)} splits={exit_splits.len()}")
+
+    splits := ice_splits.copy()
+    splits.extend(exit_splits.copy())
+    loop split in splits -> say(log, "s2-probe {split}")
+    s1_total: s1_ice.rows.len() + s1_exit.rows.len()
+    s2_total: s2_ice.rows.len() + s2_exit.rows.len()
+    if splits.len() == 0 {
+        summary: "{s1_total} rows match between s1 and s2 (BackendIce={s1_ice.rows.len()}, ProcessExitUnmapped={s1_exit.rows.len()})"
+        say(log, "s2-probe PASS: {summary}")
+        return S2ProbeVerdict{ok: true, reused: reused, s2_dir: s2_dir, source_identity: source_identity, s1_rows: s1_total, s2_rows: s2_total, splits: splits, summary: summary}
+    }
+    summary: "s1/s2 split ({splits.len()} differing row(s); s1={s1_total} rows, s2={s2_total} rows)"
+    say(log, "s2-probe FAIL: {summary}")
+    S2ProbeVerdict{ok: false, reused: reused, s2_dir: s2_dir, source_identity: source_identity, s1_rows: s1_total, s2_rows: s2_total, splits: splits, summary: summary}
+}
+
+// Export the composed tree, build or reuse s2 from s1, and compare s1 vs s2 on
+// BackendIce and ProcessExitUnmapped.
+batch_s2_probe: fn(dir: String, pre: String, composed: Composed, work: String, s1_dir: String, log: String) -[Exec, Env, FS, IO, Time.Wait]> S2ProbeVerdict Never! {
+    tree: "{work}/s2-tree"
+    files.remove_all(tree) ?? ()
+    export_tree(dir, pre, tree, [String]{}) ?? {
+        return S2ProbeVerdict{ok: false, reused: false, s2_dir: "", source_identity: "", s1_rows: 0, s2_rows: 0, splits: [String]{err.message}, summary: "s2-probe export failed: {err.message}"}
+    }
+    changed := composed.all.copy()
+    changed.extend(composed.regenerated.copy())
+    loop path in changed {
+        target: files.join(tree, path)
+        if !on_disk(dir, path) {
+            files.remove(target) ?? ()
+            next
+        }
+        files.create_dir_all(files.dirname(target)) ?? ()
+        files.copy(files.join(dir, path), target) ?? {
+            return S2ProbeVerdict{ok: false, reused: false, s2_dir: "", source_identity: "", s1_rows: 0, s2_rows: 0, splits: [String]{"{path}: {err}"}, summary: "s2-probe copy failed: {path}: {err}"}
+        }
+    }
+    source_identity: compiler_source_identity(tree) ?? {
+        return S2ProbeVerdict{ok: false, reused: false, s2_dir: "", source_identity: "", s1_rows: 0, s2_rows: 0, splits: [String]{err.message}, summary: "s2-probe source identity failed: {err.message}"}
+    }
+    identity: read_identity(seed_dir())
+    built: ensure_s2(tree, s1_dir, identity, source_identity, work, log)
+    if !built.ok {
+        say(log, "s2-probe FAIL: {built.error}")
+        return S2ProbeVerdict{ok: false, reused: false, s2_dir: "", source_identity: source_identity, s1_rows: 0, s2_rows: 0, splits: [String]{built.error.copy()}, summary: built.error}
+    }
+    compare_s1_s2_probe(tree, s1_dir, built.dir, identity, source_identity, built.reused, "{work}/s2-probe", log)
 }
 
 whole_profile: fn(line: String) -> Bool Never! {
@@ -4645,4 +4912,80 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     assert(pass_clean(runs, "check"))
     assert(!pass_clean(runs, "selfcheck"))
     assert(!pass_clean(runs, "build"))
+}
+
+#Test("s2 probe parses test rows and flags any s1/s2 split or missing row") {
+    ice_ok: "PASS\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\t-\t\nKNOWN-FAILING\tTests/Cases/BackendIce/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221.case\t-\t#6717\nPASS\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\t-\t\n"
+    ice_split: "PASS\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\t-\t\nKNOWN-FAILING\tTests/Cases/BackendIce/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221.case\t-\t#6717\nFAIL\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\t-\texit 1, expected 101\n"
+    s1: parse_probe_rows("BackendIce", ice_ok, 0)
+    s2_same: parse_probe_rows("BackendIce", ice_ok, 0)
+    s2_bad: parse_probe_rows("BackendIce", ice_split, 1)
+    assert_eq(s1.rows.len(), 3)
+    assert_eq(s1.pass_count, 2)
+    assert_eq(s1.fail_count, 0)
+    assert_eq(s1.other_count, 1)
+    assert_eq(diff_probe_runs(s1, s2_same), [String]{})
+    splits: diff_probe_runs(s1, s2_bad)
+    assert_eq(splits.len(), 1)
+    assert(splits[0].contains("s1/s2 split (BackendIce)"))
+    assert(splits[0].contains("link_failure_is_ice_101_with_a_native_link_row.case"))
+    assert(splits[0].contains("s1=PASS s2=FAIL"))
+    empty: parse_probe_rows("BackendIce", "", 1)
+    assert(diff_probe_runs(s1, empty)[0].contains("s1/s2 split (BackendIce): probe produced no rows"))
+}
+
+#Test("s2 cache reuses a built compiler only for the same source identity") {
+    scratch: files.mkdtemp("land-s2-cache") ?? panic("mkdtemp: {err}")
+    id: "jet@a0.0.46#same"
+    cache: s2_cache_dir(scratch, id)
+    assert(!s2_cache_ready(cache, id))
+    files.create_dir_all("{cache}/jet-runtime") ?? panic("{cache}: {err}")
+    files.write("{cache}/jet", "s2") ?? panic("jet: {err}")
+    files.write("{cache}/jet-runtime/native.key", "k1\n") ?? panic("key: {err}")
+    files.write("{cache}/SOURCE_IDENTITY", "{id}\n") ?? panic("id: {err}")
+    assert(s2_cache_ready(cache, id))
+    assert(!s2_cache_ready(cache, "jet@a0.0.46#other"))
+    files.remove_all(scratch) ?? ()
+}
+
+#Test("s2 probe records row counts on a clean batch and fails naming s1/s2 split on an a0.0.30 ICE exit split") {
+    dir: files.mkdtemp("land-s2-probe") ?? panic("mkdtemp: {err}")
+    s1_dir: "{dir}/s1"
+    s2_ok_dir: "{dir}/s2-ok"
+    s2_split_dir: "{dir}/s2-split"
+    tree: "{dir}/tree"
+    files.create_dir_all(s1_dir) ?? panic("s1: {err}")
+    files.create_dir_all(s2_ok_dir) ?? panic("s2-ok: {err}")
+    files.create_dir_all(s2_split_dir) ?? panic("s2-split: {err}")
+    files.create_dir_all(tree) ?? panic("tree: {err}")
+    ok_script: "#!/usr/bin/env bash\nif [[ \"$*\" == *BackendIce* ]]; then\n  printf 'PASS\\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\\t-\\t\\n'\n  printf 'PASS\\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\\t-\\t\\n'\n  exit 0\nfi\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to0\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to1\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to2\\t\\n'\nexit 0\n"
+    split_script: "#!/usr/bin/env bash\nif [[ \"$*\" == *BackendIce* ]]; then\n  printf 'PASS\\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\\t-\\t\\n'\n  printf 'FAIL\\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\\t-\\texit 1, not 101\\n'\n  exit 1\nfi\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to0\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to1\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to2\\t\\n'\nexit 0\n"
+    files.write("{s1_dir}/jet", ok_script) ?? panic("s1 jet: {err}")
+    files.set_mode("{s1_dir}/jet", 0o755) ?? panic("chmod s1: {err}")
+    files.write("{s2_ok_dir}/jet", ok_script) ?? panic("s2 ok jet: {err}")
+    files.set_mode("{s2_ok_dir}/jet", 0o755) ?? panic("chmod s2 ok: {err}")
+    files.write("{s2_split_dir}/jet", split_script) ?? panic("s2 split jet: {err}")
+    files.set_mode("{s2_split_dir}/jet", 0o755) ?? panic("chmod s2 split: {err}")
+
+    clean_log: "{dir}/clean.log"
+    files.write(clean_log, "") ?? ()
+    clean: compare_s1_s2_probe(tree, s1_dir, s2_ok_dir, "jet@a0.0.46#test", "jet@a0.0.46#src", true, "{dir}/out-ok", clean_log)
+    assert(clean.ok)
+    assert_eq(clean.s1_rows, 5)
+    assert_eq(clean.s2_rows, 5)
+    clean_text: files.read(clean_log) ?? ""
+    assert(clean_text.contains("s2-probe BackendIce: s1=2 rows (2 PASS, 0 FAIL, 0 other, rc=0) s2=2 rows (2 PASS, 0 FAIL, 0 other, rc=0) splits=0"))
+    assert(clean_text.contains("s2-probe ProcessExitUnmapped: s1=3 rows (3 PASS, 0 FAIL, 0 other, rc=0) s2=3 rows (3 PASS, 0 FAIL, 0 other, rc=0) splits=0"))
+    assert(clean_text.contains("s2-probe PASS: 5 rows match between s1 and s2"))
+
+    split_log: "{dir}/split.log"
+    files.write(split_log, "") ?? ()
+    broken: compare_s1_s2_probe(tree, s1_dir, s2_split_dir, "jet@a0.0.46#test", "jet@a0.0.46#src", false, "{dir}/out-split", split_log)
+    assert(!broken.ok)
+    assert_eq(broken.splits.len(), 1)
+    assert(broken.summary.contains("s1/s2 split"))
+    split_text: files.read(split_log) ?? ""
+    assert(split_text.contains("s2-probe s1/s2 split (BackendIce): Tests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case (-): s1=PASS s2=FAIL"))
+    assert(split_text.contains("s2-probe FAIL: s1/s2 split"))
+    files.remove_all(dir) ?? ()
 }

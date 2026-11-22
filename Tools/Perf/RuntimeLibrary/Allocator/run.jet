@@ -192,7 +192,7 @@ run: fn() -> Never Err! {
         cpu: cpu.copy(),  // copy: the pins own their text
         final_e2: process.env_get_or("FINAL_E2_SHA", ""),
         composed: process.env_get_or("COMPOSED_SHA", ""),
-        source_hashes: {driver: hash(files.join(source, "allocator.c")), rust: hash(files.join(source, "allocator.rs"))},
+        source_hashes: {driver: hash(files.join(source, "Allocator.c")), rust: hash(files.join(source, "Allocator.rs"))},
         inputs: {o0: {file: o0.copy(), sha256: hash(o0)}, o1: {file: o1.copy(), sha256: hash(o1)}, remaining: {file: remaining.copy(), sha256: hash(remaining)}},  // copy: the pins own their text
     }
     steps := [Step]{}
@@ -202,8 +202,8 @@ run: fn() -> Never Err! {
     built: [Bool]{
         step(steps, out, tree, "o0-exports", [JET_ENV, "jet", "run", "Tools/Packaging/CheckRuntimeExports.jet", "--", o0, remaining]),
         step(steps, out, tree, "o1-exports", [JET_ENV, "jet", "run", "Tools/Packaging/CheckRuntimeExports.jet", "--", o1, remaining]),
-        step(steps, out, tree, "driver", ["cc", "-std=c11", "-O2", "-fno-lto", "-c", files.join(source, "allocator.c"), "-o", driver]),
-        step(steps, out, tree, "rust", [JET_ENV, "rustc", "--edition=2024", "-C", "opt-level=3", "--crate-type=staticlib", files.join(source, "allocator.rs"), "-o", rust]),
+        step(steps, out, tree, "driver", ["cc", "-std=c11", "-O2", "-fno-lto", "-c", files.join(source, "Allocator.c"), "-o", driver]),
+        step(steps, out, tree, "rust", [JET_ENV, "rustc", "--edition=2024", "-C", "opt-level=3", "--crate-type=staticlib", files.join(source, "Allocator.rs"), "-o", rust]),
     }
     linked := [Bool]{}
     if built.all(fn(ok) { ok }) {
