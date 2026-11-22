@@ -265,7 +265,7 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         home: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
         r.home.push(home)
         r.tested.push(false)
-        r.lengths.push((exact || word) && !narrow && kind == .Def && (ir_range_length_load(m, f, s.val_at[value]) || ir_opt_calls_route(m, f, s.val_at[value], "jet_char_len")))
+        r.lengths.push((exact || word) && !narrow && kind == .Def && (ir_range_length_load(m, f, s.val_at[value]) || ir_opt_calls_route(m, f, s.val_at[value], "jet_char_len") || ir_opt_calls_route(m, f, s.val_at[value], "jet_string_bytes")))
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {
@@ -478,12 +478,14 @@ ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int, readers:
 }
 
 // The accumulators of counted loops: a signed phi still unbounded whose
-// join has two edges, on one of them (the back edge) its own value plus d,
-// where a bounded signed phi of the same join (the counter) gets its own
-// value plus 1. Each pass of the back edge adds 1 to the counter and d to
-// the accumulator, so after k passes the accumulator lies within its entry
-// value plus k times d's range, where k is at most the counter's high bound
-// less its entry's low bound. Returns whether any accumulator was bounded.
+// join has two edges, on one of them (the back edge) its own value plus a
+// bounded per-pass delta (direct Add/Sub, chained updates, or conditional
+// inner-Phi branches), where a bounded signed phi of the same join (the
+// counter) steps monotonically by a bounded nonzero delta. Each pass of the
+// back edge advances the counter by at least |step| and shifts the
+// accumulator within d's range, so after k passes the accumulator lies
+// within its entry value plus k times d's range. Returns whether any
+// accumulator was bounded.
 ir_range_counted: fn(f: IRFunction, s: IRSsa, r: &IRRanges) -> Bool Never! {
     found := false
     loop value in 0..<r.ranged.len() {
@@ -492,10 +494,8 @@ ir_range_counted: fn(f: IRFunction, s: IRSsa, r: &IRRanges) -> Bool Never! {
         join: s.phi_join[phi]
         if s.join_edges[join].len() != 2 -> next
         loop back in 0..<2 {
-            add: ir_range_step(f, s, r, value, ir_ssa_phi_arg(s, phi, back))
-            if add < 0 -> next
-            d: ir_range_step_by(f, s, r, value, add)
-            if !d.known || !ir_range_bounded(d) -> next
+            d: ir_range_accum_delta(f, s, r, join, value, ir_ssa_phi_arg(s, phi, back), 0)
+            if !d.known || !ir_range_bounded(d) || (d.lo == 0 && d.hi == 0) -> next
             entry: 1 - back
             start: ir_range_at(f, s, r, ir_ssa_phi_arg(s, phi, entry), s.edge_block[s.join_edges[join][entry]])
             if !start.known || !ir_range_bounded(start) -> next
@@ -508,6 +508,9 @@ ir_range_counted: fn(f: IRFunction, s: IRSsa, r: &IRRanges) -> Bool Never! {
             hi: ir_range_add(start.hi, step_hi)
             if lo > r.lo[value] -> r.lo[value] = lo
             if hi < r.hi[value] -> r.hi[value] = hi
+            if (r.lo[value] > IR_RANGE_LOW && r.hi[value] < IR_RANGE_HIGH) || (ir_range_inline(start) && ir_range_fits(start.lo, step_lo) && ir_range_fits(start.hi, step_hi)) {
+                r.inline[value] = true
+            }
             found = true
         }
     }
@@ -529,43 +532,122 @@ ir_range_passes: fn(f: IRFunction, s: IRSsa, r: IRRanges, join: Int, back: Int) 
             next
         }
         phi: s.val_at[value]
-        add: ir_range_step(f, s, r, value, ir_ssa_phi_arg(s, phi, back))
-        if add < 0 -> next
-        c: ir_range_step_by(f, s, r, value, add)
-        if !c.known || c.lo != 1 || c.hi != 1 -> next
+        c: ir_range_counter_step(f, s, r, value, ir_ssa_phi_arg(s, phi, back))
+        if !c.known || !ir_range_has_lo(c) || !ir_range_has_hi(c) -> next
         start: ir_range_at(f, s, r, ir_ssa_phi_arg(s, phi, entry), s.edge_block[s.join_edges[join][entry]])
         if !start.known || !ir_range_bounded(start) -> next
-        passes: if {
-            r.hi[value] < start.lo -> 0
-            start.lo <= IR_RANGE_LOW -> IR_RANGE_HIGH
-            else -> ir_range_add(r.hi[value], 0 - start.lo)
+        passes := -1
+        if c.lo >= 1 {
+            passes = if {
+                r.hi[value] < start.lo -> 0
+                start.lo <= IR_RANGE_LOW -> IR_RANGE_HIGH
+                else -> {
+                    diff: ir_range_add(r.hi[value], 0 - start.lo)
+                    if diff >= IR_RANGE_HIGH -> IR_RANGE_HIGH else -> diff /% c.lo
+                }
+            }
+        } else if c.hi <= -1 {
+            passes = if {
+                r.lo[value] > start.hi -> 0
+                r.lo[value] <= IR_RANGE_LOW -> IR_RANGE_HIGH
+                else -> {
+                    diff: ir_range_add(start.hi, 0 - r.lo[value])
+                    if diff >= IR_RANGE_HIGH -> IR_RANGE_HIGH else -> diff /% (0 - c.hi)
+                }
+            }
         }
+        if passes < 0 -> next
         if best < 0 || passes < best -> best = passes
     }
     best
 }
 
-// The Add that value `used` holds, through Copies and Moves of its own kind,
-// when one of its operands is (so held) the phi `value`: its instruction,
-// else -1.
-ir_range_step: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, used: Int) -> Int Never! {
-    if used < 0 -> return -1
+// The per-pass step range of counter phi `value` from back-edge value `used`:
+// `value + d` (Add) or `value - d` (Sub, negated); unknown otherwise.
+ir_range_counter_step: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, used: Int) -> IRRange Never! {
+    if used < 0 -> return ir_range_none()
     held: ir_range_held(f, s, r, ir_ssa_find(s, used))
-    if s.val_kind[held] != .Def -> return -1
+    if s.val_kind[held] != .Def -> return ir_range_none()
     at: s.val_at[held]
-    if f.op[at] != .Add || s.use_a[at] < 0 || s.use_b[at] < 0 -> return -1
-    if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value || ir_range_held(f, s, r, ir_ssa_find(s, s.use_b[at])) == value {
-        return at
+    op: f.op[at]
+    if (op != .Add && op != .Sub) || s.use_a[at] < 0 || s.use_b[at] < 0 -> return ir_range_none()
+    if op == .Add {
+        if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value {
+            return if ir_range_has(s, r, s.use_b[at]) -> ir_range_at(f, s, r, s.use_b[at], s.block[at]) else -> ir_range_none()
+        }
+        if ir_range_held(f, s, r, ir_ssa_find(s, s.use_b[at])) == value {
+            return if ir_range_has(s, r, s.use_a[at]) -> ir_range_at(f, s, r, s.use_a[at], s.block[at]) else -> ir_range_none()
+        }
+        return ir_range_none()
     }
-    return -1
+    if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) != value || !ir_range_has(s, r, s.use_b[at]) {
+        return ir_range_none()
+    }
+    b: ir_range_at(f, s, r, s.use_b[at], s.block[at])
+    if !b.known || !ir_range_bounded(b) || b.lo <= IR_RANGE_LOW -> return ir_range_none()
+    ir_range_make(0 - b.hi, 0 - b.lo)
 }
 
-// The range of the operand of Add `at` (ir_range_step) that is not phi
-// `value`, read where the Add is.
-ir_range_step_by: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, at: Int) -> IRRange Never! {
-    other: if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value -> s.use_b[at] else -> s.use_a[at]
-    if !ir_range_has(s, r, other) -> return ir_range_none()
-    ir_range_at(f, s, r, other, s.block[at])
+// The per-pass delta range of accumulator phi `value` (of join `join`) from
+// back-edge value `used`: handles unchanged paths (`value`), Add/Sub steps,
+// chained updates, and inner-Phi joins from conditional updates (`if c -> acc += 1`).
+ir_range_accum_delta: fn(f: IRFunction, s: IRSsa, r: IRRanges, join: Int, value: Int, used: Int, depth: Int) -> IRRange Never! {
+    if used < 0 || depth > 4 -> return ir_range_none()
+    held: ir_range_held(f, s, r, ir_ssa_find(s, used))
+    if held == value -> return IRRange{known: true, lo: 0, hi: 0, inline: true}
+    if s.val_kind[held] == .Phi {
+        inner_phi: s.val_at[held]
+        inner_join: s.phi_join[inner_phi]
+        if inner_join == join -> return ir_range_none()
+        out := ir_range_none()
+        loop k in 0..<s.join_edges[inner_join].len() {
+            arm: ir_range_accum_delta(f, s, r, join, value, ir_ssa_phi_arg(s, inner_phi, k), depth + 1)
+            if !arm.known || !ir_range_bounded(arm) -> return ir_range_none()
+            if !out.known {
+                out = arm
+            } else {
+                if arm.lo < out.lo -> out.lo = arm.lo
+                if arm.hi > out.hi -> out.hi = arm.hi
+                out.inline = ir_range_inline(out) && ir_range_inline(arm)
+            }
+        }
+        return out
+    }
+    if s.val_kind[held] != .Def -> return ir_range_none()
+    at: s.val_at[held]
+    op: f.op[at]
+    if (op != .Add && op != .Sub) || s.use_a[at] < 0 || s.use_b[at] < 0 -> return ir_range_none()
+    if op == .Add {
+        if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value {
+            return if ir_range_has(s, r, s.use_b[at]) -> ir_range_at(f, s, r, s.use_b[at], s.block[at]) else -> ir_range_none()
+        }
+        if ir_range_held(f, s, r, ir_ssa_find(s, s.use_b[at])) == value {
+            return if ir_range_has(s, r, s.use_a[at]) -> ir_range_at(f, s, r, s.use_a[at], s.block[at]) else -> ir_range_none()
+        }
+        if ir_range_has(s, r, s.use_b[at]) {
+            step: ir_range_at(f, s, r, s.use_b[at], s.block[at])
+            if step.known && ir_range_bounded(step) {
+                prev: ir_range_accum_delta(f, s, r, join, value, s.use_a[at], depth + 1)
+                if prev.known && ir_range_bounded(prev) -> return ir_range_binary(.Add, prev, step)
+            }
+        }
+        if ir_range_has(s, r, s.use_a[at]) {
+            step: ir_range_at(f, s, r, s.use_a[at], s.block[at])
+            if step.known && ir_range_bounded(step) {
+                prev: ir_range_accum_delta(f, s, r, join, value, s.use_b[at], depth + 1)
+                if prev.known && ir_range_bounded(prev) -> return ir_range_binary(.Add, prev, step)
+            }
+        }
+        return ir_range_none()
+    }
+    if !ir_range_has(s, r, s.use_b[at]) -> return ir_range_none()
+    b: ir_range_at(f, s, r, s.use_b[at], s.block[at])
+    if !b.known || !ir_range_bounded(b) || b.lo <= IR_RANGE_LOW -> return ir_range_none()
+    neg_b: ir_range_make(0 - b.hi, 0 - b.lo)
+    if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value -> return neg_b
+    prev: ir_range_accum_delta(f, s, r, join, value, s.use_a[at], depth + 1)
+    if prev.known && ir_range_bounded(prev) -> return ir_range_binary(.Add, prev, neg_b)
+    ir_range_none()
 }
 
 // The value `value` copies, through Copies and Moves between two Ints or

@@ -690,6 +690,319 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
     -1
 }
 
+// Counted-loop stop-poll strip-mining (O1, O2, after reduce/licm/strength):
+// hoists an inner counted loop's armed-word `jet_ir_stop_turn` check into a
+// chunked outer loop (IR_STRIP_MINE_CHUNK = 4096 iterations per poll), leaving
+// zero stop-poll instructions inside the hot inner loop while preserving
+// cancellation/deadline latency within microseconds. Only applies to tight,
+// non-trapping, call-free counted innermost loops with a single constant
+// positive step and a single top-level latch back-edge.
+IR_STRIP_MINE_CHUNK: 4096
+
+IRStripMineLoop: struct {
+    loop_at: Int,
+    loop_end: Int,
+    head: Int,
+    exit_at: Int,
+    poll_at: Int,
+    poll_end: Int,
+    idx: Int,
+    limit: Int,
+    step: Int,
+    is_int: Bool,
+    safe_limit: Bool,
+}
+
+ir_opt_strip_mine: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+    if f.asm != None || f.cold || f.op.len() == 0 -> return 0
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    if turn < 0 -> return 0
+    has_turn := false
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Call && f.a[at] == turn {
+            has_turn = true
+            break
+        }
+    }
+    if !has_turn -> return 0
+    ir_opt_compact(f)
+    facts: ir_opt_facts(f)
+    plans := [IRStripMineLoop]{}
+    skip_until := -1
+    loop at in 0..<f.op.len() {
+        if at <= skip_until || f.op[at] != .Loop -> next
+        plan: ir_opt_strip_mine_find(m, f, facts, poll, trap, turn, at)
+        if plan.loop_at >= 0 {
+            skip_until = plan.loop_end
+            plans.push(plan)
+        }
+    }
+    if plans.len() == 0 -> return 0
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    p := 0
+    at := 0
+    loop at < f.op.len() {
+        if p >= plans.len() || at != plans[p].loop_at {
+            ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+            at += 1
+            next
+        }
+        ir_opt_strip_mine_emit(f, code, plans[p])
+        at = plans[p].loop_end + 1
+        p += 1
+    }
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
+    plans.len()
+}
+
+ir_opt_strip_mine_none: fn() -> IRStripMineLoop Never! {
+    IRStripMineLoop{loop_at: -1, loop_end: -1, head: -1, exit_at: -1, poll_at: -1, poll_end: -1, idx: -1, limit: -1, step: 0, is_int: false, safe_limit: false}
+}
+
+ir_opt_strip_mine_find: fn(m: IRModule, f: IRFunction, facts: OptFacts, poll: Int, trap: Int, turn: Int, at: Int) -> IRStripMineLoop Never! {
+    none: ir_opt_strip_mine_none()
+    end: f.a[at]
+    if end <= at + 4 || end - at > 48 -> return none
+    if f.op[end - 1] != .Br || f.a[end - 1] != 0 -> return none
+    if ir_version_holds_loop(f, at, end) -> return none
+    head := at + 1
+    loop head < end && f.op[head] == .Nop -> head += 1
+    if head + 1 >= end || f.dst[head] < 0 -> return none
+    test: f.op[head]
+    exit_at: if f.op[head + 1] == .Not && head + 2 < end && f.a[head + 1] == f.dst[head] -> head + 2 else -> head + 1
+    if f.op[exit_at] != .BrIf || f.a[exit_at] != f.dst[exit_at - 1] || f.b[exit_at] < 1 -> return none
+    negated: exit_at == head + 2
+    idx := -1
+    limit := -1
+    if negated {
+        if test == .Lt {
+            idx = f.a[head]
+            limit = f.b[head]
+        } else if test == .Gt {
+            idx = f.b[head]
+            limit = f.a[head]
+        } else { return none }
+    } else {
+        if test == .Ge {
+            idx = f.a[head]
+            limit = f.b[head]
+        } else if test == .Le {
+            idx = f.b[head]
+            limit = f.a[head]
+        } else { return none }
+    }
+    if idx < 0 || limit < 0 || idx == limit -> return none
+    if f.slot_type[idx] != f.slot_type[limit] -> return none
+    ty: m.types[f.slot_type[idx]]
+    is_int: ty.kind == .Int
+    is_word: ty.kind == .Word && ty.signed && ty.size == 8
+    if !is_int && !is_word -> return none
+    if is_int && !ir_overflow_wraps(f.c[head]) -> return none
+    if ir_version_writes(f, at, end, limit) -> return none
+    // Scan loop body (exit_at + 1)..<(end - 1): require exactly one
+    // call-free stop_turn at depth 0, no other calls/IntBig/trapping ops,
+    // no early loop back-edges, and exactly one constant positive step on idx.
+    poll_at := -1
+    poll_end := -1
+    step := -1
+    depth := 0
+    k := exit_at + 1
+    loop k < end - 1 {
+        op: f.op[k]
+        if op == .End {
+            if depth <= 0 -> return none
+            depth -= 1
+            k += 1
+            next
+        }
+        if depth == 0 && op == .Call && f.a[k] == turn && ir_opt_stops_any_poll(f, poll, turn, k) {
+            if poll_at >= 0 || ir_opt_polls_checks_call(m, f, poll, trap, turn, k) -> return none
+            p_end: f.c[k + 1]
+            if p_end >= end - 1 -> return none
+            // Stop edge must not branch back to the loop head.
+            p_depth := 0
+            loop j in (k + 2)..<p_end {
+                jop: f.op[j]
+                if jop == .Block || jop == .Loop || jop == .If -> p_depth += 1
+                if jop == .End -> p_depth -= 1
+                if jop == .Br && f.a[j] == p_depth + 1 -> return none
+                if jop == .BrIf && f.b[j] == p_depth + 1 -> return none
+            }
+            poll_at = k
+            poll_end = p_end
+            k = p_end + 1
+            next
+        }
+        // Skip dead-end cold arms (e.g. bounds traps ending in Unreachable).
+        if op == .If && f.b[k] < 0 && ir_version_exit_arm(f, k + 1, f.c[k]) {
+            k = f.c[k] + 1
+            next
+        }
+        if op == .Block || op == .Loop || op == .If {
+            if op == .Loop -> return none
+            depth += 1
+            k += 1
+            next
+        }
+        if op == .IntBig || op == .Call || op == .CallRuntime || op == .CallIndirect -> return none
+        if op == .Br && f.a[k] == depth -> return none
+        if op == .BrIf && f.b[k] == depth -> return none
+        if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Neg || op == .Shl || op == .Shr {
+            if f.a[k] >= 0 {
+                op_ty: m.types[f.slot_type[f.a[k]]]
+                if (op_ty.kind == .Int || op_ty.kind == .Word) && f.c[k] != IR_OVERFLOW_WRAP && f.c[k] != IR_OVERFLOW_NONNEG {
+                    return none
+                }
+            }
+        }
+        if ir_x64_write(f, k) == idx {
+            if depth != 0 || step >= 0 || op != .Add || f.c[k] != IR_OVERFLOW_WRAP -> return none
+            other: if f.a[k] == idx -> f.b[k] else if f.b[k] == idx -> f.a[k] else -> -1
+            if other < 0 || !ir_version_constant(f, facts, other) -> return none
+            s: f.a[facts.def_at[other]]
+            if s < 1 || s > 262144 -> return none
+            step = s
+        }
+        k += 1
+    }
+    if depth != 0 || poll_at < 0 || step < 1 -> return none
+    // Hoisting stop_turn above (exit_at + 1)..<poll_at is sound only if the
+    // stop edge reads no slot written between exit_at + 1 and poll_at.
+    if poll_at > exit_at + 1 {
+        reads := [Int]{}
+        loop j in poll_at..<(poll_end + 1) {
+            ir_x64_reads_into(f, j, reads)
+            if f.op[j] == .If -> reads.push(f.a[j])
+            loop slot in reads {
+                if slot < 0 -> next
+                loop pre in (exit_at + 1)..<poll_at {
+                    if ir_x64_write(f, pre) == slot -> return none
+                }
+            }
+        }
+    }
+    safe_limit: ir_opt_strip_mine_safe_limit(m, f, facts, at, limit, is_int)
+    IRStripMineLoop{loop_at: at, loop_end: end, head: head, exit_at: exit_at, poll_at: poll_at, poll_end: poll_end, idx: idx, limit: limit, step: step, is_int: is_int, safe_limit: safe_limit}
+}
+
+// Whether `limit` is guaranteed <= MAX - chunk_span so `idx + chunk_span`
+// cannot overflow (a List/String length for Word/8, or an Int guarded by a
+// dominating preheader `IntBig(limit, bits <= 61); BrIf` before `loop_at`).
+ir_opt_strip_mine_safe_limit: fn(m: IRModule, f: IRFunction, facts: OptFacts, loop_at: Int, limit: Int, is_int: Bool) -> Bool Never! {
+    slot := limit
+    k := loop_at - 1
+    steps := 0
+    loop k >= 0 && steps < 32 {
+        op: f.op[k]
+        if op == .Loop || op == .If || op == .Else || op == .End || op == .Return || op == .Unreachable {
+            break
+        }
+        if is_int && op == .BrIf && k > 0 && f.op[k - 1] == .IntBig && f.a[k] == f.dst[k - 1] && f.a[k - 1] == slot && f.b[k - 1] <= 61 {
+            return true
+        }
+        if ir_x64_write(f, k) == slot {
+            if !is_int && (ir_range_length_load(m, f, k) || ir_opt_calls_route(m, f, k, "jet_string_bytes") || ir_opt_calls_route(m, f, k, "jet_char_len")) {
+                return true
+            }
+            if op == .Copy || op == .Move {
+                slot = f.a[k]
+            } else { break }
+        }
+        k -= 1
+        steps += 1
+    }
+    if !is_int && slot >= f.param_count && facts.defs[slot] == 1 && facts.def_at[slot] >= 0 {
+        def: facts.def_at[slot]
+        if ir_range_length_load(m, f, def) || ir_opt_calls_route(m, f, def, "jet_string_bytes") || ir_opt_calls_route(m, f, def, "jet_char_len") {
+            return true
+        }
+    }
+    false
+}
+
+ir_opt_strip_mine_emit: fn(f: &IRFunction, code: &IROptCode, plan: IRStripMineLoop) Never! {
+    line: f.code_line[plan.loop_at]
+    idx_row: f.slot_type[plan.idx]
+    bool_row: f.slot_type[f.dst[plan.head]]
+    cmp_c: if plan.is_int -> IR_OVERFLOW_WRAP else -> -1
+    chunk_span: IR_STRIP_MINE_CHUNK * plan.step
+    chunk_end: ir_slot(f, idx_row, .Temp, -1, line)
+    span_slot: ir_slot(f, idx_row, .Temp, -1, line)
+    cand: ir_slot(f, idx_row, .Temp, -1, line)
+    use_cand: ir_slot(f, bool_row, .Temp, -1, line)
+    cont: ir_slot(f, bool_row, .Temp, -1, line)
+    // Outer Loop (same depth as original Loop): test exit, poll stop_turn once
+    // per chunk, compute chunk_end = min(idx + chunk_span, limit), then run
+    // tight bottom-tested inner loop with zero stop polls.
+    ir_opt_code_put(code, .Loop, -1, -1, f.b[plan.loop_at], -1, line)
+    loop k in plan.head..<(plan.exit_at + 1) {
+        ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+    }
+    loop k in plan.poll_at..<(plan.poll_end + 1) {
+        ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+    }
+    if plan.safe_limit {
+        ir_opt_code_put(code, .Const, span_slot, chunk_span, -1, -1, line)
+        ir_opt_code_put(code, .Add, cand, plan.idx, span_slot, IR_OVERFLOW_WRAP, line)
+        ir_opt_code_put(code, .Lt, use_cand, cand, plan.limit, cmp_c, line)
+        ir_opt_code_put(code, .If, -1, use_cand, -1, -1, line)
+        ir_opt_code_put(code, .Move, chunk_end, cand, -1, -1, line)
+        ir_opt_code_put(code, .Else, -1, -1, -1, -1, line)
+        ir_opt_code_put(code, .Move, chunk_end, plan.limit, -1, -1, line)
+        ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+    } else {
+        max_slot: ir_slot(f, idx_row, .Temp, -1, line)
+        safe: ir_slot(f, bool_row, .Temp, -1, line)
+        max_val: if plan.is_int -> IR_RANGE_HIGH - chunk_span else -> 9223372036854775807 - chunk_span
+        ir_opt_code_put(code, .Const, max_slot, max_val, -1, -1, line)
+        ir_opt_code_put(code, .Le, safe, plan.idx, max_slot, cmp_c, line)
+        ir_opt_code_put(code, .If, -1, safe, -1, -1, line)
+        ir_opt_code_put(code, .Const, span_slot, chunk_span, -1, -1, line)
+        ir_opt_code_put(code, .Add, cand, plan.idx, span_slot, IR_OVERFLOW_WRAP, line)
+        ir_opt_code_put(code, .Lt, use_cand, cand, plan.limit, cmp_c, line)
+        ir_opt_code_put(code, .If, -1, use_cand, -1, -1, line)
+        ir_opt_code_put(code, .Move, chunk_end, cand, -1, -1, line)
+        ir_opt_code_put(code, .Else, -1, -1, -1, -1, line)
+        ir_opt_code_put(code, .Move, chunk_end, plan.limit, -1, -1, line)
+        ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+        ir_opt_code_put(code, .Else, -1, -1, -1, -1, line)
+        ir_opt_code_put(code, .Move, chunk_end, plan.limit, -1, -1, line)
+        ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+    }
+    // Inner Loop (bottom-tested; idx < chunk_end holds on entry): zero stop polls.
+    ir_opt_code_put(code, .Loop, -1, -1, f.b[plan.loop_at], -1, line)
+    open := 0
+    k := plan.exit_at + 1
+    loop k < plan.loop_end - 1 {
+        if k == plan.poll_at {
+            k = plan.poll_end + 1
+            next
+        }
+        op: f.op[k]
+        if op == .End -> open -= 1
+        a := f.a[k]
+        b := f.b[k]
+        if op == .Br && a > open -> a += 1
+        if op == .BrIf && b > open -> b += 1
+        ir_opt_code_put(code, op, f.dst[k], a, b, f.c[k], f.code_line[k])
+        if op == .Block || op == .Loop || op == .If -> open += 1
+        k += 1
+    }
+    ir_opt_code_put(code, .Lt, cont, plan.idx, chunk_end, cmp_c, line)
+    ir_opt_code_put(code, .BrIf, -1, cont, 0, -1, line)
+    ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+    ir_opt_code_put(code, .Br, -1, 0, -1, -1, line)
+    ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+}
+
 // A loop's turn right after Float{total %% 1000} (an exact Int's widening
 // of a remainder by a constant, which cannot fail) folds into the poll past
 // the plot after it, so nothing between the widening and the plot's own
@@ -972,4 +1285,52 @@ ir_opt_polls_br_end: fn(f: IRFunction, at: Int, level: Int) -> Int Never! {
         assert_eq(ir_opt_polls_checks_call(m, f, poll, -1, -1, at), !quiet)
         assert(ir_opt_polls_checks_call(ir_opt_view(m, [String]{}), f, poll, -1, -1, at))
     }
+}
+
+// A tight counted loop with a single call-free stop_turn poll is strip-mined
+// into an outer chunked loop (containing the stop_turn) wrapping a bottom-tested
+// inner loop with zero stop_turn calls, and passes IR Lint cleanly.
+#Test("A counted inner loop's stop_turn poll is strip-mined into a chunked outer loop") {
+    m := ir_module_new()
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_word_row(m)
+    turn: ir_stop_poll(m, IR_STOP_TURN_KEY)
+    f := ir_function_new("scan", "test:strip.jet.scan", "", "strip.jet", 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = word
+    i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    acc: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "acc"), 2)
+    step: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Const, acc, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Const, step, 3, -1, -1, 2)
+    _ := ir_open(f, IROp.Block, 3)
+    _ := ir_open(f, IROp.Loop, 3)
+    _ := ir_emit(f, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 3)
+    ir_x64_test_stop_edge(f, flag, turn, IROp.Return, 3)
+    _ := ir_emit(f, IROp.Add, acc, acc, i, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(f, IROp.Add, i, i, step, IR_OVERFLOW_WRAP, 5)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(f, 5)
+    ir_end(f, 5)
+    _ := ir_emit(f, IROp.Return, -1, acc, -1, -1, 6)
+    lint: ir_lint_context(m)
+    report := ir_opt_report(2)
+    mined: ir_opt_strip_mine(m, f)
+    assert_eq(mined, 1)
+    assert(ir_opt_lint(m, lint, f, "stripmine", report))
+    loops := [Int]{}
+    loop (at, op) in f.op {
+        if op == .Loop -> loops.push(at)
+    }
+    assert_eq(loops.len(), 2)
+    inner_at: loops[1]
+    inner_end: f.a[inner_at]
+    inner_turns := 0
+    loop k in (inner_at + 1)..<inner_end {
+        if f.op[k] == .Call && f.a[k] == turn -> inner_turns += 1
+    }
+    assert_eq(inner_turns, 0)
 }

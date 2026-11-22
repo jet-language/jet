@@ -1,5 +1,5 @@
 // The sum of a run of exact Ints (`[Int]` elements) as an asm leaf's body
-// (JetIR OptReduce.jet): x64_int_sum_code's bytes run in place, with
+// (JetIR OptReduce.jet): x64_int_sum_leaf's bytes run with
 //
 //   rdi  the address of element 0 of the List's data
 //   rsi  the run's first index, as a raw word
@@ -17,17 +17,13 @@
 // runs its own loop over the same elements. On a decline the leaf has
 // written no memory and changed nothing the caller sees.
 //
-// SSE2 (every x86-64 has it). Four xmm registers hold eight lane sums, each
-// biased by 2^62: a lane is inline exactly when its biased word's sign bit
-// is clear. Adding an inline element to an inline lane cannot wrap 64 bits,
-// so the sign bits ORed into xmm2 after every step catch the first lane
-// that leaves the inline range. Each element gets the same test (element +
-// 2^62, sign bit). A step takes eight elements; its sign bits meet in xmm4
-// as a tree, so one por a step carries into xmm2 and no chain of them
-// limits the loop. The last up to seven elements go one at a time, and the
-// eight lanes fold into the total with an inline test after each add.
-// Only caller-saved registers are written (rax, rcx, rsi, rdi, r8-r11 and
-// xmm0-xmm7), rsp is untouched, and the code falls through its last byte.
+// Runtime CPUID/XGETBV dispatch (cached in one module data byte):
+// - AVX-512 (level 3): 4 zmm accumulators = 32 elements (256 bytes) per step.
+// - AVX2 (level 2): 4 ymm accumulators = 16 elements (128 bytes) per step.
+// - SSE2 (level 1): 4 xmm accumulators = 8 elements (64 bytes) per step.
+// Each lane is biased by 2^62 so a clear sign bit proves the lane stays inline.
+// Only caller-saved registers are written (rax, rcx, rdx, rsi, rdi, r8-r11 and
+// xmm/ymm/zmm0-7, k1), rsp is untouched, and the code falls through its last byte.
 
 X64_INT_SUM_DECLINED: 4611686018427387904
 
@@ -36,8 +32,13 @@ X64_INT_SUM_DECLINED: 4611686018427387904
 X64_INT_SUM_BIAS: 4611686018427387904
 
 x64_int_sum_code: fn() -> [U8] Never! {
+    x64_int_sum_leaf().bytes
+}
+
+x64_int_sum_leaf: fn() -> X64SimdLeaf Never! {
     code := x64_code()
     declines := [Int]{}
+    avx_declines := [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
     // 0 <= first < end, end and the total inline.
     x64_test_rr(code, X64_RSI, X64_RSI)
@@ -52,8 +53,13 @@ x64_int_sum_code: fn() -> [U8] Never! {
     x64_shift_ri(code, X64Shift.Shl, X64_RSI, 3)
     x64_alu_rr(code, X64Alu.Add, X64_RDI, X64_RSI)
     x64_mov_ri(code, X64_R10, X64_INT_SUM_BIAS)
-    // xmm3 the bias in both lanes, xmm0, xmm1, xmm6 and xmm7 eight biased
-    // zero lanes, xmm2 the sign bits seen.
+    // Short runs (< 8 elements) skip SIMD dispatch entirely.
+    x64_alu_ri(code, X64Alu.Cmp, X64_R9, 8)
+    short_to_tail: x64_jcc_rel32(code, X64Cond.L)
+    dispatch: x64_simd_dispatch_head(code)
+
+    // --- SSE2 path (8 elements / 64 bytes per step) ---
+    sse2_entry: code.bytes.len()
     x64_movq_to_xmm(code, false, 3, X64_R10)
     x64_sse(code, 0x66, false, 0x6c, 3, 3)
     x64_sse(code, 0x66, false, 0x6f, 0, 3)
@@ -62,9 +68,8 @@ x64_int_sum_code: fn() -> [U8] Never! {
     x64_sse(code, 0x66, false, 0x6f, 7, 3)
     x64_sse(code, 0x66, false, 0xef, 2, 2)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 8)
-    to_tail: x64_jcc_rel32(code, X64Cond.L)
-    body: code.bytes.len()
-    // Elements 0-3: paddq lane, element; paddq element, bias; por.
+    sse2_to_tail: x64_jcc_rel32(code, X64Cond.L)
+    sse2_body: code.bytes.len()
     x64_vector_load(code, 4, X64_RDI, 0)
     x64_vector_load(code, 5, X64_RDI, 16)
     x64_sse(code, 0x66, false, 0xd4, 0, 4)
@@ -72,7 +77,6 @@ x64_int_sum_code: fn() -> [U8] Never! {
     x64_sse(code, 0x66, false, 0xd4, 4, 3)
     x64_sse(code, 0x66, false, 0xd4, 5, 3)
     x64_sse(code, 0x66, false, 0xeb, 4, 5)
-    // Elements 4-7, through xmm5.
     x64_vector_load(code, 5, X64_RDI, 32)
     x64_sse(code, 0x66, false, 0xd4, 6, 5)
     x64_sse(code, 0x66, false, 0xd4, 5, 3)
@@ -81,8 +85,6 @@ x64_int_sum_code: fn() -> [U8] Never! {
     x64_sse(code, 0x66, false, 0xd4, 7, 5)
     x64_sse(code, 0x66, false, 0xd4, 5, 3)
     x64_sse(code, 0x66, false, 0xeb, 4, 5)
-    // The lanes' sign bits: (xmm0 | xmm1) | (xmm6 | xmm7), then one por
-    // into xmm2.
     x64_sse(code, 0x66, false, 0x6f, 5, 0)
     x64_sse(code, 0x66, false, 0xeb, 5, 1)
     x64_sse(code, 0x66, false, 0xeb, 4, 6)
@@ -91,16 +93,13 @@ x64_int_sum_code: fn() -> [U8] Never! {
     x64_sse(code, 0x66, false, 0xeb, 2, 4)
     x64_alu_ri(code, X64Alu.Add, X64_RDI, 64)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 8)
-    again: x64_jcc_rel32(code, X64Cond.GE)
-    x64_patch_rel32(code.bytes, again, body)
-    tail: code.bytes.len()
-    x64_patch_rel32(code.bytes, to_tail, tail)
+    sse2_again: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, sse2_again, sse2_body)
+    x64_patch_rel32(code.bytes, sse2_to_tail, code.bytes.len())
     x64_alu_ri(code, X64Alu.Add, X64_R9, 8)
-    // movmskpd r8d, xmm2: any sign bit seen declines.
     x64_sse(code, 0x66, false, 0x50, X64_R8, 2)
     x64_test_rr(code, X64_R8, X64_R8)
     declines.push(x64_jcc_rel32(code, X64Cond.NE))
-    // The eight lanes, unbiased, into the total.
     lanes: [Int]{0, 1, 6, 7}
     loop lane in lanes {
         x64_int_sum_fold(code, lane, declines)
@@ -108,7 +107,112 @@ x64_int_sum_code: fn() -> [U8] Never! {
         x64_byte(code.bytes, 0xee)
         x64_int_sum_fold(code, lane, declines)
     }
-    // The last elements, one at a time.
+    sse2_done: x64_jmp_rel32(code)
+
+    // --- AVX2 path (16 elements / 128 bytes per step) ---
+    avx2_entry: code.bytes.len()
+    x64_patch_rel32(code.bytes, dispatch.to_avx2, avx2_entry)
+    x64_alu_ri(code, X64Alu.Cmp, X64_R9, 16)
+    avx2_short: x64_jcc_rel32(code, X64Cond.L)
+    x64_patch_rel32(code.bytes, avx2_short, sse2_entry)
+    x64_vmovq_to_xmm(code, 3, X64_R10)
+    x64_vpbroadcastq(code, true, 3, 3)
+    x64_vmovdqa_rr(code, true, 0, 3)
+    x64_vmovdqa_rr(code, true, 1, 3)
+    x64_vmovdqa_rr(code, true, 6, 3)
+    x64_vmovdqa_rr(code, true, 7, 3)
+    x64_vex_rr(code, 1, 1, true, 0xef, 2, 2, 2)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 16)
+    avx2_body: code.bytes.len()
+    x64_vmovdqu_load(code, true, 4, X64_RDI, 0)
+    x64_vmovdqu_load(code, true, 5, X64_RDI, 32)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 0, 0, 4)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 1, 1, 5)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 4, 4, 3)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 5, 5, 3)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 5)
+    x64_vmovdqu_load(code, true, 5, X64_RDI, 64)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 6, 6, 5)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 5, 5, 3)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 5)
+    x64_vmovdqu_load(code, true, 5, X64_RDI, 96)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 7, 7, 5)
+    x64_vex_rr(code, 1, 1, true, 0xd4, 5, 5, 3)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 5)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 5, 0, 1)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 6)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 7)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 4, 4, 5)
+    x64_vex_rr(code, 1, 1, true, 0xeb, 2, 2, 4)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 128)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 16)
+    avx2_again: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, avx2_again, avx2_body)
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 16)
+    x64_vmovmskpd(code, true, X64_R8, 2)
+    x64_test_rr(code, X64_R8, X64_R8)
+    avx_declines.push(x64_jcc_rel32(code, X64Cond.NE))
+    loop lane in lanes {
+        x64_int_sum_fold_ymm(code, lane, avx_declines)
+    }
+    x64_vzeroupper(code)
+    avx2_done: x64_jmp_rel32(code)
+
+    // --- AVX-512 path (32 elements / 256 bytes per step) ---
+    avx512_entry: code.bytes.len()
+    x64_patch_rel32(code.bytes, dispatch.to_avx512, avx512_entry)
+    x64_alu_ri(code, X64Alu.Cmp, X64_R9, 32)
+    avx512_short: x64_jcc_rel32(code, X64Cond.L)
+    x64_patch_rel32(code.bytes, avx512_short, avx2_entry)
+    x64_evex_vpbroadcastq_gpr(code, 3, X64_R10)
+    x64_evex_vmovdqa64_rr(code, 0, 3)
+    x64_evex_vmovdqa64_rr(code, 1, 3)
+    x64_evex_vmovdqa64_rr(code, 6, 3)
+    x64_evex_vmovdqa64_rr(code, 7, 3)
+    x64_evex512_q_rr(code, 0xef, 2, 2, 2)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    avx512_body: code.bytes.len()
+    x64_evex_vmovdqu64_load(code, 4, X64_RDI, 0)
+    x64_evex_vmovdqu64_load(code, 5, X64_RDI, 64)
+    x64_evex512_q_rr(code, 0xd4, 0, 0, 4)
+    x64_evex512_q_rr(code, 0xd4, 1, 1, 5)
+    x64_evex512_q_rr(code, 0xd4, 4, 4, 3)
+    x64_evex512_q_rr(code, 0xd4, 5, 5, 3)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 5)
+    x64_evex_vmovdqu64_load(code, 5, X64_RDI, 128)
+    x64_evex512_q_rr(code, 0xd4, 6, 6, 5)
+    x64_evex512_q_rr(code, 0xd4, 5, 5, 3)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 5)
+    x64_evex_vmovdqu64_load(code, 5, X64_RDI, 192)
+    x64_evex512_q_rr(code, 0xd4, 7, 7, 5)
+    x64_evex512_q_rr(code, 0xd4, 5, 5, 3)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 5)
+    x64_evex512_q_rr(code, 0xeb, 5, 0, 1)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 6)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 7)
+    x64_evex512_q_rr(code, 0xeb, 4, 4, 5)
+    x64_evex512_q_rr(code, 0xeb, 2, 2, 4)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 256)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    avx512_again: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, avx512_again, avx512_body)
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 32)
+    x64_evex_vpmovq2m(code, 1, 2)
+    x64_kmovw_rk(code, X64_R8, 1)
+    x64_test_rr(code, X64_R8, X64_R8)
+    avx_declines.push(x64_jcc_rel32(code, X64Cond.NE))
+    loop lane in lanes {
+        x64_int_sum_fold_ymm(code, lane, avx_declines)
+        x64_evex_vextracti64x4(code, 4, lane, 1)
+        x64_int_sum_fold_ymm(code, 4, avx_declines)
+    }
+    x64_vzeroupper(code)
+
+    // --- Scalar tail (remaining 0..31 elements) ---
+    tail: code.bytes.len()
+    x64_patch_rel32(code.bytes, short_to_tail, tail)
+    x64_patch_rel32(code.bytes, sse2_done, tail)
+    x64_patch_rel32(code.bytes, avx2_done, tail)
     x64_test_rr(code, X64_R9, X64_R9)
     to_done: x64_jcc_rel32(code, X64Cond.E)
     single: code.bytes.len()
@@ -123,9 +227,20 @@ x64_int_sum_code: fn() -> [U8] Never! {
     done: code.bytes.len()
     x64_patch_rel32(code.bytes, to_done, done)
     x64_mov_rr(code, X64_RAX, X64_RCX)
+    to_end: x64_jmp_rel32(code)
+
+    // Cold AVX decline (clean upper vector state) and one-time CPUID probe.
+    avx_decline_at: code.bytes.len()
+    loop site in avx_declines -> x64_patch_rel32(code.bytes, site, avx_decline_at)
+    x64_vzeroupper(code)
+    avx_to_end: x64_jmp_rel32(code)
+    probe_simd_site: x64_simd_dispatch_probe(code, dispatch)
+
     end: code.bytes.len()
+    x64_patch_rel32(code.bytes, to_end, end)
+    x64_patch_rel32(code.bytes, avx_to_end, end)
     loop site in declines -> x64_patch_rel32(code.bytes, site, end)
-    code.bytes
+    X64SimdLeaf{bytes: code.bytes.move(), simd_sites: [Int]{dispatch.simd_site, probe_simd_site}}
 }
 
 // `jo` to a decline when `reg` is not an inline Int (bits 63 and 62
@@ -143,4 +258,24 @@ x64_int_sum_fold: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! {
     x64_alu_rr(code, X64Alu.Sub, X64_R8, X64_R10)
     x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R8)
     x64_int_sum_test(code, X64_RCX, declines)
+}
+
+// VEX-encoded fold of one 128-bit xmm (2 biased 64-bit lanes) into rcx.
+x64_int_sum_fold_vex_xmm: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! {
+    x64_vmovq_from_xmm(code, X64_R8, xmm)
+    x64_alu_rr(code, X64Alu.Sub, X64_R8, X64_R10)
+    x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R8)
+    x64_int_sum_test(code, X64_RCX, declines)
+    x64_vpshufd(code, false, 5, xmm, 0xee)
+    x64_vmovq_from_xmm(code, X64_R8, 5)
+    x64_alu_rr(code, X64Alu.Sub, X64_R8, X64_R10)
+    x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R8)
+    x64_int_sum_test(code, X64_RCX, declines)
+}
+
+// VEX-encoded fold of all four biased 64-bit lanes of `ymm` into rcx (clobbers xmm5).
+x64_int_sum_fold_ymm: fn(code: &X64Code, ymm: Int, declines: &[Int]) Never! {
+    x64_int_sum_fold_vex_xmm(code, ymm, declines)
+    x64_vextracti128(code, 5, ymm, 1)
+    x64_int_sum_fold_vex_xmm(code, 5, declines)
 }

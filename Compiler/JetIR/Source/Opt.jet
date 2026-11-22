@@ -300,6 +300,13 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
             }
         }
     }
+    if level >= 1 && ir_opt_enabled(options, "stops") {
+        loop id in 0..<functions.len() {
+            if ir_opt_strip_mine(m, functions[id]) > 0 {
+                if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "stripmine", report)
+            }
+        }
+    }
     if level >= 2 && ir_opt_enabled(options, "split") {
         split: ir_opt_split_module(m, functions, threads)
         if options.verify {

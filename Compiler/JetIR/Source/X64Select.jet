@@ -113,7 +113,9 @@ use {
         x64_lock_xadd,
         x64_log,
         x64_log_stop,
+        x64_count_leaf,
         x64_count_step,
+        x64_int_sum_leaf,
         x64_mov_ri,
         x64_mov_rr,
         x64_movaps,
@@ -895,6 +897,7 @@ ir_x64_asm_inline: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 // its operand registers are the argument registers in order, and every
 // argument and the result are general.
 ir_x64_asm_inlinable: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
+    if leaf.code.len() > 128 -> return false
     if count != leaf.regs.len() || count > IR_X64_ARGUMENT_REGISTERS.len() -> return false
     if dst >= 0 && (leaf.result < 0 || ir_x64_class(ir_x64_type(m, f, dst)) != .General) {
         return false
@@ -5456,7 +5459,7 @@ ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int) -> IRX
     key: m.functions[row].key
     if ir_stop_key(key) -> return ir_x64_stop_poll(m.functions[row], row)
     if m.functions[row].asm == .Val(leaf) {
-        return ir_x64_asm_function(m, m.functions[row], leaf, row, tables.logged)
+        return ir_x64_asm_function(m, m.functions[row], leaf, row, tables)
     }
     ir_x64_compile_body(m, m.functions[row], tables, row)
 }
@@ -5564,8 +5567,17 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
 // binding pushes every argument in order before the template's registers
 // pop, so no binding overwrites an argument not yet read. A logged leaf's
 // log holds one `asm` row: the checker refuses what a template does.
-ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, logging: Bool) -> IRX64FunctionResult Never! {
-    code := x64_code_logged(logging)
+ir_x64_simd_leaf_kind: fn(key: String) -> Int Never! {
+    if key == "jet_rt_int_sum#asm" -> return IR_REDUCE_SUM
+    if key == "jet_rt_count_bytes#asm" -> return IR_REDUCE_COUNT_BYTES
+    if key == "jet_rt_count_ints#asm" -> return IR_REDUCE_COUNT_INTS
+    if key == "jet_rt_count_words#asm" -> return IR_REDUCE_COUNT_WORDS
+    if key == "jet_rt_count_widened#asm" -> return IR_REDUCE_COUNT_WIDENED
+    return -1
+}
+
+ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, tables: IRX64FunctionTables) -> IRX64FunctionResult Never! {
+    code := x64_code_logged(tables.logged)
     cfi := [U8]{}
     x64_push(code, X64_RBP)
     dwarf_cfa_advance(cfi, 0, code.bytes.len())
@@ -5598,7 +5610,19 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
         }
     }
     x64_log(code, X64EmitKind.Asm, -1, -1, -1)
-    loop byte in leaf.code -> code.bytes.push(byte)
+    relocs := [X64Reloc]{}
+    simd_kind: ir_x64_simd_leaf_kind(f.key)
+    if simd_kind >= 0 && tables.simd >= 0 {
+        exact: simd_kind == IR_REDUCE_COUNT_INTS || simd_kind == IR_REDUCE_COUNT_WIDENED
+        built: if simd_kind == IR_REDUCE_SUM -> x64_int_sum_leaf() else -> x64_count_leaf(ir_reduce_width(simd_kind), exact)
+        leaf_start: code.bytes.len()
+        loop byte in built.bytes -> code.bytes.push(byte)
+        loop site in built.simd_sites {
+            relocs.push(X64Reloc{at: leaf_start + site, target: X64RelocTarget.Data{id: X64DataID{value: tables.simd}}})
+        }
+    } else {
+        loop byte in leaf.code -> code.bytes.push(byte)
+    }
     if leaf.result > 0 -> x64_mov_rr(code, X64_RAX, leaf.result)
     x64_pop(code, X64_RBP)
     ret_at: code.bytes.len()
@@ -5615,7 +5639,7 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
     name: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     log: ir_x64_log_text(m, f, code)
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: relocs.move(), align: X64_FUNCTION_ALIGN},
         debug: X64FunctionDebug{lines: lines.move(), body: body, cfi: cfi.move(), ranges: [X64VariableRange]{}, stack: 16 + pushed},
         variables: [X64DebugVariable]{},
         errors: [String]{},
