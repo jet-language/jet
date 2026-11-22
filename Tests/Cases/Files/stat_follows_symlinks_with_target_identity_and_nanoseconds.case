@@ -1,0 +1,14 @@
+# Stat following symlinks reports the canonical target's exact device/inode
+# identity and nanosecond timestamps, while no-follow operations stay no-follow
+# across O0, O1, and O2.
+fixture: StatFollowsSymlinksWithTargetIdentityAndNanoseconds.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o1: jet run -O1 --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o2: jet run -O2 --allow=FS main.jet
+exit: 0
+stdout: = expected.out

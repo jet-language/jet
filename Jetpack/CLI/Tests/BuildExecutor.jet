@@ -955,9 +955,11 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, "exit 3")
     action: plan.actions[0]
     inputs: build_snapshot_declared_inputs(root, action) ?? panic("snapshot")
-    // The captured bytes are the hashed bytes the work tree receives.
+    // The captured source path holds the hashed bytes the work tree stages.
     assert_eq(inputs.len(), 1)
-    assert_eq(inputs[0].bytes, "input".bytes())
+    assert_eq(inputs[0].source, files.join(root, "input.txt"))
+    assert_eq(inputs[0].snapshot.byte_len, 5)
+    assert_eq(files.read_bytes(inputs[0].source) ?? panic("source bytes"), "input".bytes())
     assert(inputs[0].snapshot.digest == ContentDigest.from_bytes("input".bytes()))
     snapshots: loop input in inputs -> input.snapshot
     executable: build_resolve_program_path(plan, action.toolchain, "sh") ?? panic("sh")
