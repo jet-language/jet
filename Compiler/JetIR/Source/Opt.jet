@@ -285,26 +285,12 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
             loop id in reduced -> _ := ir_opt_lint(m, entry_lint, functions[id], "reduce", report)
         }
     }
-    if level >= 1 && ir_opt_enabled(options, "licm") {
-        stop_keys: loop f in functions -> ir_stop_key(f.key)
-        loop id in 0..<functions.len() {
-            if ir_opt_licm(m, stop_keys, functions[id]) > 0 {
-                if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "licm", report)
-            }
-        }
-    }
-    if level >= 1 && ir_opt_enabled(options, "strength") {
-        loop id in 0..<functions.len() {
-            if ir_opt_strength(m, functions[id]) > 0 {
-                if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "strength", report)
-            }
-        }
-    }
-    if level >= 1 && ir_opt_enabled(options, "stops") {
-        loop id in 0..<functions.len() {
-            if ir_opt_strip_mine(m, functions[id]) > 0 {
-                if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "stripmine", report)
-            }
+    if level >= 1 {
+        do_licm: ir_opt_enabled(options, "licm")
+        do_strength: ir_opt_enabled(options, "strength")
+        do_strip_mine: ir_opt_enabled(options, "stops")
+        if do_licm || do_strength || do_strip_mine {
+            ir_opt_post_loops(m, functions, do_licm, do_strength, do_strip_mine, options, entry_lint, threads, report)
         }
     }
     if level >= 2 && ir_opt_enabled(options, "split") {
@@ -375,7 +361,7 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
     if !ir_opt_enabled(options, "range") || !ir_opt_enabled(options, "ssa") {
         return
     }
-    work: IROptBodyWork{facts: true, versions: false, lint: false, drop: false, serial: false, poll: -1, trap: -1, turn: -1}
+    work: IROptBodyWork{facts: true, versions: false, lint: false, drop: false, licm: false, strength: false, strip_mine: false, serial: false, poll: -1, trap: -1, turn: -1, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
     found := [IRLintFinding]{}
     lint: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     ir_opt_module_bodies(m, work, options, lint, "", threads, report, found)
@@ -398,7 +384,7 @@ ir_opt_o0_bodies: fn(m: &IRModule, options: IROptOptions, lint: IRLintContext, p
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
-    work: IROptBodyWork{facts: facts, versions: false, lint: true, drop: !m.dropped_early, serial: false, poll: poll, trap: trap, turn: turn}
+    work: IROptBodyWork{facts: facts, versions: false, lint: true, drop: !m.dropped_early, licm: false, strength: false, strip_mine: false, serial: false, poll: poll, trap: trap, turn: turn, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
     ir_opt_module_bodies(m, work, options, lint, pass, threads, report, found)
     m.dropped_early = true
     ir_opt_dump(m, ir_opt_dump_names(options), "after", report)
@@ -421,19 +407,26 @@ ir_opt_module_bodies: fn(m: &IRModule, work: IROptBodyWork, options: IROptOption
 
 // What ir_opt_bodies runs on each body, in this order: entry versioning
 // (`versions`, ir_opt_version_body), the inline Int facts (`facts`,
-// ir_opt_ssa_facts), IR Lint (`lint`, ir_lint_function) and the early
-// Drops (`drop`, DropEarly.jet ir_drop_plan; `poll`, `trap` and `turn` are
-// the stop points' function rows, -1 for none). `serial` keeps every body
-// on the calling thread.
+// ir_opt_ssa_facts), post-loop passes (`licm`, `strength`, `strip_mine`),
+// IR Lint (`lint`, ir_lint_function) and the early Drops (`drop`,
+// DropEarly.jet ir_drop_plan; `poll`, `trap` and `turn` are the stop
+// points' function rows, -1 for none). `serial` keeps every body on the
+// calling thread.
 IROptBodyWork: struct {
     facts: Bool,
     versions: Bool,
     lint: Bool,
     drop: Bool,
+    licm: Bool,
+    strength: Bool,
+    strip_mine: Bool,
     serial: Bool,
     poll: Int,
     trap: Int,
     turn: Int,
+    stop_keys: [Bool],
+    safe_routes: [Int],
+    char_len_route: Int,
 }
 
 // The bodies of one ir_opt_bodies run, each in a cell of its own (taken out
@@ -542,6 +535,15 @@ ir_opt_body_claimed: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork
 ir_opt_body_run: fn(view: IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, f: &IRFunction, report: &IROptReport, found: &[IRLintFinding]) Never! {
     if work.versions -> ir_opt_version_body(view, f, options, lint, report)
     if work.facts -> _ := ir_opt_ssa_facts(view, f, options, lint, report)
+    if work.licm && ir_opt_licm_with(view, work.stop_keys, work.safe_routes, work.char_len_route, f) > 0 {
+        if options.verify -> _ := ir_opt_lint(view, lint, f, "licm", report)
+    }
+    if work.strength && ir_opt_strength(view, f) > 0 {
+        if options.verify -> _ := ir_opt_lint(view, lint, f, "strength", report)
+    }
+    if work.strip_mine && ir_opt_strip_mine_with(view, f, work.poll, work.trap, work.turn) > 0 {
+        if options.verify -> _ := ir_opt_lint(view, lint, f, "stripmine", report)
+    }
     if work.lint -> ir_lint_function(view, lint, f, pass, found)
     if !work.drop || f.asm != None {
         return
@@ -556,6 +558,23 @@ ir_opt_report_rows: fn(report: IROptReport) -> Bool Never! {
     report.inlines.len() > 0 || report.reductions.len() > 0 || report.steps.len() > 0 || report.text_lengths.len() > 0 || report.dumps.len() > 0 || report.lint.len() > 0
 }
 
+// Post-loop passes (LICM, strength reduction, stop-poll strip-mining) run in
+// one parallel claim sweep over `functions`, reading `m`'s rows lent via
+// ir_opt_lend. Module route and stop ids are resolved once up front.
+ir_opt_post_loops: fn(m: &IRModule, functions: &[IRFunction], do_licm: Bool, do_strength: Bool, do_strip_mine: Bool, options: IROptOptions, lint: IRLintContext, threads: CompilerThreads, report: &IROptReport) Never! {
+    stop_keys: if do_licm -> (loop f in functions -> ir_stop_key(f.key)) else -> [Bool]{}
+    safe_routes: if do_licm -> ir_licm_safe_routes(m) else -> [Int]{}
+    char_len_route: if do_licm -> (name_rows_value(m.name_rows, "jet_char_len") ?? -2) else -> -2
+    poll: if do_strip_mine -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1) else -> -1
+    trap: if do_strip_mine -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1) else -> -1
+    turn: if do_strip_mine -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1) else -> -1
+    work: IROptBodyWork{facts: false, versions: false, lint: false, drop: false, licm: do_licm, strength: do_strength, strip_mine: do_strip_mine && turn >= 0, serial: options.verify, poll: poll, trap: trap, turn: turn, stop_keys: stop_keys, safe_routes: safe_routes, char_len_route: char_len_route}
+    lent := ir_opt_lend(m)
+    found := [IRLintFinding]{}
+    ir_opt_bodies(lent, functions, work, options, lint, "", threads, report, found)
+    ir_opt_lend_into(m, lent)
+}
+
 // The entry form of versioning (OptVersion.jet) over the final bodies, and
 // each body it copied through the SSA round trip again, for the inline Int
 // facts the copy is there to give. A body's copy reads only its own
@@ -565,7 +584,7 @@ ir_opt_report_rows: fn(report: IROptReport) -> Bool Never! {
 // (`options.verify`) reads the whole module, so it keeps them on the
 // calling thread.
 ir_opt_version_entries: fn(m: &IRModule, functions: &[IRFunction], options: IROptOptions, lint: IRLintContext, threads: CompilerThreads, report: &IROptReport) Never! {
-    work: IROptBodyWork{facts: false, versions: true, lint: false, drop: false, serial: options.verify, poll: -1, trap: -1, turn: -1}
+    work: IROptBodyWork{facts: false, versions: true, lint: false, drop: false, licm: false, strength: false, strip_mine: false, serial: options.verify, poll: -1, trap: -1, turn: -1, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
     lent := ir_opt_lend(m)
     found := [IRLintFinding]{}
     ir_opt_bodies(lent, functions, work, options, lint, "", threads, report, found)
@@ -1534,30 +1553,41 @@ ir_opt_facts: fn(f: IRFunction) -> OptFacts Never! {
     facts
 }
 
-// Recomputes `facts` over `f` in place: each list is emptied and refilled,
-// so a caller that recomputes them after every change (ir_opt_simplify)
-// reuses their buffers instead of growing and dropping five fresh lists.
+// Recomputes `facts` over `f` in place: overwrites existing slot/region
+// buffers when their length matches to avoid [Int].clear() element drop loops
+// and push capacity checks.
 ir_opt_facts_refill: fn(f: IRFunction, facts: &OptFacts) Never! {
     count: f.slot_type.len()
-    facts.defs.clear()
-    facts.def_at.clear()
-    facts.uses.clear()
-    facts.region.clear()
-    facts.parent.clear()
-    loop slot in 0..<count {
-        facts.defs.push(if slot < f.param_count -> 1 else -> 0)
-        facts.def_at.push(-1)
-        facts.uses.push(0)
+    op_count: f.op.len()
+    if facts.defs.len() == count {
+        loop slot in 0..<count {
+            facts.defs[slot] = if slot < f.param_count -> 1 else -> 0
+            facts.def_at[slot] = -1
+            facts.uses[slot] = 0
+        }
+    } else {
+        facts.defs.clear()
+        facts.def_at.clear()
+        facts.uses.clear()
+        loop slot in 0..<count {
+            facts.defs.push(if slot < f.param_count -> 1 else -> 0)
+            facts.def_at.push(-1)
+            facts.uses.push(0)
+        }
     }
+    reuse_region: facts.region.len() == op_count
+    if !reuse_region -> facts.region.clear()
+    facts.parent.clear()
     facts.parent.push(-1)
-    open := [Int]{0}
-    loop at in 0..<f.op.len() {
+    open := [I64]{I64{0}}
+    loop at in 0..<op_count {
         op: f.op[at]
         if op == .Else || op == .End -> _ := open.pop()
-        facts.region.push(open[open.len() - 1])
+        cur: Int{open[open.len() - 1]}
+        if reuse_region -> facts.region[at] = cur else -> facts.region.push(cur)
         if op == .Block || op == .Loop || op == .If || op == .Else {
-            facts.parent.push(open[open.len() - 1])
-            open.push(facts.parent.len() - 1)
+            facts.parent.push(cur)
+            open.push(I64{facts.parent.len() - 1})
         }
         // The reads of ir_x64_reads_into, counted in place.
         form: ir_x64_read_form(op)
@@ -1567,12 +1597,63 @@ ir_opt_facts_refill: fn(f: IRFunction, facts: &OptFacts) Never! {
             if form == IR_X64_READS_AB {
                 b: f.b[at]
                 if b >= 0 && b < count -> facts.uses[b] = facts.uses[b] + 1
-            }
-            if form == IR_X64_READS_AC {
+            } else if form == IR_X64_READS_AC {
                 c: f.c[at]
                 if c >= 0 && c < count -> facts.uses[c] = facts.uses[c] + 1
+            } else if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+                first: f.b[at]
+                loop index in first..<(first + f.c[at]) {
+                    slot: f.args[index]
+                    if slot >= 0 && slot < count -> facts.uses[slot] = facts.uses[slot] + 1
+                }
             }
-            if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+        }
+        written: ir_x64_write(f, at)
+        if written >= 0 && written < count {
+            facts.defs[written] = facts.defs[written] + 1
+            facts.def_at[written] = at
+        }
+    }
+}
+
+// Recomputes only `defs`, `def_at`, and `uses` of `facts` when the function's
+// control-flow structure (`region` and `parent`) has not changed.
+ir_opt_facts_refill_counts: fn(f: IRFunction, facts: &OptFacts) Never! {
+    count: f.slot_type.len()
+    op_count: f.op.len()
+    if facts.region.len() != op_count {
+        ir_opt_facts_refill(f, facts)
+        return
+    }
+    if facts.defs.len() == count {
+        loop slot in 0..<count {
+            facts.defs[slot] = if slot < f.param_count -> 1 else -> 0
+            facts.def_at[slot] = -1
+            facts.uses[slot] = 0
+        }
+    } else {
+        facts.defs.clear()
+        facts.def_at.clear()
+        facts.uses.clear()
+        loop slot in 0..<count {
+            facts.defs.push(if slot < f.param_count -> 1 else -> 0)
+            facts.def_at.push(-1)
+            facts.uses.push(0)
+        }
+    }
+    loop at in 0..<op_count {
+        op: f.op[at]
+        form: ir_x64_read_form(op)
+        if form != IR_X64_READS_NONE {
+            a: f.a[at]
+            if form != IR_X64_READS_ARGS && a >= 0 && a < count -> facts.uses[a] = facts.uses[a] + 1
+            if form == IR_X64_READS_AB {
+                b: f.b[at]
+                if b >= 0 && b < count -> facts.uses[b] = facts.uses[b] + 1
+            } else if form == IR_X64_READS_AC {
+                c: f.c[at]
+                if c >= 0 && c < count -> facts.uses[c] = facts.uses[c] + 1
+            } else if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
                 first: f.b[at]
                 loop index in first..<(first + f.c[at]) {
                     slot: f.args[index]
@@ -1645,56 +1726,79 @@ ir_opt_text_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int, clone: In
 // open constructs, so they stay valid as long as a pass removes a construct
 // only together with every Br inside it.
 
-ir_opt_compact: fn(f: &IRFunction) Never! {
-    nops := 0
-    loop kind in f.op {
-        if kind == .Nop -> nops += 1
-    }
-    // Without a Nop the columns stay as they are; only the indexes are
-    // recomputed. With one, each kept row moves down over the Nops in
-    // place and the freed tail is popped, so no column is rebuilt.
-    if nops > 0 {
-        kept := 0
-        loop at in 0..<f.op.len() {
-            if f.op[at] == .Nop -> next
-            if kept != at {
-                f.op[kept] = f.op[at]
-                f.dst[kept] = f.dst[at]
-                f.a[kept] = f.a[at]
-                f.b[kept] = f.b[at]
-                f.c[kept] = f.c[at]
-                f.code_line[kept] = f.code_line[at]
-            }
-            kept += 1
-        }
-        loop f.op.len() > kept {
-            _ := f.op.pop()
-            _ := f.dst.pop()
-            _ := f.a.pop()
-            _ := f.b.pop()
-            _ := f.c.pop()
-            _ := f.code_line.pop()
-        }
-    }
-    open := [Int]{}
+ir_opt_compact_links: fn(f: &IRFunction) Never! {
+    open := [I64]{}
     loop at in 0..<f.op.len() {
-        if f.op[at] == {
-            .Block | .Loop -> { open.push(at) }
-            .If -> {
-                f.b[at] = -1
-                open.push(at)
-            }
-            .Else -> { f.b[open[open.len() - 1]] = at }
-            .End -> {
-                opener: open.pop() ?? panic("ir_opt_compact: End without an open construct")
-                f.a[at] = opener
-                if f.op[opener] == .If {
-                    f.c[opener] = at
-                    if f.b[opener] >= 0 -> f.a[f.b[opener]] = at
-                } else { f.a[opener] = at }
-            }
-            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
+        op: f.op[at]
+        if op == .Block || op == .Loop {
+            open.push(I64{at})
+        } else if op == .If {
+            f.b[at] = -1
+            open.push(I64{at})
+        } else if op == .Else {
+            f.b[Int{open[open.len() - 1]}] = at
+        } else if op == .End {
+            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            f.a[at] = opener
+            if f.op[opener] == .If {
+                f.c[opener] = at
+                if f.b[opener] >= 0 -> f.a[f.b[opener]] = at
+            } else { f.a[opener] = at }
         }
+    }
+}
+
+ir_opt_compact: fn(f: &IRFunction) Never! {
+    has_nop := false
+    loop kind in f.op {
+        if kind == .Nop {
+            has_nop = true
+            break
+        }
+    }
+    if !has_nop {
+        ir_opt_compact_links(f)
+        return
+    }
+    // Single pass: move kept rows down over Nops and recompute structural
+    // indices simultaneously, then pop the freed tail.
+    kept := 0
+    open := [I64]{}
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .Nop -> next
+        if kept != at {
+            f.op[kept] = op
+            f.dst[kept] = f.dst[at]
+            f.a[kept] = f.a[at]
+            f.b[kept] = f.b[at]
+            f.c[kept] = f.c[at]
+            f.code_line[kept] = f.code_line[at]
+        }
+        if op == .Block || op == .Loop {
+            open.push(I64{kept})
+        } else if op == .If {
+            f.b[kept] = -1
+            open.push(I64{kept})
+        } else if op == .Else {
+            f.b[Int{open[open.len() - 1]}] = kept
+        } else if op == .End {
+            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            f.a[kept] = opener
+            if f.op[opener] == .If {
+                f.c[opener] = kept
+                if f.b[opener] >= 0 -> f.a[f.b[opener]] = kept
+            } else { f.a[opener] = kept }
+        }
+        kept += 1
+    }
+    loop f.op.len() > kept {
+        _ := f.op.pop()
+        _ := f.dst.pop()
+        _ := f.a.pop()
+        _ := f.b.pop()
+        _ := f.c.pop()
+        _ := f.code_line.pop()
     }
 }
 
@@ -1704,21 +1808,62 @@ ir_opt_compact: fn(f: &IRFunction) Never! {
 // nesting stay; only rows move down, each with its region and, for the
 // write a slot's def_at names, that position.
 ir_opt_compact_facts: fn(f: &IRFunction, facts: &OptFacts) Never! {
+    has_nop := false
+    loop kind in f.op {
+        if kind == .Nop {
+            has_nop = true
+            break
+        }
+    }
+    if !has_nop {
+        ir_opt_compact_links(f)
+        return
+    }
     count: facts.defs.len()
     kept := 0
+    open := [I64]{}
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Nop -> next
+        op: f.op[at]
+        if op == .Nop -> next
         if kept != at {
             facts.region[kept] = facts.region[at]
             written: ir_x64_write(f, at)
             if written >= 0 && written < count && facts.def_at[written] == at {
                 facts.def_at[written] = kept
             }
+            f.op[kept] = op
+            f.dst[kept] = f.dst[at]
+            f.a[kept] = f.a[at]
+            f.b[kept] = f.b[at]
+            f.c[kept] = f.c[at]
+            f.code_line[kept] = f.code_line[at]
+        }
+        if op == .Block || op == .Loop {
+            open.push(I64{kept})
+        } else if op == .If {
+            f.b[kept] = -1
+            open.push(I64{kept})
+        } else if op == .Else {
+            f.b[Int{open[open.len() - 1]}] = kept
+        } else if op == .End {
+            opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
+            f.a[kept] = opener
+            if f.op[opener] == .If {
+                f.c[opener] = kept
+                if f.b[opener] >= 0 -> f.a[f.b[opener]] = kept
+            } else { f.a[opener] = kept }
         }
         kept += 1
     }
-    loop facts.region.len() > kept -> _ := facts.region.pop()
-    ir_opt_compact(f)
+    loop f.op.len() > kept {
+        _ := f.op.pop()
+        _ := f.dst.pop()
+        _ := f.a.pop()
+        _ := f.b.pop()
+        _ := f.c.pop()
+        _ := f.code_line.pop()
+        _ := facts.region.pop()
+    }
 }
 
 // Turns instruction `at` into a Nop.

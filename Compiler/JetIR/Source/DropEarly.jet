@@ -128,19 +128,30 @@ ir_drop_early_part: fn(m: IRModule, functions: &&[IRFunction], poll: Int, trap: 
 ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) -> IRDropPlan Never! {
     n: f.op.len()
     plan := IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
+    count: f.slot_type.len()
+    has_string_drop := false
+    loop at in 0..<n {
+        if f.op[at] == .Drop {
+            slot: f.a[at]
+            if slot >= 0 && slot < count {
+                row: m.types[f.slot_type[slot]]
+                if row.kind == .String && row.drop != "" {
+                    has_string_drop = true
+                    break
+                }
+            }
+        }
+    }
+    if !has_string_drop -> return plan
     // Per instruction: the If of the stop poll holding it, -1 for none.
     stop := [Int]{}
     loop _ in 0..<n -> stop.push(-1)
-    found := false
     loop at in 0..<n {
-        if f.op[at] == .Drop -> found = true
         if f.op[at] != .If || stop[at] >= 0 || !ir_drop_stop_edge(m, f, at, poll, trap, turn) {
             next
         }
         loop inner in at..<(f.c[at] + 1) -> stop[inner] = at
     }
-    if !found -> return plan
-    count: f.slot_type.len()
     eligible := [Bool]{}
     dropped := [Bool]{}
     loop slot in 0..<count {

@@ -24,13 +24,14 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 6 -> return 0
     has_loop := false
+    has_mul := false
     loop at in 0..<count {
-        if f.op[at] == .Loop {
-            has_loop = true
-            break
-        }
+        op: f.op[at]
+        if op == .Loop -> has_loop = true
+        else if op == .Mul -> has_mul = true
+        if has_loop && has_mul -> break
     }
-    if !has_loop -> return 0
+    if !has_loop || !has_mul -> return 0
 
     slots: f.slot_type.len()
     writes := loop _ in 0..<slots -> 0
@@ -39,20 +40,37 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     is_const := loop _ in 0..<slots -> false
     dropped := loop _ in 0..<slots -> false
     read_count := loop _ in 0..<slots -> 0
-    reads := [Int]{}
     loop at in 0..<count {
         w: ir_x64_write(f, at)
         if w >= 0 {
             writes[w] = writes[w] + 1
             write_at[w] = at
         }
-        if f.op[at] == .Drop || f.op[at] == .Close {
+        op: f.op[at]
+        if op == .Drop || op == .Close {
             s: f.a[at]
             if s >= 0 && s < slots -> dropped[s] = true
         }
-        ir_x64_reads_into(f, at, reads)
-        if f.op[at] == .If || f.op[at] == .BrIf -> reads.push(f.a[at])
-        loop r in reads {
+        form: ir_x64_read_form(op)
+        if form != IR_X64_READS_NONE {
+            a: f.a[at]
+            if form != IR_X64_READS_ARGS && a >= 0 && a < slots -> read_count[a] = read_count[a] + 1
+            if form == IR_X64_READS_AB {
+                b: f.b[at]
+                if b >= 0 && b < slots -> read_count[b] = read_count[b] + 1
+            } else if form == IR_X64_READS_AC {
+                c: f.c[at]
+                if c >= 0 && c < slots -> read_count[c] = read_count[c] + 1
+            } else if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+                first: f.b[at]
+                loop index in first..<(first + f.c[at]) {
+                    r: f.args[index]
+                    if r >= 0 && r < slots -> read_count[r] = read_count[r] + 1
+                }
+            }
+        }
+        if op == .If || op == .BrIf {
+            r: f.a[at]
             if r >= 0 && r < slots -> read_count[r] = read_count[r] + 1
         }
     }
@@ -209,6 +227,7 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             // Verify every read of `target_old` lies inside `(mul_at..step_at)` so
             // stepping the new IV right after `step_at` never alters any read.
             def_pos: if add_at >= 0 -> add_at else -> mul_at
+            reads := [Int]{}
             reads_safe := true
             loop k in 0..<count {
                 if k > def_pos && k < step_at -> next

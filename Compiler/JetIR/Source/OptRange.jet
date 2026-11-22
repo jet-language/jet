@@ -209,9 +209,62 @@ ir_range_is_compare: fn(op: IROp) -> Bool Never! {
 
 // Whether function `f` has an Int or word slot (a value with a range).
 ir_range_wanted: fn(m: IRModule, f: IRFunction) -> Bool Never! {
+    has_numeric := false
     loop row in f.slot_type {
         kind: m.types[row].kind
-        if kind == .Int || kind == .Word -> return true
+        if kind == .Int || kind == .Word {
+            has_numeric = true
+            break
+        }
+    }
+    if !has_numeric -> return false
+    to_i64: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
+    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    native: name_rows_value(m.name_rows, "jet_int_native_i64_at") ?? -2
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .IntBig -> return true
+        if op == .Drop || op == .Copy {
+            a: f.a[at]
+            if a >= 0 && m.types[f.slot_type[a]].kind == .Int -> return true
+            next
+        }
+        if op == .Add || op == .Sub || op == .Mul {
+            if f.c[at] != IR_OVERFLOW_WRAP && f.c[at] >= IR_OVERFLOW_TRAP && f.a[at] >= 0 {
+                kind: m.types[f.slot_type[f.a[at]]].kind
+                if kind == .Int || kind == .Word -> return true
+            }
+            next
+        }
+        if op == .Div || op == .Rem || op == .FloorDiv || op == .Mod {
+            if f.c[at] == IR_OVERFLOW_TRAP && f.a[at] >= 0 {
+                kind: m.types[f.slot_type[f.a[at]]].kind
+                if kind == .Int || kind == .Word -> return true
+            }
+            next
+        }
+        if op == .BitAnd || op == .BitOr || op == .BitXor {
+            if f.c[at] != IR_OVERFLOW_WRAP && f.a[at] >= 0 && m.types[f.slot_type[f.a[at]]].kind == .Int {
+                return true
+            }
+            next
+        }
+        if op == .Shl || op == .Shr {
+            if f.c[at] == IR_OVERFLOW_TRAP && f.a[at] >= 0 && m.types[f.slot_type[f.a[at]]].kind == .Word {
+                return true
+            }
+            next
+        }
+        if ir_range_is_compare(op) && f.dst[at] >= 0 && f.a[at] >= 0 {
+            kind: m.types[f.slot_type[f.a[at]]].kind
+            if kind == .Int || kind == .Word -> return true
+            next
+        }
+        if op == .CallRuntime && f.dst[at] >= 0 {
+            id: f.a[at]
+            if id == to_i64 || id == clone || id == native || id == fixed -> return true
+        }
     }
     false
 }
@@ -227,13 +280,17 @@ ir_range_length_load: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] != .Load -> return false
     if f.c[at] == IR_LOAD_LENGTH -> return true
     if f.b[at] != 0 || f.a[at] < 0 || f.a[at] >= f.slot_type.len() -> return false
-    ir_untag(m.types[f.slot_type[f.a[at]]].ty) == .List(_)
+    row: f.slot_type[f.a[at]]
+    if m.types[row].kind != .Aggregate -> return false
+    ir_untag(m.types[row].ty) == .List(_)
 }
 
 ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     count: s.val_slot.len()
     if count == 0 || count > IR_RANGE_VALUES -> return 0
     r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, inline: [Bool]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}, lengths: [Bool]{}}
+    char_len_id: name_rows_value(m.name_rows, "jet_char_len") ?? -2
+    string_bytes_id: name_rows_value(m.name_rows, "jet_string_bytes") ?? -2
     any := false
     loop value in 0..<count {
         ty: m.types[f.slot_type[s.val_slot[value]]]
@@ -265,7 +322,18 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         home: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
         r.home.push(home)
         r.tested.push(false)
-        r.lengths.push((exact || word) && !narrow && kind == .Def && (ir_range_length_load(m, f, s.val_at[value]) || ir_opt_calls_route(m, f, s.val_at[value], "jet_char_len") || ir_opt_calls_route(m, f, s.val_at[value], "jet_string_bytes")))
+        is_len := false
+        if (exact || word) && !narrow && kind == .Def {
+            at: s.val_at[value]
+            op: f.op[at]
+            if op == .Load {
+                is_len = ir_range_length_load(m, f, at)
+            } else if op == .CallRuntime {
+                id: f.a[at]
+                is_len = id == char_len_id || id == string_bytes_id
+            }
+        }
+        r.lengths.push(is_len)
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {
