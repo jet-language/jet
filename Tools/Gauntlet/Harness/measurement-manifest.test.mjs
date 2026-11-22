@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, LANGUAGE_SOURCE_DIRS, metricApplicability, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
+import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, LANGUAGE_SOURCE_DIRS, MANIFEST_PEER_SLOTS, metricApplicability, peerFloorWorkloadIssues, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals, processTreeRssKb } from "./live-reload.mjs";
 import { compileThroughputContractIssues } from "./compile-throughput.mjs";
 import { BUILD_SYSTEM_CELLS, buildSystemContractIssues } from "./BuildSystem.mjs";
@@ -917,26 +917,96 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   }
   assert.deepEqual([...names].sort(), [...entryDirs.keys()].sort());
 
+  const defaultPeerFile = {
+    python: "main.py",
+    rust: "main.rs",
+    c: "main.c",
+    zig: "main.zig",
+    go: "main.go",
+  };
   const cellOwners = new Map();
   for (const row of rows) {
     assert.equal(typeof row.name, "string");
-    assert.equal(Object.hasOwn(row, "python"), true);
     const entryDir = entryDirs.get(row.name);
     const entry = JSON.parse(await fs.readFile(path.join(entryDir, "entry.json"), "utf8"));
     assert.equal(entry.name, row.name);
     assert.equal(entry.languages.includes("jet"), true);
     for (const cell of entry.cells) cellOwners.set(cell, (cellOwners.get(cell) ?? 0) + 1);
-    // A language the entry declares not applicable has no program to pair.
-    assert.equal(row.python !== null, entry.languages.includes("python") && !entry.non_applicable?.python, row.name);
     assert.equal(await exists(sourcePath(entryDir, row.jet)), true, `${row.name}: missing Jet source`);
 
-    const pythonDefault = path.join(entryDir, LANGUAGE_SOURCE_DIRS.python, "main.py");
-    if (row.python === null) {
-      assert.equal(await exists(pythonDefault), false, `${row.name}: unlisted Python source`);
-    } else {
-      assert.equal(await exists(sourcePath(entryDir, row.python)), true, `${row.name}: missing Python source`);
+    for (const peer of MANIFEST_PEER_SLOTS) {
+      assert.equal(Object.hasOwn(row, peer), true, `${row.name}: missing ${peer} slot`);
+      // A language the entry declares not applicable has no program to pair.
+      const applies = entry.languages.includes(peer) && !entry.non_applicable?.[peer];
+      assert.equal(row[peer] !== null, applies, `${row.name}/${peer}`);
+      const defaultPath = path.join(entryDir, LANGUAGE_SOURCE_DIRS[peer], defaultPeerFile[peer]);
+      if (row[peer] === null) {
+        assert.equal(await exists(defaultPath), false, `${row.name}: unlisted ${peer} source`);
+      } else {
+        assert.equal(await exists(sourcePath(entryDir, row[peer])), true, `${row.name}: missing ${peer} source`);
+      }
     }
   }
   const allowed = new Set(manifest.corpus.allowed_uncovered_cells);
   for (const cell of matrix.cells) if (!allowed.has(cell.id)) assert.equal(cellOwners.get(cell.id), 1, `${cell.id}: expected one corpus owner`);
+
+  // Peer-floor workloads: wordfreq 10k, wordfreq 200k and cat each record
+  // matched Rust, C, Zig and Go peers against the AGENTS.md <1 comparator.
+  assert.deepEqual(await peerFloorWorkloadIssues(manifest, repoDir), []);
+  const floorIds = manifest.peer_floor_workloads.workloads.map((workload) => workload.id);
+  for (const id of ["wordfreq-10k", "wordfreq-200k", "cat"]) {
+    assert.ok(floorIds.includes(id), `peer_floor_workloads lacks ${id}`);
+  }
+  assert.deepEqual(manifest.peer_floor_workloads.comparator, { win: "<1", loss: ">=1" });
+});
+
+test("required cell fails when a manifest-declared peer is missing, unmatched, or fails the AGENTS.md comparator", async () => {
+  const tower = { status: "available", revision: 1, cards: new Map() };
+
+  // Missing matched peer: manifest declares rust, c, zig, go, but the run omits go.
+  const missingPeer = scoreboardFixture();
+  missingPeer.manifest.entries = [
+    { name: "fixture", jet: "Jet/run.jet", python: null, rust: "Rust/main.rs", c: "C/main.c", zig: "Zig/main.zig", go: "Go/main.go" },
+  ];
+  const missingBoard = buildScoreboard(missingPeer.matrix, [missingPeer.result], missingPeer.manifest, tower);
+  const missingRecord = missingBoard.cells[0].entries[0];
+  assert.equal(missingRecord.verdict, "unmeasured");
+  for (const peer of ["c", "zig", "go"]) {
+    const peerRecord = missingRecord.peers.find((item) => item.language === peer);
+    assert.ok(peerRecord, `missing manifest peer ${peer} must stay in scoreboard`);
+    assert.equal(peerRecord.verdict, "unmeasured");
+  }
+  const missingPub = fixturePublication(missingPeer, missingBoard);
+  assert.equal(missingPub.complete, false);
+  assert.ok(missingPub.blockers.some((blocker) => blocker.startsWith("fixture.cell/go/runtime_wall_seconds: metric unmeasured")));
+
+  // Unmatched peer: peer verification failed / output mismatched.
+  const unmatched = scoreboardFixture();
+  unmatched.result.rows.rust.verification = { status: "failed", kind: "byte_exact_stdout" };
+  const unmatchedBoard = buildScoreboard(unmatched.matrix, [unmatched.result], unmatched.manifest, tower);
+  const unmatchedPub = fixturePublication(unmatched, unmatchedBoard);
+  assert.equal(unmatchedPub.complete, false);
+  assert.ok(unmatchedPub.blockers.some((blocker) => blocker.includes("fixture/rust: successful row is missing valid passed verification")));
+
+  // AGENTS.md comparator failure: Jet/Rust = 1.05 (no parity band; must be <1.00).
+  const rustLoss = scoreboardFixture();
+  rustLoss.result.rows.rust.metrics.runtime_wall_seconds = 1 / 1.05;
+  rustLoss.result.comparisons = comparisons(rustLoss.result.entry, Object.keys(rustLoss.result.rows), rustLoss.result.rows, rustLoss.result.jet_tiers);
+  const rustLossBoard = buildScoreboard(rustLoss.matrix, [rustLoss.result], rustLoss.manifest, tower);
+  assert.equal(rustLossBoard.cells[0].verdict, "loss");
+  assert.equal(rustLossBoard.cells[0].metric_verdicts.runtime_wall_seconds, "loss");
+  const rustLossPub = fixturePublication(rustLoss, rustLossBoard);
+  assert.equal(rustLossPub.complete, false);
+  assert.ok(rustLossPub.blockers.some((blocker) => blocker.includes("fixture.cell/rust/runtime_wall_seconds: metric loss (aot Jet/rust 1.050")));
+
+  // Peer-floor workload gate rejects a missing peer, missing workload, or weakened comparator.
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const badManifest = structuredClone(manifest);
+  delete badManifest.peer_floor_workloads.workloads.find((item) => item.id === "wordfreq-200k").peers.rust;
+  badManifest.peer_floor_workloads.workloads = badManifest.peer_floor_workloads.workloads.filter((item) => item.id !== "cat");
+  badManifest.peer_floor_workloads.comparator = { win: "<=1.05", loss: ">1.05" };
+  const issues = await peerFloorWorkloadIssues(badManifest, repoDir);
+  assert.ok(issues.some((issue) => issue.includes("wordfreq-200k/rust: missing required matched peer")));
+  assert.ok(issues.some((issue) => issue.includes("missing required workload cat")));
+  assert.ok(issues.some((issue) => issue.includes("comparator must match")));
 });
