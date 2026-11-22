@@ -1,0 +1,30 @@
+# `jet perf attach -- <command>` profiles a jet command by its phases: jet
+# starts the command with a `JET_TRACE_FILE` of its own, so the jet streams
+# its trace there, and the samples split by the phase of the jet's trace
+# open at each one's time. The command is a `jet check` whose constant's
+# compile-time work spins, so its samples are in at least two phases, the
+# loading and the checking that runs the work. The attach prints them as
+# `cpu by phase`, the `functions` section holds them as `phases`, and the
+# trace's profile is captured: a row for each function the samples were in
+# whose source can be read, at its declaration, the jet's own check among
+# them, its coverage saying whether every sample is in a row. `jet perf
+# view` prints the profile's method, status and coverage, and the phases.
+# The attach removes the jet's trace files.
+requires: os-name:linux
+requires: arch:x86_64
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may sample its own processes
+fixture: AttachSamplesACommand.fixture
+env: NO_COLOR=1
+step: jet perf attach --out spin.jettrace -- {jet} check spin.jet
+exit: 0 # the check's own exit code
+stderr: ~ "\ncpu by phase\n" # the samples by the phase they were taken in
+json: file spin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.phases #>= 2 # at least two phases held samples
+json: file spin.jettrace doc $.content.profile.method = "sampling"
+json: file spin.jettrace doc $.content.profile.status = "captured" # a real profile, not `unsupported`
+json: file spin.jettrace doc $.content.profile.rows #>= 1 # a row for each function with a readable source
+json: file spin.jettrace doc $.content.profile.rows[?symbol.name~="jet_cli_compile_check"] #>= 1 # the check on every stack of the jet's, among its rows
+json: file spin.jettrace doc $.content.source_identity #>= 1 # the sources its rows are in
+step: jet perf view spin.jettrace
+exit: 0
+stdout: ~ "profile method=sampling status=captured coverage=" # the view says the profile's coverage
+stdout: ~ "\ncpu by phase\n" # and the samples by phase

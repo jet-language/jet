@@ -1,0 +1,50 @@
+// A runtime pack keeps its objects' Jet line tables (Image/RuntimePack.jet
+// link_pack_write), so what links the pack names the runtime's functions'
+// sources: the runtime image prelinked from it, which the comptime child
+// runs, and every program linked with it. The pack is linked here from the
+// runtime object of the compiler under test.
+use {
+    jet_backend.[x64_image_functions, x64_jetline_find, x64_jetline_read, x64_link_runtime_image, x64_link_runtime_pack]
+    jet_foundation.[compiler_threads_single]
+    lines_files: core.files
+    lines_process: core.process
+    lines_sys: core.sys
+}
+
+// The runtime object of the compiler under test, never this test binary's.
+runtime_lines_object_path: fn() -> String {
+    jet: lines_sys.get("JET") ?? (lines_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime/jet_runtime_jet.o"
+}
+
+#Test("the runtime image linked from a pack names each runtime function's source") {
+    path: runtime_lines_object_path()
+    object := lines_files.read_bytes(path) ?? panic("the compiler under test has no runtime object at {path}")
+    pack := x64_link_runtime_pack([String]{path}, [[U8]]{object.move()}, [String]{})
+    assert(pack.errors.len() == 0, "the runtime object packs: {pack.errors.join("; ")}")
+    image := x64_link_runtime_image(path, pack.bytes.move(), compiler_threads_single())
+    assert(image.errors.len() == 0, "the pack prelinks: {image.errors.join("; ")}")
+    lines: x64_jetline_read(image.bytes) ?? panic("the runtime image has no Jet line table")
+    read: x64_image_functions(image.bytes)
+    assert(read.failure == "", "the runtime image names its functions: {read.failure}")
+    named := 0
+    loop function in read.functions {
+        found: x64_jetline_find(lines, function.start)
+        if found < 0 -> next
+        record: lines.functions[found]
+        assert(record.low <= function.start && function.start < record.high, "`{function.name}`'s record holds its start")
+        assert(record.file.ends_with(".jet") && record.decl > 0, "`{function.name}` is declared at a line of a Jet source, not {record.file}:{record.decl}")
+        named += 1
+    }
+    loop name in ([String]{"jet_rt_string_eq", "jet_rt_alloc"}) {
+        index := -1
+        loop (k, function) in read.functions {
+            if function.name == name -> index = k
+        }
+        assert(index >= 0, "the runtime image defines `{name}`")
+        assert(x64_jetline_find(lines, read.functions[index].start) >= 0, "the runtime image's line table names `{name}`'s source")
+    }
+    assert(named == lines.functions.len(), "each of the {lines.functions.len()} records is a function of the image, {named} are")
+}

@@ -168,6 +168,39 @@ link_pack_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first:
     }
 }
 
+// Whether symbol `k` of object `obj` is defined in a section the pack
+// leaves out: collected, or discarded with its group.
+link_pack_left_out: fn(c: LinkContext, p: LinkPack, obj: Int, k: Int) -> Bool Never! {
+    if k == 0 -> return false
+    s := link_sym_shndx(c, obj, k)
+    g: link_global_of(c, obj, k)
+    if g >= 0 {
+        f: link_final(c, g)
+        if c.g_kind[f] != LINK_G_FILE -> return false
+        s = c.g_section[f]
+    }
+    s != LINK_ABS && (s < 0 || link_pack_out(c, p, s) < 0)
+}
+
+// Append the rewritten relocation rows of the Jet line table section `s`
+// of object `obj`. A record of a function the pack leaves out relocates
+// against an absolute zero instead: its start falls below `.text`, where a
+// link that relocates the table drops it (DebugPrune.jet
+// link_jetline_link), as it drops the record of a function it collects.
+link_pack_line_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, s: Int) Never! {
+    table: link_rel_table(c, obj, s)
+    loop k in 0..<link_rel_count(c, obj, s) {
+        at: table + 24 * k
+        symbol: link_u32(c.bufs, c.obj_buffer[obj], at + 12)
+        p.r_off.push(link_u64(c.bufs, c.obj_buffer[obj], at))
+        p.r_type.push(link_u32(c.bufs, c.obj_buffer[obj], at + 8))
+        // The absolute zero's key lies past those of the globals (-1 - id).
+        left_out: link_pack_left_out(c, p, obj, symbol)
+        p.r_sym.push(if left_out -> link_pack_local(p, -1 - c.g_name.len(), "", 0, LINK_ABS, 0, 0) else -> link_pack_symbol(c, p, obj, symbol))
+        p.r_add.push(link_s64(c.bufs, c.obj_buffer[obj], at + 16))
+    }
+}
+
 // Name every function and object of a kept section, so the program link's
 // `.symtab` (StaticLink.jet link_write_sections) lets profilers and
 // debuggers name the runtime's internal code: each named local of an input
@@ -288,7 +321,8 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     loop _ in ord_row -> row_ord.push(0)
     loop (ord, row) in ord_row -> row_ord[row] = ord
     // Header indexes: each kept section, followed by its RELA section when it
-    // has relocations; `.eh_frame` and its RELA; the symbol tables.
+    // has relocations; `.eh_frame` and its RELA; each `.debug_jetline` and
+    // its RELA; the symbol tables.
     sec_out := [Int]{}
     rela_out := [Int]{}
     next_index := 1
@@ -364,10 +398,34 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         if cie >= 0 -> link_put32(eh, out + 4, out + 4 - (eh_out.get(cie) ?? 0))
     }
     eh_rel_end: p.r_off.len()
+    // Each input's Jet line table (DebugPrune.jet), so a program linked with
+    // the pack, and the runtime image, name the runtime's functions' sources.
+    lines := [Int]{}
+    lines_rel := [Int]{}
+    loop obj in 0..<c.obj_name.len() {
+        loop k in 1..<c.obj_count[obj] {
+            s: c.obj_first_section[obj] + k
+            if link_sec_type(c, obj, s) != LINK_SHT_PROGBITS || link_sec_size(c, obj, s) == 0 {
+                next
+            }
+            if !link_name_has(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s), ".debug_jetline", true) {
+                next
+            }
+            lines.push(s)
+            lines_rel.push(p.r_off.len())
+            link_pack_line_relocs(c, p, obj, s)
+        }
+    }
+    lines_rel.push(p.r_off.len())
     link_pack_name_kept(c, p)
     eh_index: if eh.len() > 0 -> next_index else -> -1
     if eh.len() > 0 -> next_index += 1
     if eh_rel_end > eh_rel_first -> next_index += 1
+    lines_index := [Int]{}
+    loop j in 0..<lines.len() {
+        lines_index.push(next_index)
+        next_index += if lines_rel[j + 1] > lines_rel[j] -> 2 else -> 1
+    }
     // An empty `.note.GNU-stack`: the code needs no executable stack.
     next_index += 1
     symtab_index: next_index
@@ -471,6 +529,21 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
             rela_at: bytes.len()
             link_pack_rela(bytes, p, eh_rel_first, eh_rel_end, first_global)
             link_pack_header(h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, eh_index, 8, 24)
+        }
+    }
+    loop (j, s) in lines {
+        obj: link_obj_of(c, s)
+        elf64_pad(bytes, link_sec_align(c, obj, s))
+        at: bytes.len()
+        start: link_sec_offset(c, obj, s)
+        size: link_sec_size(c, obj, s)
+        bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
+        link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, shstr_at, ".debug_jetline"), LINK_SHT_PROGBITS, 0, at, size, 0, 0, link_sec_align(c, obj, s), 0)
+        if lines_rel[j + 1] > lines_rel[j] {
+            elf64_pad(bytes, 8)
+            rela_at: bytes.len()
+            link_pack_rela(bytes, p, lines_rel[j], lines_rel[j + 1], first_global)
+            link_pack_header(h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, lines_index[j], 8, 24)
         }
     }
     link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, shstr_at, ".note.GNU-stack"), LINK_SHT_PROGBITS, 0, bytes.len(), 0, 0, 0, 1, 0)

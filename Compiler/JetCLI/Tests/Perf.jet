@@ -1,7 +1,7 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
-    jet_backend.[X64Counted, X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, X64SampleMapping, x64_jetline_rows]
+    jet_backend.[X64Counted, X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction, X64LineRow, X64SampleMapping, X64Samples, x64_jetline_rows]
     jet_cli.[
         JET_CLI_PERF_OBJECT_SOCKET,
         JET_CLI_PERF_SAMPLE_US,
@@ -26,6 +26,7 @@ use {
         JetCLIPerfLineTotals,
         JetCLIPerfObservation,
         JetCLIPerfOutsideMoment,
+        JetCLIPerfOutsidePhase,
         JetCLIPerfOutsideRow,
         JetCLIPerfOutsideTree,
         JetCLIPerfPlotTotal,
@@ -71,13 +72,19 @@ use {
         jet_cli_perf_line_table,
         jet_cli_perf_log_spans_read,
         jet_cli_perf_observed,
+        jet_cli_perf_outside_code_at,
         jet_cli_perf_outside_flame,
         jet_cli_perf_outside_fold,
         jet_cli_perf_outside_folded,
         jet_cli_perf_outside_function,
         jet_cli_perf_outside_hex,
         jet_cli_perf_outside_lines,
+        jet_cli_perf_outside_listing,
+        jet_cli_perf_outside_phase_samples,
+        jet_cli_perf_outside_phases,
         jet_cli_perf_outside_recorded,
+        jet_cli_perf_outside_span,
+        jet_cli_perf_outside_take,
         jet_cli_perf_outside_timeline,
         jet_cli_perf_outside_tree_add,
         jet_cli_perf_pc_json,
@@ -1686,8 +1693,9 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
 
 // A sampled command's process names its code by the mappings the kernel
 // reported it made, so one that has ended, with no /proc entry left, still
-// does; one that made none since its fork runs its parent's, and a
-// mapping made before its execve is its old image's, not its new one's.
+// does; until its execve it also runs what its parent mapped before its
+// fork, beside what it maps itself, and a mapping made before its execve
+// is its old image's, not its new one's.
 #Test("an outside attach names an ended process's code by the mappings the kernel reported") {
     exe: perf_test_files.read_link("/proc/self/exe") ?? panic("this test's executable can't be found")
     maps: perf_test_files.read("/proc/self/maps") ?? panic("this test's mappings can't be read")
@@ -1710,8 +1718,91 @@ jet_cli_perf_test_corrupt: fn(shared: Int, back: Int, chained: Int) -> [U8] Neve
     loop range in named { assert(range.image >= 0, "an image of the mapped file holds the code") }
     fold.parents[child] = ended
     assert_eq(jet_cli_perf_outside_recorded(fold, child).len(), named.len())
+    // Code the child maps itself, as a comptime child's batches, names none.
+    fold.mappings.push(X64SampleMapping{pid: child, start: 4096, end: 8192, offset: 4096, path: "//anon", time: 25})
+    assert_eq(jet_cli_perf_outside_recorded(fold, child).len(), named.len())
     fold.execs[ended] = 30
     assert_eq(jet_cli_perf_outside_recorded(fold, ended).len(), 0)
+}
+
+// A comptime child's batch code, which no file holds, is named by the
+// listing its jet writes of each batch the child loads: each function's
+// code, declaration and name, its entry program's `main` a stack's root.
+#Test("an outside attach names a comptime child's batch code by its jet's listing") {
+    listed: jet_cli_perf_outside_listing("4160\t4200\t0\t\tmain\n4096\t4160\t7\tsrc/./spin.jet\tunit.spin\nno code\n4300\t4300\t1\tspin.jet\tempty\n")
+    assert_eq(loop code in listed -> "{code.start}-{code.end} {code.file}:{code.line} {code.name}", [String]{"4096-4160 src/spin.jet:7 unit.spin", "4160-4200 :0 main"})
+    pcs: [Int]{4095, 4096, 4159, 4160, 4199, 4200}
+    assert_eq(loop pc in pcs -> jet_cli_perf_outside_code_at(listed, pc), [Int]{-1, 0, 0, 1, 1, -1})
+    // A pid past the kernel's largest, so no /proc entry names its code.
+    child: 1073741821
+    fold := jet_cli_perf_outside_fold()
+    fold.code = "{perf_test_sys.temp_dir()}/jet-perf-listing-{perf_test_process.current_pid()}-%p.code"
+    path: fold.code.replace("%p", "{child}")
+    perf_test_files.write_bytes(path, "4096\t4160\t7\tsrc/spin.jet\tunit.spin\n4160\t4200\t0\t\tmain\n".bytes()) ?? panic("the listing file: {err}")
+    fold.drains = 1
+    taken := X64Samples{words: [Int]{child, child, 10, 2, 4100, 4170, child, child, 20, 1, 9000}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 2, lost: 0}
+    jet_cli_perf_outside_take(fold, taken)
+    perf_test_files.remove(path) ?? panic("the listing file: {err}")
+    rows: loop row in fold.rows -> "{row.name} {row.file}:{row.line} own={row.own} total={row.total} root={row.root}"
+    assert_eq(rows, [String]{"unit.spin src/spin.jet:7 own=1 total=1 root=false", "main :0 own=0 total=1 root=true"})
+    assert_eq(fold.unwound, 1)
+    assert_eq(fold.unnamed, 1)
+}
+
+// A sampled command's jet streams its trace; its top-level spans, whose
+// name is their kind, are its phases, on the wall clock by the trace's
+// start, one left open ending at the trace's last event, and each sample
+// counts in the innermost phase open at its time, or in none.
+#Test("an outside attach splits a command's samples by the phases its jet's trace names, the innermost open at each one's time") {
+    opened: jet_cli_perf_outside_span(`{"name":"load","cat":"load","ph":"B","ts":20156,"pid":7,"tid":1}`) ?? panic("a phase's begin opens a span")
+    assert_eq(opened.name, "load")
+    assert(opened.begins, "a `B` event opens it")
+    closed: jet_cli_perf_outside_span(`{"name":"load","cat":"load","ph":"E","ts":22828,"pid":7,"tid":1,"args":{"items":3}}`) ?? panic("a phase's end closes a span")
+    assert(!closed.begins, "an `E` event closes it")
+    assert(jet_cli_perf_outside_span(`{"name":"spin.jet","cat":"parse","ph":"B","ts":20376,"pid":7,"tid":1,"args":{"index":0,"total":1}}`) == None, "an item's span is no phase")
+    events: [String]{
+        `[`,
+        `{"name":"process_name","ph":"M","pid":7,"tid":0,"args":{"name":"jet"}},`,
+        `{"name":"trace.start","ph":"i","s":"g","ts":0,"pid":7,"tid":0,"args":{"unix_ms":1700000000000,"functions":false,"unix_us":1700000000000000}},`,
+        `{"name":"load","cat":"load","ph":"B","ts":1000,"pid":7,"tid":1},`,
+        `{"name":"spin.jet","cat":"parse","ph":"B","ts":1100,"pid":7,"tid":1,"args":{"index":0,"total":1}},`,
+        `{"name":"spin.jet","cat":"parse","ph":"E","ts":1200,"pid":7,"tid":1,"args":{"items":3}},`,
+        `{"name":"load","cat":"load","ph":"E","ts":2000,"pid":7,"tid":1,"args":{"items":3}},`,
+        `{"name":"sema.check","cat":"sema.check","ph":"B","ts":2000,"pid":7,"tid":1},`,
+        `{"name":"comptime","cat":"comptime","ph":"B","ts":2500,"pid":7,"tid":1},`,
+        `{"name":"comptime","cat":"comptime","ph":"E","ts":3000,"pid":7,"tid":1,"args":{"items":1}},`,
+        `{"name":"spin","cat":"sema.module","ph":"B","ts":4000,"pid":7,"tid":1,"args":{"index":0,"total":1}},`,
+    }
+    path: "{perf_test_sys.temp_dir()}/jet-perf-phases-{perf_test_process.current_pid()}.trace"
+    perf_test_files.write_bytes(path, "{events.join("\n")}\n".bytes()) ?? panic("the trace file: {err}")
+    phases: jet_cli_perf_outside_phases(path)
+    perf_test_files.remove(path) ?? panic("the trace file: {err}")
+    base: 1700000000000000
+    spans: loop phase in phases -> "{phase.phase} {phase.start_us - base}-{phase.end_us - base}"
+    assert_eq(spans, [String]{"load 1000-2000", "comptime 2500-3000", "sema.check 2000-4000"})
+    times: [Int]{500, 1500, 2200, 2700, 2800, 3500, 5000}
+    timeline: loop us in times -> JetCLIPerfOutsideMoment{us: us, node: -1}
+    shares: jet_cli_perf_outside_phase_samples(timeline, phases, base * 1000)
+    assert_eq(loop share in shares -> "{share.phase}={share.samples}", [String]{"=2", "comptime=2", "sema.check=2", "load=1"})
+    assert_eq(jet_cli_perf_outside_phase_samples(timeline, [JetCLIPerfOutsidePhase]{}, base * 1000).len(), 0)
+}
+
+// The `functions` section's phases print as its packages do, under their
+// own heading, the samples taken in no phase as `(none)`.
+#Test("an outside attach's view prints a command's CPU by phase") {
+    section: `{"broken":0,"cut":0,"exited_ms":null,"functions":[{"name":"main","self":10,"total":10}],"lost":0,"packages":[],"period_ns":1000000,"phases":[{"phase":"sema.check","samples":6},{"phase":"","samples":4}],"processes":1,"samples":10,"stacks":[{"samples":10,"stack":"main"}],"threads":1,"unnamed":0,"unwound":10,"window_ms":3000}`
+    value: canonical_json_parse("{section}\n".bytes()) ?? panic(err.message)
+    assert_eq(
+        jet_cli_perf_outside_lines(value),
+        [String]{
+            "functions samples=10 processes=1 threads=1 window_ms=3000 lost=0 unnamed=0",
+            "stacks unwound=10 cut=0 broken=0",
+            "  100.0% self  100.0% total · main",
+            "cpu by phase",
+            "  sema.check samples=6 cpu_us=6000 share=60%",
+            "  (none) samples=4 cpu_us=4000 share=40%",
+        },
+    )
 }
 
 // Past the task row limit, the tasks with the fewest CPU-time samples have
