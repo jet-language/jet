@@ -357,11 +357,22 @@ NameRows: struct {
 
 NAME_ROWS_INITIAL_SLOTS: 16
 
-name_rows: fn() -> NameRows Never! {
+name_rows: fn(expected: Int{0}) -> NameRows Never! {
+    capacity := NAME_ROWS_INITIAL_SLOTS
+    needed: expected * 2 + 2
+    loop capacity < needed -> capacity = capacity * 2
     slots := [Int]{}
-    slots.try_reserve(NAME_ROWS_INITIAL_SLOTS) ?? panic("reserve failed")
-    loop _ in 0..<NAME_ROWS_INITIAL_SLOTS -> slots.push(0)
-    NameRows{texts: [String]{}, hashes: [Int]{}, rows: [Int]{}, slots: slots, mask: NAME_ROWS_INITIAL_SLOTS - 1}
+    slots.try_reserve(capacity) ?? panic("reserve failed")
+    loop _ in 0..<capacity -> slots.push(0)
+    texts := [String]{}
+    hashes := [Int]{}
+    rows := [Int]{}
+    if expected > 0 {
+        texts.try_reserve(expected) ?? panic("reserve failed")
+        hashes.try_reserve(expected) ?? panic("reserve failed")
+        rows.try_reserve(expected) ?? panic("reserve failed")
+    }
+    NameRows{texts: texts, hashes: hashes, rows: rows, slots: slots, mask: capacity - 1}
 }
 
 // The key index of `text` (whose name_rows_hash is `hash`), if the map ever

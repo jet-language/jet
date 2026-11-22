@@ -93,6 +93,9 @@ use {
         body_codec_put_list_u8,
         body_codec_put_string,
         body_codec_put_uvarint,
+        CompilerThreads,
+        compiler_threads_admit,
+        compiler_threads_failure_text,
         comptime_walk_identifiers,
         core_record_field_types,
         core_record_literal_fields,
@@ -2750,17 +2753,62 @@ sema_derive_fail_dependents: fn(failed: &[Bool], dependents: [[Int]]) {
 // module declares at its top level (a type a template, a protocol or an
 // inline module generates) has no entry: a declaration that holds one derives
 // no codec unless it asks for it.
-sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput]) -> [[String:Bool]] {
+SemaDeriveForeignScan: struct {
+    indexes: [SemaDeriveItemIndex],
+    held_names: [[String]],
+}
+
+sema_derive_foreign_scan_range: fn(inputs: [SemaRegistrationModuleInput], from: Int, to: Int) -> SemaDeriveForeignScan {
     indexes := [SemaDeriveItemIndex]{}
-    loop input in inputs -> indexes.push(sema_derive_item_index(input.program.items))
+    held_names := [[String]]{}
+    loop index in from..<to {
+        indexes.push(sema_derive_item_index(inputs[index].program.items))
+        names := [String]{}
+        loop item in inputs[index].program.items -> sema_derive_held_type_names(item, names)
+        held_names.push(names.move())
+    }
+    SemaDeriveForeignScan{indexes: indexes.move(), held_names: held_names.move()}
+}
+
+sema_derive_foreign_scan_spawn: fn(inputs: [SemaRegistrationModuleInput], part: Int, workers: Int, indexes: &[SemaDeriveItemIndex], held_names: &[[String]]) {
+    from: part * inputs.len() /% workers
+    to: (part + 1) * inputs.len() /% workers
+    if part + 1 >= workers {
+        done := sema_derive_foreign_scan_range(inputs, from, to)
+        indexes.extend(done.indexes.move())
+        held_names.extend(done.held_names.move())
+        return
+    }
+    task.group sema_derive_foreign_scan {
+        head: task sema_derive_foreign_scan_range(inputs, from, to)
+        rest_indexes := [SemaDeriveItemIndex]{}
+        rest_held := [[String]]{}
+        sema_derive_foreign_scan_spawn(inputs, part + 1, workers, rest_indexes, rest_held)
+        got := head.join() ?? panic(compiler_threads_failure_text(err))
+        indexes.extend(got.indexes.move())
+        indexes.extend(rest_indexes.move())
+        held_names.extend(got.held_names.move())
+        held_names.extend(rest_held.move())
+    }
+}
+
+sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: CompilerThreads) -> [[String:Bool]] {
+    indexes := [SemaDeriveItemIndex]{}
+    held_names := [[String]]{}
+    workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
+    if workers <= 1 {
+        done := sema_derive_foreign_scan_range(inputs, 0, inputs.len())
+        indexes = done.indexes.move()
+        held_names = done.held_names.move()
+    } else {
+        sema_derive_foreign_scan_spawn(inputs, 0, workers, indexes, held_names)
+    }
     readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidates: [String:Int]{}, relied_on: [Int]{}, foreign: [String:Bool]{}, global: true}
     ready := [String:Bool]{}
     codecs: [String]{"Encode", "Decode"}
     loop trait_name in codecs -> sema_derive_codec_ready(readiness, inputs, trait_name, ready)
     tables := [[String:Bool]]{}
-    loop input in inputs {
-        names := [String]{}
-        loop item in input.program.items -> sema_derive_held_type_names(item, names)
+    loop names in held_names {
         table := [String:Bool]{}
         loop name in names {
             loop trait_name in codecs {

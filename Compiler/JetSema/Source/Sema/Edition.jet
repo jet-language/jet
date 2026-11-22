@@ -584,10 +584,14 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             rename := Bool?{None}
             inlined := false
             if call.callee == .Val(callee) {
-                if !symbol_is_local(callee) && symbol_table_key(graph.symbols, callee).starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
-                    declared = payloads.get(callee.id)
-                    rename = renames.get(callee.id)
-                    inlined = inlines.get(callee.id) != None
+                if !symbol_is_local(callee) {
+                    if payloads.get(callee.id) == .Val(found_payload) {
+                        if symbol_table_key(graph.symbols, callee).starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
+                            declared = Val(found_payload)
+                            rename = renames.get(callee.id)
+                            inlined = inlines.get(callee.id) != None
+                        }
+                    }
                 }
             }
             detail: sema_call_site_detail(call)

@@ -9,7 +9,7 @@
 // filled the same way. An impl of a trait another module declares gains its
 // default bodies before any module is prepared (sema_trait_impls_foreign).
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, CallArg, Expr, Func, Item, ModuleTable, Span, Stmt, TraitImplBlock, TraitMethodSig, Type, ast_func, import_walk_bindings, module_index, module_is_core, module_text, owned_trait, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, CallArg, Expr, Func, Item, ModuleTable, NameTable, Span, Stmt, TraitImplBlock, TraitMethodSig, Type, ast_func, import_walk_bindings, module_index, module_is_core, module_text, name_count, name_find, name_intern, name_table, owned_trait, type_name]
     jet_parser.[parse_generated_source]
 }
 
@@ -181,9 +181,39 @@ sema_trait_impls_fill_blocks: fn(blocks: &[TraitImplBlock], first: &&SemaTraitIm
 // The traits are read in place: only the bodies an impl gains are copied. A
 // trait the compiler owns and a `using` delegation are left to the impl's
 // own preparation.
+sema_trait_impls_has_defaults: fn(sigs: [TraitMethodSig]) -> Bool Never! {
+    loop sig in sigs {
+        if sig.default_body != None -> return true
+    }
+    false
+}
+
 sema_trait_impls_foreign: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], table: ModuleTable) Never! {
+    default_traits := name_table()
+    loop input in inputs {
+        loop item in input.program.items {
+            if item == .Trait(definition) && sema_trait_impls_has_defaults(definition.methods) {
+                _ := name_intern(default_traits, definition.name)
+            }
+        }
+    }
+    if name_count(default_traits) == 0 {
+        return
+    }
     positions := [Int:Int]{}
     loop (position, input) in inputs -> positions[module_index(input.module_identity)] = position
+    edges_by_source := [Int:[Int]]{}
+    loop (edge_index, edge) in edges {
+        if edge.source_scope != "" -> next
+        src: module_index(edge.source_module_identity)
+        if !edges_by_source.has_key(src) -> edges_by_source[src] = [Int]{}
+        edges_by_source[src].push(edge_index)
+        loop binding in import_walk_bindings(edge.declaration) {
+            if binding.original == .Val(original) && name_find(default_traits, original) != None {
+                _ := name_intern(default_traits, binding.local)
+            }
+        }
+    }
     loop position in 0..<inputs.len() {
         gains := [SemaTraitImplGain]{}
         loop (index, item) in inputs[position].program.items {
@@ -191,14 +221,14 @@ sema_trait_impls_foreign: fn(inputs: &[SemaRegistrationModuleInput], edges: [Sem
                 .Impl(definition) -> {
                     trait_name: definition.trait_name ?? next
                     if definition.delegation_field != None -> next
-                    methods: sema_trait_impls_foreign_methods(inputs, position, edges, positions, table, trait_name, definition.methods) ?? next
+                    methods: sema_trait_impls_foreign_methods(inputs, position, edges, edges_by_source, positions, default_traits, table, trait_name, definition.methods) ?? next
                     gains.push(SemaTraitImplGain{item: index, block: -1, methods: methods})
                 }
                 .Struct(definition) -> {
-                    sema_trait_impls_foreign_blocks(inputs, position, edges, positions, table, index, definition.trait_impls, gains)
+                    sema_trait_impls_foreign_blocks(inputs, position, edges, edges_by_source, positions, default_traits, table, index, definition.trait_impls, gains)
                 }
                 .Enum(definition) -> {
-                    sema_trait_impls_foreign_blocks(inputs, position, edges, positions, table, index, definition.trait_impls, gains)
+                    sema_trait_impls_foreign_blocks(inputs, position, edges, edges_by_source, positions, default_traits, table, index, definition.trait_impls, gains)
                 }
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
@@ -209,10 +239,10 @@ sema_trait_impls_foreign: fn(inputs: &[SemaRegistrationModuleInput], edges: [Sem
 
 // The gains of the `impl Trait` blocks of the type body at item `item` of
 // input `position` from traits other modules declare.
-sema_trait_impls_foreign_blocks: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], table: ModuleTable, item: Int, blocks: [TraitImplBlock], gains: &[SemaTraitImplGain]) Never! {
+sema_trait_impls_foreign_blocks: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], edges_by_source: [Int:[Int]], positions: [Int:Int], default_traits: NameTable, table: ModuleTable, item: Int, blocks: [TraitImplBlock], gains: &[SemaTraitImplGain]) Never! {
     loop (block, written) in blocks {
         if written.delegation_field != None -> next
-        methods: sema_trait_impls_foreign_methods(inputs, position, edges, positions, table, written.trait_name, written.methods) ?? next
+        methods: sema_trait_impls_foreign_methods(inputs, position, edges, edges_by_source, positions, default_traits, table, written.trait_name, written.methods) ?? next
         gains.push(SemaTraitImplGain{item: item, block: block, methods: methods})
     }
 }
@@ -220,11 +250,13 @@ sema_trait_impls_foreign_blocks: fn(inputs: [SemaRegistrationModuleInput], posit
 // The methods of an impl in input `position` that writes `methods` and names
 // `trait_name`, with the default bodies it gains from the trait another
 // module declares; None when it gains none.
-sema_trait_impls_foreign_methods: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], table: ModuleTable, trait_name: String, methods: [Func]) -> [Func]? Never! {
+sema_trait_impls_foreign_methods: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], edges_by_source: [Int:[Int]], positions: [Int:Int], default_traits: NameTable, table: ModuleTable, trait_name: String, methods: [Func]) -> [Func]? Never! {
+    leaf: if trait_name.split_once(".") == .Val(parts) -> parts.after else -> trait_name
+    if name_find(default_traits, leaf) == None -> return None
     if owned_trait(trait_name) != None || sema_trait_impls_declared(inputs[position].program.items, trait_name) != None {
         return None
     }
-    found: sema_trait_impls_named(inputs, position, edges, positions, trait_name) ?? return None
+    found: sema_trait_impls_named(inputs, position, edges, edges_by_source, positions, trait_name) ?? return None
     if inputs[found.position].program.items[found.item] == .Trait(definition) {
         extras: sema_trait_impl_defaults(definition.methods, methods, module_text(table, inputs[found.position].module_identity))
         return sema_trait_impl_with(methods, extras.move())
@@ -236,20 +268,22 @@ sema_trait_impls_foreign_methods: fn(inputs: [SemaRegistrationModuleInput], posi
 // `written`: through the module's own imports first, then by the other
 // members of its package namespace, then as the one trait of that name
 // another package declares.
-sema_trait_impls_named: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], positions: [Int:Int], written: String) -> SemaTraitImplForeign? Never! {
+sema_trait_impls_named: fn(inputs: [SemaRegistrationModuleInput], position: Int, edges: [SemaRegistrationImportEdge], edges_by_source: [Int:[Int]], positions: [Int:Int], written: String) -> SemaTraitImplForeign? Never! {
     identity: module_index(inputs[position].module_identity)
     qualified: written.split_once(".")
-    loop edge in edges {
-        if edge.source_scope != "" || module_index(edge.source_module_identity) != identity -> next
-        target: positions.get(module_index(edge.target_module_identity)) ?? next
-        loop binding in import_walk_bindings(edge.declaration) {
-            if binding.original == .Val(original) {
-                if binding.local == written {
-                    return sema_trait_impls_offered(inputs, target, position, original)
-                }
-            } else if qualified == .Val(parts) {
-                if binding.local == parts.before {
-                    return sema_trait_impls_offered(inputs, target, position, parts.after)
+    if edges_by_source.get(identity) == .Val(source_edges) {
+        loop edge_index in source_edges {
+            edge: edges[edge_index]
+            target: positions.get(module_index(edge.target_module_identity)) ?? next
+            loop binding in import_walk_bindings(edge.declaration) {
+                if binding.original == .Val(original) {
+                    if binding.local == written {
+                        return sema_trait_impls_offered(inputs, target, position, original)
+                    }
+                } else if qualified == .Val(parts) {
+                    if binding.local == parts.before {
+                        return sema_trait_impls_offered(inputs, target, position, parts.after)
+                    }
                 }
             }
         }

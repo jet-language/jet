@@ -26,6 +26,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     gate_kind_parse,
+    module_none,
     policy_key_name,
     policy_scope_name,
     policy_scope_rank,
@@ -62,6 +63,9 @@ SemaFunctionMemoryPlan: struct {
     positions: [String:Int],
     diagnostics: [Diagnostic],
     complete: Bool,
+    // True when every function in the graph has no scoped-GC policy, no memory
+    // diagnostics, and a unique key: row 0 holds the shared plain entry.
+    all_plain: Bool{false},
 }
 
 SemaFunctionMemorySource: struct {
@@ -86,6 +90,7 @@ SemaFunctionMemoryWalk: struct {
     next_row: Int,
     wanted: [Int:Bool],
     fetched: [Int:Func],
+    plain: Bool{true},
 }
 
 // The declarations a plan rewrote (`functions`, at plan rows `rows`, both in
@@ -249,7 +254,10 @@ sema_function_memory_visit: fn(walk: &SemaFunctionMemoryWalk, module_identity: M
     }
     chain: sema_function_memory_function_policies(outer, declarations, function)
     rewritable := Func?{None}
-    if sema_function_memory_scope_may_annotate(function.body, chain) -> rewritable = Val(function)
+    if sema_function_memory_scope_may_annotate(function.body, chain) {
+        rewritable = Val(function)
+        walk.plain = false
+    }
     walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), name: function.name, span: function.span, function: rewritable, chain: chain, transfer_root: transfer_root})
 }
 
@@ -298,6 +306,31 @@ sema_function_memory_collect_items: fn(items: [Item], module_identity: ModuleID,
     }
 }
 
+sema_function_memory_module_keys_unique: fn(sources: [SemaFunctionMemorySource], start_row: Int) -> Bool Never! {
+    seen := [Int:Int]{}
+    loop row in start_row..<sources.len() {
+        span: sources[row].span
+        packed: span.start * 1048576 + span.end
+        if seen.get(packed) == .Val(prev) {
+            if prev >= 0 {
+                if sources[prev].span.start == span.start && sources[prev].span.end == span.end && sources[prev].name == sources[row].name && sources[prev].owner == sources[row].owner {
+                    return false
+                }
+                seen[packed] = -1
+            } else {
+                loop other in start_row..<row {
+                    if sources[other].span.start == span.start && sources[other].span.end == span.end && sources[other].name == sources[row].name && sources[other].owner == sources[row].owner {
+                        return false
+                    }
+                }
+            }
+        } else {
+            seen[packed] = row
+        }
+    }
+    true
+}
+
 // Visits one module's functions in row order under its package's scoped-GC
 // policies (row `package` of `packages`, None when it declares none) and its
 // own; returns its top-level item count (the propagation bound sums them).
@@ -308,7 +341,11 @@ sema_function_memory_walk_module: fn(packages: SemaFunctionMemoryPackages, packa
             outer.push(declaration.copy())
         }
     }
+    start_row: walk.sources.len()
     sema_function_memory_collect_items(items, module_identity, true, outer, declarations, walk)
+    if walk.plain && !walk.fetching && !sema_function_memory_module_keys_unique(walk.sources, start_row) {
+        walk.plain = false
+    }
     items.len()
 }
 
@@ -336,6 +373,7 @@ SEMA_FUNCTION_MEMORY_MIN_BYTES_PER_THREAD: 262144
 SemaFunctionMemoryWalked: struct {
     sources: [SemaFunctionMemorySource],
     limit: Int,
+    plain: Bool,
 }
 
 // The collecting walk of every module of `graph` into `walk`. Each module's
@@ -356,8 +394,16 @@ sema_function_memory_collect_graph: fn(graph: SemaRegistrationGraph, threads: Co
     packages: sema_function_memory_packages_of(graph)
     parts := sema_function_memory_walk_parts(graph, packages, compiler_threads_partition(weights, workers), 0)
     limit := 0
+    all_plain := true
     loop index in 0..<parts.len() {
         limit += parts[index].limit
+        if !parts[index].plain -> all_plain = false
+    }
+    walk.plain = all_plain
+    if all_plain {
+        return limit
+    }
+    loop index in 0..<parts.len() {
         walk.sources.extend(parts[index].sources.move())
     }
     walk.next_row = walk.sources.len()
@@ -387,7 +433,7 @@ sema_function_memory_walk_parts: fn(graph: SemaRegistrationGraph, packages: Sema
 sema_function_memory_walk_part: fn(graph: SemaRegistrationGraph, packages: SemaFunctionMemoryPackages, from: Int, to: Int) -> SemaFunctionMemoryWalked Never! {
     walk := sema_function_memory_walk_new()
     limit: sema_function_memory_walk_modules(graph, packages, from, to, walk)
-    SemaFunctionMemoryWalked{sources: walk.sources.move(), limit: limit}
+    SemaFunctionMemoryWalked{sources: walk.sources.move(), limit: limit, plain: walk.plain}
 }
 
 sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleID, walk: &SemaFunctionMemoryWalk) -> Int Never! {
@@ -556,6 +602,12 @@ sema_function_memory_boundary_diagnostics: fn(function: Func, promoted: [String]
 sema_function_memory_plan_from_graph: fn(graph: SemaRegistrationGraph, threads: CompilerThreads) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit: sema_function_memory_collect_graph(graph, threads, walk)
+    if walk.plain {
+        plain_plan := sema_function_memory_plan_new()
+        plain_plan.all_plain = true
+        plain_plan.functions.push(SemaFunctionMemoryFunction{module_identity: module_none(), owner: "", function: None, diagnostics: [Diagnostic]{}, transfer_root: false, complete: true})
+        return plain_plan
+    }
     plan := sema_function_memory_plan_new()
     planned := sema_function_memory_plan_rows(plan, walk.sources, limit)
     walk.wanted = sema_function_memory_wanted_rows(plan, planned)
@@ -609,6 +661,7 @@ sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclarati
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
 sema_function_memory_position: fn(plan: SemaFunctionMemoryPlan, module_identity: ModuleID, owner: String, name: String, span: Span) -> Int? {
+    if plan.all_plain -> return Val(0)
     plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), name, span))
 }
 

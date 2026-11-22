@@ -2478,11 +2478,13 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
         loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
             if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
                 sema_inline_always_check_function(function, imports, diagnostics, method: false)
-                key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name)
-                id: symbol_find(graph.symbols, key) ?? next
-                if function.is_inline_always && address_taken.get(id.id) != None {
-                    name: function.name
-                    diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", sema_inline_always_why("`{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at."), "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
+                if function.is_inline_always {
+                    key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name)
+                    id: symbol_find(graph.symbols, key) ?? next
+                    if address_taken.get(id.id) != None {
+                        name: function.name
+                        diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", sema_inline_always_why("`{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at."), "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
+                    }
                 }
             }
         }

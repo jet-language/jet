@@ -575,8 +575,8 @@ sema_expression_core_record_name: fn(struct_name: String, type_args: [Type], exp
             }
         }
     }
-    if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
     if core_record_literal_fields(name) == None -> return None
+    if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
     if core_record_literal_is_core_only(name) && !module_is_core(environment.module_identity) {
         return None
     }
@@ -688,12 +688,12 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     result_ty := resolved.ty
     // The struct's fields and type parameters, read at the declaration
     // without copying its methods.
-    if sema_scope_declaration_kind(environment, program, owner.id) == None {
-        diagnostics.push(sema_error("E0119", span, "struct `{type_name(result_ty)}` has no declaration metadata", "a struct literal must check every declared field before lowering", "use a registered struct declaration"))
-        return None
-    }
     struct_def: sema_scope_declaration_struct(environment, program, owner.id) ?? {
-        diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
+        if sema_scope_declaration_kind(environment, program, owner.id) == None {
+            diagnostics.push(sema_error("E0119", span, "struct `{type_name(result_ty)}` has no declaration metadata", "a struct literal must check every declared field before lowering", "use a registered struct declaration"))
+        } else {
+            diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
+        }
         return None
     }
     names: loop parameter in struct_def.type_params -> parameter.name
@@ -2487,6 +2487,7 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
     // Each dot is tried from the left, cut in place with no part list.
     // spec.md:334-335: "An unshadowed module alias can qualify a declared enum
     // and its variants"; spec.md:518-519: labeled payloads use `Type.Variant{label: value}`.
+    if !path.contains(".") -> return None
     bytes: path.bytes()
     loop separator in 1..<bytes.len() {
         if (Int{bytes[separator]}) != 46 -> next

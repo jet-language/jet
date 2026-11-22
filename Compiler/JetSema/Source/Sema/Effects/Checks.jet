@@ -67,6 +67,7 @@ use jet_foundation.[
     name_rows_get_text,
     name_rows_hash,
     name_rows_set,
+    name_rows_set_first,
     name_rows_set_hashed,
     name_find,
     name_index,
@@ -1592,14 +1593,27 @@ sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModu
     reported := (loop _ in nodes -> false)
     loop module_row in inputs {
         loop function in modules[module_row.module_index].functions {
-            taken: sema_effect_compiler_hook_param(loop parameter in function.params -> parameter.ty) ?? next
+            taken := String?{None}
+            loop parameter in function.params {
+                if parameter.ty == .Named(name) {
+                    if name == "Compiler" {
+                        taken = Val("Compiler")
+                        break
+                    }
+                    if name == "CompilerEvent" || name == "<corelib>/core.prelude.CompilerEvent" {
+                        taken = Val("CompilerEvent")
+                        break
+                    }
+                }
+            }
+            hook_param: taken ?? next
             node_index: sema_effect_node_index(node_by_key, function.key) ?? next
             if sema_effect_covered(solved[node_index], launch).len() == 0 -> next
             reported[node_index] = true
             seen := (loop _ in nodes -> false)
             path: sema_effect_launch_path(nodes, solved, node_index, seen)
             chain: loop step in path -> sema_effect_launch_step_name(table, nodes[step])
-            hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic("`{nodes[node_index].name}`", taken, chain, nodes[node_index].name_span)}
+            hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic("`{nodes[node_index].name}`", hook_param, chain, nodes[node_index].name_span)}
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, hook_diagnostics)
         }
     }
@@ -4718,14 +4732,25 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
     ordered_names := loop entry in ordered -> entry.name
     solved := [[String]]{}
     if nodes.len() > 0 -> solved.try_reserve(nodes.len()) ?? panic("reserve failed")
+    by_mask := [Int:Int]{}
+    unique_rows := [[String]]{}
     loop mask in bits {
-        row := [String]{}
-        if mask != 0 {
-            loop k in 0..<ordered_masks.len() {
-                if (mask & ordered_masks[k]) != 0 -> row.push(ordered_names[k])
-            }
+        if mask == 0 {
+            solved.push([String]{})
+            next
         }
-        solved.push(row)
+        if by_mask.get(mask) == .Val(slot) {
+            solved.push(unique_rows[slot])
+            next
+        }
+        row := [String]{}
+        loop k in 0..<ordered_masks.len() {
+            if (mask & ordered_masks[k]) != 0 -> row.push(ordered_names[k])
+        }
+        slot: unique_rows.len()
+        by_mask[mask] = slot
+        unique_rows.push(row)
+        solved.push(unique_rows[slot])
     }
     solved
 }
@@ -6427,8 +6452,8 @@ sema_effect_walk_region_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tre
 // block keyed `{function.key}#{label}@{start}`: its own sites, its call edges
 // and its call sites, walked as its owner's were but from none of them. The
 // node is appended to `nodes` for the walk (which writes only that node) and
-// removed again before returning.
-sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBody, span: Span, label: String, facts: SemaEffectCallIndex, module_index: Int) -> SemaEffectNode {
+// Walks a region's body into a temporary single-element node list.
+sema_effect_region_walk: fn(nodes: [SemaEffectNode], owner: Int, function: FnBody, span: Span, label: String, facts: SemaEffectCallIndex, module_index: Int) -> SemaEffectNode {
     // copy: the region node starts from its owner's declared row and spans;
     // the owner node stays in the graph.
     region_node := nodes[owner].copy()
@@ -6447,14 +6472,13 @@ sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBo
         rare.scoped_calls = [SemaEffectScopedCall]{}
         rare.bare_scope_callees = [String]{}
     }
-    nodes.push(region_node)
-    region_index: nodes.len() - 1
+    local_nodes := [SemaEffectNode]{region_node}
     ignored := [Diagnostic]{}
     caller: sema_effect_caller_slot(facts, module_index, function.key)
     loop statement in function.body {
-        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: region_index, region: span}, nodes, facts, ignored, caller, function.tree, function.tree.stmts[statement])
+        sema_effect_walk_stmt_children(SemaEffectWalk.Region{node_index: 0, region: span}, local_nodes, facts, ignored, caller, function.tree, function.tree.stmts[statement])
     }
-    walked := nodes.pop() ?? panic("the region node left the graph")
+    walked := local_nodes.pop() ?? panic("the region node left the local list")
     sema_effect_node_settle_edges(walked)
     walked
 }
@@ -6465,7 +6489,7 @@ sema_effect_region_walk: fn(nodes: &[SemaEffectNode], owner: Int, function: FnBo
 // it as the scoped effect its constant argument names, as a function's own
 // calls do (sema_effect_solve_scoped), so `files.read("data/{name}")` needs
 // `FS.Read("data/")`.
-sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
+sema_effect_region_inferred: fn(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
     walked := sema_effect_region_walk(nodes, owner, function, region.span, "FX", facts, module_index)
     inferred := walked.direct.move()
     walked_rare: walked.rare ?? SEMA_EFFECT_NODE_NO_RARE
@@ -6490,7 +6514,7 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
 // met the wall at its call, and its body is held to that row. A lambda's body
 // (a `tx.on_commit` hook) and a call through a function value are no call of
 // the block.
-sema_effect_check_transact_calls: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, span: Span, facts: SemaEffectCallIndex, module_index: Int, diagnostics: &[Diagnostic]) {
+sema_effect_check_transact_calls: fn(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, span: Span, facts: SemaEffectCallIndex, module_index: Int, diagnostics: &[Diagnostic]) {
     walked: sema_effect_region_walk(nodes, owner, function, span, "Transact", facts, module_index)
     loop call in walked.memory_calls {
         target: sema_effect_node_index(facts.node_by_key, call.callee) ?? next
@@ -6610,8 +6634,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop (key_index, key) in node_by_key.texts {
         node_index: node_by_key.rows[key_index]
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
-        if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) {
-            published_effects[key] = published
+        if nodes[node_index].declared.len() > 0 {
+            if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) {
+                published_effects[key] = published
+            }
         }
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
@@ -6631,9 +6657,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     callers: sema_effect_callers(nodes, table)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
+        facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
+        if facts.len() == 0 -> next
         sites := [U32:SharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
-        facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
         facts = loop fresh_item in facts -> fresh_item
         facts.sort_by(fn(left: SemaCallSiteFact, right: SemaCallSiteFact) { (sema_call_site_detail(left).shared_source <=> sema_call_site_detail(right).shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(sema_call_site_detail(left).shared_member <=> sema_call_site_detail(right).shared_member) })
         loop fact in facts {
@@ -6676,27 +6703,40 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // The debugger's probe answers take their verdicts from the solved rows.
     sema_eval_probe_judge_effects(modules, nodes, calls, solved)
     sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
+    any_module_writes := false
+    any_comptime_inputs := false
+    loop node in nodes {
+        if node.rare == .Val(rare) {
+            if rare.module_writes.len() > 0 -> any_module_writes = true
+            if rare.comptime_inputs.len() > 0 -> any_comptime_inputs = true
+            if any_module_writes && any_comptime_inputs -> break
+        }
+    }
     // A pure function may not write module state, itself or through any
     // function it calls or takes as a value. Reuse one seen bitmap + undo list
     // instead of allocating O(nodes) bools per pure function.
-    state_seen := (loop _ in nodes -> false)
-    state_visited := [Int]{}
-    loop node_index in 0..<nodes.len() {
-        if !nodes[node_index].is_pure -> next
-        path: sema_effect_state_writer_path(nodes, node_index, state_seen, state_visited)
-        loop row in state_visited -> state_seen[row] = false
-        state_visited.clear()
-        if path.len() == 0 -> next
-        state_diagnostics := [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
-        // The report points at the write, which may be in another module.
-        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
+    if any_module_writes {
+        state_seen := (loop _ in nodes -> false)
+        state_visited := [Int]{}
+        loop node_index in 0..<nodes.len() {
+            if !nodes[node_index].is_pure -> next
+            path: sema_effect_state_writer_path(nodes, node_index, state_seen, state_visited)
+            loop row in state_visited -> state_seen[row] = false
+            state_visited.clear()
+            if path.len() == 0 -> next
+            state_diagnostics := [Diagnostic]{sema_effect_pure_state_diagnostic(nodes, path)}
+            // The report points at the write, which may be in another module.
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
+        }
     }
     // No function a runtime entry reaches may make a comptime input.
-    loop path in sema_effect_runtime_input_paths(nodes, modules, inputs, prep_functions, calls.symbols) {
-        maker: path[path.len() - 1]
-        made: nodes[maker].rare ?? SEMA_EFFECT_NODE_NO_RARE
-        input_diagnostics := loop input in made.comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
-        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)
+    if any_comptime_inputs {
+        loop path in sema_effect_runtime_input_paths(nodes, modules, inputs, prep_functions, calls.symbols) {
+            maker: path[path.len() - 1]
+            made: nodes[maker].rare ?? SEMA_EFFECT_NODE_NO_RARE
+            input_diagnostics := loop input in made.comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)
+        }
     }
     sema_effect_check_trait_bounds_parallel(modules, inputs, source_indices, nodes, calls, solved, threads, diagnostics)
     // Every call path's stack, by the frame model; FnBody keeps each frame
@@ -6711,11 +6751,14 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // reads less of the program than the run binds (CoreSeal.jet).
     walks := false
     loop node_index in 0..<nodes.len() {
+        if nodes[node_index].rare == None && nodes[node_index].kernel == None -> next
         if nodes[node_index].rare == .Val(rare) && rare.memory_denials.len() > 0 -> walks = true
         if nodes[node_index].kernel != None -> walks = true
         memory_diagnostics := [Diagnostic]{}
         sema_effect_check_memory_denials(nodes, node_index, stack, frames, memory_diagnostics, memory_facts)
-        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
+        if memory_diagnostics.len() > 0 {
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
+        }
     }
     // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
     // function, including otherwise unreferenced bodies, not just entry.
@@ -6856,10 +6899,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, cap_diagnostics)
     }
-    loop module_index in 0..<inputs.len() {
-        sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], solved, calls, nodes, diagnostics)
-    }
-    sema_effect_check_module_passes_parallel(modules, inputs, solved, calls, nodes, threads, diagnostics)
+    sema_effect_check_module_passes_parallel(modules, inputs, source_indices, solved, calls, nodes, threads, diagnostics)
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
     // function's heap and stack bounds.
@@ -6876,14 +6916,16 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         heaps = sema_effect_heap_bounds(nodes, called)
         stacks = sema_effect_stack_bounds(stack, frames, nodes, called)
     }
+    stamped_tfacts := sema_effect_build_tfacts_parallel(modules, inputs, function_nodes, nodes, solved, threads)
+    stamped_tfacts.reverse()
     loop (input_position, module_row) in inputs {
         target: module_row.module_index
+        module_tfacts := stamped_tfacts.pop() ?? panic("missing parallel TEffectFacts")
+        module_tfacts.reverse()
         loop function_index in 0..<modules[target].functions.len() {
             node_index: function_nodes[input_position][function_index]
             if node_index < 0 -> next
-            effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
-            memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
-            if memoized -> sema_effect_context_reach(nodes, node_index, effects)
+            effects := module_tfacts.pop() ?? panic("missing parallel function TEffectFacts")
             capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
             frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
             modules[target].functions[function_index].effects = effects.move()
@@ -7059,39 +7101,116 @@ sema_effect_check_trait_bounds_parallel: fn(modules: [SemaGraphModuleResult], in
     sema_effect_check_trait_bounds_spawn(modules, inputs, source_indices, nodes, calls, solved, 0, workers, diagnostics)
 }
 
-sema_effect_check_module_passes_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], from: Int, to: Int) -> [Diagnostic] {
+SemaEffectModulePassPart: struct {
+    region_diags: [Diagnostic],
+    call_diags: [Diagnostic],
+}
+
+sema_effect_check_module_passes_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], from: Int, to: Int) -> SemaEffectModulePassPart {
+    region_diags := [Diagnostic]{}
     call_diags := [Diagnostic]{}
     loop module_index in from..<to {
         module_row: inputs[module_index]
+        sema_effect_check_module_regions(modules[module_row.module_index].functions, module_row, module_index, source_indices[module_index], solved, calls, nodes, region_diags)
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, call_diags)
         sema_effect_check_hole_headers(modules[module_row.module_index].call_facts, module_row, nodes, calls, solved, call_diags)
     }
-    call_diags
+    SemaEffectModulePassPart{region_diags: region_diags.move(), call_diags: call_diags.move()}
 }
 
-sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], part: Int, workers: Int, call_diags: &[Diagnostic]) {
+sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], part: Int, workers: Int, region_diags: &[Diagnostic], call_diags: &[Diagnostic]) {
     from: part * inputs.len() /% workers
     to: (part + 1) * inputs.len() /% workers
     if part + 1 >= workers {
-        call_diags.extend(sema_effect_check_module_passes_range(modules, inputs, solved, calls, nodes, from, to))
+        done := sema_effect_check_module_passes_range(modules, inputs, source_indices, solved, calls, nodes, from, to)
+        region_diags.extend(done.region_diags.move())
+        call_diags.extend(done.call_diags.move())
         return
     }
     task.group sema_effect_module_pass_checks {
-        head: task sema_effect_check_module_passes_range(modules, inputs, solved, calls, nodes, from, to)
+        head: task sema_effect_check_module_passes_range(modules, inputs, source_indices, solved, calls, nodes, from, to)
+        rest_regions := [Diagnostic]{}
         rest_calls := [Diagnostic]{}
-        sema_effect_check_module_passes_spawn(modules, inputs, solved, calls, nodes, part + 1, workers, rest_calls)
-        call_diags.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        sema_effect_check_module_passes_spawn(modules, inputs, source_indices, solved, calls, nodes, part + 1, workers, rest_regions, rest_calls)
+        got := head.join() ?? panic(compiler_threads_failure_text(err))
+        region_diags.extend(got.region_diags.move())
+        region_diags.extend(rest_regions.move())
+        call_diags.extend(got.call_diags.move())
         call_diags.extend(rest_calls.move())
     }
 }
 
-sema_effect_check_module_passes_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], threads: CompilerThreads, diagnostics: &[Diagnostic]) {
+sema_effect_check_module_passes_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], source_indices: [SemaEffectSourceIndex], solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], threads: CompilerThreads, diagnostics: &[Diagnostic]) {
     workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
     if workers <= 1 {
-        diagnostics.extend(sema_effect_check_module_passes_range(modules, inputs, solved, calls, nodes, 0, inputs.len()))
+        done := sema_effect_check_module_passes_range(modules, inputs, source_indices, solved, calls, nodes, 0, inputs.len())
+        diagnostics.extend(done.region_diags.move())
+        diagnostics.extend(done.call_diags.move())
         return
     }
-    sema_effect_check_module_passes_spawn(modules, inputs, solved, calls, nodes, 0, workers, diagnostics)
+    region_diags := [Diagnostic]{}
+    call_diags := [Diagnostic]{}
+    sema_effect_check_module_passes_spawn(modules, inputs, source_indices, solved, calls, nodes, 0, workers, region_diags, call_diags)
+    diagnostics.extend(region_diags.move())
+    diagnostics.extend(call_diags.move())
+}
+
+sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], from: Int, to: Int) -> [[TEffectFacts]] {
+    out := [[TEffectFacts]]{}
+    loop input_position in from..<to {
+        target: inputs[input_position].module_index
+        module_tfacts := [TEffectFacts]{}
+        loop function_index in 0..<modules[target].functions.len() {
+            node_index: function_nodes[input_position][function_index]
+            if node_index < 0 -> next
+            effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
+            memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
+            if memoized -> sema_effect_context_reach(nodes, node_index, effects)
+            module_tfacts.push(effects.move())
+        }
+        out.push(module_tfacts.move())
+    }
+    out
+}
+
+sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], bounds: [Int], at: Int) -> [[[TEffectFacts]]] {
+    done := [[[TEffectFacts]]]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, from, to))
+        return done
+    }
+    task.group sema_effect_tfacts_group {
+        head: task sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, from, to)
+        rest := sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], threads: CompilerThreads) -> [[TEffectFacts]] {
+    weights := [Int]{}
+    work := 0
+    loop input_position in 0..<inputs.len() {
+        count: modules[inputs[input_position].module_index].functions.len()
+        weights.push(count)
+        work += count
+    }
+    workers: compiler_threads_admit(threads, weights.len(), work, 512, 0, 0)
+    if workers <= 1 {
+        return sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, 0, inputs.len())
+    }
+    parts := sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, compiler_threads_partition(weights, workers), 0)
+    parts.reverse()
+    out := [[TEffectFacts]]{}
+    loop parts.len() > 0 {
+        part := parts.pop() ?? break
+        out.extend(part.move())
+    }
+    out
 }
 
 // The rows of the effect graph each input module contributes on its own:
@@ -7162,9 +7281,9 @@ sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModu
 // Each key's first node, hashed (A1); the table's `texts` hold the keys in
 // first-node order.
 sema_effect_node_key_table: fn(node_keys: [String]) -> NameRows Never! {
-    table := name_rows()
+    table := name_rows(node_keys.len())
     loop (node, key) in node_keys {
-        if name_rows_get_text(table, key) == None -> name_rows_set(table, key, node)
+        name_rows_set_first(table, key, node)
     }
     table
 }
@@ -7211,6 +7330,7 @@ sema_effect_add_implementer: fn(tables: &SemaEffectImplTables, trait_key: String
 // struct or enum body and an impl of another module's trait count too.
 sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, symbols: SymbolTable, tables: &SemaEffectImplTables) {
     loop function in functions {
+        if function.kind == .TopLevel -> next
         trait_key := ""
         if sema_effect_source_position(function, source_index) == .Val(at) {
             if module_row.sources[at].trait_symbol == .Val(trait_id) {
@@ -7481,7 +7601,7 @@ sema_effect_shared_facts: fn(call_facts: [SemaCallSiteFact]) -> [SemaCallSiteFac
 // Every `#FX(…)` region of the functions of input module `module_index` stays
 // within its caps, and every `#Transact` block's calls within the transaction
 // wall.
-sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: &[SemaEffectNode], diagnostics: &[Diagnostic]) {
+sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, solved: [[String]], calls: SemaEffectCallIndex, nodes: [SemaEffectNode], diagnostics: &[Diagnostic]) {
     region_diagnostics := [Diagnostic]{}
     loop function in functions {
         at: sema_effect_source_position(function, source_index) ?? next
