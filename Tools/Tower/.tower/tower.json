@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113166,
+    "rev": 113169,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35337,6 +35337,11 @@
         {
           "at": "2026-11-22",
           "by": "Orchestrator",
+          "text": "Phase 4C landed at dev 976b6e45da (exact Stage-1/Stage-2 -O2 bit-for-bit fixed point, ~54.9s wall, CodegenCeiling 9/9, CompilerData ok, UnsafeRatchet 1670 ok, 217/217 Tests/Guards, copy_ratchet ceilings lowered StaticLink 56->53, Build 79->78, BuildExpr 38->37). Live cold uncached Throughput.jet (1.07M LOC, 12t): O0 CPU 160.75s->152.60s (-5.1%: ir.build -6.6%, ir.opt -7.7%, ir.object -7.1%), check insns -1.72B; single-thread build -O0/-O1 peak RSS -4.2%, cycles -1.0% to -1.72%."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
           "text": "Phase 4B landed at dev 891804c5fc (Stage-2 self-hosted, 9/9 CodegenCeiling 0 regressions, CompilerData ok, UnsafeRatchet 1670 ok, 211/211 Tests/Guards, copy_ratchet ceilings lowered X64Relax 2->1 and Scopes 86->84). Live cold uncached Throughput.jet (1.07M LOC, 12 threads): check CPU 87.06s->51.93s (-40.4%, 1.68x), retired insns 521.93B->457.73B (-12.3%), sema.finalize 59.93s->28.99s (-51.6%; sema.core_demand 8.19s->0.21s), comptime 6.19s->2.43s (-60.7%), peak RSS 3725->3581 MiB (-144 MiB); O0 retired insns 2371.49B->2259.75B (-111.74B, -4.7%); self-host Compiler/JetCLI -O1 wall 29.84s->28.58s (-4.2%; cumulative from pre-Phase-3A 44.5s->28.6s, -35.7%)."
         },
         {
@@ -36077,11 +36082,11 @@
         {
           "n": 38,
           "text": "x64 instruction selection is linear in a function's forward jumps: at dev ba5711569a (2026-11-21), ir_x64_end (Compiler/JetIR X64Select.jet, lines 3916-3927) scans every pending forward jump at each block end, so a function of deeply nested branches spends quadratic time in the ir.x64 phase. Measured with the gate-p413 compiler on generated bodies (by Ballots3 for D-PLUGIN-ENGINE1): ir.x64 took 2.56 s at 25,000 nested levels and 10.74 s at 50,000 with branches, against 0.23-0.30 s at 50,000 for the other shapes, and a ~1 MiB body took 21.5 s at O0 and 22.0 s at O2. Each block keeps its own pending jumps (or the pending set is indexed by target), so the phase is linear. Proof: the same generated nested-branch bodies at 25,000 and 50,000 levels take ir.x64 time within 2.2x of each other (linear), and a second program with many small functions shows no ir.x64 regression.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-21T13:37:03.692Z"
+          "evidence": "dev 976b6e45da (Phase 4C): replaced O(N^2) pending forward-jump linear scan in X64Select.jet ir_x64_end with O(1)-push / O(k)-patch per-construct intrusive FIFO linked list; exact Stage-1/Stage-2 bit-for-bit fixed point, CodegenCeiling 9/9 PASS, 285/285 Stage-2 unit tests PASS, 217/217 Tests/Guards PASS.",
+          "at": "2026-11-22T12:55:06.391Z"
         },
         {
           "n": 39,
@@ -36117,7 +36122,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-22T11:43:39.709Z",
+      "updated": "2026-11-22T12:55:07.201Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 40
     },
@@ -69631,6 +69636,11 @@
         {
           "at": "2026-11-22",
           "by": "Orchestrator",
+          "text": "Phase 4C cold compile-speed wave landed at dev 976b6e45da: #5479 c38 closed, O0 CPU -5.1% (160.75s->152.60s), peak RSS -4.2%, CodegenCeiling 9/9 exact match, 217/217 Tests/Guards PASS."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
           "text": "Phase 4B cold compile-speed wave landed at dev 891804c5fc: check CPU -40.4% (87.06s->51.93s), O0 insns -111.7B (-4.7%), Compiler/JetCLI -O1 wall 29.84s->28.58s (-4.2%), 9/9 CodegenCeiling exact match, 211/211 Tests/Guards PASS."
         },
         {
@@ -70004,7 +70014,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:38.317Z",
-      "updated": "2026-11-22T11:43:40.761Z",
+      "updated": "2026-11-22T12:55:08.015Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 38
     },
@@ -133496,6 +133506,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T12:55:08.015Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0lt36hf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T12:55:07.201Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T12:55:06.391Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c031o59x",
+      "note": "#38"
+    },
     {
       "at": "2026-11-22T12:49:52.405Z",
       "by": "Orchestrator",
