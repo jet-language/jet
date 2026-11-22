@@ -10,6 +10,7 @@ Run a lesson from the repository root, for example `jet run Examples/Tooling/<Le
 - [DevTools](DevTools/)
 - [Fidelity](Fidelity.jet) — Perf fidelity signal — explicit app-read quality/perf knob.
 - [InternalProjectParts](InternalProjectParts.jet) — This declaration is omitted from automatic project discovery until another source writes `use project._bench`.
+- [LadderLaw](LadderLaw.jet) — Config precedence ladder: Policy Tighten, BuildOptions pins, and FactLaw share one rung order from outer defaults to inner overrides.
 - [OutputCallable](OutputCallable.jet) — A Package executable can name ordinary checked code.
 - [SolvePuzzle](SolvePuzzle.jet)
 - [StructureLiveness](StructureLiveness.jet) — The four liveness verdicts are findings, not runtime work.

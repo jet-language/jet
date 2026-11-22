@@ -88,15 +88,45 @@ pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, 
         },
     ) ?? panic("layers resolve to a deciding writer")
     assert_eq(resolved.value, FactValue.Text{value: "cli"})
-    pinned: pkg_fact_resolve(
+    pinned_match: pkg_fact_resolve(
         FactKey.new("k"),
         [FactContribution]{
             pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
-            pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").forced(),
+            pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").pinned(),
+            pkg_merge_test_writer("k", "fleet", ContributionLayer.CommandLine, "command line"),
+        },
+    ) ?? panic("a fleet pin allows a matching command-line flag")
+    assert_eq(pinned_match.value, FactValue.Text{value: "fleet"})
+    assert(pinned_match.forced)
+    if pkg_fact_resolve(
+        FactKey.new("k"),
+        [FactContribution]{
+            pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
+            pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").pinned(),
             pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line"),
         },
-    ) ?? panic("a fleet pin resolves to a deciding writer")
-    assert_eq(pinned.value, FactValue.Text{value: "fleet"})
+    ) == {
+        .Ok(_) -> { panic("expected a conflicting flag against a fleet pin to fail with E2113") }
+        .Err(error) -> {
+            diag: error.diagnostic() ?? panic("expected E2113 diagnostic")
+            assert_eq(diag.code, "E2113")
+            assert(diag.what.contains("fleet.jet"))
+        }
+    }
+    if pkg_fact_resolve(
+        FactKey.new("k"),
+        [FactContribution]{
+            pkg_merge_test_writer("k", "host", ContributionLayer.System, "host.jet").pinned(),
+            pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line"),
+        },
+    ) == {
+        .Ok(_) -> { panic("expected a conflicting flag against a host pin to fail with E2113") }
+        .Err(error) -> {
+            diag: error.diagnostic() ?? panic("expected E2113 diagnostic")
+            assert_eq(diag.code, "E2113")
+            assert(diag.what.contains("host.jet"))
+        }
+    }
 }
 
 #Test("fact law conflict keeps both writers") {
@@ -108,7 +138,7 @@ pkg_merge_test_writer: fn(key: String, value: String, layer: ContributionLayer, 
                     assert_eq(first.source, "env-a")
                     assert_eq(second.source, "env-b")
                 }
-                .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
+                .InvalidForce(_, _, _) | .PinnedConflict(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
                     panic("expected FactError.Conflict")
                 }
             }
@@ -150,7 +180,7 @@ pkg_merge_test_entries: fn() -> [FactContribution] {
                     assert_eq(first.source, "lib/package.jet")
                     assert_eq(second.source, "report/package.jet")
                 }
-                .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
+                .InvalidForce(_, _, _) | .PinnedConflict(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
                     panic("expected FactError.Conflict")
                 }
             }
@@ -199,7 +229,7 @@ pkg_merge_test_entries: fn() -> [FactContribution] {
                 .FactConflict(fact_error) -> {
                     if fact_error == {
                         .Conflict(key, _, _, _) -> assert_eq(key, "host")
-                        .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
+                        .InvalidForce(_, _, _) | .PinnedConflict(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> {
                             panic("expected FactError.Conflict")
                         }
                     }
