@@ -105,7 +105,7 @@ use {
         jet_eval_native_session,
     ]
     jet_backend.[X64ExecutableResult, X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
-    jet_ir.[IREvalUnit, IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_eval_link_receipt, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IREvalUnit, IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_eval_link_receipt, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object_into]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read, sema_unsafe_unit_map]
     jet_web.[web_runtime_partition]
@@ -257,13 +257,24 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     building: task jet_cli_core_library_ir(jet_eval_native_session(JET_CLI_RUNTIME_IMAGE_FILE, JetCLICoreImageReader{arrival: arrival}), core_threads, trace_sink)
     interfacing: task jet_cli_core_interface_made(core_prefix, core_threads, trace_sink)
     checked := X64ImageFile?{None}
-    made: jet_cli_runtime_made(jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink), prefix, checked, trace_sink)
+    made := jet_cli_runtime_made(jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink), prefix, checked, trace_sink)
     jet_cli_core_image_send(image, checked.move()).drop("a Core check that stopped reads no image")
+    // Run the web runtime partition and runtime metadata file writes here on
+    // the main thread while `building` compiles Core in parallel.
+    finish_problem := ""
+    if made == .Made(_, object_problem, _, _, deferred) {
+        if object_problem == "" {
+            if deferred == .Val(pending) {
+                finish_problem = jet_cli_runtime_object_finish(pending, prefix, trace_sink)
+            }
+        }
+    }
     core_ir: building.join() ?? return jet_driver_compile_escaped_failure("the Core library build stopped: {compiler_threads_failure_text(err)}")
     finished: if made.move() == {
         .Stopped(result) -> result
-        .Made(result, object_problem, pack, receipt) -> {
+        .Made(result, object_problem, pack, receipt, _) -> {
             if object_problem != "" -> return jet_driver_compile_escaped_failure(object_problem)
+            if finish_problem != "" -> return jet_driver_compile_escaped_failure(finish_problem)
             core: jet_cli_core_library_made(core_ir, core_prefix, receipt, trace_sink)
             if core.problem != "" -> return jet_driver_compile_escaped_failure(core.problem)
             jet_cli_runtime_packed(result, prefix, pack, Val(core.bytes.move()), compiler_threads, trace_sink)
@@ -278,11 +289,12 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
 // compile's result, the object's problem ("" when it was made), the pack
 // linked from the object (jet_cli_runtime_pack_linked; None when there is
 // none), whose findings are written once the Core object's problem is known
-// (jet_cli_runtime_pack), and its thread receipt. Else the result that stops
+// (jet_cli_runtime_pack), its thread receipt, and the deferred web partition
+// and metadata files written while Core compiles. Else the result that stops
 // the build.
 JetCLIRuntimeMade: enum {
     Stopped(result: JetDriverCompileResult),
-    Made(result: JetDriverCompileResult, object_problem: String, pack: JetCLIRuntimePackLinked?, receipt: [String]),
+    Made(result: JetDriverCompileResult, object_problem: String, pack: JetCLIRuntimePackLinked?, receipt: [String], deferred: JetCLIRuntimeDeferred?),
 }
 
 // The runtime library's object and pack (JetCLIRuntimeMade), and in
@@ -294,19 +306,20 @@ jet_cli_runtime_made: fn(runtime: &&JetCLIRuntimeIR, prefix: String, checked: &X
     if runtime.move() == {
         .Stopped(result) -> JetCLIRuntimeMade.Stopped{result: result}
         .Built(result, library, interface_text, threads, receipt) -> {
-            object: jet_cli_runtime_object(library, interface_text, threads, receipt, prefix, trace_sink)
+            object := jet_cli_runtime_object_emit(library, interface_text, threads, receipt, prefix, trace_sink)
             if object.problem != "" {
-                return JetCLIRuntimeMade.Made{result: result, object_problem: object.problem, pack: None, receipt: receipt}
+                return JetCLIRuntimeMade.Made{result: result, object_problem: object.problem, pack: None, receipt: receipt, deferred: None}
             }
-            pack := jet_cli_runtime_pack_linked(prefix, object.bytes.move(), trace_sink) ?? return JetCLIRuntimeMade.Made{result: result, object_problem: "", pack: None, receipt: receipt}
+            deferred: object.deferred.move()
+            pack := jet_cli_runtime_pack_linked(prefix, object.bytes.move(), trace_sink) ?? return JetCLIRuntimeMade.Made{result: result, object_problem: "", pack: None, receipt: receipt, deferred: deferred}
             if pack.linked.errors.len() == 0 {
-                cli_files.write_bytes(pack.path, pack.linked.bytes) ?? return JetCLIRuntimeMade.Made{result: result, object_problem: "cannot write runtime pack: {err}", pack: None, receipt: receipt}
+                cli_files.write_bytes(pack.path, pack.linked.bytes) ?? return JetCLIRuntimeMade.Made{result: result, object_problem: "cannot write runtime pack: {err}", pack: None, receipt: receipt, deferred: None}
                 pack.written = true
                 image: pack.linked.bytes.move()
                 pack.linked.bytes = [U8]{}
                 checked = jet_cli_core_check_image(pack.path, image.move(), threads, trace_sink)
             }
-            JetCLIRuntimeMade.Made{result: result, object_problem: "", pack: Val(pack.move()), receipt: receipt}
+            JetCLIRuntimeMade.Made{result: result, object_problem: "", pack: Val(pack.move()), receipt: receipt, deferred: deferred}
         }
     }
 }
@@ -350,12 +363,21 @@ JetCLIRuntimeIR: enum {
     Built(result: JetDriverCompileResult, library: IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String]),
 }
 
+// The runtime library's web partition and metadata writes deferred past
+// unblocking the Core check (jet_cli_runtime_with_core).
+JetCLIRuntimeDeferred: struct {
+    library: IRLibraryResult,
+    interface_text: String,
+    receipt: [String],
+}
+
 // The runtime library's object (jet_cli_runtime_object): its bytes, written
 // to `{prefix}.o` with its export list, ABI, thread receipt and interface,
 // else the problem that stops the build.
 JetCLIRuntimeObject: struct {
     bytes: [U8],
     problem: String,
+    deferred: JetCLIRuntimeDeferred?{None},
 }
 
 jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
@@ -470,41 +492,63 @@ jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExpor
     JetCLILibraryIR{library: library.move(), threads: threads, stops: receipt, eval_receipt: eval_receipt, issues: issues.move(), refused: refused}
 }
 
-// The runtime's machine code from its IR `library`, then, under
-// JET_FRONT_RUNTIME_WEB_OUTPUT, the runtime partition of a web build (JetWeb
-// Build.jet) selected from the same lowered module, as `{prefix}.wasm` with
-// its receipt `{prefix}.wasm.tsv`, and the object with its files.
-jet_cli_runtime_object: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String], prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+// The runtime's machine code and object file from its IR `library`, deferring
+// the web runtime partition and metadata files into `deferred` so
+// jet_cli_runtime_with_core can unblock Core before running them.
+jet_cli_runtime_object_emit: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String], prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+    owned := library.move()
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
-    compiled := ir_x64_compile_module(library.program.move(), threads)
+    compiled := ir_x64_compile_module(owned.program.move(), threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
-    if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
-        if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
-        web := web_runtime_partition(compiled.program, library.exports, library.data)
-        if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
-        if web.errors.len() > 0 {
-            cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime library findings: {err}")
-            return jet_cli_runtime_object_failed("the runtime's web partition failed; see {prefix}.issues")
-        }
-        cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_cli_runtime_object_failed("cannot write the runtime's web partition: {err}")
-        cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_cli_runtime_object_failed("cannot write the runtime's web receipt: {err}")
-    }
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
-    object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
+    object := ir_x64_library_object_into(compiled, owned.exports, owned.data, true, true)
     if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
     if object.errors.len() > 0 {
         cli_files.write("{prefix}.issues", object.errors.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime library findings: {err}")
         return jet_cli_runtime_object_failed("runtime library lowering failed; see {prefix}.issues")
     }
     cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_cli_runtime_object_failed("cannot write runtime object: {err}")
+    owned.program = compiled.program.move()
+    JetCLIRuntimeObject{bytes: object.bytes.move(), problem: "", deferred: Val(JetCLIRuntimeDeferred{library: owned.move(), interface_text: interface_text, receipt: receipt})}
+}
+
+// The deferred web runtime partition and runtime metadata files of
+// jet_cli_runtime_object_emit; "" on success, else the problem text.
+jet_cli_runtime_object_finish: fn(deferred: JetCLIRuntimeDeferred, prefix: String, trace_sink: JetCLITraceSink?) -> String {
+    if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
+        if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
+        web := web_runtime_partition(deferred.library.program, deferred.library.exports, deferred.library.data)
+        if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
+        if web.errors.len() > 0 {
+            cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return "cannot write runtime library findings: {err}"
+            return "the runtime's web partition failed; see {prefix}.issues"
+        }
+        cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return "cannot write the runtime's web partition: {err}"
+        cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return "cannot write the runtime's web receipt: {err}"
+    }
     // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
-    symbols := loop row in library.exports -> row.symbol
+    symbols := loop row in deferred.library.exports -> row.symbol
     symbols.sort()
-    cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime exports: {err}")
-    cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_cli_runtime_object_failed("cannot write runtime ABI: {err}")
-    cli_files.write("{prefix}.threads", receipt.join("\n")) ?? return jet_cli_runtime_object_failed("cannot write runtime thread receipt: {err}")
-    cli_files.write("{prefix}.interface.jet", interface_text) ?? return jet_cli_runtime_object_failed("cannot write the runtime interface: {err}")
-    JetCLIRuntimeObject{bytes: object.bytes.move(), problem: ""}
+    cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return "cannot write runtime exports: {err}"
+    cli_files.write("{prefix}.abi.json", ir_export_abi_json(deferred.library.abis)) ?? return "cannot write runtime ABI: {err}"
+    cli_files.write("{prefix}.threads", deferred.receipt.join("\n")) ?? return "cannot write runtime thread receipt: {err}"
+    cli_files.write("{prefix}.interface.jet", deferred.interface_text) ?? return "cannot write the runtime interface: {err}"
+    ""
+}
+
+// The runtime's machine code from its IR `library`, then, under
+// JET_FRONT_RUNTIME_WEB_OUTPUT, the runtime partition of a web build (JetWeb
+// Build.jet) selected from the same lowered module, as `{prefix}.wasm` with
+// its receipt `{prefix}.wasm.tsv`, and the object with its files.
+jet_cli_runtime_object: fn(library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String], prefix: String, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeObject {
+    emitted := jet_cli_runtime_object_emit(library, interface_text, threads, receipt, prefix, trace_sink)
+    if emitted.problem != "" -> return emitted
+    if emitted.deferred == .Val(pending) {
+        problem: jet_cli_runtime_object_finish(pending, prefix, trace_sink)
+        if problem != "" -> return jet_cli_runtime_object_failed(problem)
+    }
+    emitted.deferred = None
+    emitted
 }
 
 jet_cli_runtime_object_failed: fn(problem: String) -> JetCLIRuntimeObject Never! {
@@ -2213,12 +2257,12 @@ JetCLIOverlay: struct {
 // `target_machine` is the declared machine it checks for ("" for the
 // host; `jet check --target`); `hold_check_state` and `capture_cost_report`
 // as in jet_cli_compile_prepared.
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) {
         overlays.push(JetCLIOverlay{path: file, source: replacement})
     }
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report, release_state_aside: release_state_aside)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -2320,11 +2364,11 @@ jet_cli_unread_file_what: fn(file: String) -[FS]> String Never! {
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases; `hold_check_state` and `capture_cost_report` as in
 // jet_cli_compile_prepared.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report, release_state_aside: release_state_aside)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -2348,7 +2392,7 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // result and is never dropped (JetDriverCompileRequest.hold_check_state).
 // `capture_cost_report`: a check keeps its typed cost report and its L2510
 // lints (`explain --cost`, `lint --cost`).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2363,6 +2407,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.every_core_body = every_core_body
             selected.core_layers = core_layers
             selected.hold_check_state = hold_check_state
+            selected.release_state_aside = release_state_aside
             selected.capture_cost_report = capture_cost_report
             // A check of a program over the built-in Core loads that Core's
             // function checks as a bound native compile does. Neither a

@@ -40,13 +40,11 @@ JetDriverRecursionFlow: struct {
     cont: [JetDriverRecursionCall]?{None},
 }
 
-// The L0305 tidy errors of `functions`, whose direct callees are found by
-// DeclID row through `bodies` (each one's position among `functions`) and
-// `decls`. One per function the program wrote on a cycle of must-calls, at
-// its call to the next function around the cycle.
-jet_driver_recursion_lints: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable) -> [Diagnostic] {
+// Direct call edges for `functions[start..<end]` among reported functions.
+jet_driver_recursion_calls_range: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, start: Int, end: Int) -> [[Int]] Never! {
     calls := [[Int]]{}
-    loop function in functions {
+    loop index in start..<end {
+        function: functions[index]
         targets := [Int]{}
         if jet_driver_cost_reports(function) {
             loop node in function.tree.nodes {
@@ -58,6 +56,11 @@ jet_driver_recursion_lints: fn(load: JetDriverLoadResult, functions: [FnBody], b
         }
         calls.push(targets)
     }
+    calls
+}
+
+// Finishes L0305 recursion lints from a precomputed `calls` adjacency list.
+jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable, calls: [[Int]]) -> [Diagnostic] {
     groups: jet_driver_recursion_components(calls)
     must := [[Int]]{}
     spans := [[Span]]{}
@@ -91,6 +94,15 @@ jet_driver_recursion_lints: fn(load: JetDriverLoadResult, functions: [FnBody], b
         }
     }
     lints
+}
+
+// The L0305 tidy errors of `functions`, whose direct callees are found by
+// DeclID row through `bodies` (each one's position among `functions`) and
+// `decls`. One per function the program wrote on a cycle of must-calls, at
+// its call to the next function around the cycle.
+jet_driver_recursion_lints: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable) -> [Diagnostic] {
+    calls: jet_driver_recursion_calls_range(functions, bodies, decls, 0, functions.len())
+    jet_driver_recursion_lints_from_calls(load, functions, bodies, decls, calls)
 }
 
 // The position among the checked functions of the function a call node

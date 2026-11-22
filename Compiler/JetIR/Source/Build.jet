@@ -543,7 +543,7 @@ IRProgram: struct {
     // and the Display, Printable, Close and user Comparable implementations
     // (`impl_methods`) whose methods ir_program_bind selects among the bound
     // functions.
-    impl_slots: [String:Int],
+    impl_slots: NameRows,
     impl_traits: [[String]],
     impl_methods: [IRImplMethod],
     // The payload key of each type a trait implementation is declared for
@@ -710,7 +710,9 @@ ir_source_line_of: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     high := I64{p.source_lines[row].len()}
     loop low < high {
         middle: Int{(low + high) >> I64{1}}
-        if p.source_lines[row][middle] <= offset -> low = I64{middle} + I64{1} else -> high = I64{middle}
+        if p.source_lines[row][middle] <= offset -> low = I64{middle} + I64{1} else {
+            high = I64{middle}
+        }
     }
     Val(Int{low})
 }
@@ -727,9 +729,7 @@ ir_source_column: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
         at -= I64{1}
         byte: p.source_bytes[row][Int{at}]
         if byte == (U8{10}) -> break
-        if byte < (U8{128}) || byte >= (U8{192}) {
-            column += I64{1}
-        }
+        if byte < (U8{128}) || byte >= (U8{192}) -> column += I64{1}
     }
     Val(Int{column})
 }
@@ -916,14 +916,12 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     }
     constant_keys := [{key: String, at: Int, row: Int}]{}
     loop (index, definition) in defs {
-        constant_keys.push({key: definition.key.copy(), at: 2 * index, row: 2 * index})
+        constant_keys.push({key: definition.key.copy(), at: 2 * index, row: index})
         if definition.symbol_key != "" {
-            constant_keys.push({key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1})
+            constant_keys.push({key: definition.symbol_key.copy(), at: 2 * index + 1, row: index})
         }
     }
-    constant_rows: ir_first_rows(constant_keys)
-    constants := [String:Int]{}
-    loop (key, at) in constant_rows -> constants[key] = at /% 2
+    constants: ir_first_rows(constant_keys)
     // The Display, Printable, Close and KeyBy implementations of the host
     // target, and the user Comparable ones (a derived Comparable orders
     // structurally). Every trait implementation's type, with the first
@@ -931,7 +929,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // (ir_trait_key_table). Every trait implementation of the host target
     // also names its methods' traits for ir_trait_methods, and one that
     // declares no method names its owner for ir_trait_implementers.
-    impl_slots := [String:Int]{}
+    impl_slots := name_rows()
     impl_traits := [[String]]{}
     impl_methods := [IRImplMethod]{}
     implementers := [{identity: String, first: Int}]{}
@@ -949,10 +947,10 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         owner_key: ir_render_type_key(type_rows, types, implementation.self_type)
         loop key in implementation.methods {
             slot_key: "{implementation.module_identity.id}|{owner_key}|{ir_impl_method_leaf(key)}"
-            slot := impl_slots.get(slot_key) ?? -1
+            slot := name_rows_value(impl_slots, slot_key) ?? -1
             if slot < 0 {
                 slot = impl_traits.len()
-                impl_slots[slot_key] = slot
+                name_rows_set(impl_slots, slot_key, slot)
                 impl_traits.push([String]{})
             }
             impl_traits[slot].push(trait_short.copy())
@@ -987,7 +985,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
     // else a plain Method).
-    owner_methods := [String:Int]{}
+    owner_methods := name_rows()
     render_impls := [String:Int]{}
     loop (index, function) in owned {
         if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
@@ -997,13 +995,13 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
             .TopLevel -> {}
             .Method(_, owner_type) -> {
                 key: "{function.name}||{ir_render_type_key(p.type_rows, p.types, owner_type)}"
-                if owner_methods.get(key) == None -> owner_methods[key] = index
+                name_rows_set_first(owner_methods, key, index)
             }
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
                 trait_short: ir_short_name(ir_symbol_key(p, trait_name))
                 owner_key: ir_render_type_key(p.type_rows, p.types, owner_type)
                 key: "{function.name}|{trait_short}|{owner_key}"
-                if owner_methods.get(key) == None -> owner_methods[key] = index
+                name_rows_set_first(owner_methods, key, index)
                 selected: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
                 if selected {
                     render_key: "{trait_short}|{owner_key}"
@@ -1014,7 +1012,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     }
     close_methods := [String:Int]{}
     loop implementation in p.impl_methods {
-        row: owner_methods.get("{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? owner_methods.get("{implementation.method}||{implementation.owner_key}") ?? -1
+        row: name_rows_value(owner_methods, "{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? name_rows_value(owner_methods, "{implementation.method}||{implementation.owner_key}") ?? -1
         if row < 0 -> next
         if implementation.trait_short == "Close" {
             if close_methods.get(implementation.owner_key) == None {
@@ -1366,8 +1364,8 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
 // resolves in the implementing module, else as a plain Method of the owner,
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
 // name the traits of; `symbols` holds the TraitMethods' trait keys.
-ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
-    slots := [String:Int]{}
+ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [String:Int], types: [TTypeDef], impl_slots: NameRows, impl_traits: [[String]]) -> [String:[Int]] Never! {
+    slots := name_rows()
     keys := [String]{}
     rows := [[Int]]{}
     loop (index, function) in functions {
@@ -1378,7 +1376,7 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [Stri
             }
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(type_rows, types, owner_type)
-                slot: impl_slots.get("{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
+                slot: name_rows_value(impl_slots, "{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
                 if slot >= 0 {
                     loop trait_short in impl_traits[slot] -> traits.push(trait_short.copy())
                 }
@@ -1387,10 +1385,10 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [Stri
         }
         loop trait_short in traits {
             key: "{trait_short}|{function.name}"
-            slot := slots.get(key) ?? -1
+            slot := name_rows_value(slots, key) ?? -1
             if slot < 0 {
                 slot = rows.len()
-                slots[key] = slot
+                name_rows_set(slots, key, slot)
                 keys.push(key)
                 rows.push([Int]{})
             }
@@ -2306,7 +2304,9 @@ ir_body_node_span: fn(p: IRProgram, b: IRBuilder, id: Int) -> Span Never! {
 
 // Span of statement `index` without cloning its StmtKind payload.
 ir_body_stmt_span: fn(p: IRProgram, b: IRBuilder, index: Int) -> Span Never! {
-    if index >= IR_FIRST_STMT_INDEX -> return ir_stmt_kind_span(b.made.stmts[index - IR_FIRST_STMT_INDEX])
+    if index >= IR_FIRST_STMT_INDEX {
+        return ir_stmt_kind_span(b.made.stmts[index - IR_FIRST_STMT_INDEX])
+    }
     if b.row < 0 -> panic("{b.f.name}: statement {index} read without a checked body")
     ir_stmt_kind_span(p.functions[b.row].tree.stmts[index])
 }
@@ -2318,7 +2318,9 @@ ir_body_node_is_local: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
 }
 
 ir_body_node_is_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(_, _)
+    if id <= IR_FIRST_NODE_ID {
+        return b.made.nodes[ir_made_node_index(b, id)].kind == .IntLit(_, _)
+    }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
     p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(_, _)
 }
@@ -2329,7 +2331,9 @@ ir_body_node_int_lit: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
         return None
     }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(value, _) -> return Val(value)
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .IntLit(value, _) {
+        return Val(value)
+    }
     None
 }
 
@@ -2346,7 +2350,9 @@ ir_body_node_is_move: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
 }
 
 ir_body_node_is_slice: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return b.made.nodes[ir_made_node_index(b, id)].kind == .Slice(_, _, _, _, _)
+    if id <= IR_FIRST_NODE_ID {
+        return b.made.nodes[ir_made_node_index(b, id)].kind == .Slice(_, _, _, _, _)
+    }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
     p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Slice(_, _, _, _, _)
 }
@@ -2357,27 +2363,37 @@ ir_body_node_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never
         return None
     }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, _) -> return Val(inner)
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, _) {
+        return Val(inner)
+    }
     None
 }
 
 ir_body_node_write_borrow_inner: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, access) && access == .Write -> return Val(inner)
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .Borrow(inner, access) && access == .Write {
+            return Val(inner)
+        }
         return None
     }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, access) && access == .Write -> return Val(inner)
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Borrow(inner, access) && access == .Write {
+        return Val(inner)
+    }
     None
 }
 
 ir_body_node_or_fallback_operand: fn(p: IRProgram, b: IRBuilder, id: Int) -> Int? Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .OrFallback(operand, _, _) -> return Val(operand)
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .OrFallback(operand, _, _) {
+            return Val(operand)
+        }
         return None
     }
     if b.row < 0 -> panic("{b.f.name}: node {id} read without a checked body")
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .OrFallback(operand, _, _) -> return Val(operand)
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .OrFallback(operand, _, _) {
+        return Val(operand)
+    }
     None
 }
 
@@ -2393,11 +2409,15 @@ ir_body_node_is_split_call: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Neve
 
 ir_body_node_is_no_else: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
     if id <= IR_FIRST_NODE_ID {
-        if b.made.nodes[ir_made_node_index(b, id)].kind == .Never(reason, _) -> return reason == "no else arm"
+        if b.made.nodes[ir_made_node_index(b, id)].kind == .Never(reason, _) {
+            return reason == "no else arm"
+        }
         return false
     }
     if b.row < 0 -> return false
-    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Never(reason, _) -> return reason == "no else arm"
+    if p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)].kind == .Never(reason, _) {
+        return reason == "no else arm"
+    }
     false
 }
 
@@ -2405,11 +2425,15 @@ ir_body_stmts_is_no_else: fn(p: IRProgram, b: IRBuilder, stmts: [Int]) -> Bool N
     if stmts.len() != 1 -> return false
     id: stmts[0]
     if id >= IR_FIRST_STMT_INDEX {
-        if b.made.stmts[id - IR_FIRST_STMT_INDEX] == .ExprStmt(val, _) -> return ir_body_node_is_no_else(p, b, val)
+        if b.made.stmts[id - IR_FIRST_STMT_INDEX] == .ExprStmt(val, _) {
+            return ir_body_node_is_no_else(p, b, val)
+        }
         return false
     }
     if b.row < 0 -> return false
-    if p.functions[b.row].tree.stmts[id] == .ExprStmt(val, _) -> return ir_body_node_is_no_else(p, b, val)
+    if p.functions[b.row].tree.stmts[id] == .ExprStmt(val, _) {
+        return ir_body_node_is_no_else(p, b, val)
+    }
     false
 }
 
@@ -2442,7 +2466,9 @@ ir_expr_is_pure_atom_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> Bool 
 }
 
 ir_expr_is_pure_atom: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return ir_expr_is_pure_atom_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    if id <= IR_FIRST_NODE_ID {
+        return ir_expr_is_pure_atom_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    }
     if b.row < 0 -> return false
     ir_expr_is_pure_atom_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
 }
@@ -2464,7 +2490,9 @@ ir_expr_is_pure_tag_test_in: fn(p: IRProgram, b: IRBuilder, node: BodyNode) -> B
 }
 
 ir_expr_is_pure_tag_test: fn(p: IRProgram, b: IRBuilder, id: Int) -> Bool Never! {
-    if id <= IR_FIRST_NODE_ID -> return ir_expr_is_pure_tag_test_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    if id <= IR_FIRST_NODE_ID {
+        return ir_expr_is_pure_tag_test_in(p, b, b.made.nodes[ir_made_node_index(b, id)])
+    }
     if b.row < 0 -> return false
     ir_expr_is_pure_tag_test_in(p, b, p.functions[b.row].tree.nodes[body_node_index(p.functions[b.row].tree, id)])
 }
