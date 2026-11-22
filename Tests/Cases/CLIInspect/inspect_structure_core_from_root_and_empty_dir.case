@@ -1,0 +1,34 @@
+# `jet inspect structure --core --json` is the one spelling of the Core
+# catalog and prints it from any directory with no package: at the repository
+# root and in an empty directory. Positional `core` resolves as a target, not
+# the Core catalog.
+env: NO_COLOR=1
+step root: env -C {root} {jet} inspect structure --core --json
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"," # one jet.status/v1 envelope at repo root
+json: stdout doc $.action = "inspect.structure"
+json: stdout doc $.ok = true
+json: stdout doc $.core.bootstrap #>= 1
+json: stdout doc $.core.root_types #>= 1
+json: stdout doc $.core.modules #>= 1
+json: stdout doc $.core.sources #>= 1
+json: stdout doc $.core.calls #>= 1
+step empty_json: jet inspect structure --core --json
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"," # one jet.status/v1 envelope in an empty directory
+json: stdout doc $.action = "inspect.structure"
+json: stdout doc $.ok = true
+json: stdout doc $.core.bootstrap #>= 1
+json: stdout doc $.core.root_types #>= 1
+json: stdout doc $.core.modules #>= 1
+json: stdout doc $.core.sources #>= 1
+json: stdout doc $.core.calls #>= 1
+step empty_text: jet inspect structure --core
+exit: 0
+stdout: ~ "Bootstrap:" # text catalog in an empty directory
+stdout: ~ "Root types:" # root types line in an empty directory
+step positional_core: jet inspect structure core --json
+exit: 1
+json: stdout doc $.ok = false
+json: stdout doc $.reports[0].code = "E2105"
+stdout: ~ "There's no file `core`" # positional `core` resolves as a target, not `--core`
