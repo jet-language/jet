@@ -167,14 +167,14 @@ run: fn() {
     // From here on, a relative root or report names a path from the tree, as in the original.
     files.chdir(tree) ?? process.fail(2, "census: cd {tree}: {err}")
     seed: "{compiler}/jet"
-    check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCLI"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("CENSUS_TOOLCHAIN_ROOT") ?? ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", "{at}/check-keep-going.tsv"), "{at}/check.out", "{at}/check.err")
+    check_rc: pass(jetenv(g, seed, Sh{"check --keep-going {"--keep-going-report={at}/check-keep-going.tsv"} --threads 12 Compiler/JetCLI"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("CENSUS_TOOLCHAIN_ROOT") ?? "."), "{at}/check.out", "{at}/check.err")
     print("check rc={check_rc}")
     // The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
     census_errors(g, "{at}/check-keep-going.tsv", 21)
     if check_rc != 0 -> process.exit(1)
     if process.env_get_or("CENSUS_BUILD", "") == "0" -> process.exit(0)
     done.remove_all("Compiler/JetCLI/.jet/build")
-    build_rc: pass(jetenv(g, seed, Sh{"build --threads 12 Compiler"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("CENSUS_BUILD_ROOT") ?? ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", "{at}/build-keep-going.tsv").timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
+    build_rc: pass(jetenv(g, seed, Sh{"build --keep-going {"--keep-going-report={at}/build-keep-going.tsv"} --threads 12 Compiler"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("CENSUS_BUILD_ROOT") ?? ".").timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
     build_rows_count: rows("{at}/build-keep-going.tsv")
     print("build rc={build_rc} rows={build_rows_count}")
     build_rows("{at}/build-keep-going.tsv")
@@ -208,7 +208,7 @@ run: fn() {
         loop (package, name) in
             [{package: "Compiler/JetCLI", name: "selfcheck"}, {package: "Core", name: "selfcheck-core"}] {
             tsv: "{at}/{name}-keep-going.tsv"
-            code: pass(jetenv(g, self_jet, Sh{"check --threads 12 {package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").env("JET_KEEP_GOING", "1").env("JET_KEEP_GOING_REPORT", tsv).timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
+            code: pass(jetenv(g, self_jet, Sh{"check --keep-going {"--keep-going-report={tsv}"} --threads 12 {package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")
             count: rows(tsv)
             print("{name} rc={code} rows={count}")
             census_errors(g, tsv, 11)

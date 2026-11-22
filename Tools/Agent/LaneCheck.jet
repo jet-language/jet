@@ -7,7 +7,7 @@
 // delimiter) is what `jet check` prints in one keep-going pass. So a worker
 // type-checks its own patch with the admitted native compiler named by $JET.
 // The default run checks the whole compiler project (Compiler/, the unit the
-// native self-host builds) with JET_KEEP_GOING=1, so every error in every item
+// native self-host builds) with `--keep-going`, so every error in every item
 // is reported at once. A path argument checks that file or project instead.
 // A path under Compiler/JetRuntime is checked in its assembled mode (#6670):
 // the one unit Compiler/JetRuntime/sources.list assembles, as the runtime
@@ -583,9 +583,9 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
     if limit < 0 {
         return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
     }
-    argv := [String]{jet.copy()}
-    argv.extend(command.copy())
-    spec := process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+    argv := [String]{jet.copy(), command[0].copy(), "--keep-going"}
+    loop index in 1..<command.len() -> argv.push(command[index].copy())
+    spec := process.cmd(argv).cwd(repo).env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo).timeout(1800s).output_limit(1073741824)
     if limit > 0 -> spec = spec.memory_limit(limit)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}

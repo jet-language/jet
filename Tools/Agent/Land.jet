@@ -965,12 +965,9 @@ run_spec: fn(base: ProcessSpec, program: String, dir: String, env: [Setting], lo
     }
 }
 
-// The environment of a compile of `tree` by a compiler of `identity`, its
-// keep-going report in `report` ("" for none).
-compile_env: fn(identity: String, tree: String, report: String) -> [Setting] Never! {
-    env := [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: tree.copy()}, Setting{name: "JET_KEEP_GOING", value: "1"}}
-    if report != "" -> env.push(Setting{name: "JET_KEEP_GOING_REPORT", value: report.copy()})
-    env
+// The environment of a compile of `tree` by a compiler of `identity`.
+compile_env: fn(identity: String, tree: String) -> [Setting] Never! {
+    [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: tree.copy()}}
 }
 
 // COMMIT of the checkout `repo` (only `paths` when there are any) unpacked into `dir`.
@@ -1369,7 +1366,10 @@ census_rc: fn(runs: [PassRun]) -> Int Never! {
 compile_pass: fn(name: String, snap: String, out: String, memory: String, seconds: Int, argv: [String], identity: String, package_dirs: [String], limit: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
     report: "{out}/{name}-keep-going.tsv"
-    code: run_heavy(snap, seconds, memory, CENSUS_CPUS, argv, compile_env(identity, snap, report), "{out}/{name}")
+    args := argv.copy()
+    args.push("--keep-going")
+    args.push("--keep-going-report={report}")
+    code: run_heavy(snap, seconds, memory, CENSUS_CPUS, args, compile_env(identity, snap), "{out}/{name}")
     rows: report_rows(report)
     lines := [String]{"{name} rc={code} rows={rows}"}
     lines.extend(first_of(census_rows(report, snap, package_dirs), limit))
@@ -1434,7 +1434,7 @@ guard_test: fn(snap: String, jet: String, identity: String, log: String, memory:
     watch: time.start()
     argv := [String]{jet, "{snap}/Tools/Agent/JetEnv.jet", jet, "test"}
     argv.extend(args)
-    env := compile_env(identity, snap, "")
+    env := compile_env(identity, snap)
     env.push(Setting{name: "JET", value: jet.copy()})
     code: run_heavy(snap, 2400, memory, CENSUS_CPUS, argv, env, log)
     text: "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}"
@@ -1510,7 +1510,7 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
     loop path in targets {
         log: "{out}/core-tests/{path.replace("/", "_")}"
         // The dev shell runs under the seed's identity; the test under the built jet's own.
-        code: run_heavy(snap, 600, CORE_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", "env", "JET_COMPILER_IDENTITY={source_identity}", self_jet, "test", path.copy()}, compile_env(identity, snap, ""), log)
+        code: run_heavy(snap, 600, CORE_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/Agent/JetEnv.jet", "env", "JET_COMPILER_IDENTITY={source_identity}", self_jet, "test", path.copy()}, compile_env(identity, snap), log)
         loop failure in guard_failures("{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}") {
             if !failure.starts_with("  FAIL ") {
                 rc = 1
@@ -2114,7 +2114,7 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         return 0
     }
     seed: seed_dir()
-    code: run_heavy(tree, 1200, HEAVY_MEMORY, HEAVY_CPUS, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCLI"}, compile_env(read_identity(seed), tree, ""), "{tree}/check")
+    code: run_heavy(tree, 1200, HEAVY_MEMORY, HEAVY_CPUS, [String]{"{seed}/jet", "check", "--keep-going", "--threads", "10", "Compiler/JetCLI"}, compile_env(read_identity(seed), tree), "{tree}/check")
     rows: error_rows(files.read("{tree}/check.err") ?? "")
     if code == 0 && rows.len() == 0 {
         print("prescreen: clean")
@@ -2562,9 +2562,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
             rebuilt_checked: precommit_batch(dir, composed, log)
             rechecked_code = rebuilt_checked.code
             built = rebuilt_checked.census
-        } else {
-            rechecked_code = ratchets(dir)
-        }
+        } else { rechecked_code = ratchets(dir) }
         stages.push(Stage{name: if compiler -> "rebuild" else -> "ratchets", seconds: epoch() - started})
         if rechecked_code != 0 {
             say(log, "PRECOMMIT FAILED after the set-aside; reverting")
@@ -2961,11 +2959,9 @@ prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[
     specs := [ProcessSpec]{}
     loop at in 0..<packages.len() {
         report: "{work}/gate-{at}.tsv"
-        argv: capped(GATE_GIB, [String]{"{seed}/jet", "check", "--threads", "8", "{dir}/{packages[at]}"})
+        argv: capped(GATE_GIB, [String]{"{seed}/jet", "check", "--keep-going", "--keep-going-report={report}", "--threads", "8", "{dir}/{packages[at]}"})
         spec := process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(1200)).output_limit(268435456)
-        loop setting in compile_env(identity, dir, report) {
-            spec = spec.env(setting.name, setting.value)
-        }
+        loop setting in compile_env(identity, dir) -> spec = spec.env(setting.name, setting.value)
         specs.push(spec)
     }
     say(log, "gate: the seed's check of {packages.join(" ")}")
@@ -3344,7 +3340,9 @@ parse_probe_rows: fn(suite: String, text: String, code: Int) -> ProbeRun Never! 
         rows.push(ProbeRow{suite: suite.copy(), path: path, tier: tier, verdict: verdict.copy()})
         if {
             verdict == "PASS" -> pass_count += 1
-            verdict == "FAIL" || verdict == "ERROR" || verdict == "TIMEOUT" || verdict == "REFUSED" -> fail_count += 1
+            verdict == "FAIL" || verdict == "ERROR" || verdict == "TIMEOUT" || verdict == "REFUSED" -> {
+                fail_count += 1
+            }
             else -> other_count += 1
         }
     }
@@ -3397,7 +3395,9 @@ s2_cache_dir: fn(scratch: String, source_identity: String) -> String Never! {
 }
 
 s2_cache_ready: fn(cache: String, source_identity: String) -[FS]> Bool Never! {
-    if !files.is_file("{cache}/jet") || !files.is_file("{cache}/jet-runtime/native.key") -> return false
+    if !files.is_file("{cache}/jet") || !files.is_file("{cache}/jet-runtime/native.key") {
+        return false
+    }
     (files.read("{cache}/SOURCE_IDENTITY") ?? "").trim() == source_identity
 }
 
@@ -3417,9 +3417,9 @@ ensure_s2: fn(tree: String, s1_dir: String, identity: String, source_identity: S
     files.remove_all(s2_snap) ?? ()
     files.copy_dir(tree, s2_snap) ?? return S2Build{ok: false, reused: false, dir: "", error: "s2 snapshot copy failed: {err}"}
     files.remove_all("{s2_snap}/Compiler/JetCLI/.jet/build") ?? ()
-    env := compile_env(identity, s2_snap, "")
+    env := compile_env(identity, s2_snap)
     env.push(Setting{name: "JET", value: s1_jet.copy()})
-    argv: [String]{s1_jet, "{s2_snap}/Tools/Agent/JetEnv.jet", s1_jet, "build", "-O1", "--threads", "12", "Compiler"}
+    argv: [String]{s1_jet, "{s2_snap}/Tools/Agent/JetEnv.jet", s1_jet, "build", "-O1", "--keep-going", "--threads", "12", "Compiler"}
     build_log: "{work}/s2-build"
     code: run_heavy(s2_snap, 1800, BUILD_MEMORY, CENSUS_CPUS, argv, env, build_log)
     built_dir: "{s2_snap}/Compiler/JetCLI/.jet/build"
@@ -4189,7 +4189,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
     loop stem in (process.env_get("GOLD_EXCLUDE") ?? GOLD_EXCLUDE).split(" ") {
         if stem != "" -> exclude.push(stem.copy())
     }
-    listed: run_in_env(tree, [String]{"{dir}/jet", "test", "Compiler", "--profile", "golden", "-O0", "--list"}, compile_env(identity, tree, ""))
+    listed: run_in_env(tree, [String]{"{dir}/jet", "test", "Compiler", "--profile", "golden", "-O0", "--list"}, compile_env(identity, tree))
     rows: golden_rows(listed.output, exclude) ?? {
         files.write("{dir}/goldens.failed", "golden selection failed\n{err.message}\n{listed.errors.trim_end().last_lines(20).join("\n")}\n") ?? ()
         return 1
@@ -4209,7 +4209,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
     argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=24G", "-p", "MemorySwapMax=0", "timeout", "7200", "prlimit", "--core=0", HEAVY_STACK, "--"}
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "{tree}/Tools/Agent/JetEnv.jet", "{dir}/jet", "test", "Compiler", "--profile", "golden", "-O0", "--cases={selection}", "--jobs=6", "--time-limit=120s", "--results={results}"})
-    env := compile_env(identity, tree, "")
+    env := compile_env(identity, tree)
     env.push(Setting{name: "JET_TEST_STATE_DIR", value: "{work}/state"})
     env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
     code: run_logged(tree, argv, env, "{work}/goldens")
@@ -4336,7 +4336,7 @@ jetpack_build: fn(repo: String, base: String, sha: String, tree: String, tmp: St
     cpus: process.env_nonempty("SLOT_CPUS") ?? ""
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "Jetpack/Bootstrap/Check.jet", "--hosted"})
-    env := compile_env(read_identity(dir), tree, "")
+    env := compile_env(read_identity(dir), tree)
     env.push(Setting{name: "JETPACK_WORKER", value: worker.copy()})
     env.push(Setting{name: "JET", value: "{dir}/jet"})
     env.push(Setting{name: "TMPDIR", value: tmp.copy()})

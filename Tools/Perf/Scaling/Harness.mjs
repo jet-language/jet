@@ -212,15 +212,15 @@ const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 function argvFor(config, compiler, run) {
   const scope = argv => ['systemd-run', '--user', '--scope', '-q', '--expand-environment=no', '-p', `MemoryMax=${config.memoryMax}`, '-p', 'MemorySwapMax=0',
     'bash', '-c', 'ulimit -c 0; ulimit -s 1048576; exec "$@"', 'scoped', ...argv];
-  const common = { JET_STORE_DIR: run.store, JET_TRACE_FILE: run.trace, JET_PHASE_COUNTERS: '1', TMPDIR: run.dir, NO_COLOR: '1' };
+  const common = { JET_STORE_DIR: run.store, TMPDIR: run.dir, NO_COLOR: '1' };
   if (compiler.kind === 'bootstrap') {
     const env = { HOME: os.homedir(), PATH: process.env.PATH, LC_ALL: 'C', JET_BOOTSTRAP_MODE: 'runner', JET_BOOTSTRAP_FACTORY_TIER: 'aot',
       JET_BOOTSTRAP_SOURCE_ROOT: run.project, JET_BOOTSTRAP_ENTRY: 'main.jet', JET_BOOTSTRAP_OUTPUT: path.join(run.dir, 'out.rs'),
-      JET_BOOTSTRAP_RECEIPT: run.receipt, RUST_MIN_STACK: '8388608', ...common };
+      JET_BOOTSTRAP_RECEIPT: run.receipt, JET_TRACE_FILE: run.trace, JET_PHASE_COUNTERS: '1', RUST_MIN_STACK: '8388608', ...common };
     return { argv: scope(['env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), compiler.path]), env: process.env };
   }
   if (compiler.kind === 'jet') {
-    return { argv: scope([compiler.path, config.jetCommand, '--color=never', path.join(run.project, 'main.jet')]), env: { ...process.env, ...common } };
+    return { argv: scope([compiler.path, config.jetCommand, '--color=never', `--trace=${run.trace}`, '--phase-counters', path.join(run.project, 'main.jet')]), env: { ...process.env, ...common } };
   }
   const command = compiler.template.replace(/\{([a-z]+)\}/g, (_, key) => {
     const values = { project: run.project, entry: path.join(run.project, 'main.jet'), n: run.n, trace: run.trace, dir: run.dir };
