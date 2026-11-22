@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113242,
+    "rev": 113243,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -134536,6 +134536,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-22T23:55:10.658Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing0dou5ut",
+      "note": "30M LOC/s Architectural Overhaul — Pillar Status (8% Overall)"
+    },
+    {
       "at": "2026-11-22T23:52:43.008Z",
       "by": "Orchestrator",
       "action": "card.update",
@@ -138961,6 +138968,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing0dou5ut",
+      "title": "30M LOC/s Architectural Overhaul — Pillar Status (8% Overall)",
+      "body": "# 30M LOC/s Architectural Overhaul — Pillar Status\n\nUpdated: 2026-11-22 18:55 EST | Branch Tip: `dev` `174a8cdeda` | Deadline Target: `05:00 EST`\nOverall Architectural Progress: **8%** (Baseline locked; Pillar 1 active, Pillar 2 staging on Wave 6B close)\n\n## Current Live Cold Uncached Baseline (`174a8cdeda`)\n- Full `jet build -O0 --threads 24 Compiler`: **40.69s** (`prelude-sources` 1.25s, `lexer-keywords` 1.25s, `runtime-pack` 0.37s, `jet-bare` 15.30s, `runtime`+`Core` 19.48s, `core-embed` 2.68s)\n- Standalone `jet-bare` (`jet build -O0 --threads 24 Compiler/JetCLI/run.jet`): **15.05s**\n- Full `jet build -O2 --threads 12 Compiler`: **46.5s**\n- `Throughput.jet` (`O0`, 12t): **~25,381 LOC/s** (target: **30,000,000 LOC/s**)\n- Peak RSS (`jet-bare`): **~5.3 GiB** (target: **< 1.0 GiB**)\n- `CompilerData` ledger: **1,145** text-keyed lookups, **384** `Shared` cells, **219** payload enums\n\n## Six Architectural Pillars\n\n| Pillar | Cards | Scope | Status | Complete |\n|---|---|---|---|---:|\n| **1. Interned `TypeID` + `NameID` Core** | `#6978`, `#6793 c2,c4` | Zero-copy `InternerDelta` + O(1) `canonical` `TypeID` (`u32`) across `JetFoundation`/`JetSema`/`Registration`, replacing ~100+ `String`-keyed maps and eliminating the 2-3x full AST-body deep-copy RSS bomb in `Registration/Items.jet` | **Active (`CodegenOpt`)** | **15%** |\n| **2. Direct-to-Image `-O0` + Copy-and-Patch Stencils** | `#6795` | Remove the 120 MB ELF `.o` serialize/re-parse round-trip (`Object` -> `StaticLink`) and emit `-O0` machine code directly from toolchain-built x86-64 stencils (zero regalloc/isel at `-O0`) | **Starting Next (`GoalsOrder`)** | **10%** |\n| **3. One Warm Shared-Memory Comptime Child** | `#6798` | Replace 5 separate comptime child build/load batches and 512 eval RPCs (~1.7s) with one warm child per compile running `-O0` stencils over shared memory | **Queued (`GoalsOrder`)** | **5%** |\n| **4. Flat Arena SoA AST & IR (`< 1 GiB` RSS)** | `#6793 c3,c4,c5` | Replace heap-boxed RC `AST`/`TExpr`/`TStmt`/`IR` trees with flat `u32`-indexed SoA columns in per-phase arenas freed in bulk | **Queued (Streams A+B)** | **5%** |\n| **5. Barrier-Free Streaming Pipeline (24-32 Cores)** | `#6794` | Wire `CompilerTaskGraph` across `JetDriver`/`JetSema`/`JetIR` so modules stream `parse -> register -> check -> lower -> emit` without stop-the-world phase barriers, plus trim `Compiler/build.jet` serial overhead | **Queued (Streams A+B)** | **10%** |\n| **6. Parallel SIMD Lex/Parse + Shared `-O0` Generics** | `#6796`, `#6797` | SIMD intra-file declaration boundary split (`<= 1 ns/byte`) for giant modules + single compiled body per generic function at `-O0` with hidden type descriptor | **Queued (Streams A+B)** | **0%** |\n\n## Active Work Right Now\n- **Stream A (`CodegenOpt`):** Building Pillar 1 (`TypeIDs.jet` zero-copy `InternerDelta` & O(1) canonical equality, `JetSema`/`Registration` `TypeID`/`NameID` cutover, and removing the 2-3x full AST-body deep copies in `Items.jet`).\n- **Stream B (`GoalsOrder`):** Finishing final Wave 6B A/B benchmarks (includes direct `Object`/`StaticLink` prep), then pivoting immediately onto Pillar 2 (`#6795` direct-to-image + copy-and-patch `-O0` stencils) and Pillar 3 (`#6798` warm comptime child).\n\nThis briefing updates on every landed architectural slice with new live cold timings, LOC/s, RSS, and updated % complete.\n",
+      "by": "Orchestrator",
+      "created": "2026-11-22T23:55:10.658Z",
+      "sections": []
+    },
     {
       "id": "briefing0g221ws",
       "title": "p235: #6847 and #6866 closed; #6857 down to c5/c6",
