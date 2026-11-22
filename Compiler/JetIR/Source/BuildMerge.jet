@@ -760,6 +760,7 @@ ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunct
     loop id in 0..<count -> ids[g.function_part[id]][g.function_local[id]] = id
     taken := ir_merge_rewrite_parts(lists, g.sides, ids)
     slots := [IRFunction?]{}
+    slots.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count -> slots.push(None)
     loop taken.len() > 0 {
         part_taken := taken.pop() ?? panic("a nonempty merged part list failed to pop")
@@ -769,6 +770,7 @@ ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunct
             slots[id] = Val(row.function.move())
         }
     }
+    functions.try_reserve(count) ?? panic("reserve failed")
     loop slots.len() > 0 {
         slot := slots.pop() ?? panic("a nonempty merged function slot list failed to pop")
         row := slot.move() ?? panic("a merged function left no row")
@@ -818,10 +820,9 @@ ir_merge_rewrite_parts: fn(lists: &[[IRFunction]], sides: [IRMergeSide], ids: &[
     part_ids: ids.pop() ?? panic("a nonempty part id list failed to pop")
     if at == 0 -> return [[IRMergeTaken]]{ir_merge_rewrite_part(functions, sides[0], part_ids)}
     part: IRMergePart{functions: functions, ids: part_ids}
-    side: sides[at].copy()
     taken := [[IRMergeTaken]]{}
     task.group ir_merge_rewrite_threads {
-        last: task &&part { ir_merge_rewrite_part(part.functions, side, part.ids) }
+        last: task &&part { ir_merge_rewrite_part(part.functions, sides[at], part.ids) }
         taken = ir_merge_rewrite_parts(lists, sides, ids)
         taken.push(last.join() ?? panic(compiler_threads_failure_text(err)))
     }

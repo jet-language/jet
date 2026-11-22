@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, NameTable, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -445,6 +445,10 @@ IRChecks: struct {
     // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
     // follows (ir_route_can_stop); empty without a receipt.
     quiet_routes: NameTable{name_table_sized(2)},
+    // Sorted newline-separated runtime exports and stopping exports bytes
+    // (shared read-only across wave workers without building a NameTable).
+    quiet_exports: [U8]{[U8]{}},
+    quiet_stops: [U8]{[U8]{}},
     // A debugger's evaluation against a running O0 image (ir_held_program):
     // the program functions, by key, that the image holds under their own
     // symbol (ir_symbol_name), which no other function shares. A direct
@@ -522,7 +526,7 @@ IRProgram: struct {
     // declaration or body names (ir_symbol_key).
     symbols: SymbolTable,
     types: [TTypeDef],
-    type_rows: [String:Int],
+    type_rows: NameRows,
     // Checked constants (ConstRef / CtLit values): each key's row in
     // `constant_defs`. A read borrows the row in place; the map holds no
     // definition, so neither a read nor a landed value copies one.
@@ -530,10 +534,10 @@ IRProgram: struct {
     constant_defs: [TConstantDef],
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>".
-    render_impls: [String:Int],
+    render_impls: NameRows,
     // The selected Close implementation method (`close`) by rendered type
     // key.
-    close_methods: [String:Int],
+    close_methods: NameRows,
     // The implementation methods a dynamic trait call may select, by
     // "<trait>|<method>" (function rows; see ir_trait_methods).
     trait_methods: [String:[Int]],
@@ -797,7 +801,7 @@ IRCaptureSlot: struct {
     close: Int{-1},
 }
 
-ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
+ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef], threads: CompilerThreads{compiler_threads_single()}) -> IRProgram Never! {
     owned_sources: sources.move()
     programs := [IRProgram]{}
     // Past IR_SOURCE_INDEX_MIN_BYTES the sources are indexed on their own
@@ -807,7 +811,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     if total < IR_SOURCE_INDEX_MIN_BYTES {
         index := ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
-        ir_program_bind(p, functions, decls)
+        ir_program_bind(p, functions, decls, threads)
         p.source_bytes = index.bytes.move()
         p.source_lines = index.lines.move()
         p.source_rows = index.rows.move()
@@ -816,7 +820,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     task.group ir_program_sources {
         indexing: task ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
-        ir_program_bind(p, functions, decls)
+        ir_program_bind(p, functions, decls, threads)
         index := indexing.join() ?? panic(compiler_threads_failure_text(err))
         p.source_bytes = index.bytes.move()
         p.source_lines = index.lines.move()
@@ -883,20 +887,26 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // literals spell it bare, so it claims its name ahead of the Prelude's.
     builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
     families: ir_unit_family_rows(types)
-    type_keys := [{key: String, at: Int, row: Int}]{}
+    type_rows := name_rows()
+    tier1 := [Int]{}
+    tier2 := [Int]{}
+    tier3 := [Int]{}
+    tier4 := [Int]{}
     loop (index, definition) in types {
-        type_keys.push({key: definition.key.copy(), at: index, row: index})
-    }
-    loop (index, definition) in types {
-        tier: if {
-            definition.key.starts_with(builtins) -> 1
-            definition.key.starts_with(MODULE_CORE_PREFIX) || definition.key == definition.name -> 3
-            ir_unit_minted_row(definition, types, families) -> 2
-            else -> 4
+        name_rows_set_first(type_rows, definition.key, index)
+        if {
+            definition.key.starts_with(builtins) -> tier1.push(index)
+            definition.key.starts_with(MODULE_CORE_PREFIX) || definition.key == definition.name -> {
+                tier3.push(index)
+            }
+            ir_unit_minted_row(definition, types, families) -> tier2.push(index)
+            else -> tier4.push(index)
         }
-        type_keys.push({key: definition.name.copy(), at: tier * types.len() + index, row: index})
     }
-    type_rows: ir_first_rows(type_keys)
+    loop index in tier1 -> name_rows_set_first(type_rows, types[index].name, index)
+    loop index in tier2 -> name_rows_set_first(type_rows, types[index].name, index)
+    loop index in tier3 -> name_rows_set_first(type_rows, types[index].name, index)
+    loop index in tier4 -> name_rows_set_first(type_rows, types[index].name, index)
     impls: impl_defs.move()
     // A constant by its key, then by the symbol key a ConstRef names
     // (TConstantDef.symbol_key); the first definition of a key holds it.
@@ -969,7 +979,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: name_rows(), close_methods: name_rows(), trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -977,7 +987,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
 // implementation methods and trait method tables that name function rows.
 // `decls` is the run's declaration table their direct calls name.
 // The declarations stay, so one declared program serves many builds.
-ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Never! {
+ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, threads: CompilerThreads{compiler_threads_single()}) Never! {
     owned := functions.move()
     ir_declared_owners(owned, p.types)
     ir_add_signature_union_types(p.types, p.type_rows, owned)
@@ -986,7 +996,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     // (a TraitMethod when its trait resolves in the implementing module,
     // else a plain Method).
     owner_methods := name_rows()
-    render_impls := [String:Int]{}
+    render_impls := name_rows()
     loop (index, function) in owned {
         if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
             next
@@ -1005,22 +1015,20 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
                 selected: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
                 if selected {
                     render_key: "{trait_short}|{owner_key}"
-                    if render_impls.get(render_key) == None -> render_impls[render_key] = index
+                    name_rows_set_first(render_impls, render_key, index)
                 }
             }
         }
     }
-    close_methods := [String:Int]{}
+    close_methods := name_rows()
     loop implementation in p.impl_methods {
         row: name_rows_value(owner_methods, "{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? name_rows_value(owner_methods, "{implementation.method}||{implementation.owner_key}") ?? -1
         if row < 0 -> next
         if implementation.trait_short == "Close" {
-            if close_methods.get(implementation.owner_key) == None {
-                close_methods[implementation.owner_key] = row
-            }
+            name_rows_set_first(close_methods, implementation.owner_key, row)
         } else {
             render_key: "{implementation.trait_short}|{implementation.owner_key}"
-            if render_impls.get(render_key) == None -> render_impls[render_key] = row
+            name_rows_set_first(render_impls, render_key, row)
         }
     }
     p.trait_methods = ir_trait_methods(owned, p.symbols, p.type_rows, p.types, p.impl_slots, p.impl_traits)
@@ -1048,12 +1056,11 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     loop (index, function) in owned {
         if function.role != "" -> core_roles.push(index)
     }
-    p.spawn_sites = ir_spawn_sites(owned)
     p.functions = owned.move()
     p.quiet_points = ir_quiet_points(p)
     p.rows = rows
     p.decode_helpers = ir_codec_decode_rows(p)
-    p.trait_boxed = ir_trait_boxed(p)
+    ir_program_scan_bodies(p, threads)
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
@@ -1120,6 +1127,7 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
 ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never! {
     intrinsics := [String:IRRuntimeIntrinsic]{}
     loop function in functions {
+        if function.module_name != "core.mem" && function.module_name != "core.math" -> next
         loop row in IR_CORE_INTRINSICS {
             if row.name != function.name || row.module_name != function.module_name -> next
             if ir_core_intrinsic_shaped(function, row.intrinsic) {
@@ -1151,9 +1159,9 @@ ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) ->
 
 // Selects function `index` as `owner`'s `trait_short` hook for the
 // right-hand type `rhs` (ir_operator_impl), unless one is selected already.
-ir_operator_hook_key: fn(p: IRProgram, render_impls: &[String:Int], trait_short: String, owner: Type, rhs: Type, index: Int) Never! {
+ir_operator_hook_key: fn(p: IRProgram, render_impls: &NameRows, trait_short: String, owner: Type, rhs: Type, index: Int) Never! {
     key: "{trait_short}|{ir_render_type_key(p.type_rows, p.types, owner)}|{ir_render_type_key(p.type_rows, p.types, rhs)}"
-    if render_impls.get(key) == None -> render_impls[key] = index
+    name_rows_set_first(render_impls, key, index)
 }
 
 // The bound functions' DeclID rows over `decls` (IRProgram.decl_rows): a
@@ -1195,29 +1203,29 @@ ir_decl_foreign: fn(p: IRProgram, id: DeclID) -> Int Never! {
 ir_declared_owners: fn(functions: &[FnBody], types: [TTypeDef]) Never! {
     // Only a name some method's owner spells is ever looked up, so only the
     // types of those names are keyed.
-    owners := [String:Bool]{}
+    owners := name_table_sized(64)
     loop index in 0..<functions.len() {
         name: ir_declared_owner_name(functions[index].kind) ?? next
-        owners[name] = true
+        _ := name_intern(owners, name)
     }
-    if owners.len() == 0 {
+    if name_count(owners) == 0 {
         return
     }
-    declared := [String:String]{}
-    loop definition in types {
-        if owners.get(definition.name) == None -> next
+    declared := name_rows()
+    loop (index, definition) in types {
+        if name_find(owners, definition.name) == None -> next
         scoped: "{definition.module_identity.id}|{definition.name}"
-        if declared.get(scoped) == None -> declared[scoped] = definition.key.copy()
+        name_rows_set_first(declared, scoped, index)
     }
     loop index in 0..<functions.len() {
         if functions[index].kind == {
             .Method(convention, owner_type) -> {
-                owner: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                owner: ir_declared_owner(declared, types, functions[index].module_identity, owner_type) ?? next
                 _: type_table_intern(functions[index].tree.types, owner)
                 functions[index].kind = TFuncKind.Method{self_convention: convention, owner_type: owner}
             }
             .TraitMethod(is_unsafe, convention, owner_type, trait_name, codec) -> {
-                owner: ir_declared_owner(declared, functions[index].module_identity, owner_type) ?? next
+                owner: ir_declared_owner(declared, types, functions[index].module_identity, owner_type) ?? next
                 _: type_table_intern(functions[index].tree.types, owner)
                 functions[index].kind = TFuncKind.TraitMethod{is_unsafe: is_unsafe, self_convention: convention, owner_type: owner, trait_name: trait_name, serde_codec: codec}
             }
@@ -1238,15 +1246,15 @@ ir_declared_owner_name: fn(kind: TFuncKind) -> String? Never! {
 
 // `owner` named by the key of its declaration in `module_identity`, or None
 // when that module declares no type of its name.
-ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owner: Type) -> Type? Never! {
+ir_declared_owner: fn(declared: NameRows, types: [TTypeDef], module_identity: ModuleID, owner: Type) -> Type? Never! {
     if owner == {
         .Named(name) -> {
-            key: declared.get("{module_identity.id}|{name}") ?? return None
-            return Val(Type.Named{name: key.copy()})
+            row: name_rows_value(declared, "{module_identity.id}|{name}") ?? return None
+            return Val(Type.Named{name: types[row].key.copy()})
         }
         .Apply(name, args) -> {
-            key: declared.get("{module_identity.id}|{name}") ?? return None
-            return Val(Type.Apply{name: key.copy(), args: args.copy()})
+            row: name_rows_value(declared, "{module_identity.id}|{name}") ?? return None
+            return Val(Type.Apply{name: types[row].key.copy(), args: args.copy()})
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
@@ -1259,6 +1267,14 @@ ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owne
 // handler is ever attached: each Hook run returns its own fallback, and each
 // DecisionHook run continues with its own payload.
 ir_quiet_points: fn(p: IRProgram) -[]> [Int:Bool] {
+    has_point := false
+    loop definition in p.constant_defs {
+        if !definition.is_storage && ir_point_type(p, definition.ty) {
+            has_point = true
+            break
+        }
+    }
+    if !has_point -> return [Int:Bool]{}
     // Constant rows read as a `run`'s receiver, and read any other way.
     run := [Int:Bool]{}
     other := [Int:Bool]{}
@@ -1319,6 +1335,101 @@ ir_spawn_sites: fn(functions: [FnBody]) -> [String:Int] Never! {
     sites
 }
 
+IR_BODY_SCAN_MIN_NODES_PER_THREAD: 40000
+
+IRBodyScanPart: struct {
+    spawns: [IRBodyScanSpawn],
+    boxed: [IRBodyScanBoxed],
+}
+
+ir_body_scan_range: fn(functions: [FnBody], check_boxed: [Bool], start: Int, end: Int) -> IRBodyScanPart Never! {
+    spawns := [IRBodyScanSpawn]{}
+    boxed := [IRBodyScanBoxed]{}
+    loop row in start..<end {
+        ir_scan_function_nodes(row, functions[row], check_boxed[row], spawns, boxed)
+    }
+    IRBodyScanPart{spawns: spawns.move(), boxed: boxed.move()}
+}
+
+ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], bounds: [Int], part: Int) -> [IRBodyScanPart] {
+    if part >= bounds.len() - 2 {
+        return [IRBodyScanPart]{ir_body_scan_range(functions, check_boxed, bounds[part], bounds[part + 1])}
+    }
+    parts := [IRBodyScanPart]{}
+    task.group ir_body_scan_threads {
+        head: task ir_body_scan_range(functions, check_boxed, bounds[part], bounds[part + 1])
+        rest := ir_body_scan_parts(functions, check_boxed, bounds, part + 1)
+        first: head.join() ?? panic(compiler_threads_failure_text(err))
+        parts.push(first)
+        loop row in rest.move() -> parts.push(row)
+    }
+    parts
+}
+
+// ir_trait_identity over the type rows `type_rows` of `types`, before a
+// program holds them (ir_program_declared).
+ir_type_identity: fn(type_rows: NameRows, types: [TTypeDef], ty: Type) -> String Never! {
+    plain: ir_untag(ty)
+    if plain == .Named(_) -> return ir_render_type_key(type_rows, types, plain)
+    type_carrier_identity(plain)
+}
+
+// Single-pass (parallel across `threads` for large modules) scan of every
+// function's AST nodes for both `p.spawn_sites` and `p.trait_boxed`.
+ir_program_scan_bodies: fn(p: &IRProgram, threads: CompilerThreads) Never! {
+    count: p.functions.len()
+    check_boxed := [Bool]{}
+    check_boxed.try_reserve(count) ?? panic("reserve failed")
+    weights := [Int]{}
+    weights.try_reserve(count) ?? panic("reserve failed")
+    total := 0
+    loop index in 0..<count {
+        nodes: 1 + p.functions[index].tree.nodes.len()
+        weights.push(nodes)
+        total += nodes
+        check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
+    }
+    workers: compiler_threads_admit(threads, count, total, IR_BODY_SCAN_MIN_NODES_PER_THREAD, 0, 0)
+    spawns := [IRBodyScanSpawn]{}
+    candidates := [IRBodyScanBoxed]{}
+    if workers <= 1 {
+        loop row in 0..<count {
+            ir_scan_function_nodes(row, p.functions[row], check_boxed[row], spawns, candidates)
+        }
+    } else {
+        bounds: compiler_threads_partition(weights, workers)
+        parts := ir_body_scan_parts(p.functions, check_boxed, bounds, 0) ?? panic("the IR body scan threads failed")
+        loop part in parts.move() {
+            loop s in part.spawns -> spawns.push(s)
+            loop c in part.boxed.move() -> candidates.push(c)
+        }
+    }
+    files := [String:[Int]]{}
+    loop s in spawns {
+        file: p.functions[s.fn_row].source_file
+        starts := files.get(file) ?? [Int]{}
+        starts.push(s.start)
+        files[file] = starts.move()
+    }
+    sites := [String:Int]{}
+    loop (file, starts) in files.move() {
+        ordered := starts
+        ordered.sort()
+        ordinal := 0
+        loop start in ordered {
+            key: "{file}:{start}"
+            if sites.get(key) != None -> next
+            sites[key] = ordinal
+            ordinal += 1
+        }
+    }
+    p.spawn_sites = sites
+    boxed := IRTraitBoxed{}
+    seen := name_table_sized(8)
+    loop c in candidates.move() { ir_trait_boxed_put_short(p, boxed, seen, c.concrete, c.short) }
+    p.trait_boxed = boxed
+}
+
 // `definition` takes over `p`'s constant rows of its key and its symbol key
 // (a compile-time value landed after the program was declared), each not
 // taken over yet (`taken`, which it joins): a key's first landed row stands.
@@ -1354,7 +1465,10 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m.alloc_types = p.checks.checked_alloc
     m.zones_stripped = p.checks.zones_stripped
     m.zone_table = p.zone_table
-    m.quiet_routes = p.checks.quiet_routes.copy()
+    if p.checks.quiet_exports.len() > 0 {
+        m.quiet_exports = p.checks.quiet_exports
+        m.quiet_stops = p.checks.quiet_stops
+    } else { m.quiet_routes = p.checks.quiet_routes.copy() }
     m
 }
 
@@ -1364,7 +1478,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
 // resolves in the implementing module, else as a plain Method of the owner,
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
 // name the traits of; `symbols` holds the TraitMethods' trait keys.
-ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [String:Int], types: [TTypeDef], impl_slots: NameRows, impl_traits: [[String]]) -> [String:[Int]] Never! {
+ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: NameRows, types: [TTypeDef], impl_slots: NameRows, impl_traits: [[String]]) -> [String:[Int]] Never! {
     slots := name_rows()
     keys := [String]{}
     rows := [[Int]]{}
@@ -1415,7 +1529,7 @@ ir_short_name: fn(key: String) -> String Never! {
 }
 
 // The declaration a nominal type name or key names.
-ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! { p.type_rows.get(name) }
+ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! { name_rows_value(p.type_rows, name) }
 
 // `ty` with each nominal head spelled by its identity key (ir_identity_key): a
 // type named by its key (`module.Name`) and by its name (`Name`) is one type,
@@ -1692,7 +1806,7 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // `ir.build.core_cells`.
 ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
     if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
-    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants, threads)
     p.checks = checks
     p.zone_table = true
     p.sentries = ir_checks_sentries(checks)
@@ -3412,7 +3526,44 @@ ir_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int
 // BuildLibrary.jet ir_stop_exports), so without a receipt, and for a Core
 // export or any symbol the runtime does not export, every call polls.
 ir_route_can_stop: fn(m: IRModule, symbol: String) -> Bool Never! {
-    symbol == "" || name_find(m.quiet_routes, symbol) == None
+    if symbol == "" -> return true
+    if m.quiet_exports.len() > 0 {
+        bytes: symbol.bytes()
+        return !ir_sorted_lines_contains(m.quiet_exports, bytes) || ir_sorted_lines_contains(m.quiet_stops, bytes)
+    }
+    name_find(m.quiet_routes, symbol) == None
+}
+
+// Whether `row` is a line in newline-separated sorted `bytes` (zero-alloc
+// binary search over byte slices).
+ir_sorted_lines_contains: fn(bytes: [U8], row: [U8]) -> Bool Never! {
+    low := 0
+    high := bytes.len()
+    loop low < high {
+        start := low + (high - low).div_euclid(2)
+        loop start > low && bytes[start - 1] != (U8{10}) -> start -= 1
+        end := start
+        loop end < high && bytes[end] != (U8{10}) -> end += 1
+        at := 0
+        order := 0
+        loop start + at < end && at < row.len() {
+            if bytes[start + at] != row[at] {
+                order = if bytes[start + at] < row[at] -> -1 else -> 1
+                break
+            }
+            at += 1
+        }
+        if order == 0 {
+            order = if {
+                start + at < end -> 1
+                at < row.len() -> -1
+                else -> 0
+            }
+        }
+        if order == 0 -> return true
+        if order < 0 -> low = end + 1 else -> high = start
+    }
+    false
 }
 
 // After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns
@@ -3490,12 +3641,14 @@ ir_recursion_checks: fn(m: &IRModule, workers: Int) Never! {
 }
 
 // ir_recursion_checks on `workers` parts: the calls of each part on a thread
-// of its own, the cycles on this one over every part's calls in function
-// order, then the removals on the parts' threads again.
+// of its own (reading `m.functions` in place without moving it), the cycles
+// on this one over every part's calls in function order, then the removals
+// on the parts' threads (or in place when single-threaded or no entry checks).
 ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
     count: m.functions.len()
     checked := false
     weights := [Int]{}
+    weights.try_reserve(count) ?? panic("reserve failed")
     loop f in m.functions {
         if f.entry_check >= 0 -> checked = true
         weights.push(1 + f.op.len())
@@ -3503,7 +3656,42 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
     if !checked && !m.stop_points {
         return
     }
-    bounds: compiler_threads_partition(weights, workers)
+    calls := OptCalls{start: [Int]{}, to: [Int]{}}
+    calls.start.try_reserve(count + 2) ?? panic("reserve failed")
+    taken := [Int]{}
+    bounds := [Int]{}
+    if workers <= 1 {
+        loop row in 0..<count {
+            calls.start.push(calls.to.len())
+            ir_recursion_calls(m.functions[row], count, calls.to, taken)
+        }
+    } else {
+        bounds = compiler_threads_partition(weights, workers)
+        scans := ir_recursion_scan_ranges(m.functions, bounds, count, 0)
+        total_to := 0
+        loop at in 0..<scans.len() -> total_to += scans[at].calls.len()
+        calls.to.try_reserve(total_to) ?? panic("reserve failed")
+        loop at in 0..<scans.len() {
+            base: calls.to.len()
+            from := 0
+            loop end in scans[at].ends {
+                calls.start.push(base + from)
+                from = end
+            }
+            compiler_transfer_rows<Int>(calls.to, scans[at].calls)
+            compiler_transfer_rows<Int>(taken, scans[at].taken)
+        }
+    }
+    calls.start.push(calls.to.len())
+    compiler_transfer_rows<Int>(calls.to, taken)
+    calls.start.push(calls.to.len())
+    order: ir_opt_bottom_up(calls)
+    if workers <= 1 || !checked {
+        loop id in 0..<count {
+            ir_recursion_entry(m.functions[id], order.recursive, id, m.stop_points)
+        }
+        return
+    }
     // Parts leave the list last-first: part `workers - 1` pops first.
     parts := [IRRecursionPart]{}
     part := workers - 1
@@ -3518,27 +3706,43 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
         part -= 1
     }
     parts.reverse()
-    parts = ir_recursion_walks(count, [Bool]{}, parts.move())
-    calls := OptCalls{start: [Int]{}, to: [Int]{}}
-    taken := [Int]{}
-    loop at in 0..<parts.len() {
-        base: calls.to.len()
-        from := 0
-        loop end in parts[at].ends {
-            calls.start.push(base + from)
-            from = end
-        }
-        compiler_transfer_rows<Int>(calls.to, parts[at].calls)
-        compiler_transfer_rows<Int>(taken, parts[at].taken)
-    }
-    calls.start.push(calls.to.len())
-    compiler_transfer_rows<Int>(calls.to, taken)
-    calls.start.push(calls.to.len())
-    order: ir_opt_bottom_up(calls)
     parts = ir_recursion_walks(count, order.recursive, parts.move())
     loop at in 0..<parts.len() {
         m.functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
     }
+}
+
+IRRecursionScan: struct {
+    calls: [Int],
+    ends: [Int],
+    taken: [Int],
+}
+
+ir_recursion_scan_range: fn(functions: [IRFunction], start: Int, end: Int, count: Int) -> IRRecursionScan Never! {
+    calls := [Int]{}
+    ends := [Int]{}
+    ends.try_reserve(end - start) ?? panic("reserve failed")
+    taken := [Int]{}
+    loop row in start..<end {
+        ir_recursion_calls(functions[row], count, calls, taken)
+        ends.push(calls.len())
+    }
+    IRRecursionScan{calls: calls.move(), ends: ends.move(), taken: taken.move()}
+}
+
+ir_recursion_scan_ranges: fn(functions: [IRFunction], bounds: [Int], count: Int, at: Int) -> [IRRecursionScan] Never! {
+    end: if at + 1 < bounds.len() -> bounds[at + 1] else -> count
+    if at + 1 >= bounds.len() {
+        return [IRRecursionScan]{ir_recursion_scan_range(functions, bounds[at], end, count)}
+    }
+    scans := [IRRecursionScan]{}
+    task.group ir_recursion_scan_threads {
+        head: task ir_recursion_scan_range(functions, bounds[at], end, count)
+        rest: ir_recursion_scan_ranges(functions, bounds, count, at + 1)
+        scans.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest -> scans.push(item)
+    }
+    scans
 }
 
 // One thread's functions of ir_recursion_checks, in order, from function

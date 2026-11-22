@@ -392,6 +392,7 @@ x64_object_text_weight: fn(function: X64CompiledFunction) -> Int Never! {
 X64ObjectTextShared: struct {
     functions: [X64CompiledFunction],
     offsets: [Int],
+    sizes: [Int],
     function_rows: [Int],
     exported: [Bool],
     extended: Bool,
@@ -402,17 +403,19 @@ X64ObjectTextShared: struct {
 }
 
 // One thread's consecutive function range, the range's code (each
-// function's bytes, taken out of it) and its rows (`outputs` holds one row
-// once the thread finished).
+// function's bytes, taken out of it), its outputs once built, and the merge's
+// resolved runtime globals and strtab base for parallel finalization.
 X64ObjectTextPart: struct {
     start: Int,
     end: Int,
     codes: [[U8]],
     outputs: [X64ObjectTextRows],
+    globals: [Int]{[Int]{}},
+    strtab_base: Int{0},
 }
 
-// A function range's `.text`, one piece per function at its offset (calls
-// between functions patched into its bytes in place), and `.rela.text`
+// A function range's `.text` (coalesced into one piece per part when not
+// emitting own sections, else one piece per function), and `.rela.text`
 // entries, in function and relocation order. A runtime import's entry (a
 // call or a data address) is written with symbol 0: its byte offset in
 // `relas` is in `runtime_at` and its symbol's row in the range's own
@@ -450,9 +453,49 @@ x64_object_text_parts: fn(inputs: Shared<X64ObjectTextShared>, parts: [Shared<X6
     built
 }
 
+// One part's extracted rows paired with its resolved runtime globals and
+// strtab base for lock-free parallel finalization.
+X64ObjectTextFinalize: struct {
+    rows: X64ObjectTextRows,
+    globals: [Int],
+    strtab_base: Int,
+}
+
+// Finalizes `items` (in reverse order, popped off the end so each task owns
+// its item without copying) in parallel and returns them in original order.
+x64_object_text_finalize_items: fn(items: &&[X64ObjectTextFinalize]) -> [X64ObjectTextRows] {
+    owned := items.move()
+    if owned.len() == 0 -> return [X64ObjectTextRows]{}
+    head: owned.pop() ?? panic("lost finalize item")
+    if owned.len() == 0 -> return [X64ObjectTextRows]{x64_object_text_finalize_one(head)}
+    out := [X64ObjectTextRows]{}
+    task.group x64_object_text_finalize_threads {
+        done_head: task x64_object_text_finalize_one(head)
+        rest := x64_object_text_finalize_items(owned)
+        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        out.push(first)
+        loop row in rest.move() -> out.push(row)
+    }
+    out
+}
+
+x64_object_text_finalize_one: fn(item: &&X64ObjectTextFinalize) -> X64ObjectTextRows Never! {
+    owned := item.move()
+    rows := owned.rows.move()
+    globals: owned.globals
+    loop (at_index, at) in rows.runtime_at {
+        symbol: globals[rows.runtime_local[at_index]]
+        loop shift in 0..<4 -> rows.relas[at + 12 + shift] = U8{(symbol >> (8 * shift)) & 255}
+    }
+    x64_object_symbol_rebase(rows.symtab, owned.strtab_base)
+    rows
+}
+
 // One thread: the `.text` pieces, `.rela.text` entries and private function
-// symbols of its function range; each function's code becomes its piece as
-// it is.
+// symbols of its function range. Without own sections, the range's functions
+// coalesce into one contiguous `.text` piece (with 0xcc alignment padding
+// filled on this thread) so x64_object_file appends one buffer per thread
+// instead of tens of thousands of per-function pieces.
 x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64ObjectTextPart>) -> Int {
     permit := part.guard_edit()
     reads: inputs.guard_read()
@@ -483,6 +526,13 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     data_symbols: reads.value.data_symbols
     provider_hooks: reads.value.provider_hooks
     own: function_symbols.len() > 0
+    merged_text := [U8]{}
+    part_base := 0
+    if !own && start < end {
+        part_base = reads.value.offsets[start]
+        part_len: reads.value.offsets[end - 1] + reads.value.sizes[end - 1] - part_base
+        if part_len > 0 -> merged_text.try_reserve(part_len) ?? panic("reserve failed")
+    }
     loop index in start..<end {
         offset: reads.value.offsets[index]
         code := codes.pop() ?? panic("a .text thread lost the code of {reads.value.functions[index].name}")
@@ -525,12 +575,17 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
             name_at: if reads.value.functions[index].name == "" -> 0 else -> 1 + elf64_string(strtab, reads.value.functions[index].name)
             x64_object_symbol_put(symtab, xindex, extended, name_at, 2, x64_object_function_section(own, index), offset, code.len())
         }
-        text.push(X64ObjectPiece{at: offset, bytes: code})
         if own {
+            text.push(X64ObjectPiece{at: offset, bytes: code})
             rela_ends.push(relas.len())
             aligns.push(reads.value.functions[index].align)
+        } else {
+            want: offset - part_base
+            loop merged_text.len() < want -> merged_text.push(U8{0xcc})
+            merged_text.extend(code)
         }
     }
+    if !own && start < end -> text.push(X64ObjectPiece{at: part_base, bytes: merged_text.move()})
     permit.value.outputs.push(X64ObjectTextRows{text: text.move(), relas: relas.move(), rela_ends: rela_ends.move(), aligns: aligns.move(), runtime_at: runtime_at.move(), runtime_local: runtime_local.move(), imports: imports.move(), symtab: symtab.move(), strtab: strtab.move(), xindex: xindex.move(), errors: errors.move()})
     1
 }
@@ -1118,7 +1173,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     loop weight in weights -> total += weight
     workers: compiler_threads_admit(threads, functions.len(), total, X64_OBJECT_MIN_WEIGHT_PER_THREAD, 0, 0)
     bounds: if workers <= 1 -> [Int]{0, functions.len()} else -> compiler_threads_partition(weights, workers)
-    inputs: Shared{X64ObjectTextShared{functions: functions, offsets: offsets, function_rows: function_rows, exported: exported, extended: extended, data_offsets: data_offsets, function_symbols: function_symbols, data_symbols: data_symbols, provider_hooks: provider_hooks}}
+    inputs: Shared{X64ObjectTextShared{functions: functions, offsets: offsets, sizes: sizes, function_rows: function_rows, exported: exported, extended: extended, data_offsets: data_offsets, function_symbols: function_symbols, data_symbols: data_symbols, provider_hooks: provider_hooks}}
     // Built last part first, each taking its code off the end of `codes`.
     parts := [Shared<X64ObjectTextPart>]{}
     loop back in 0..<(bounds.len() - 1) {
@@ -1133,7 +1188,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     }
     parts.reverse()
     _ := x64_object_text_parts(inputs, parts, 0) ?? panic("the .text threads failed")
-    // Without own sections: `.text` as each function's piece and
+    // Without own sections: `.text` as each part's coalesced piece and
     // `.rela.text` as each part's, in function order (x64_object_file
     // writes them into the file).
     text := [X64ObjectPiece]{}
@@ -1162,9 +1217,13 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         id: x64_object_symbol(symbol_names, import_of, export_of, entry_row.symbol)
         export_of[id] = first_global + exports.len() + index
     }
+    // Extract each part's rows, resolve runtime import globals and strtab
+    // bases serially (O(imports + parts)), then patch `.rela.text` runtime
+    // symbols and rebase private `.symtab` names across all parts in parallel.
+    pending_finalize := [X64ObjectTextFinalize]{}
+    next_strtab := strtab_size
     loop part in parts {
         rows := x64_object_text_part_take(part)
-        errors.extend(rows.errors)
         globals := [Int]{}
         loop symbol in rows.imports {
             id: x64_object_symbol(symbol_names, import_of, export_of, symbol)
@@ -1179,14 +1238,14 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
             found: import_of[id]
             globals.push(first_import + found)
         }
-        // The symbol is the high word of the entry's info (bytes 12..15).
-        loop (at_index, at) in rows.runtime_at {
-            symbol: globals[rows.runtime_local[at_index]]
-            loop shift in 0..<4 -> rows.relas[at + 12 + shift] = U8{(symbol >> (8 * shift)) & 255}
-        }
-        // The part's private function symbols, their names moved past the
-        // names before the part's.
-        x64_object_symbol_rebase(rows.symtab, strtab_size)
+        base: next_strtab
+        next_strtab += rows.strtab.len()
+        pending_finalize.push(X64ObjectTextFinalize{rows: rows.move(), globals: globals.move(), strtab_base: base})
+    }
+    pending_finalize.reverse()
+    finalized: x64_object_text_finalize_items(pending_finalize) ?? panic("the .text finalize threads failed")
+    loop rows in finalized.move() {
+        errors.extend(rows.errors)
         symtab_at: symtab_size
         symtab_size += rows.symtab.len()
         symtab.push(X64ObjectPiece{at: symtab_at, bytes: rows.symtab.move()})

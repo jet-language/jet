@@ -390,6 +390,38 @@ ir_opt_o0_bodies: fn(m: &IRModule, options: IROptOptions, lint: IRLintContext, p
     ir_opt_dump(m, ir_opt_dump_names(options), "after", report)
 }
 
+// Fast unverified O0 bodies pass: runs single-round inline Int facts only on
+// functions with loops (skipping loopless functions and the second SSA build),
+// fused with early Drops in one parallel sweep, and skips IR Lint.
+ir_opt_o0_fast: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads, report: &IROptReport) Never! {
+    facts: ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa")
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    total := 0
+    has_loop := false
+    loop f in m.functions {
+        total += 1 + f.op.len()
+        if !has_loop && f.op.contains(IROp.Loop) -> has_loop = true
+    }
+    workers: compiler_threads_admit(threads, m.functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 && (!facts || !has_loop) {
+        if !m.dropped_early {
+            loop id in 0..<m.functions.len() {
+                if m.functions[id].asm != None -> next
+                plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
+                if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
+            }
+            m.dropped_early = true
+        }
+        return
+    }
+    work: IROptBodyWork{facts: facts, facts_loops_only: true, versions: false, lint: false, drop: !m.dropped_early, licm: false, strength: false, strip_mine: false, serial: false, poll: poll, trap: trap, turn: turn, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
+    found := [IRLintFinding]{}
+    ir_opt_module_bodies(m, work, options, ir_lint_context_none(), "", threads, report, found)
+    m.dropped_early = true
+}
+
 // `work` over every body of `m` (ir_opt_bodies), reading the module's view
 // (ir_opt_view) and its names (an early Drop's cleanup routes).
 ir_opt_module_bodies: fn(m: &IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, threads: CompilerThreads, report: &IROptReport, found: &[IRLintFinding]) Never! {
@@ -414,6 +446,7 @@ ir_opt_module_bodies: fn(m: &IRModule, work: IROptBodyWork, options: IROptOption
 // calling thread.
 IROptBodyWork: struct {
     facts: Bool,
+    facts_loops_only: Bool{false},
     versions: Bool,
     lint: Bool,
     drop: Bool,
@@ -534,7 +567,7 @@ ir_opt_body_claimed: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWork
 // One body through `work` (IROptBodyWork).
 ir_opt_body_run: fn(view: IRModule, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, f: &IRFunction, report: &IROptReport, found: &[IRLintFinding]) Never! {
     if work.versions -> ir_opt_version_body(view, f, options, lint, report)
-    if work.facts -> _ := ir_opt_ssa_facts(view, f, options, lint, report)
+    if work.facts -> _ := ir_opt_ssa_facts(view, f, options, lint, report, work.facts_loops_only)
     if work.licm && ir_opt_licm_with(view, work.stop_keys, work.safe_routes, work.char_len_route, f) > 0 {
         if options.verify -> _ := ir_opt_lint(view, lint, f, "licm", report)
     }
@@ -1157,18 +1190,19 @@ ir_opt_ssa: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintC
 // points they dropped left the form stale, the facts of a fresh form. The
 // facts rewritten, -1 for an invalid form. Under verify, IR Lint (`lint`)
 // checks a copy of `f` taken out of SSA; `f` stays as it is.
-ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintContext, report: &IROptReport) -> Int Never! {
+ir_opt_ssa_facts: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint: IRLintContext, report: &IROptReport, loops_only: Bool{false}) -> Int Never! {
     if f.op.len() == 0 -> return 0
+    if loops_only && !f.op.contains(IROp.Loop) -> return 0
     ranges: ir_opt_enabled(options, "range") && ir_range_wanted(m, f)
     if !ranges && !options.verify && !options.stress -> return 0
     s := ir_ssa_build(f)
     if !ir_opt_ssa_valid(f, s, options, report) -> return -1
-    traps: if ranges -> ir_range_traps(m, f) else -> 0
+    traps: if ranges && !loops_only -> ir_range_traps(m, f) else -> 0
     facts := if ranges -> ir_opt_int_facts(m, f, s) else -> 0
     // The stop points the ranges dropped leave the form stale, and the values
     // they kept unbounded at a join bounded now: one more round on a fresh
-    // form.
-    if facts > 0 && ir_range_traps(m, f) < traps {
+    // form (skipped on fast O0).
+    if !loops_only && facts > 0 && ir_range_traps(m, f) < traps {
         s = ir_ssa_build(f)
         if !ir_opt_ssa_valid(f, s, options, report) -> return -1
         facts += ir_opt_int_facts(m, f, s)
@@ -1730,14 +1764,10 @@ ir_opt_compact_links: fn(f: &IRFunction) Never! {
     open := [I64]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
-        if op == .Block || op == .Loop {
-            open.push(I64{at})
-        } else if op == .If {
+        if op == .Block || op == .Loop -> open.push(I64{at}) else if op == .If {
             f.b[at] = -1
             open.push(I64{at})
-        } else if op == .Else {
-            f.b[Int{open[open.len() - 1]}] = at
-        } else if op == .End {
+        } else if op == .Else { f.b[Int{open[open.len() - 1]}] = at } else if op == .End {
             opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
             f.a[at] = opener
             if f.op[opener] == .If {
@@ -1775,14 +1805,10 @@ ir_opt_compact: fn(f: &IRFunction) Never! {
             f.c[kept] = f.c[at]
             f.code_line[kept] = f.code_line[at]
         }
-        if op == .Block || op == .Loop {
-            open.push(I64{kept})
-        } else if op == .If {
+        if op == .Block || op == .Loop -> open.push(I64{kept}) else if op == .If {
             f.b[kept] = -1
             open.push(I64{kept})
-        } else if op == .Else {
-            f.b[Int{open[open.len() - 1]}] = kept
-        } else if op == .End {
+        } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
             opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
             f.a[kept] = opener
             if f.op[opener] == .If {
@@ -1838,14 +1864,10 @@ ir_opt_compact_facts: fn(f: &IRFunction, facts: &OptFacts) Never! {
             f.c[kept] = f.c[at]
             f.code_line[kept] = f.code_line[at]
         }
-        if op == .Block || op == .Loop {
-            open.push(I64{kept})
-        } else if op == .If {
+        if op == .Block || op == .Loop -> open.push(I64{kept}) else if op == .If {
             f.b[kept] = -1
             open.push(I64{kept})
-        } else if op == .Else {
-            f.b[Int{open[open.len() - 1]}] = kept
-        } else if op == .End {
+        } else if op == .Else { f.b[Int{open[open.len() - 1]}] = kept } else if op == .End {
             opener: Int{open.pop() ?? panic("ir_opt_compact: End without an open construct")}
             f.a[kept] = opener
             if f.op[opener] == .If {
@@ -1921,14 +1943,22 @@ OptTarjan: struct {
 ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {
     count: calls.start.len() - 1
     t := OptTarjan{index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
+    t.index.try_reserve(count) ?? panic("reserve failed")
+    t.low.try_reserve(count) ?? panic("reserve failed")
+    t.on_stack.try_reserve(count) ?? panic("reserve failed")
+    t.recursive.try_reserve(count) ?? panic("reserve failed")
+    t.order.try_reserve(count) ?? panic("reserve failed")
+    t.stack.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count {
         t.index.push(-1)
         t.low.push(0)
         t.on_stack.push(false)
         t.recursive.push(false)
     }
+    work := [Int]{}
+    edge := [Int]{}
     loop node in 0..<count {
-        if t.index[node] < 0 -> ir_opt_tarjan_visit(t, calls, node)
+        if t.index[node] < 0 -> ir_opt_tarjan_visit(t, calls, node, work, edge)
     }
     loop node in 0..<count {
         loop k in calls.start[node]..<calls.start[node + 1] {
@@ -1943,9 +1973,11 @@ ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {
 
 // Iterative Tarjan visit from `root` over the edges `calls` (the compiler's
 // own call graphs are deep).
-ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
-    work := [Int]{root}
-    edge := [Int]{0}
+ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int, work: &[Int], edge: &[Int]) Never! {
+    work.clear()
+    edge.clear()
+    work.push(root)
+    edge.push(0)
     t.index[root] = t.next_index
     t.low[root] = t.next_index
     t.next_index += 1
@@ -1977,16 +2009,15 @@ ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
             if t.low[node] < t.low[caller] -> t.low[caller] = t.low[node]
         }
         if t.low[node] == t.index[node] {
-            component := [Int]{}
+            start: t.order.len()
             loop t.stack.len() > 0 {
                 member: t.stack.pop() ?? break
                 t.on_stack[member] = false
-                component.push(member)
+                t.order.push(member)
                 if member == node -> break
             }
-            loop member in component {
-                if component.len() > 1 -> t.recursive[member] = true
-                t.order.push(member)
+            if t.order.len() - start > 1 {
+                loop at in start..<t.order.len() -> t.recursive[t.order[at]] = true
             }
         }
     }

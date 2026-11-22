@@ -514,7 +514,7 @@ jet_driver_core_interface_fit: fn(reader: JetDriverCoreInterfaceReader, window: 
 // The fewest bytes of ready parses worth a compiler thread of their own in
 // jet_driver_core_ready_programs: the syntax codec decodes a ready parse at
 // about 20 MB a second, so each thread decodes for some milliseconds.
-JET_DRIVER_CORE_READY_BYTES_PER_THREAD: 65536
+JET_DRIVER_CORE_READY_BYTES_PER_THREAD: 16384
 
 // Where a ready parse a load reads sits in the interface file: `size`
 // bytes from byte `at`; a size of 0 when there is none to read.
@@ -564,7 +564,7 @@ jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window
         if place.size > 0 {
             if reader == .Val(file) {
                 if jet_driver_core_interface_fit(file, window, place.at, place.size) == .Val(from) {
-                    bytes.extend(window.bytes[from..<from + place.size])
+                    bytes = window.bytes[from..<from + place.size]
                     found = true
                 }
             }
@@ -1398,7 +1398,7 @@ jet_driver_core_side_order: fn(own: [Int], restored: [Bool], fresh: [Int]) -> [I
 // unreadable, or of a kept body that didn't come back
 // (jet_driver_core_restore_check). The interface is part of the compiler,
 // so either is a defect of the build.
-jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule]) -> JetDriverCoreRestore {
+jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetDriverCoreLazyModule], modules: &[JetDriverLoadedModule], window: &JetDriverCoreInterfaceWindow) -> JetDriverCoreRestore {
     done := JetDriverCoreRestore{bodies: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
     plans := [JetDriverCoreRestorePlan]{}
     places := [JetDriverCoreReadyPlace]{}
@@ -1430,9 +1430,9 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         plans.push(JetDriverCoreRestorePlan{row: at, read: read.move(), wanted: wanted.move(), wanted_ends: wanted_ends.move(), stripped: stripped.move()})
     }
     // The regions' ready parses in `places` order, popped in that order.
-    window := jet_driver_core_interface_window()
+    reads_before: window.reads
     parts := jet_driver_core_ready_programs(request.core_interface, window, places, request.compiler_threads)
-    done.fragment_reads = window.reads
+    done.fragment_reads = window.reads - reads_before
     parts.reverse()
     loop plan in plans {
         row: lazy[plan.row]
