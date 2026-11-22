@@ -13,6 +13,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [EntityTree](EntityTree.jet)
 - [EntityWorld](EntityWorld.jet) — Pools: `Pool<T>`/`Id<T>` — a generational arena.
 - [ExpiringSecret](ExpiringSecret.jet)
+- [LiveLinks](LiveLinks.jet) — Live links (`@T`): shared references with auto-deref reads/writes, value equality (`==`), identity comparison (`.same()`), and recursive optional links (`@Node?`).
 - [LocalCache](LocalCache.jet)
 - [Memoize](Memoize.jet) — Pure function-result memoization has one bounded default and one explicit unbounded spelling.
 - [MethodFootprint](MethodFootprint.jet) — Sema infers the record fields each method reads or changes through `self`; an expert may state them on the receiver with `&self.field` or the member spread…
