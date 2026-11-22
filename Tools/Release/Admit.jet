@@ -1239,7 +1239,7 @@ Census: struct {
 jetpack_census: fn(ctx: &Ctx, side: String, jet: String, identity: String, root: String) -[Env, Exec, FS, Time, Time.Wait]> Census Never! {
     worker: "release-{side}-{sys.pid()}"
     clear_scratch(worker)
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_KEEP_GOING", "1"), set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
     log: files.join(ctx.work, "logs/jetpack-{side}.log")
     result: run_logged(joined(STACK, [String]{jet.copy(), "Jetpack/Bootstrap/Check.jet"}), root, vars, log, 3600)
     scratch: bootstrap_scratch(worker)
