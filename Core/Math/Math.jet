@@ -13123,7 +13123,7 @@ __log10_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10(x), LOG10_F32) }
 
 __ln_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln_1p(x), LN1P_F32) }
 
-priv log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
+__log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
 
 __atan_pi_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan_pi(x), ATANPI_F32) }
 
@@ -13141,26 +13141,26 @@ __acos_f32: fn(x: Float) -> Float Never! { f32_listed(x, acos(x), ACOS_F32) }
 
 __atan_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan(x), ATAN_F32) }
 
-priv sinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, sinh(x), SINH_F32) }
+__sinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, sinh(x), SINH_F32) }
 
-priv asinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, asinh(x), ASINH_F32) }
+__asinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, asinh(x), ASINH_F32) }
 
-priv acosh_f32: fn(x: Float) -> Float Never! { f32_listed(x, acosh(x), ACOSH_F32) }
+__acosh_f32: fn(x: Float) -> Float Never! { f32_listed(x, acosh(x), ACOSH_F32) }
 
-priv erf_f32: fn(x: Float) -> Float Never! { f32_listed(x, erf(x), ERF_F32) }
+__erf_f32: fn(x: Float) -> Float Never! { f32_listed(x, erf(x), ERF_F32) }
 
-priv erfc_f32: fn(x: Float) -> Float Never! { f32_listed(x, erfc(x), ERFC_F32) }
+__erfc_f32: fn(x: Float) -> Float Never! { f32_listed(x, erfc(x), ERFC_F32) }
 
-priv gamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, gamma(x), GAMMA_F32) }
+__gamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, gamma(x), GAMMA_F32) }
 
-priv lgamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, lgamma(x), LGAMMA_F32) }
+__lgamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, lgamma(x), LGAMMA_F32) }
 
 // The F32 form of hypot, CORE-MATH hypotf.c on the widened binary32 a and b:
 // a Float that narrows to the correctly rounded binary32 result. Narrowing
 // hypot(a, b) itself could round twice when that lands on a binary32
 // midpoint, so a result within one binary64 step of a binary32 boundary is
 // recomputed with its error term and moved off the midpoint to its own side.
-priv hypot_f32: fn(a: Float, b: Float) -> Float Never! {
+__hypot_f32: fn(a: Float, b: Float) -> Float Never! {
     ax: fabs(a)
     bx: fabs(b)
     if !is_finite(ax) || !is_finite(bx) -> return hypot(a, b)
@@ -37394,9 +37394,9 @@ f32_sqrt: fn(x: Float) -> F32 Never! { f32_narrow(sqrt_odd(x)) }
 // The F32 form of fma and muladd (an all-F32 call): the exact a * b + c
 // rounded to odd, which then narrows correctly. Narrowing fma(a, b, c) would
 // round twice.
-priv fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+__fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
 
-priv muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+__muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
 
 // The F32 nearest x, ties to even: a NaN is the F32 NaN, and a magnitude
 // from 2^128 - 2^103 (the midpoint above the largest F32) is the infinity.
@@ -37529,14 +37529,14 @@ fabs: fn(n: Float) -> Float Never! { core.math.fabs(n) }
 
 // The F32 fabs and copysign (an all-F32 call): sign-bit operations on the
 // binary32 bits, which keep a signaling NaN and its payload.
-priv fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF) }
+__fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF) }
 
-priv copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
+__copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
     __from_bits_f32(__to_bits_f32(value) & 0x7FFF_FFFF | __to_bits_f32(sign_value) & 0x8000_0000)
 }
 
 // abs_float is fabs, at F32 width too.
-priv abs_float_f32: fn(n: F32) -> F32 Never! { fabs_f32(n) }
+__abs_float_f32: fn(n: F32) -> F32 Never! { __fabs_f32(n) }
 
 #Builtin.Role(.AbsI64) priv abs_i64: fn(n: I64) -> I64 Never! {
     zero: I64{0}
@@ -37577,12 +37577,12 @@ is_subnormal: fn(n: Float) -> Bool Never! {
 
 // The F32 forms (an all-F32 call): the widening of a binary32 subnormal is a
 // normal Float, so the bound is the binary32 one, 2^-126.
-priv is_normal_f32: fn(n: F32) -> Bool Never! {
+__is_normal_f32: fn(n: F32) -> Bool Never! {
     magnitude: fabs(Float.from_f32(n))
     magnitude >= 1.1754943508222875e-38 && magnitude < INFINITY
 }
 
-priv is_subnormal_f32: fn(n: F32) -> Bool Never! {
+__is_subnormal_f32: fn(n: F32) -> Bool Never! {
     magnitude: fabs(Float.from_f32(n))
     magnitude > 0.0 && magnitude < 1.1754943508222875e-38
 }
@@ -37630,17 +37630,17 @@ nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
 // The F32 forms of next_up, next_down and next_after (an all-F32 call): one
 // step of the binary32 bit pattern, on the exactly widened arguments, as
 // musl's nextafterf steps it.
-priv next_up_f32: fn(n: Float) -> Float Never! {
+__next_up_f32: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == INFINITY -> return n
-    next_after_f32(n, INFINITY)
+    __next_after_f32(n, INFINITY)
 }
 
-priv next_down_f32: fn(n: Float) -> Float Never! {
+__next_down_f32: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == -INFINITY -> return n
-    next_after_f32(n, -INFINITY)
+    __next_after_f32(n, -INFINITY)
 }
 
-priv next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
+__next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
     if is_nan(n) || is_nan(toward) -> return nan_pair(n, toward)
     if n == toward -> return toward
     // The smallest binary32 subnormal signed as `toward`, and from an
@@ -37654,7 +37654,7 @@ priv next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
     Float.from_f32(__from_bits_f32(if away -> bits + 1 else -> bits - 1))
 }
 
-priv nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { next_after_f32(n, toward) }
+__nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { __next_after_f32(n, toward) }
 
 significand: fn(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
@@ -37816,7 +37816,7 @@ frexp: fn(n: Float) -> {exp: Int, frac: Float} Never! {
 
 // modff.c from musl 1.2.5: modf's F32 form (an all-F32 call), clearing the
 // fraction bits of the binary32 word, so a NaN keeps its bits.
-priv modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
+__modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
     bits: __to_bits_f32(n)
     signed_zero: __from_bits_f32(bits & 0x8000_0000)
     e: ((bits >> 23) & 255) - 127
@@ -37834,12 +37834,12 @@ priv modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
 // frexpf.c from musl 1.2.5: frexp's F32 form (an all-F32 call) on the
 // binary32 word; a subnormal scales by 2^64 exactly first, and a zero, an
 // infinity or a NaN is its own frac, bits and all, with exp 0.
-priv frexp_f32: fn(n: F32) -> {exp: Int, frac: F32} Never! {
+__frexp_f32: fn(n: F32) -> {exp: Int, frac: F32} Never! {
     bits: __to_bits_f32(n)
     biased: (bits >> 23) & 255
     if biased == 0 {
         if bits & 0x7FFF_FFFF == 0 -> return {exp: 0, frac: n}
-        scaled: frexp_f32(n * F32{18446744073709551616.0})
+        scaled: __frexp_f32(n * F32{18446744073709551616.0})
         return {exp: scaled.exp - 64, frac: scaled.frac}
     }
     if biased == 255 -> return {exp: 0, frac: n}
@@ -38101,7 +38101,7 @@ rem_quo: fn(a: Float, b: Float) -> {rem: Float, quo: Int} Never! {
 
 // rem_quo of two F32s (an all-F32 call): the Float rem_quo of the exactly
 // widened operands, whose remainder an F32 holds exactly; a NaN stays NaN.
-priv rem_quo_f32: fn(a: F32, b: F32) -> {rem: F32, quo: Int} Never! {
+__rem_quo_f32: fn(a: F32, b: F32) -> {rem: F32, quo: Int} Never! {
     split: rem_quo(Float.from_f32(a), Float.from_f32(b))
     {rem: f32_narrow(split.rem), quo: split.quo}
 }
@@ -38541,14 +38541,14 @@ impl F32.ComplexScalar {
 
     cx_ge: fn(self, rhs: F32) -> Bool Never! { self >= rhs }
 
-    cx_fabs: fn(self) -> F32 Never! { fabs_f32(self) }
+    cx_fabs: fn(self) -> F32 Never! { __fabs_f32(self) }
 
-    cx_copysign: fn(self, sign: F32) -> F32 Never! { copysign_f32(self, sign) }
+    cx_copysign: fn(self, sign: F32) -> F32 Never! { __copysign_f32(self, sign) }
 
     cx_sqrt: fn(self) -> F32 Never! { f32_sqrt(Float.from_f32(self)) }
 
     cx_hypot: fn(self, other: F32) -> F32 Never! {
-        f32_narrow(hypot_f32(Float.from_f32(self), Float.from_f32(other)))
+        f32_narrow(__hypot_f32(Float.from_f32(self), Float.from_f32(other)))
     }
 
     cx_exp: fn(self) -> F32 Never! { f32_narrow(exp(Float.from_f32(self))) }
@@ -38561,7 +38561,7 @@ impl F32.ComplexScalar {
 
     cx_cos: fn(self) -> F32 Never! { f32_narrow(__cos_f32(Float.from_f32(self))) }
 
-    cx_sinh: fn(self) -> F32 Never! { f32_narrow(sinh_f32(Float.from_f32(self))) }
+    cx_sinh: fn(self) -> F32 Never! { f32_narrow(__sinh_f32(Float.from_f32(self))) }
 
     cx_cosh: fn(self) -> F32 Never! { f32_narrow(cosh(Float.from_f32(self))) }
 
@@ -38569,9 +38569,9 @@ impl F32.ComplexScalar {
         f32_narrow(__atan2_f32(Float.from_f32(self), Float.from_f32(x)))
     }
 
-    cx_asinh: fn(self) -> F32 Never! { f32_narrow(asinh_f32(Float.from_f32(self))) }
+    cx_asinh: fn(self) -> F32 Never! { f32_narrow(__asinh_f32(Float.from_f32(self))) }
 
-    cx_frexp: fn(self) -> {exp: Int, frac: F32} Never! { frexp_f32(self) }
+    cx_frexp: fn(self) -> {exp: Int, frac: F32} Never! { __frexp_f32(self) }
 
     cx_ldexp: fn(self, exponent: Int) -> F32 Never! { ldexp_f32(self, exponent) }
 
@@ -38866,13 +38866,13 @@ priv payload_bits: fn(payload: Float) -> Int? Never! {
 // The F32 forms (an all-F32 call) of the bit operations above, on the
 // binary32 bits themselves: widening would quiet a signaling NaN and move a
 // payload 29 bits up.
-priv is_signaling_f32: fn(n: F32) -> Bool Never! {
+__is_signaling_f32: fn(n: F32) -> Bool Never! {
     bits: __to_bits_f32(n) & 0x7FFF_FFFF
     bits > 0x7F80_0000 && bits < 0x7FC0_0000
 }
 
-priv canonicalize_f32: fn(n: F32) -> F32 Never! {
-    if is_signaling_f32(n) -> return __from_bits_f32(__to_bits_f32(n) | 0x40_0000)
+__canonicalize_f32: fn(n: F32) -> F32 Never! {
+    if __is_signaling_f32(n) -> return __from_bits_f32(__to_bits_f32(n) | 0x40_0000)
     n
 }
 
@@ -38885,25 +38885,25 @@ priv total_order_key_f32: fn(n: F32) -> Int Never! {
     bits
 }
 
-priv total_order_f32: fn(a: F32, b: F32) -> Bool Never! {
+__total_order_f32: fn(a: F32, b: F32) -> Bool Never! {
     total_order_key_f32(a) <= total_order_key_f32(b)
 }
 
-priv total_order_mag_f32: fn(a: F32, b: F32) -> Bool Never! {
+__total_order_mag_f32: fn(a: F32, b: F32) -> Bool Never! {
     __to_bits_f32(a) & 0x7FFF_FFFF <= __to_bits_f32(b) & 0x7FFF_FFFF
 }
 
-priv get_payload_f32: fn(n: F32) -> F32? Never! {
+__get_payload_f32: fn(n: F32) -> F32? Never! {
     if n == n -> return None
     Val(F32{Float{__to_bits_f32(n) & 0x3F_FFFF}})
 }
 
-priv set_payload_f32: fn(payload: F32) -> F32? Never! {
+__set_payload_f32: fn(payload: F32) -> F32? Never! {
     bits: payload_bits_f32(payload) ?? return None
     Val(__from_bits_f32(bits | 0x7FC0_0000))
 }
 
-priv set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
+__set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
     bits: payload_bits_f32(payload) ?? return None
     if bits == 0 -> return None
     Val(__from_bits_f32(bits | 0x7F80_0000))
@@ -38917,40 +38917,40 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
 }
 
 #Test("math F32 forms step and read the binary32 bits") {
-    assert_eq(next_up_f32(1.0), 1.0000001192092896)
-    assert_eq(next_down_f32(1.0), 0.9999999403953552)
-    assert_eq(next_after_f32(0.0, -1.0), -1.401298464324817e-45)
-    assert_eq(next_after_f32(-1.401298464324817e-45, 1.0), -0.0)
-    assert(sign_bit(next_after_f32(-1.401298464324817e-45, 1.0)))
-    assert_eq(next_after_f32(INFINITY, 0.0), 3.4028234663852886e38)
-    assert_eq(next_up_f32(3.4028234663852886e38), INFINITY)
-    signaling: set_payload_signaling_f32(F32{1.0}) ?? F32{0.0}
-    assert(is_signaling_f32(signaling))
+    assert_eq(__next_up_f32(1.0), 1.0000001192092896)
+    assert_eq(__next_down_f32(1.0), 0.9999999403953552)
+    assert_eq(__next_after_f32(0.0, -1.0), -1.401298464324817e-45)
+    assert_eq(__next_after_f32(-1.401298464324817e-45, 1.0), -0.0)
+    assert(sign_bit(__next_after_f32(-1.401298464324817e-45, 1.0)))
+    assert_eq(__next_after_f32(INFINITY, 0.0), 3.4028234663852886e38)
+    assert_eq(__next_up_f32(3.4028234663852886e38), INFINITY)
+    signaling: __set_payload_signaling_f32(F32{1.0}) ?? F32{0.0}
+    assert(__is_signaling_f32(signaling))
     assert_eq(__to_bits_f32(signaling), 0x7F80_0001)
-    assert_eq(__to_bits_f32(canonicalize_f32(signaling)), 0x7FC0_0001)
-    assert_eq(__to_bits_f32(fabs_f32(-signaling)), 0x7F80_0001)
-    assert_eq(__to_bits_f32(copysign_f32(signaling, F32{-1.0})), 0xFF80_0001)
-    assert_eq(get_payload_f32(signaling) ?? F32{0.0}, F32{1.0})
-    assert(get_payload_f32(F32{1.0}) == None)
-    assert(set_payload_f32(F32{4194304.0}) == None)
-    assert(set_payload_signaling_f32(F32{0.0}) == None)
-    assert(total_order_f32(F32{-0.0}, F32{0.0}))
-    assert(!total_order_f32(F32{0.0}, F32{-0.0}))
-    assert(total_order_mag_f32(F32{-1.0}, F32{2.0}))
-    assert(is_subnormal_f32(F32{1.0e-40}))
-    assert(!is_normal_f32(F32{1.0e-40}))
-    split: frexp_f32(F32{6.5})
+    assert_eq(__to_bits_f32(__canonicalize_f32(signaling)), 0x7FC0_0001)
+    assert_eq(__to_bits_f32(__fabs_f32(-signaling)), 0x7F80_0001)
+    assert_eq(__to_bits_f32(__copysign_f32(signaling, F32{-1.0})), 0xFF80_0001)
+    assert_eq(__get_payload_f32(signaling) ?? F32{0.0}, F32{1.0})
+    assert(__get_payload_f32(F32{1.0}) == None)
+    assert(__set_payload_f32(F32{4194304.0}) == None)
+    assert(__set_payload_signaling_f32(F32{0.0}) == None)
+    assert(__total_order_f32(F32{-0.0}, F32{0.0}))
+    assert(!__total_order_f32(F32{0.0}, F32{-0.0}))
+    assert(__total_order_mag_f32(F32{-1.0}, F32{2.0}))
+    assert(__is_subnormal_f32(F32{1.0e-40}))
+    assert(!__is_normal_f32(F32{1.0e-40}))
+    split: __frexp_f32(F32{6.5})
     assert_eq(split.exp, 3)
     assert_eq(split.frac, F32{0.8125})
-    tiny: frexp_f32(__from_bits_f32(1))
+    tiny: __frexp_f32(__from_bits_f32(1))
     assert_eq(tiny.exp, -148)
     assert_eq(tiny.frac, F32{0.5})
-    assert_eq(__to_bits_f32(frexp_f32(signaling).frac), 0x7F80_0001)
-    parts: modf_f32(F32{-6.5})
+    assert_eq(__to_bits_f32(__frexp_f32(signaling).frac), 0x7F80_0001)
+    parts: __modf_f32(F32{-6.5})
     assert_eq(parts.whole, F32{-6.0})
     assert_eq(parts.fract, F32{-0.5})
-    assert_eq(__to_bits_f32(modf_f32(F32{-0.25}).whole), 0x8000_0000)
-    assert_eq(__to_bits_f32(modf_f32(signaling).whole), 0x7F80_0001)
+    assert_eq(__to_bits_f32(__modf_f32(F32{-0.25}).whole), 0x8000_0000)
+    assert_eq(__to_bits_f32(__modf_f32(signaling).whole), 0x7F80_0001)
 }
 
 #Test("math scalar composition preserves IEEE boundaries") {
@@ -39132,7 +39132,7 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
     split: rem_quo(7.0, -2.0)
     assert_eq(split.rem, -1.0)
     assert_eq(split.quo, -4)
-    f32_split: rem_quo_f32(F32{6.5}, F32{-2.0})
+    f32_split: __rem_quo_f32(F32{6.5}, F32{-2.0})
     assert_eq(f32_split.rem, F32{0.5})
     assert_eq(f32_split.quo, -3)
     assert_eq(fdim(5.0, 3.0), 2.0)
@@ -39418,14 +39418,14 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert_eq(Float.from_f32(F32{__cos_f32(1.7269983397793917e20)}), 0.9690579771995544)
     assert_eq(Float.from_f32(F32{__acos_f32(0.00024868646869435906)}), 1.5705476999282837)
     assert_eq(Float.from_f32(F32{__atan_f32(0.06905200332403183)}), 0.06894256919622421)
-    assert_eq(Float.from_f32(F32{sinh_f32(0.0005589424981735647)}), 0.0005589424981735647)
-    assert_eq(Float.from_f32(F32{asinh_f32(-29018954.0)}), -17.87660789489746)
-    assert_eq(Float.from_f32(F32{acosh_f32(6.391891847492497e22)}), 53.20505142211914)
-    assert_eq(Float.from_f32(F32{erf_f32(0.00018398030078969896)}), 0.00020759954350069165)
-    assert_eq(Float.from_f32(F32{erfc_f32(-0.000014103805369813927)}), 1.0000158548355103)
-    assert_eq(Float.from_f32(F32{gamma_f32(6.1763376700649675e-15)}), 161908237795328.0)
-    assert_eq(Float.from_f32(F32{lgamma_f32(-1.5639554096225083e-9)}), 20.27604866027832)
-    assert_eq(Float.from_f32(F32{hypot_f32(1.7750831842422485, 0.0004600069660227746)}), 1.7750831842422485)
+    assert_eq(Float.from_f32(F32{__sinh_f32(0.0005589424981735647)}), 0.0005589424981735647)
+    assert_eq(Float.from_f32(F32{__asinh_f32(-29018954.0)}), -17.87660789489746)
+    assert_eq(Float.from_f32(F32{__acosh_f32(6.391891847492497e22)}), 53.20505142211914)
+    assert_eq(Float.from_f32(F32{__erf_f32(0.00018398030078969896)}), 0.00020759954350069165)
+    assert_eq(Float.from_f32(F32{__erfc_f32(-0.000014103805369813927)}), 1.0000158548355103)
+    assert_eq(Float.from_f32(F32{__gamma_f32(6.1763376700649675e-15)}), 161908237795328.0)
+    assert_eq(Float.from_f32(F32{__lgamma_f32(-1.5639554096225083e-9)}), 20.27604866027832)
+    assert_eq(Float.from_f32(F32{__hypot_f32(1.7750831842422485, 0.0004600069660227746)}), 1.7750831842422485)
     assert_eq(Float.from_f32(F32{pow_f32(1.6949651046854058e-13, 1.00834059715271)}), 1.3263079057333066e-13)
     assert_eq(Float.from_f32(F32{__atan2_f32(1.0, 1.0)}), 0.7853981852531433)
     assert_eq(__atan2_f32(-0.0, -2.0), -3.141592653589793)
@@ -45399,4 +45399,71 @@ priv complex_atan: fn(z: Complex) -> Complex Never! {
     assert_eq(one32.acosh().real, F32{0.0})
     assert_eq(zero32.atanh().imaginary, F32{0.0})
     assert_eq(Complex32{real: 2.0, imaginary: F32.INFINITY}.proj().real, F32.INFINITY)
+}
+
+#Test("Exposed F32 math entrypoints preserve F32 width without widening") {
+    keep_f32: fn(v: F32) -> F32 Never! { v }
+    exact_f32: fn(v: Float) -> F32 Never! {
+        F32.from_float(v) ?? panic("expected representable F32")
+    }
+    x32: F32{0.5}
+    y32: F32{1.5}
+    x: Float.from_f32(x32)
+    y: Float.from_f32(y32)
+    z: Float.from_f32(F32{2.0})
+    r_log1p: exact_f32(__log1p_f32(x))
+    r_sinh: exact_f32(__sinh_f32(x))
+    r_asinh: exact_f32(__asinh_f32(x))
+    r_acosh: exact_f32(__acosh_f32(y))
+    r_hypot: exact_f32(__hypot_f32(3.0, 4.0))
+    r_erf: exact_f32(__erf_f32(x))
+    r_erfc: exact_f32(__erfc_f32(x))
+    r_gamma: exact_f32(__gamma_f32(4.0))
+    r_lgamma: exact_f32(__lgamma_f32(1.0))
+    r_fma: exact_f32(__fma_f32(x, y, z))
+    r_muladd: exact_f32(__muladd_f32(x, y, z))
+    r_next_up: exact_f32(__next_up_f32(1.0))
+    r_next_down: exact_f32(__next_down_f32(1.0))
+    r_next_after: exact_f32(__next_after_f32(1.0, 2.0))
+    r_nextafter: exact_f32(__nextafter_f32(1.0, 2.0))
+    r_fabs: keep_f32(__fabs_f32(F32{-0.5}))
+    r_abs: keep_f32(__abs_float_f32(F32{-0.5}))
+    r_copysign: keep_f32(__copysign_f32(F32{2.0}, F32{-1.0}))
+    r_canon: keep_f32(__canonicalize_f32(x32))
+    assert_eq(r_log1p, exact_f32(__ln_1p_f32(x)))
+    assert(r_sinh > F32{0.52} && r_sinh < F32{0.53})
+    assert(r_asinh > F32{0.48} && r_asinh < F32{0.49})
+    assert(r_acosh > F32{0.96} && r_acosh < F32{0.97})
+    assert_eq(r_hypot, F32{5.0})
+    assert(r_erf > F32{0.52} && r_erf < F32{0.53})
+    assert(r_erfc > F32{0.47} && r_erfc < F32{0.48})
+    assert_eq(r_gamma, F32{6.0})
+    assert_eq(r_lgamma, F32{0.0})
+    assert_eq(r_fma, F32{2.75})
+    assert_eq(r_muladd, F32{2.75})
+    assert(r_next_up > F32{1.0})
+    assert(r_next_down < F32{1.0})
+    assert_eq(r_next_after, r_next_up)
+    assert_eq(r_nextafter, r_next_up)
+    assert_eq(r_fabs, F32{0.5})
+    assert_eq(r_abs, F32{0.5})
+    assert_eq(r_copysign, F32{-2.0})
+    assert_eq(r_canon, x32)
+    assert(__is_normal_f32(F32{1.0}))
+    assert(!__is_subnormal_f32(F32{1.0}))
+    assert(!__is_signaling_f32(F32{1.0}))
+    assert(__total_order_f32(F32{1.0}, F32{2.0}))
+    assert(!__total_order_mag_f32(F32{-2.0}, F32{1.0}))
+    qnan: keep_f32(__set_payload_f32(F32{1.0}) ?? panic("set_payload_f32"))
+    assert_eq(keep_f32(__get_payload_f32(qnan) ?? panic("get_payload_f32")), F32{1.0})
+    snan: keep_f32(__set_payload_signaling_f32(F32{1.0}) ?? panic("set_payload_signaling_f32"))
+    assert(__is_signaling_f32(snan))
+    rq: __rem_quo_f32(F32{5.0}, F32{2.0})
+    assert_eq(keep_f32(rq.rem), F32{1.0})
+    fr: __frexp_f32(F32{8.0})
+    assert_eq(fr.exp, 4)
+    assert_eq(keep_f32(fr.frac), F32{0.5})
+    md: __modf_f32(F32{2.5})
+    assert_eq(keep_f32(md.whole), F32{2.0})
+    assert_eq(keep_f32(md.fract), F32{0.5})
 }

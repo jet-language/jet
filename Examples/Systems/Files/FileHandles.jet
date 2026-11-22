@@ -1,0 +1,47 @@
+package: {
+    name: "file_handles"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// Opened FileWriter and FileReader handles operate directly on their file
+// descriptors: write, write_all, flush, fsync, set_mode, stat, read, chunks,
+// and seek.
+use files: core.files
+
+text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("utf8") }
+
+write_sample: fn(path: String) -[FS, FS.Write, IO, Mem.Alloc]> {
+    writer := files.create(path) ?? panic("create")
+    writer.write("abc") ?? panic("write")
+    writer.write_all("defghij".bytes()) ?? panic("write_all")
+    writer.flush() ?? panic("flush")
+    writer.fsync() ?? panic("fsync")
+    writer.set_mode(0o640) ?? panic("set_mode")
+    info: writer.stat() ?? panic("writer.stat")
+    print("writer: size={info.size} mode640={info.mode % 512 == 0o640}")
+}
+
+read_sample: fn(path: String) -[FS, FS.Read, IO, Mem.Alloc]> {
+    reader := files.open(path) ?? panic("open")
+    info: reader.stat() ?? panic("reader.stat")
+    head: reader.read(4) ?? panic("read")
+    reader.seek(2) ?? panic("seek")
+    parts: reader.chunks(3) ?? panic("chunks")
+    joined := ""
+    loop i in 0..<parts.len() {
+        if i > 0 -> joined = "{joined}|"
+        joined = "{joined}{text(parts[i])}"
+    }
+    print("reader: size={info.size} head={text(head)} chunks={parts.len()} parts={joined}")
+    if reader.chunks(0) == {
+        .Ok(_) -> { print("zero-chunk: accepted") }
+        .Err(error) -> print("zero-chunk: {error == .InvalidInput(_)}")
+    }
+}
+
+run: fn() {
+    scratch: files.temp_dir("file-handles") ?? panic("temp dir")
+    path: files.join(scratch.path, "data.txt")
+    write_sample(path)
+    read_sample(path)
+}

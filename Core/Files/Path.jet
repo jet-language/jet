@@ -26,6 +26,12 @@ use {
 
 Path: struct {
     raw: String,
+
+    /// Lexical component containment: compares normalized lexical components
+    /// across separators, `.`, `..`, partial names, and roots.
+    /// This is pure lexical comparison and is not symlink truth; canonicalize
+    /// both paths on the filesystem when symlink identity matters.
+    is_within: fn(self, base: Path) -> Bool Never! { is_within(self, base) }
 }
 
 of: fn(raw: String) -> Path Never! { Path{raw: raw.copy()} }
@@ -228,12 +234,33 @@ relative_to: fn(path: Path, start: Path) -> Path Never! {
     Path{raw: files.relative(path.raw, start.raw)}
 }
 
-is_relative_to: fn(path: Path, start: Path) -> Bool Never! {
-    target: files.collapse(path.raw)
-    base: files.collapse(start.raw)
-    common: files.commonpath([String]{target.copy(), base.copy()})
-    if common != base -> return false
-    if base == "." && starts_dotdot(target) -> return false
+is_relative_to: fn(path: Path, start: Path) -> Bool Never! { is_within(path, start) }
+
+priv lexical_parts: fn(path: Path) -> [String] Never! {
+    posix: as_posix(path)
+    collapsed: files.collapse(posix)
+    if collapsed == "." || collapsed == "" -> return [String]{}
+    p: Path{raw: collapsed}
+    parts(p)
+}
+
+/// Lexical component containment: compares normalized lexical components across
+/// separators (`/` and `\`), `.`, `..`, partial names (`/a/bc` is not within
+/// `/a/b`), and roots (`/`).
+/// This is pure lexical comparison and is not symlink truth; canonicalize both
+/// paths on the filesystem when symlink identity matters.
+is_within: fn(path: Path, base: Path) -> Bool Never! {
+    path_abs: is_absolute(Path{raw: as_posix(path)})
+    base_abs: is_absolute(Path{raw: as_posix(base)})
+    if path_abs != base_abs -> return false
+    p_parts: lexical_parts(path)
+    b_parts: lexical_parts(base)
+    // A relative path that escapes above the base (`..`) is never within `.` or a relative root.
+    if !path_abs && b_parts.len() == 0 -> return p_parts.len() == 0 || p_parts[0] != ".."
+    if p_parts.len() < b_parts.len() -> return false
+    loop i in 0..<b_parts.len() {
+        if p_parts[i] != b_parts[i] -> return false
+    }
     true
 }
 
@@ -368,4 +395,31 @@ starts_dotdot: fn(text: String) -> Bool {
     if raw.len() < 2 -> return false
     if raw[0] != (U8{46}) || raw[1] != (U8{46}) -> return false
     raw.len() == 2 || raw[2] == (U8{47})
+}
+
+#Test("Path.is_within compares normalized lexical components and is not symlink truth") {
+    // Separator normalization (doubled, trailing, mixed backslash/slash)
+    assert(of("/srv/root//sub/file").is_within(of("/srv/root/")))
+    assert(of("/srv/root/sub/").is_within(of("/srv/root")))
+    assert(of("srv\\root\\sub\\file").is_within(of("srv/root")))
+    // Dot and dot-dot lexical collapsing
+    assert(of("/srv/root/a/./b/../file").is_within(of("/srv/root")))
+    assert(!of("/srv/root/../outside").is_within(of("/srv/root")))
+    assert(of("a/b/../c").is_within(of(".")))
+    assert(!of("../escape").is_within(of(".")))
+    assert(of(".").is_within(of(".")))
+    // Partial prefix names must not match
+    assert(!of("/srv/rooted/file").is_within(of("/srv/root")))
+    assert(!of("/a/bc").is_within(of("/a/b")))
+    assert(!of("foo_bar/baz").is_within(of("foo")))
+    // Root and absolute/relative boundaries
+    assert(of("/").is_within(of("/")))
+    assert(of("/a/b").is_within(of("/")))
+    assert(of("/a/..").is_within(of("/")))
+    assert(!of("a/b").is_within(of("/")))
+    assert(!of("/a/b").is_within(of("a")))
+    // Same path is within itself
+    assert(of("/srv/root").is_within(of("/srv/root")))
+    // Pure lexical check: does not consult the filesystem or follow symlinks.
+    assert(of("/nonexistent/link/target").is_within(of("/nonexistent/link")))
 }
