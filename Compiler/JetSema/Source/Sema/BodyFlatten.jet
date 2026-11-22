@@ -144,11 +144,44 @@ body_flat_function: fn(value: TFunc, arena: BodyTree) -> FnBody Never! {
 
 // Sorts the rows by node id. A node a desugaring placed twice keeps one row.
 body_tree_finish: fn(tree: &BodyTree) Never! {
-    tree.nodes.sort_by(fn(left: BodyNode, right: BodyNode) { left.id <=> right.id })
-    tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
+    count: tree.nodes.len()
+    if count <= 1 -> return
+    nodes_sorted := true
+    has_dup := false
+    loop index in 1..<count {
+        prev: tree.nodes[index - 1].id
+        cur: tree.nodes[index].id
+        if cur < prev {
+            nodes_sorted = false
+            break
+        }
+        if cur == prev -> has_dup = true
+    }
+    if nodes_sorted {
+        types_sorted := true
+        loop index in 1..<count {
+            if tree.expr_types[index].id < tree.expr_types[index - 1].id {
+                types_sorted = false
+                break
+            }
+        }
+        if !types_sorted {
+            tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
+        }
+    } else {
+        tree.nodes.sort_by(fn(left: BodyNode, right: BodyNode) { left.id <=> right.id })
+        tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
+        loop index in 1..<count {
+            if tree.nodes[index].id == tree.nodes[index - 1].id {
+                has_dup = true
+                break
+            }
+        }
+    }
+    if !has_dup -> return
     nodes := [BodyNode]{}
     types := [TExprType]{}
-    loop index in 0..<tree.nodes.len() {
+    loop index in 0..<count {
         if index > 0 && tree.nodes[index].id == tree.nodes[index - 1].id -> next
         nodes.push(tree.nodes[index])
         types.push(tree.expr_types[index])

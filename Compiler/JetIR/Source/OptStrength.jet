@@ -140,8 +140,8 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             if loop_writes[s] != 1 || dropped[s] -> next
             st: loop_write_at[s]
             if st <= loop_at || !top_level[st - loop_at] -> next
-            ty: m.types[f.slot_type[s]]
-            if ty.kind != .Word || ty.bits != 64 -> next
+            s_row: f.slot_type[s]
+            if m.types[s_row].kind != .Word || m.types[s_row].bits != 64 -> next
             op: f.op[st]
             if (op != .Add && op != .Sub) || f.c[st] != IR_OVERFLOW_WRAP -> next
             if f.dst[st] != s -> next
@@ -166,8 +166,8 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             if f.op[mul_at] != .Mul || f.c[mul_at] != IR_OVERFLOW_WRAP -> next
             scaled: f.dst[mul_at]
             if scaled < f.param_count || writes[scaled] != 1 || dropped[scaled] -> next
-            scaled_ty: m.types[f.slot_type[scaled]]
-            if scaled_ty.kind != .Word || scaled_ty.bits != 64 -> next
+            scaled_row: f.slot_type[scaled]
+            if m.types[scaled_row].kind != .Word || m.types[scaled_row].bits != 64 -> next
 
             idx := -1
             stride := 0
@@ -213,10 +213,10 @@ ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             use_base := -1
             if add_at >= 0 {
                 addr: f.dst[add_at]
-                addr_ty: m.types[f.slot_type[addr]]
-                if addr >= f.param_count && writes[addr] == 1 && !dropped[addr] && addr_ty.kind == .Word && addr_ty.bits == 64 && replace_slot[addr] < 0 {
+                addr_row: f.slot_type[addr]
+                if addr >= f.param_count && writes[addr] == 1 && !dropped[addr] && m.types[addr_row].kind == .Word && m.types[addr_row].bits == 64 && replace_slot[addr] < 0 {
                     target_old = addr
-                    target_ty = f.slot_type[addr]
+                    target_ty = addr_row
                     use_base = base
                 } else {
                     add_at = -1

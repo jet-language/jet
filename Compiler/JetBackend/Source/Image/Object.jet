@@ -484,17 +484,18 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     provider_hooks: reads.value.provider_hooks
     own: function_symbols.len() > 0
     loop index in start..<end {
-        function: reads.value.functions[index]
         offset: reads.value.offsets[index]
-        code := codes.pop() ?? panic("a .text thread lost the code of {function.name}")
-        loop reloc in function.relocs {
-            at: offset + reloc.at
-            if reloc.target == {
+        code := codes.pop() ?? panic("a .text thread lost the code of {reads.value.functions[index].name}")
+        reloc_count: reads.value.functions[index].relocs.len()
+        loop r in 0..<reloc_count {
+            reloc_at: reads.value.functions[index].relocs[r].at
+            at: offset + reloc_at
+            if reads.value.functions[index].relocs[r].target == {
                 .Function(id) -> {
                     row: if id.value >= -1 && id.value + 1 < function_rows.len() -> function_rows[id.value + 1] else -> -1
                     if {
                         row < 0 -> {
-                            errors.push("{function.name}: call to function {id.value}, which is not in the object")
+                            errors.push("{reads.value.functions[index].name}: call to function {id.value}, which is not in the object")
                         }
                         own && provider_hooks[id.value + 1] >= 0 -> {
                             x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, RUNTIME_PROVIDER_HOOKS[provider_hooks[id.value + 1]], ELF64_R_X86_64_PLT32)
@@ -502,7 +503,7 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                         own -> {
                             x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
                         }
-                        else -> x64_patch_rel32(code, reloc.at, reads.value.offsets[row] - offset)
+                        else -> x64_patch_rel32(code, reloc_at, reads.value.offsets[row] - offset)
                     }
                 }
                 .Runtime(symbol) -> {
@@ -513,21 +514,21 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                 }
                 .Data(id) -> {
                     if id.value < 0 || id.value >= data_offsets.len() {
-                        errors.push("{function.name}: data {id.value} is not in the module")
+                        errors.push("{reads.value.functions[index].name}: data {id.value} is not in the module")
                     } else {
                         x64_object_rela_put(relas, at, data_symbols[id.value], ELF64_R_X86_64_PC32, data_offsets[id.value] - 4)
                     }
                 }
             }
         }
-        if !exported[function.id.value + 1] {
-            name_at: if function.name == "" -> 0 else -> 1 + elf64_string(strtab, function.name)
+        if !exported[reads.value.functions[index].id.value + 1] {
+            name_at: if reads.value.functions[index].name == "" -> 0 else -> 1 + elf64_string(strtab, reads.value.functions[index].name)
             x64_object_symbol_put(symtab, xindex, extended, name_at, 2, x64_object_function_section(own, index), offset, code.len())
         }
         text.push(X64ObjectPiece{at: offset, bytes: code})
         if own {
             rela_ends.push(relas.len())
-            aligns.push(function.align)
+            aligns.push(reads.value.functions[index].align)
         }
     }
     permit.value.outputs.push(X64ObjectTextRows{text: text.move(), relas: relas.move(), rela_ends: rela_ends.move(), aligns: aligns.move(), runtime_at: runtime_at.move(), runtime_local: runtime_local.move(), imports: imports.move(), symtab: symtab.move(), strtab: strtab.move(), xindex: xindex.move(), errors: errors.move()})
@@ -997,17 +998,17 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         loop _ in program.data -> placed.push(false)
         order: x64_object_data_order(program.data, functions, data_rows, placed)
         loop index in order {
-            object: program.data[index]
-            if x64_object_read_only(object) {
-                elf64_pad(rodata, object.align)
-                if object.align > rodata_align -> rodata_align = object.align
+            align: program.data[index].align
+            if x64_object_read_only(program.data[index]) {
+                elf64_pad(rodata, align)
+                if align > rodata_align -> rodata_align = align
                 data_offsets[index] = rodata.len()
-                rodata.extend(object.bytes)
+                rodata.extend(program.data[index].bytes)
             } else {
-                elf64_pad(data, object.align)
-                if object.align > data_align -> data_align = object.align
+                elf64_pad(data, align)
+                if align > data_align -> data_align = align
                 data_offsets[index] = data.len()
-                data.extend(object.bytes)
+                data.extend(program.data[index].bytes)
             }
         }
     }

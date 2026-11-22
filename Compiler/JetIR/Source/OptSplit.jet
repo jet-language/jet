@@ -168,11 +168,12 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
 // a general register, and no constant or frame address (one write by a
 // Const, a StackAddress or an Offset of a temp).
 ir_opt_splittable: fn(m: IRModule, f: IRFunction, slot: Int, writes: Int, last: Int) -> Bool Never! {
-    row: m.types[f.slot_type[slot]]
-    if row.kind != .Bool && row.kind != .Int && row.kind != .Word && row.kind != .Pointer {
+    type_row: f.slot_type[slot]
+    kind: m.types[type_row].kind
+    if kind != .Bool && kind != .Int && kind != .Word && kind != .Pointer {
         return false
     }
-    if ir_x64_class(ir_x64_shape(row)) != .General -> return false
+    if ir_x64_class(ir_x64_shape(m.types[type_row])) != .General -> return false
     if writes != 1 || f.slot_kind[slot] != .Temp -> return true
     op: f.op[last]
     op != .Const && op != .StackAddress && op != .Offset

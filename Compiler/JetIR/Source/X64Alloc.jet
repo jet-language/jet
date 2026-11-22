@@ -250,11 +250,12 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
         .Nop | .Const | .ConstText | .ConstBigInt | .Drop | .Close | .Rem | .FloorDiv | .Mod | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
     if !reads_slot || f.a[at] < 0 -> return false
-    row: m.types[f.slot_type[f.a[at]]]
-    if op == .Copy || op == .Move {
-        return op == .Move || row.drop == "" || row.kind == .Aggregate || ir_clone_shares(row.clone)
+    if op == .Move -> return true
+    type_row: f.slot_type[f.a[at]]
+    kind: m.types[type_row].kind
+    if op == .Copy {
+        return m.types[type_row].drop == "" || kind == .Aggregate || ir_clone_shares(m.types[type_row].clone)
     }
-    kind: row.kind
     wrap: f.c[at] == IR_OVERFLOW_WRAP
     float: kind == .Float || kind == .Float32
     word: kind == .Word || kind == .Bool || kind == .Char || kind == .Pointer || (kind == .Int && wrap)
@@ -267,7 +268,7 @@ ir_x64_quiet: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: 
             if kind != .Word && !(kind == .Int && wrap) -> return false
             if wrap -> return true
             count: f.b[at]
-            bits: if kind == .Word -> row.bits else -> 64
+            bits: if kind == .Word -> m.types[type_row].bits else -> 64
             count >= 0 && consts[count] && values[count] >= 0 && values[count] < bits
         }
         .Neg -> float || (kind == .Word && wrap)

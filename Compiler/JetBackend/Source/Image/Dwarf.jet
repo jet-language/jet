@@ -710,8 +710,7 @@ dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
 // memory at fbreg(offset); direct, the computed address (DW_OP_stack_value).
 // A Constant is its value (DW_OP_consts), an EntryValue the value its
 // register had at the function's entry (DW_OP_entry_value).
-dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
-    expr := [U8]{}
+dwarf_location_into: fn(expr: &[U8], location: X64DebugLocation, indirect: Bool) Never! {
     if location == {
         .Register(reg) -> {
             // DW_OP_reg0 + n / DW_OP_breg0 + n name registers below 32;
@@ -750,13 +749,26 @@ dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
             if !indirect -> dwarf_u8(expr, 0x9f)
         }
         .EntryValue(reg) -> {
-            entered: dwarf_location(X64DebugLocation.Register{reg: reg}, false)
+            number: x64_dwarf_register(reg)
             dwarf_u8(expr, 0xa3)
-            dwarf_uleb(expr, entered.len())
-            expr.extend(entered)
+            if number < 32 {
+                dwarf_u8(expr, 1)
+                dwarf_u8(expr, 0x50 + number)
+            } else {
+                start: expr.len()
+                dwarf_u8(expr, 0)
+                dwarf_u8(expr, 0x90)
+                dwarf_uleb(expr, number)
+                expr[start] = U8{expr.len() - start - 1}
+            }
             if !indirect -> dwarf_u8(expr, 0x9f)
         }
     }
+}
+
+dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
+    expr := [U8]{}
+    dwarf_location_into(expr, location, indirect)
     expr
 }
 
@@ -1204,9 +1216,10 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], list
             dwarf_u8(lists.bytes, 0x04)
             dwarf_uleb(lists.bytes, range.start)
             dwarf_uleb(lists.bytes, range.end)
-            expr: dwarf_location(range.location, row.indirect)
-            dwarf_uleb(lists.bytes, expr.len())
-            lists.bytes.extend(expr)
+            len_at: lists.bytes.len()
+            dwarf_u8(lists.bytes, 0)
+            dwarf_location_into(lists.bytes, range.location, row.indirect)
+            lists.bytes[len_at] = U8{lists.bytes.len() - len_at - 1}
         }
         dwarf_u8(lists.bytes, 0)
     }
@@ -1289,19 +1302,28 @@ dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64Allo
 // (DW_AT_call_value), where the caller keeps it (dwarf_location of an
 // indirect place: the address it computes is the value).
 dwarf_info_call_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64CallSite], offset: Int, symbol: Int) Never! {
-    loop site in sites {
+    loop i in 0..<sites.len() {
         dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENTS)
-        dwarf_address(info, relas, symbol, offset + site.at)
-        dwarf_uleb(info, site.line)
-        dwarf_uleb(info, site.column)
-        loop argument in site.arguments {
+        dwarf_address(info, relas, symbol, offset + sites[i].at)
+        dwarf_uleb(info, sites[i].line)
+        dwarf_uleb(info, sites[i].column)
+        loop j in 0..<sites[i].arguments.len() {
             dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENT)
-            register: dwarf_location(X64DebugLocation.Register{reg: argument.reg}, false)
-            dwarf_uleb(info, register.len())
-            info.extend(register)
-            value: dwarf_location(argument.value, true)
-            dwarf_uleb(info, value.len())
-            info.extend(value)
+            number: x64_dwarf_register(sites[i].arguments[j].reg)
+            if number < 32 {
+                dwarf_u8(info, 1)
+                dwarf_u8(info, 0x50 + number)
+            } else {
+                reg_len_at: info.len()
+                dwarf_u8(info, 0)
+                dwarf_u8(info, 0x90)
+                dwarf_uleb(info, number)
+                info[reg_len_at] = U8{info.len() - reg_len_at - 1}
+            }
+            val_len_at: info.len()
+            dwarf_u8(info, 0)
+            dwarf_location_into(info, sites[i].arguments[j].value, true)
+            info[val_len_at] = U8{info.len() - val_len_at - 1}
         }
         dwarf_uleb(info, 0)
     }

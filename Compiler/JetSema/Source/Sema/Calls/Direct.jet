@@ -1908,23 +1908,22 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         diagnostics.push(sema_error("E0644", call.name_span, "`{target.symbol.name}` makes a point, which is declared only as a module binding's value", "a point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs", "declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`"))
         return None
     }
-    candidate := target
-    params := sema_call_params_from_type(candidate.signature) ?? {
-        diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
+    params := sema_call_params_from_type(target.signature) ?? {
+        diagnostics.push(sema_call_not_callable(call.name, target.signature, call.name_span))
         return None
     }
     args := call.args
     root_mark: diagnostics.len()
-    binding := sema_call_bind_direct(call.name, candidate.signature, args, call.name_span, diagnostics) ?? {
-        sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, scopes, context, diagnostics)
+    binding := sema_call_bind_direct(call.name, target.signature, args, call.name_span, diagnostics) ?? {
+        sema_call_direct_rejected_propagation(target, call, root_mark, expected, environment, program, scopes, context, diagnostics)
         return None
     }
-    if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
+    if target.generic_params.len() > 0 && target.generic_substitutions.len() != target.generic_params.len() {
         source_args := call.args
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, program, scopes, state, tail_store, context)
-        sema_call_lambda_failure_facts(inferred_facts, candidate.generic_params, params, binding, source_args, environment, program, scopes, state, tail_store, context)
-        if sema_call_http_source_json_target(candidate, environment, program) {
-            loop parameter in candidate.generic_params {
+        sema_call_lambda_failure_facts(inferred_facts, target.generic_params, params, binding, source_args, environment, program, scopes, state, tail_store, context)
+        if sema_call_http_source_json_target(target, environment, program) {
+            loop parameter in target.generic_params {
                 loop bound in parameter.bounds {
                     if bound != "Encode" -> next
                     loop index in 0..<inferred_facts.parameter_types.len() {
@@ -1939,14 +1938,14 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
                 }
             }
         }
-        if !sema_call_variadic_slot_bounds_met(candidate, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) {
+        if !sema_call_variadic_slot_bounds_met(target, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) {
             return None
         }
-        if !sema_call_numeric_slot_arguments_met(candidate, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) {
+        if !sema_call_numeric_slot_arguments_met(target, call.name, params, binding, source_args, environment, program, scopes, state, tail_store, context, diagnostics) {
             return None
         }
         inference_diagnostics := [Diagnostic]{}
-        inferred: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, scopes, call.name_span, inference_diagnostics) ?? {
+        inferred: sema_call_infer_direct_target_from_types(target, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, scopes, call.name_span, inference_diagnostics) ?? {
             // An argument still waiting on a compile-time value has no type
             // yet. Checking it records the wait, so the call is checked again
             // once the value lands, not reported as uninferrable.
@@ -1962,23 +1961,27 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         }
         loop diagnostic in inference_diagnostics -> diagnostics.push(diagnostic)
         sema_call_lambda_return_conflicts(inferred, inferred_facts.lambda_returns, params, binding, call.name_span, diagnostics)
-        candidate = inferred
-        params = sema_call_params_from_type(candidate.signature) ?? {
-            diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
+        inferred_params := sema_call_params_from_type(inferred.signature) ?? {
+            diagnostics.push(sema_call_not_callable(call.name, inferred.signature, call.name_span))
             return None
         }
-        args = call.args
-        binding = sema_call_bind_direct(call.name, candidate.signature, args, call.name_span, diagnostics) ?? return None
+        inferred_args := call.args
+        inferred_binding := sema_call_bind_direct(call.name, inferred.signature, inferred_args, call.name_span, diagnostics) ?? return None
+        return sema_call_direct_checked_resolved(state, inferred, inferred_params, inferred_args, inferred_binding.move(), call, defaults, expected, root_mark, environment, program, scopes, tail_store, context, diagnostics)
     }
+    sema_call_direct_checked_resolved(state, target, params, args, binding.move(), call, defaults, expected, root_mark, environment, program, scopes, tail_store, context, diagnostics)
+}
+
+sema_call_direct_checked_resolved: fn(state: &SemaOwnershipState, candidate: SemaCallDirectTarget, params: [SemaCallParam], args: &[CallArg], binding_in: &&SemaCallBinding, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, root_mark: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+    binding := binding_in.move()
     if !sema_call_direct_target_generic_ready(candidate, diagnostics, call.name_span) -> return None
     // The settled type arguments decide what the callee's crossings carry
     // across threads (Ownership/GenericCrossings.jet).
     if candidate.generic_substitutions.len() > 0 {
         sema_generic_call_note(sema_symbol_key(program, context, candidate.symbol.id), call.name, candidate.generic_substitutions, call.name_span, environment, program, context)
     }
-    resolved_binding := binding
-    resolved_defaults := defaults
     if binding.default_refs.len() > 0 {
+        resolved_defaults := defaults
         if resolved_defaults.len() == 0 {
             if program.registration_graph == {
                 .Val(graph) -> {
@@ -1998,17 +2001,17 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
             }
         }
         resolved: sema_call_materialize_defaults(params, binding, args, resolved_defaults, call.name_span, diagnostics) ?? return None
-        resolved_binding = resolved
+        binding = resolved
     }
     abi: sema_call_direct_target_abi(candidate, environment, program)
-    {lowered, pins} := sema_call_check_bound_arguments_owned(state, call.name, params, abi, true, resolved_binding, args, environment, program, scopes, tail_store, context, call.name_span, diagnostics) ?? {
+    {lowered, pins} := sema_call_check_bound_arguments_owned(state, call.name, params, abi, true, binding, args, environment, program, scopes, tail_store, context, call.name_span, diagnostics) ?? {
         sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, scopes, context, diagnostics)
         return None
     }
     sema_call_lint_shared_loop_arguments(call.args, environment, scopes, diagnostics)
     callee_facts: sema_contract_function_facts(environment, program, candidate.symbol.id)
     if callee_facts == .Val(facts) {
-        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, call.args, scopes, state, diagnostics) {
+        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, binding.slots, call.args, scopes, state, diagnostics) {
             return None
         }
     }
@@ -2060,9 +2063,9 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
     }
     value: sema_call_with_binder_pins(pins, contracted, call.name_span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return None
-    facts: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
-    return_view_facts: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, state, call.name_span, diagnostics)
-    Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+    facts: sema_call_facts(candidate.signature, candidate.type_args, binding) ?? return None
+    return_view_facts: sema_call_return_view_facts(candidate.signature, None, args, binding, scopes, state, call.name_span, diagnostics)
+    Val(SemaCallChecked{value: checked, binding: binding.move(), facts: facts, return_view_facts: return_view_facts})
 }
 
 // A direct call rejected at its arguments after its callee resolved: the

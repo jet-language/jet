@@ -260,9 +260,12 @@ IRX64Emitter: struct {
     open: [Int],
     heads: [Int],
     falses: [Int],
-    // rel32 fields that jump to the End of opener `end_targets[k]`.
+    // Per open construct: FIFO linked list of rel32 fields jumping to its End.
+    end_head: [Int],
+    end_tail: [Int],
     end_sites: [Int],
-    end_targets: [Int],
+    end_next: [Int],
+    end_pending: Int,
     // rel32 fields of Returns that jump to the epilogue (a stop edge's: to
     // the stop exit).
     returns: [Int],
@@ -1990,7 +1993,13 @@ ir_x64_zone_stubs: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         e.open = stub.open
         e.heads = stub.heads
         e.falses = [Int]{}
-        loop _ in 0..<e.open.len() -> e.falses.push(-1)
+        e.end_head = [Int]{}
+        e.end_tail = [Int]{}
+        loop _ in 0..<e.open.len() {
+            e.falses.push(-1)
+            e.end_head.push(-1)
+            e.end_tail.push(-1)
+        }
         e.fused = -1
         e.routed = -1
         e.sunk_site = stub.site
@@ -4008,8 +4017,18 @@ ir_x64_branch: fn(e: &IRX64Emitter, f: IRFunction, at: Int, depth: Int, conditio
     site: if conditional -> x64_jcc_rel32(e.code, cond) else -> x64_jmp_rel32(e.code)
     if e.heads[row] >= 0 -> return ir_x64_patch(e, site, e.heads[row])
     if e.end_of[e.open[row]] >= 0 -> return ir_x64_patch(e, site, e.end_of[e.open[row]])
+    ir_x64_push_end_site(e, row, site)
+}
+
+// Appends `site` to the FIFO list of rel32 jumps targeting open construct `row`.
+ir_x64_push_end_site: fn(e: &IRX64Emitter, row: Int, site: Int) Never! {
+    idx: e.end_sites.len()
     e.end_sites.push(site)
-    e.end_targets.push(e.open[row])
+    e.end_next.push(-1)
+    tail: e.end_tail[row]
+    if tail < 0 -> e.end_head[row] = idx else -> e.end_next[tail] = idx
+    e.end_tail[row] = idx
+    e.end_pending += 1
 }
 
 // Points the rel32 field at `site` to the end of the code so far.
@@ -4035,6 +4054,8 @@ ir_x64_open: fn(e: &IRX64Emitter, at: Int, head: Int, false_site: Int) Never! {
     e.open.push(at)
     e.heads.push(head)
     e.falses.push(false_site)
+    e.end_head.push(-1)
+    e.end_tail.push(-1)
 }
 
 ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
@@ -4050,26 +4071,22 @@ ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     }
     e.end_of[opener] = here
     if e.falses[row] >= 0 -> ir_x64_patch(e, e.falses[row], here)
-    kept := 0
-    loop index in 0..<e.end_sites.len() {
-        if e.end_targets[index] == opener -> ir_x64_patch(e, e.end_sites[index], here) else {
-            e.end_sites[kept] = e.end_sites[index]
-            e.end_targets[kept] = e.end_targets[index]
-            kept += 1
-        }
-    }
-    loop e.end_sites.len() > kept {
-        _ := e.end_sites.pop()
-        _ := e.end_targets.pop()
+    idx := e.end_head[row]
+    loop idx >= 0 {
+        ir_x64_patch(e, e.end_sites[idx], here)
+        e.end_pending -= 1
+        idx = e.end_next[idx]
     }
     _ := e.open.pop()
     _ := e.heads.pop()
     _ := e.falses.pop()
+    _ := e.end_head.pop()
+    _ := e.end_tail.pop()
 }
 
 // The slow paths, relocations and branches laid out so far.
 ir_x64_marks: fn(e: IRX64Emitter) -> Int Never! {
-    e.colds.len() + e.relocs.len() + e.branches.len() + e.end_sites.len()
+    e.colds.len() + e.relocs.len() + e.branches.len() + e.end_pending
 }
 
 // The most code a loop's back edges repeat of its head (ir_x64_rotate).
@@ -4403,8 +4420,8 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                 ir_x64_log_invert(e, false_site - 2)
                 return
             }
-            e.end_sites.push(x64_jmp_rel32(e.code))
-            e.end_targets.push(e.open[row])
+            site: x64_jmp_rel32(e.code)
+            ir_x64_push_end_site(e, row, site)
             if false_site >= 0 -> ir_x64_land(e, false_site)
             e.falses[row] = -1
         }
@@ -4775,7 +4792,13 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
                     e.open.push(pad.at)
                     e.heads.push(-1)
                     e.falses = [Int]{}
-                    loop _ in 0..<e.open.len() -> e.falses.push(-1)
+                    e.end_head = [Int]{}
+                    e.end_tail = [Int]{}
+                    loop _ in 0..<e.open.len() {
+                        e.falses.push(-1)
+                        e.end_head.push(-1)
+                        e.end_tail.push(-1)
+                    }
                     e.fused = -1
                     stop: if share >= 0 -> share else -> pad.end
                     offsets := [Int]{}
@@ -6017,7 +6040,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     al: ir_x64_allocate(m, f)
     checked: ir_timing_marked(f)
     logged: tables.logged
-    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_head: [Int]{}, end_tail: [Int]{}, end_sites: [Int]{}, end_next: [Int]{}, end_pending: 0, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)

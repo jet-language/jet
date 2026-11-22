@@ -1027,10 +1027,10 @@ ir_version_word_counter: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: 
     idx: if leaves_above -> f.a[head] else -> f.b[head]
     limit: if leaves_above -> f.b[head] else -> f.a[head]
     if idx < 0 || limit < 0 || idx == limit -> return none
-    idx_ty: m.types[f.slot_type[idx]]
-    lim_ty: m.types[f.slot_type[limit]]
-    if idx_ty.kind != .Word || !idx_ty.signed || idx_ty.size != 8 -> return none
-    if lim_ty.kind != .Word || !lim_ty.signed || lim_ty.size != 8 -> return none
+    idx_row: f.slot_type[idx]
+    lim_row: f.slot_type[limit]
+    if m.types[idx_row].kind != .Word || !m.types[idx_row].signed || m.types[idx_row].size != 8 -> return none
+    if m.types[lim_row].kind != .Word || !m.types[lim_row].signed || m.types[lim_row].size != 8 -> return none
     if ir_version_writes(f, at, end, limit) -> return none
     if limit >= f.param_count && first[limit] >= start -> return none
     if idx >= f.param_count && first[idx] >= start -> return none
@@ -1089,10 +1089,12 @@ ir_version_accum_op: fn(f: IRFunction, facts: OptFacts, at: Int, k: Int, slot: I
 ir_version_delta_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, depth: Int) -> Int Never! {
     if slot < 0 || depth > 4 -> return -1
     cap: 1 << 30
-    ty: m.types[f.slot_type[slot]]
-    if ty.kind == .Bool -> return 1
-    if ty.kind == .Word && ty.bits > 0 && ty.bits <= 30 {
-        return if ty.signed -> 1 << (ty.bits - 1) else -> (1 << ty.bits) - 1
+    type_row: f.slot_type[slot]
+    kind: m.types[type_row].kind
+    if kind == .Bool -> return 1
+    if kind == .Word && m.types[type_row].bits > 0 && m.types[type_row].bits <= 30 {
+        bits: m.types[type_row].bits
+        return if m.types[type_row].signed -> 1 << (bits - 1) else -> (1 << bits) - 1
     }
     if slot < f.param_count || facts.defs[slot] != 1 || facts.def_at[slot] < 0 -> return -1
     def: facts.def_at[slot]

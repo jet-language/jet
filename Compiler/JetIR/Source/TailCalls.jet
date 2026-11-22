@@ -349,8 +349,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
 // an Int. Every other Drop (a handle's, an Aggregate's glue, which may reach
 // one) may close or stop something, and keeps its place after the call.
 ir_tail_memory_only: fn(m: IRModule, ty: Int) -> Bool Never! {
-    t: m.types[ty]
-    t.drop == "" || t.kind == .String || t.kind == .Int
+    m.types[ty].drop == "" || m.types[ty].kind == .String || m.types[ty].kind == .Int
 }
 
 ir_tail_bit: fn(index: Int) -> Int Never! { 1 << index }

@@ -746,9 +746,9 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     // of at most 8 bytes, so no store of the run changes what they read.
     loop k in loads {
         source: f.a[k]
-        through: m.types[f.slot_type[source]]
+        through_row: f.slot_type[source]
         loaded: f.dst[k]
-        if (loaded != base && loaded != bound && !checks.contains(loaded)) || m.types[f.slot_type[loaded]].size != 8 || through.kind != .Aggregate || through.size < 24 || !ir_reduce_invariant(m, f, at, end, source, 0) {
+        if (loaded != base && loaded != bound && !checks.contains(loaded)) || m.types[f.slot_type[loaded]].size != 8 || m.types[through_row].kind != .Aggregate || m.types[through_row].size < 24 || !ir_reduce_invariant(m, f, at, end, source, 0) {
             return ir_reduce_declined(kind, "a load in a Loop that stores")
         }
     }
@@ -864,16 +864,18 @@ ir_reduce_count_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: 
     } else {
         return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the count's test is not element == value")
     }
-    ty: m.types[f.slot_type[operand]]
-    vt: m.types[f.slot_type[value]]
-    if ty.kind != vt.kind || ty.size != vt.size {
+    ty_row: f.slot_type[operand]
+    vt_row: f.slot_type[value]
+    ty_kind: m.types[ty_row].kind
+    ty_size: m.types[ty_row].size
+    if ty_kind != m.types[vt_row].kind || ty_size != m.types[vt_row].size {
         return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the element and the value differ in type")
     }
     kind: if {
         operand != element -> IR_REDUCE_COUNT_WIDENED
-        (ty.kind == .Word || ty.kind == .Bool) && ty.size == 1 -> IR_REDUCE_COUNT_BYTES
-        ty.kind == .Int -> IR_REDUCE_COUNT_INTS
-        ty.kind == .Word && ty.size == 8 -> IR_REDUCE_COUNT_WORDS
+        (ty_kind == .Word || ty_kind == .Bool) && ty_size == 1 -> IR_REDUCE_COUNT_BYTES
+        ty_kind == .Int -> IR_REDUCE_COUNT_INTS
+        ty_kind == .Word && ty_size == 8 -> IR_REDUCE_COUNT_WORDS
         else -> -1
     }
     if kind < 0 {
@@ -923,19 +925,20 @@ ir_reduce_fill_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
     if !ir_reduce_invariant(m, f, at, end, value, 0) {
         return ir_reduce_no_update(IR_REDUCE_FILL, "-")
     }
-    ty: m.types[f.slot_type[stored]]
-    plain: (ty.kind == .Bool || ty.kind == .Char || ty.kind == .Word) && ty.drop == ""
-    if ty.kind != .Int && !plain {
+    ty_row: f.slot_type[stored]
+    ty_kind: m.types[ty_row].kind
+    plain: (ty_kind == .Bool || ty_kind == .Char || ty_kind == .Word) && m.types[ty_row].drop == ""
+    if ty_kind != .Int && !plain {
         return ir_reduce_no_update(IR_REDUCE_FILL, "the stored value is not a Bool, a Char, an Int or a word")
     }
     // The stored width's log2: 1, 2, 4 or 8 bytes.
-    width: ir_x64_value_width(ir_x64_shape(ty))
+    width: ir_x64_value_width(ir_x64_shape(m.types[ty_row]))
     shift: if width == 1 -> 0 else if width == 2 -> 1 else if width == 4 -> 2 else -> 3
     // A conversion stores a word of its kind's width.
-    if convert >= 0 && (ty.kind != .Word || shift != narrow %% 4) {
+    if convert >= 0 && (ty_kind != .Word || shift != narrow %% 4) {
         return ir_reduce_no_update(IR_REDUCE_FILL, "-")
     }
-    kind: if ty.kind == .Int -> IR_REDUCE_FILL_INTS else -> IR_REDUCE_FILL + shift
+    kind: if ty_kind == .Int -> IR_REDUCE_FILL_INTS else -> IR_REDUCE_FILL + shift
     found := ir_reduce_no_update(kind, "")
     found.store = store
     found.clone = clone
@@ -958,8 +961,8 @@ ir_reduce_element: fn(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int) 
     }
     source: f.a[def]
     loaded: ir_reduce_def(f, at, end, source)
-    byte: m.types[f.slot_type[source]]
-    if loaded < 0 || f.op[loaded] != .Load || byte.kind != .Word || byte.size != 1 || byte.signed {
+    byte_row: f.slot_type[source]
+    if loaded < 0 || f.op[loaded] != .Load || m.types[byte_row].kind != .Word || m.types[byte_row].size != 1 || m.types[byte_row].signed {
         return -1
     }
     source
@@ -1050,8 +1053,9 @@ ir_reduce_invariant: fn(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int
 // An index or bound the leaf reads as a raw word: an Int, or an 8-byte
 // word.
 ir_reduce_counter: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
-    ty: m.types[f.slot_type[slot]]
-    ty.kind == .Int || (ty.kind == .Word && ty.size == 8)
+    ty_row: f.slot_type[slot]
+    kind: m.types[ty_row].kind
+    kind == .Int || (kind == .Word && m.types[ty_row].size == 8)
 }
 
 // Whether `slot` holds the index's value of the current pass: it is the
