@@ -7,7 +7,7 @@ spellings are registered in
 [`CLICommands.jet`](../../Compiler/JetFoundation/Source/Registry/CLICommands.jet), and the
 replay artifact path check is in
 [`Inspect.jet`](../../Compiler/JetCLI/Source/CLI/Inspect.jet); exercised command
-contracts are in [`tests/prove.rs`](../../tests/prove.rs), and diagnostic copy
+contracts are in [`Tests/Cases/Prove/`](../../Tests/Cases/Prove/), and diagnostic copy
 is in [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet).
 Use the [Jet vocabulary](vocabulary.md) for domain terms.
 

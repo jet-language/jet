@@ -17,7 +17,7 @@ can otherwise exercise a different revision.
 A registry declaration does not prove dispatch. Exercise the real caller,
 consume its result, and check the observable value or effect. A bind-and-
 discard probe can pass while the operation does nothing. The
-[Core call tests](../../../tests/core_call_table.rs) expose the relevant seams.
+[Core call tests](../../../Tests/Cases/CoreCallTable/) expose the relevant seams.
 
 A backend rejection is not automatically a new user diagnostic. Trace it back
 to the front-end check or lowering defect and use the

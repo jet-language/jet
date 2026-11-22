@@ -19,7 +19,7 @@ and
 [`Examples/Tooling/Performance/HTTPReady/run.jet`](../../Examples/Tooling/Performance/HTTPReady/run.jet).
 
 Provider protocol coverage is exercised in
-[`tests/performance_budget_providers.rs`](../../tests/performance_budget_providers.rs).
+[`Tests/Cases/CLIPartsBudget/`](../../Tests/Cases/CLIPartsBudget/).
 
 The ten budget decisions retain these ratified outcomes. Each ID is a
 citation; the outcome is the selected option and its durable rule.

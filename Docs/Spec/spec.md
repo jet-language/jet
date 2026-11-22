@@ -9,7 +9,7 @@ inventory or a progress log.
 record for this contract. A decision ID is a citation, not an implementation
 status: only ratified decisions define the language. The canonical lexical ledger
 is the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/), and
-[`tests/decisions.rs`](../../tests/decisions.rs) checks that the ratified decision
+[`Tests/Guards/decisions.jet`](../../Tests/Guards/decisions.jet) checks that the ratified decision
 surface and ledger agree. The parser and semantic checker are the executable
 language rules; the implementation is in
 [`Compiler/JetParser`](../../Compiler/JetParser/) and
@@ -2485,8 +2485,8 @@ run: fn() {
     world := Pool<Player>.new()
     kai: world.add(Player{name: "Kai", hp: 100, attack: 15, target: None})
     world[kai].hp += 1
-    fallen: world.remove(kai)
-    _: fallen
+    fallen: world.remove(kai) ?? return
+    print("{fallen.name} hp={fallen.hp} atk={fallen.attack} has_target={fallen.target != None}")
 }
 ```
 
@@ -2696,9 +2696,9 @@ exposes those facts. It is for authors of functions and packages, and for tools
 that consume checked programs. Executable truth lives in the [effect
 table](../../Compiler/Prelude/Effects.jet), [syntax
 tables](../../Compiler/JetFoundation/Data/Syntax/), [sema effect
-checker](../../Compiler/JetSema/Source/Effects/), [inspect
+checker](../../Compiler/JetSema/Source/Sema/Effects/), [inspect
 projections](../../Compiler/JetCLI/Source/CLI/Expand.jet), and [expand
-tests](../../tests/cli_parts/expand.rs).
+tests](../../Tests/Cases/CLIPartsExpand/).
 
 Every function has an **effect set**: the ambient powers exercised by its body,
 such as filesystem, network, clock, or process access. Jet infers the set,
@@ -3199,9 +3199,11 @@ produce the same runtime code.
 `#FX(...) { ... }` applies the same idea to one block:
 
 ```jet
+use files: core.files
+
 run: fn() {
     #FX(FS, IO) {
-        text: core.files.read("x") ?? ""
+        text: files.read("x") ?? ""
         print(text)
     }
 }
@@ -3299,10 +3301,15 @@ a returned, stored, or otherwise unknown function value contributes the
 maximal set, which is conservative and sound.
 
 ```jet
-apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+apply: fn(f: fn(Int) -[IO]> Int, x: Int) -[IO]> Int { f(x) }
 
-run: fn() -[IO]> Unit {
-    apply(log_it, 1)
+log_it: fn(n: Int) -[IO]> Int {
+    print(n)
+    n
+}
+
+run: fn() -[IO]> {
+    print(apply(log_it, 1))
 }
 ```
 
@@ -3830,14 +3837,14 @@ file.
 ```jet
 math: module {
     clamp: fn(value: Int, low: Int, high: Int) -> Int {
-        if value < low -> low
-        else if value > high -> high
-        else -> value
+        if value < low -> return low
+        if value > high -> return high
+        value
     }
 }
 
 run: fn() {
-    math.clamp(3, 0, 2)
+    print(math.clamp(3, 0, 2))
 }
 ```
 
@@ -4951,7 +4958,7 @@ in a private workspace and publishes nothing. Missing cargo is E0703, a
 fetch/build failure is E0704, and an invalid foreign path or signature is E0705.
 A panic at the foreign boundary becomes the shared runtime report. The worked
 surface is [`Examples/Interop/FFI/FFI.jet`](../../Examples/Interop/FFI/FFI.jet);
-Rust FFI integration assertions live in [`tests/ffi_rust.rs`](../../tests/ffi_rust.rs).
+Rust FFI integration assertions live in [`Tests/Cases/FFIRust/`](../../Tests/Cases/FFIRust/).
 The descriptor table also records the namespaced `rust.*` and `swift.*`
 bridge roots; this direct block is the Rust declaration surface described here.
 (S50, D-FFI-CAP1)
@@ -5985,7 +5992,7 @@ of the optimizer rather than the intended work:
 The language example is
 [`Examples/Tooling/Performance/Bench.jet`](../../Examples/Tooling/Performance/Bench.jet),
 and the test command contract is covered by
-[`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). Compiler
+[`Tests/Cases/MeasurementTiers/`](../../Tests/Cases/MeasurementTiers/). Compiler
 build speed is measured separately, by the throughput lanes in
 [Compile throughput](Reference/compiler-speed.md#compile-throughput), with
 their own warmup and sampling policy. Do not use those numbers as a substitute
@@ -6799,7 +6806,7 @@ ServeArgs: struct {
 }
 
 run: fn(args: ServeArgs) {
-    routes().bind("127.0.0.1:{args.port}") ?? return
+    print("127.0.0.1:{args.port} verbose={args.verbose} config={args.config ?? "default"}")
 }
 ```
 
@@ -7087,7 +7094,7 @@ for every permission.
 
 A manifest-less `.jet` script may begin with an inline dependency:
 
-```jet
+```jet ignore
 // stats.jet
 use textkit#1.4
 
@@ -7150,7 +7157,7 @@ scale: fn(a: Float, b: Float) -> Float {
 A sandbox's WIT world lists the entry file's top-level functions. A host uses a
 typed plugin handle:
 
-```jet
+```jet ignore
 use plugin: core.plugin
 
 run: fn() {

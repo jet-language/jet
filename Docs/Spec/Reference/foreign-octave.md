@@ -51,7 +51,7 @@ command failure, shape/width mismatch, and message-limit failure.
 
 A host program can use the generated module in the normal effect-declared loop:
 
-```jet
+```jet ignore
 use {
     scale: octave.scale
     compute: core.compute

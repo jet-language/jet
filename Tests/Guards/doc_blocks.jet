@@ -1,0 +1,99 @@
+// Guard: every runnable ```jet block in README.md and Docs/Spec/
+// must pass `jet check`, and every ```jet error block must fail `jet check`.
+use {
+    doc_blocks_files: core.files
+    doc_blocks_process: core.process
+}
+
+DocBlock: struct {
+    file: String,
+    line: Int,
+    tag: String,
+    code: String,
+}
+
+doc_blocks_is_runnable: fn(code: String) -> Bool {
+    loop raw in code.lines() {
+        trimmed: raw.trim()
+        if trimmed.starts_with("run: fn") || trimmed.starts_with("run:fn") || trimmed.starts_with("fn run") {
+            return true
+        }
+    }
+    false
+}
+
+doc_blocks_extract: fn(file: String, text: String) -> [DocBlock] {
+    blocks := [DocBlock]{}
+    in_block := false
+    tag := ""
+    start_line := 0
+    buf := [String]{}
+    line_no := 0
+    loop raw in text.lines() {
+        line_no += 1
+        trimmed: raw.trim()
+        if !in_block {
+            if trimmed.starts_with("```jet") {
+                in_block = true
+                tag = trimmed.slice(3, trimmed.len()).trim()
+                start_line = line_no
+                buf = [String]{}
+            }
+        } else {
+            if trimmed.starts_with("```") {
+                code: buf.join("\n")
+                if doc_blocks_is_runnable(code) {
+                    blocks.push(DocBlock{file: file, line: start_line, tag: tag, code: code})
+                }
+                in_block = false
+            } else { buf.push(raw) }
+        }
+    }
+    blocks
+}
+
+doc_blocks_first_error: fn(output: String) -> String {
+    loop line in output.lines() {
+        if line.starts_with("Error:") -> return line
+    }
+    output.trim()
+}
+
+#Test("doc_blocks") {
+    guards_enter_root()
+    jet: md_jet()
+    docs := [String]{"README.md"}
+    loop path in s3_truth_md_paths("Docs/Spec") -> docs.push(path)
+    docs.sort()
+    blocks := [DocBlock]{}
+    loop doc in docs {
+        text: doc_blocks_files.read(doc) ?? panic("read {doc}: {err}")
+        loop block in doc_blocks_extract(doc, text) -> blocks.push(block)
+    }
+    assert(blocks.len() > 0, "no runnable ```jet blocks found in README.md or Docs/Spec/")
+    scratch: doc_blocks_files.temp_dir("jet-doc-blocks-") ?? panic("create temp dir: {err}")
+    scratch_path: "{scratch.path}"
+    failures := [String]{}
+    checked := 0
+    idx := 0
+    loop block in blocks {
+        if block.tag == "jet ignore" -> next
+        idx += 1
+        probe: "{scratch_path}/block_{idx}.jet"
+        doc_blocks_files.write(probe, "{block.code}\n") ?? panic("write {probe}: {err}")
+        ran: doc_blocks_process.cmd([String]{jet, "check", probe}).stdout(.Capture).stderr(.Capture).run() ?? panic("run jet check on {block.file}:{block.line}: {err}")
+        checked += 1
+        if block.tag == "jet error" {
+            if ran.code == 0 {
+                failures.push("{block.file}:{block.line} [jet error]: expected jet check to fail, but it passed")
+            }
+        } else {
+            if ran.code != 0 {
+                msg: doc_blocks_first_error(doc_blocks_process.combined_output(ran))
+                failures.push("{block.file}:{block.line} [{block.tag}]: {msg}")
+            }
+        }
+    }
+    assert(checked > 0, "doc_blocks checked zero runnable blocks")
+    assert(failures.len() == 0, "doc_blocks failures ({failures.len()} of {checked} checked):\n{failures.join("\n")}")
+}

@@ -675,7 +675,8 @@ to map it with `ModError.Unsupported`.
 use library: core.mod
 
 run: fn() {
-    library.load(".jet/build/loadable.jetlib", grant: {read: [".jet/build"]}) ?? return
+    loaded: library.load(".jet/build/loadable.jetlib", grant: {read: [".jet/build"]}) ?? return
+    _: loaded
 }
 ```
 
@@ -703,10 +704,10 @@ use fs: core.files
 run: fn() {
     text: fs.read("data.txt")
     fs.write("out.txt", text.to_upper())
+    fallback: fs.read("data.txt") ?? ""
+    annotated: fs.read("data.txt")?("reading the input for out.txt")
+    print("{fallback.len()} {annotated.len()}")
 }
-
-text: fs.read("data.txt") ?? ""
-annotated: fs.read("data.txt")?("reading the input for out.txt")
 ```
 
 A function without an explicit error type uses the default `Err`. Core's
@@ -3022,7 +3023,7 @@ falling back to a lexical working directory.
 ```jet
 use process: core.process
 
-run: fn() -[Exec, Time.Wait]> {
+run: fn() -[Exec, IO, Time.Wait]> {
     timeout: Duration.seconds(30) ?? return
     spec: process.cmd(["cp", "--", "directory with spaces;*.tmp", "backup"])
         .stdout(.Capture)
@@ -3765,8 +3766,8 @@ it retains its 64-bit floating-point projection, while
 use random: core.math.random
 
 roll_at: fn(rng: &RNG) -> String {
-    value := rng.int(1, 6)
-    return "roll=" + value.to_string()
+    value: rng.int(1, 6)
+    "roll={value}"
 }
 
 run: fn() {
@@ -3897,12 +3898,11 @@ use game: core.game
 
 run: fn() {
     scene := game.Scene.new("counter")
-    scene.max_frames = 3
     scene.on_frame(fn(frame) {
-        print("frame=" + frame.to_string())
+        print("frame={frame.index}")
     })
     backend: game.Backend.headless()
-    replay: game.Replay.record("build/counter.replay")
+    replay: game.Replay.record("build/counter.jetreplay")
     receipt: game.run(scene, replay: replay, backend: backend, frames: 3)
     print(receipt)
 }
@@ -4136,7 +4136,7 @@ use time: core.time
 run: fn() {
     stamp: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
     print(time.isoformat(stamp))
-    clock: time.Clock.new(0)
+    clock := time.Clock.new(0)
     clock.tick(1000)
     print(clock.now())
 }
