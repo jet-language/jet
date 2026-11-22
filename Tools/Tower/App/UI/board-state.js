@@ -175,20 +175,22 @@ export function sortCriteria(items = [], { col = 'n', dir = 'asc' } = {}) {
   });
 }
 
-// An epoch's number: its stored `num`, else the digits of an `e18`-style id.
+// A goal/epoch's number: its stored `num`, else the digits of an `e18` or `G1`-style id.
 export function epochNumber(epoch) {
   if (Number.isInteger(epoch?.num)) return epoch.num;
-  const match = /^e(\d+)$/i.exec(String(epoch?.id ?? ''));
+  const match = /^[eg](\d+)$/i.exec(String(epoch?.id ?? ''));
   return match ? Number(match[1]) : null;
 }
 
-// The one way an epoch is named on screen: `E18`, or `E18 Declarations as
-// types` where a name is shown. An id without a number shows as itself.
+// The one way a goal/epoch is named on screen: `G1 Metaprogramming` for `G1`,
+// `E18` for `e18`. An id without a number shows as itself.
 export function epochLabel(epoch, { name = true } = {}) {
   if (!epoch) return '';
+  const id = String(epoch.id ?? '');
+  const gMatch = /^g(\d+)$/i.exec(id);
   const num = epochNumber(epoch);
-  const tag = num == null ? String(epoch.id ?? '') : `E${num}`;
-  return name && epoch.name && epoch.name !== epoch.id ? `${tag} ${epoch.name}` : tag;
+  const tag = gMatch ? `G${Number(gMatch[1])}` : (num == null ? id : `E${num}`);
+  return name && epoch.name && epoch.name !== id ? `${tag} ${epoch.name}` : tag;
 }
 
 // Epochs are worked in `order`; epochs without one follow, by number, then id.
@@ -240,28 +242,46 @@ export function chainRank(epochs = []) {
   return (id) => rank.get(id) ?? Infinity;
 }
 
-// One row per epoch in chain order with its role (active, next, later,
-// finished), staffing, open cards and open criteria. Done and frozen cards
-// and sidequests do not count. Counts read each card's `crit`
-// (criteriaCounts), the field the board projection carries.
+// One row per goal/epoch in chain order with its role (active, next, later,
+// finished), staffing, open/done/frozen cards and criteria progress.
 export function epochChain(epochs = [], cards = []) {
   const tally = new Map();
   for (const c of cards) {
-    if (c.phase === 'done' || c.phase === 'frozen' || c.track === 'sidequest' || !c.epoch) continue;
-    const row = tally.get(c.epoch) || { cards: 0, open: 0, blocked: 0 };
+    if (c.track === 'sidequest' || !c.epoch) continue;
+    const row = tally.get(c.epoch) || { cards: 0, done: 0, frozen: 0, open: 0, blocked: 0, settled: 0, total: 0 };
+    if (c.phase === 'done') {
+      row.done++;
+      const crit = c.crit || criteriaCounts(c);
+      row.settled += crit.settled;
+      row.total += crit.total;
+      tally.set(c.epoch, row);
+      continue;
+    }
+    if (c.phase === 'frozen') {
+      row.frozen++;
+      tally.set(c.epoch, row);
+      continue;
+    }
     const crit = c.crit || criteriaCounts(c);
-    row.cards++; row.open += crit.open; row.blocked += crit.blocked;
+    row.cards++;
+    row.open += crit.open;
+    row.blocked += crit.blocked;
+    row.settled += crit.settled;
+    row.total += crit.total;
     tally.set(c.epoch, row);
   }
   let slot = 0;
   return sortEpochs(epochs).map(e => {
     const finished = epochFinished(e);
-    const role = finished ? 'finished' : ['active', 'next'][slot] || 'later';
-    const staff = finished ? 0 : CHAIN_STAFF[slot] ?? 0;
-    if (!finished) slot++;
-    const row = tally.get(e.id) || { cards: 0, open: 0, blocked: 0 };
-    return { id: e.id, label: epochLabel(e, { name: false }), name: e.name || '', status: e.status, role, staff,
-      openCards: row.cards, openCriteria: row.open, blockedCriteria: row.blocked };
+    const row = tally.get(e.id) || { cards: 0, done: 0, frozen: 0, open: 0, blocked: 0, settled: 0, total: 0 };
+    const allFrozen = !finished && row.cards === 0 && row.frozen > 0;
+    const role = finished ? 'finished' : allFrozen ? 'frozen' : ['active', 'next'][slot] || 'later';
+    const staff = (finished || allFrozen) ? 0 : CHAIN_STAFF[slot] ?? 0;
+    if (!finished && !allFrozen) slot++;
+    return {
+      id: e.id, label: epochLabel(e, { name: false }), name: e.name || '', status: e.status, role, staff,
+      openCards: row.cards, openCriteria: row.open, blockedCriteria: row.blocked,
+    };
   });
 }
 

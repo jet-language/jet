@@ -265,7 +265,7 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         home: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
         r.home.push(home)
         r.tested.push(false)
-        r.lengths.push((exact || word) && !narrow && kind == .Def && ir_range_length_load(m, f, s.val_at[value]))
+        r.lengths.push((exact || word) && !narrow && kind == .Def && (ir_range_length_load(m, f, s.val_at[value]) || ir_opt_calls_route(m, f, s.val_at[value], "jet_char_len")))
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {

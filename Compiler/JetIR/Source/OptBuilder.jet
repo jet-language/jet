@@ -1,0 +1,337 @@
+// Non-escaping string-builder pure-observer elimination (O1, O2, pass "builder"):
+// when a string builder (`jet_rt_string_builder_new` or `jet_rt_string_builder_value`)
+// is fed only by `jet_rt_string_builder_push_static` and `jet_rt_string_builder_push`
+// in straight-line code inside one region and finished by
+// `jet_rt_string_builder_finish` into a String `s` whose only read in the entire
+// function is a single `jet_char_len(s)` (followed by optional `Drop(s)`), the
+// entire allocation, formatting and refcount drop collapse to exact additive
+// UTF-8 scalar-length arithmetic:
+//   - Static parts fold at compile time via `ir_opt_text_scalars`.
+//   - Dynamic `push(b, str_i)` calls become `t_i = jet_char_len(str_i)` IN PLACE
+//     at the exact push site (preserving `str_i`'s lifetime even if `str_i` is
+//     dropped before `finish`).
+//   - At `jet_char_len(s)`, the static count and all `t_i` sums add up into `len`.
+// UTF-8 scalar count is strictly additive under concatenation of valid UTF-8
+// strings, so the result is bit-for-bit identical for every input.
+use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+
+ir_builder_route: fn(m: IRModule, name: String) -> Int Never! {
+    name_rows_value(m.name_rows, name) ?? -2
+}
+
+// Rewrites non-escaping string-builder -> jet_char_len chains in `f`.
+// Returns the number of string builders eliminated.
+ir_opt_builders: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    if count < 4 -> return 0
+    rt_new: ir_builder_route(m, "jet_rt_string_builder_new")
+    rt_val: ir_builder_route(m, "jet_rt_string_builder_value")
+    rt_push_static: ir_builder_route(m, "jet_rt_string_builder_push_static")
+    rt_push: ir_builder_route(m, "jet_rt_string_builder_push")
+    rt_finish: ir_builder_route(m, "jet_rt_string_builder_finish")
+    rt_char_len: ir_builder_route(m, "jet_char_len")
+    if (rt_new < 0 && rt_val < 0) || rt_finish < 0 || rt_char_len < 0 -> return 0
+
+    // Fast check: does `f` contain any builder creation at all?
+    has_builder := false
+    loop at in 0..<count {
+        if f.op[at] == .CallRuntime && (f.a[at] == rt_new || f.a[at] == rt_val) {
+            has_builder = true
+            break
+        }
+    }
+    if !has_builder -> return 0
+
+    slots: f.slot_type.len()
+    writes := loop _ in 0..<slots -> 0
+    write_at := loop _ in 0..<slots -> -1
+    read_count := loop _ in 0..<slots -> 0
+    drop_count := loop _ in 0..<slots -> 0
+    drop_at := loop _ in 0..<slots -> -1
+    reads := [Int]{}
+    loop at in 0..<count {
+        w: ir_x64_write(f, at)
+        if w >= 0 {
+            writes[w] = writes[w] + 1
+            write_at[w] = at
+        }
+        if f.op[at] == .Drop {
+            s: f.a[at]
+            if s >= 0 && s < slots {
+                drop_count[s] = drop_count[s] + 1
+                drop_at[s] = at
+            }
+            next
+        }
+        ir_x64_reads_into(f, at, reads)
+        if f.op[at] == .If || f.op[at] == .BrIf -> reads.push(f.a[at])
+        loop r in reads {
+            if r >= 0 && r < slots -> read_count[r] = read_count[r] + 1
+        }
+    }
+
+    // Track per-instruction rewrite actions:
+    // - kill[at]: replace instruction with Nop
+    // - replace_push_slot[at]: >= 0 means replace `push(b, str)` with `slot = jet_char_len(str)`
+    // - replace_len_const[at]: >= 0 means at `jet_char_len(s)` emit sum of const + push slots
+    kill := loop _ in 0..<count -> false
+    push_dest := loop _ in 0..<count -> -1
+    len_const := loop _ in 0..<count -> -1
+    len_parts := [Int:[Int]]{}
+    eliminated := 0
+
+    loop create_at in 0..<count {
+        if f.op[create_at] != .CallRuntime || (f.a[create_at] != rt_new && f.a[create_at] != rt_val) || f.c[create_at] != 0 {
+            next
+        }
+        builder: f.dst[create_at]
+        if builder < f.param_count || writes[builder] != 1 || drop_count[builder] != 0 -> next
+
+        // Scan straight-line forward in the same region for all uses of `builder`
+        // until `finish(builder)`.
+        pushes := [Int]{}
+        static_pushes := [Int]{}
+        static_scalars := 0
+        finish_at := -1
+        builder_uses := 0
+        valid := true
+        k := create_at + 1
+        loop k < count {
+            op: f.op[k]
+            if ir_opt_structural(op) {
+                valid = false
+                break
+            }
+            if op == .CallRuntime {
+                sym: f.a[k]
+                if sym == rt_push_static && f.c[k] == 3 && f.args[f.b[k]] == builder {
+                    data_slot: f.args[f.b[k] + 1]
+                    len_slot: f.args[f.b[k] + 2]
+                    if data_slot < 0 || len_slot < 0 || writes[data_slot] != 1 || writes[len_slot] != 1 {
+                        valid = false
+                        break
+                    }
+                    da: write_at[data_slot]
+                    la: write_at[len_slot]
+                    if da < 0 || la < 0 || f.op[da] != .DataAddress || f.op[la] != .Const {
+                        valid = false
+                        break
+                    }
+                    row: f.a[da]
+                    blen: f.a[la]
+                    if row < 0 || row >= m.data.len() || blen < 0 || blen > m.data[row].len() {
+                        valid = false
+                        break
+                    }
+                    if blen == m.data[row].len() {
+                        static_scalars += ir_opt_text_scalars(m.data[row])
+                    } else {
+                        slice := [U8]{}
+                        loop bi in 0..<blen -> slice.push(m.data[row][bi])
+                        static_scalars += ir_opt_text_scalars(slice)
+                    }
+                    static_pushes.push(k)
+                    builder_uses += 1
+                    k += 1
+                    next
+                }
+                if sym == rt_push && f.c[k] == 2 && f.args[f.b[k]] == builder {
+                    pushes.push(k)
+                    builder_uses += 1
+                    k += 1
+                    next
+                }
+                if sym == rt_finish && f.c[k] == 1 && f.args[f.b[k]] == builder && f.dst[k] >= f.param_count {
+                    finish_at = k
+                    builder_uses += 1
+                    break
+                }
+            }
+            // Reject if any other instruction touches `builder`.
+            ir_x64_reads_into(f, k, reads)
+            if reads.contains(builder) {
+                valid = false
+                break
+            }
+            k += 1
+        }
+        if !valid || finish_at < 0 || builder_uses != read_count[builder] -> next
+        if !ir_int_inline(static_scalars) -> next
+
+        // Check finished String `s`: must be written once, read ONCE by
+        // `jet_char_len(s)` in the same straight-line region, and dropped at
+        // most once (not moved/copied/escaped anywhere).
+        str_slot: f.dst[finish_at]
+        if writes[str_slot] != 1 || read_count[str_slot] != 1 || drop_count[str_slot] > 1 -> next
+
+        len_at := -1
+        j := finish_at + 1
+        loop j < count {
+            op: f.op[j]
+            if ir_opt_structural(op) -> break
+            if op == .CallRuntime && f.a[j] == rt_char_len && f.c[j] == 1 && f.args[f.b[j]] == str_slot && f.dst[j] >= f.param_count {
+                len_at = j
+                break
+            }
+            j += 1
+        }
+        if len_at < 0 -> next
+        len_dst: f.dst[len_at]
+        len_ty: m.types[f.slot_type[len_dst]]
+        if len_ty.kind != .Int && len_ty.kind != .Word -> next
+        // If `str_slot` has a Drop, require it to be after `len_at` in the same region
+        // (or anywhere — wait: if dropped in an outer/stop cleanup, we only kill
+        // the Drop if `drop_count == 1` and there's no structural jump between
+        // finish_at and drop_at; actually if `s` is never created, ANY single
+        // Drop of `s` after finish_at must be killed too — check straight-line!).
+        s_drop := -1
+        if drop_count[str_slot] == 1 {
+            d_at: drop_at[str_slot]
+            if d_at <= len_at -> next
+            straight := true
+            loop m_at in (len_at + 1)..<d_at {
+                if ir_opt_structural(f.op[m_at]) {
+                    straight = false
+                    break
+                }
+            }
+            if !straight -> next
+            s_drop = d_at
+        }
+
+        // Everything verified! Allocate fresh temp slots of `len_dst`'s type for
+        // each dynamic push's `jet_char_len(str_i)`.
+        part_slots := [Int]{}
+        loop p_at in pushes {
+            tmp: ir_slot(f, f.slot_type[len_dst], IRSlotKind.Temp, -1, 0)
+            push_dest[p_at] = tmp
+            part_slots.push(tmp)
+        }
+        kill[create_at] = true
+        loop sp in static_pushes -> kill[sp] = true
+        kill[finish_at] = true
+        if s_drop >= 0 -> kill[s_drop] = true
+        len_const[len_at] = static_scalars
+        len_parts[len_at] = part_slots.move()
+        eliminated += 1
+    }
+
+    if eliminated == 0 -> return 0
+
+    // Rebuild `f` with the rewritten instructions.
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop at in 0..<count {
+        if kill[at] -> next
+        if push_dest[at] >= 0 {
+            // Replace `push(builder, str)` with `tmp = jet_char_len(str)`.
+            str_arg: f.args[f.b[at] + 1]
+            arg_start: f.args.len()
+            f.args.push(str_arg)
+            ir_opt_code_put(code, IROp.CallRuntime, push_dest[at], rt_char_len, arg_start, 1, f.code_line[at])
+            next
+        }
+        if len_const[at] >= 0 {
+            // Replace `len_dst = jet_char_len(s)` with sum of static_scalars + part_slots.
+            len_dst: f.dst[at]
+            ty_row: f.slot_type[len_dst]
+            line: f.code_line[at]
+            base_c: len_const[at]
+            parts: len_parts.get(at) ?? [Int]{}
+            if parts.len() == 0 {
+                ir_opt_code_put(code, IROp.Const, len_dst, base_c, -1, -1, line)
+            } else if parts.len() == 1 && base_c == 0 {
+                ir_opt_code_put(code, IROp.Move, len_dst, parts[0], -1, -1, line)
+            } else {
+                acc := parts[0]
+                if base_c > 0 {
+                    c_slot: ir_slot(f, ty_row, IRSlotKind.Temp, -1, 0)
+                    ir_opt_code_put(code, IROp.Const, c_slot, base_c, -1, -1, line)
+                    if parts.len() == 1 {
+                        ir_opt_code_put(code, IROp.Add, len_dst, acc, c_slot, IR_OVERFLOW_WRAP, line)
+                        next
+                    }
+                    sum0: ir_slot(f, ty_row, IRSlotKind.Temp, -1, 0)
+                    ir_opt_code_put(code, IROp.Add, sum0, acc, c_slot, IR_OVERFLOW_WRAP, line)
+                    acc = sum0
+                }
+                loop pi in 1..<parts.len() {
+                    target: if pi == parts.len() - 1 -> len_dst else -> ir_slot(f, ty_row, IRSlotKind.Temp, -1, 0)
+                    ir_opt_code_put(code, IROp.Add, target, acc, parts[pi], IR_OVERFLOW_WRAP, line)
+                    acc = target
+                }
+            }
+            next
+        }
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+    }
+
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
+    eliminated
+}
+
+#Test("Builder pass eliminates non-escaping string formatting whose only read is jet_char_len") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    ptr: ir_pointer_row(m)
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no Word row")
+    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    rt_val: ir_intern_name(m, "jet_rt_string_builder_value")
+    rt_ps: ir_intern_name(m, "jet_rt_string_builder_push_static")
+    rt_p: ir_intern_name(m, "jet_rt_string_builder_push")
+    rt_fin: ir_intern_name(m, "jet_rt_string_builder_finish")
+    rt_len: ir_intern_name(m, "jet_char_len")
+    row_lt: ir_intern_text(m, "<")
+    row_gt: ir_intern_text(m, ">")
+    g := ir_function_new("wrap_len", "test:builder.jet.wrap_len", "", "builder.jet", 1)
+    w: ir_slot(g, text, IRSlotKind.Param, ir_intern_name(m, "w"), 1)
+    g.result = exact
+    b: ir_slot(g, ptr, IRSlotKind.Temp, -1, 0)
+    da1: ir_slot(g, ptr, IRSlotKind.Temp, -1, 0)
+    c1: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    da2: ir_slot(g, ptr, IRSlotKind.Temp, -1, 0)
+    c2: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    s: ir_slot(g, text, IRSlotKind.Temp, -1, 0)
+    n: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    a0: ir_args(g, [Int]{})
+    _ := ir_emit(g, IROp.CallRuntime, b, rt_val, a0, 0, 2)
+    _ := ir_emit(g, IROp.DataAddress, da1, row_lt, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
+    a1: ir_args(g, [Int]{b, da1, c1})
+    _ := ir_emit(g, IROp.CallRuntime, -1, rt_ps, a1, 3, 2)
+    a2: ir_args(g, [Int]{b, w})
+    _ := ir_emit(g, IROp.CallRuntime, -1, rt_p, a2, 2, 2)
+    _ := ir_emit(g, IROp.DataAddress, da2, row_gt, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, c2, 1, -1, -1, 2)
+    a3: ir_args(g, [Int]{b, da2, c2})
+    _ := ir_emit(g, IROp.CallRuntime, -1, rt_ps, a3, 3, 2)
+    a4: ir_args(g, [Int]{b})
+    _ := ir_emit(g, IROp.CallRuntime, s, rt_fin, a4, 1, 2)
+    a5: ir_args(g, [Int]{s})
+    _ := ir_emit(g, IROp.CallRuntime, n, rt_len, a5, 1, 3)
+    _ := ir_emit(g, IROp.Drop, -1, s, -1, -1, 3)
+    _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 4)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    builders := 0
+    lens := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .CallRuntime {
+            if f.a[at] == rt_val || f.a[at] == rt_fin -> builders += 1
+            if f.a[at] == rt_len -> lens += 1
+        }
+    }
+    assert_eq(builders, 0)
+    assert_eq(lens, 1)
+}

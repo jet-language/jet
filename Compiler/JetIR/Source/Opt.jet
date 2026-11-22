@@ -90,7 +90,7 @@ ir_opt_options: fn(level: Int) -> IROptOptions Never! {
 }
 
 // The passes IROptOptions.disabled can name (`--opt-disable`).
-IR_OPT_PASS_NAMES: [String]{"retslot", "unique", "accumulate", "entry", "once", "localbox", "scalar", "promote", "licm", "version", "range", "ssa", "stops", "fold", "glue", "split", "reduce", "sink"}
+IR_OPT_PASS_NAMES: [String]{"retslot", "unique", "accumulate", "entry", "once", "localbox", "scalar", "promote", "builder", "licm", "strength", "version", "range", "ssa", "stops", "fold", "glue", "split", "reduce", "sink"}
 
 ir_opt_enabled: fn(options: IROptOptions, pass: String) -> Bool Never! {
     loop name in options.disabled {
@@ -290,6 +290,13 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
         loop id in 0..<functions.len() {
             if ir_opt_licm(m, stop_keys, functions[id]) > 0 {
                 if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "licm", report)
+            }
+        }
+    }
+    if level >= 1 && ir_opt_enabled(options, "strength") {
+        loop id in 0..<functions.len() {
+            if ir_opt_strength(m, functions[id]) > 0 {
+                if options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "strength", report)
             }
         }
     }
@@ -966,7 +973,7 @@ ir_opt_split_part: fn(slot: Shared<IROptSplitPart>, types: Shared<IROptTypes>) -
 // The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet,
 // OptLocalBox.jet, OptSimplify.jet, OptInline.jet, OptStops.jet).
 ir_opt_routes: fn() -> [String] Never! {
-    [String]{"jet_rt_alloc", "jet_rt_alloc_value", "jet_rt_alloc_value_grow", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_rt_free", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "memcmp", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at", "jet_int_checked_widen", "jet_int_add", "jet_int_sub", "jet_int_mul", "jet_int_compare", "jet_rt_int_drop", "jet_rt_list_bounds_stop", "jet_string_bytes", "jet_rt_string_clone", "jet_char_len", "jet_rt_context_trace", "jet_rt_cleanup_enter", "jet_rt_cleanup_leave"}
+    [String]{"jet_rt_alloc", "jet_rt_alloc_value", "jet_rt_alloc_value_grow", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_rt_free", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "memcmp", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at", "jet_int_checked_widen", "jet_int_add", "jet_int_sub", "jet_int_mul", "jet_int_compare", "jet_rt_int_drop", "jet_rt_list_bounds_stop", "jet_string_bytes", "jet_rt_string_clone", "jet_char_len", "jet_rt_string_builder_new", "jet_rt_string_builder_value", "jet_rt_string_builder_push_static", "jet_rt_string_builder_push", "jet_rt_string_builder_finish", "jet_rt_context_trace", "jet_rt_cleanup_enter", "jet_rt_cleanup_leave"}
 }
 
 // Whether instruction `at` calls the runtime route `route`.
@@ -1029,6 +1036,16 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
         report.aggregates_replaced += replaced
         if replaced > 0 -> ir_opt_simplify(m, out, report)
         if checking -> checking = ir_opt_lint(m, lint, out, "scalar", report)
+    }
+    if level >= 1 && ir_opt_enabled(options, "builder") && ir_opt_builders(m, out) > 0 {
+        if checking -> checking = ir_opt_lint(m, lint, out, "builder", report)
+        ir_opt_simplify(m, out, report)
+        if checking -> checking = ir_opt_lint(m, lint, out, "simplify", report)
+    }
+    if level >= 1 && ir_opt_enabled(options, "strength") && ir_opt_strength(m, out) > 0 {
+        if checking -> checking = ir_opt_lint(m, lint, out, "strength", report)
+        ir_opt_simplify(m, out, report)
+        if checking -> checking = ir_opt_lint(m, lint, out, "simplify", report)
     }
     if level >= 1 {
         // The SSA form is built only from a body IR Lint passed. A body

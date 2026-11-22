@@ -25,8 +25,11 @@ ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     dst: f.dst[at]
     if dst < 0 -> return false
     ty: m.types[f.slot_type[dst]]
+    if op == .Const {
+        return ty.kind == .Word || ty.kind == .Int || ty.kind == .Bool
+    }
     if op == .Add || op == .Sub || op == .Mul {
-        return ty.kind == .Word && f.c[at] == IR_OVERFLOW_WRAP
+        return (ty.kind == .Word || ty.kind == .Int) && f.c[at] == IR_OVERFLOW_WRAP
     }
     if op == .BitAnd || op == .BitOr || op == .BitXor {
         return ty.kind == .Word || ty.kind == .Bool
@@ -36,6 +39,25 @@ ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     }
     if op == .Convert -> return true
     false
+}
+
+// Whether instruction `def` strictly dominates `target` in structured IR
+// (every If/Loop open at `def` stays open through `target`).
+ir_licm_dominates: fn(f: IRFunction, def: Int, target: Int) -> Bool Never! {
+    if def < 0 || def >= target -> return false
+    k := def + 1
+    loop k < target {
+        op: f.op[k]
+        if op == .End {
+            opener: f.a[k]
+            if opener < def && (f.op[opener] == .If || f.op[opener] == .Loop) -> return false
+        } else if op == .Else {
+            opener: f.a[k]
+            if opener < def -> return false
+        }
+        k += 1
+    }
+    true
 }
 
 // Runtime route ids known not to mutate user struct/list headers.
@@ -138,6 +160,7 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
     }
 
     safe_routes: ir_licm_safe_routes(m)
+    char_len_route: name_rows_value(m.name_rows, "jet_char_len") ?? -2
     // Collect loops innermost-first (reverse order of Loop opener index).
     loops := [Int]{}
     idx := count - 1
@@ -208,11 +231,12 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
                 // further out to this enclosing loop if its operands are invariant here.
                 if hoist_to[k] >= 0 && hoist_to[k] <= loop_at -> next
                 op: f.op[k]
-                if op != .Load && !ir_licm_pure_op(m, f, k) -> next
+                is_char_len: op == .CallRuntime && char_len_route >= 0 && f.a[k] == char_len_route && f.c[k] == 1
+                if op != .Load && !is_char_len && !ir_licm_pure_op(m, f, k) -> next
                 dst: ir_x64_write(f, k)
                 if dst < f.param_count || writes[dst] != 1 || dropped[dst] -> next
                 dst_ty: m.types[f.slot_type[dst]]
-                if dst_ty.drop != "" -> next
+                if dst_ty.drop != "" && dst_ty.kind != .Int -> next
 
                 // Check all slot operands are invariant in this loop.
                 ir_x64_reads_into(f, k, reads)
@@ -225,8 +249,18 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
                 }
                 if !invariant -> next
 
+                if is_char_len {
+                    if !mem_pure -> next
+                    arg: f.args[f.b[k]]
+                    if arg < 0 -> next
+                    if arg >= f.param_count && !(writes[arg] == 1 && ir_licm_dominates(f, write_at[arg], loop_at)) {
+                        next
+                    }
+                }
+
                 if op == .Load {
                     if !mem_pure -> next
+                    if dst_ty.drop != "" -> next
                     if !always_runs[k - loop_at] {
                         base: f.a[k]
                         offset: f.b[k]

@@ -958,15 +958,22 @@ let closestSort = savedSort('closest', CARD_SORTS, 'open');
 function viewClosest() {
   const v = $('#view');
   const chain = epochChain(S.epochs, S.cards);
+  const activeChain = chain.filter(e => e.role !== 'finished' && e.role !== 'frozen');
   const rows = closestCards(S.cards, S.epochs, { epoch: closestEpoch || null, sort: closestSort, priorities: CFG().priorities });
+  const goalsTerm = TERM('epochs', 'Goals');
+  const goalTerm = TERM('epoch', 'Goal');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Closest</h1>
       <span class="viewhead__sub">cards nearest to done — fewest open criteria first</span></div>
-    <div class="chain">${chain.filter(e => e.role !== 'finished').map(e => `<span class="chain__step chain__step--${e.role}" title="${esc(e.name)}">
-        <b>${esc(e.label)}</b> ${e.role === 'later' ? '' : `${e.role} · ${e.staff} agent${e.staff === 1 ? '' : 's'} · `}${e.openCriteria} open${e.blockedCriteria ? ` · ${e.blockedCriteria} blocked` : ''}</span>`).join('<span class="chain__arrow">→</span>')}</div>
+    <div class="chain">${activeChain.map(e => {
+      return `<button type="button" class="chain__step chain__step--${e.role}${closestEpoch === e.id ? ' chain__step--selected' : ''}" data-chain-goal="${esc(e.id)}" title="${esc(e.name)} · ${e.openCards} open cards · ${e.openCriteria} open criteria">
+        <b>${esc(e.label)}</b> <span class="chain__name">${esc(e.name)}</span>
+        <span class="chain__meta">${e.openCards}c · ${e.openCriteria} open${e.blockedCriteria ? ` · ${e.blockedCriteria} blk` : ''}</span>
+      </button>`;
+    }).join('<span class="chain__arrow">→</span>')}</div>
     <div class="radar-tools">
-      <select id="closest-epoch" aria-label="Filter by epoch">
-        <option value="">All epochs</option>
-        ${chain.map(e => `<option value="${esc(e.id)}" ${closestEpoch === e.id ? 'selected' : ''}>${esc(e.label)}${e.name ? ` ${esc(e.name)}` : ''}</option>`).join('')}
+      <select id="closest-epoch" aria-label="Filter by ${esc(goalTerm.toLowerCase())}">
+        <option value="">All ${esc(goalsTerm.toLowerCase())}</option>
+        ${activeChain.map(e => `<option value="${esc(e.id)}" ${closestEpoch === e.id ? 'selected' : ''}>${esc(e.label)}${e.name ? ` ${esc(e.name)}` : ''}</option>`).join('')}
       </select>
       <select id="closest-sort" aria-label="Sort cards">${sortOptions(CARD_SORTS, closestSort)}</select>
       ${sortDirButton('closest-direction', closestSort)}
@@ -975,11 +982,14 @@ function viewClosest() {
     <div class="closest">${rows.map(({ card, crit }) => {
       const e = S.epochs.find(x => x.id === card.epoch);
       const ready = !crit.open && !crit.blocked;
+      const ratio = crit.total ? `${crit.settled}/${crit.total}` : '—';
       return `<button type="button" class="closest__row${ready ? ' closest__row--ready' : ''}" data-card-id="${esc(card.id)}">
         <span class="closest__num">#${esc(card.num)}</span>
         <span class="closest__epoch">${esc(e ? epochTag(e) : card.epoch || '—')}</span>
-        <span class="closest__open">${ready ? 'ready to close' : `${crit.open} open`}</span>
-        <span class="closest__blocked">${crit.blocked ? `${crit.blocked} blocked` : ''}</span>
+        <span class="prio prio-${esc(card.priority || 'P2')}">${esc(card.priority || 'P2')}</span>
+        <span class="closest__open">${ready ? 'ready' : `${crit.open} open`}</span>
+        <span class="closest__ratio" title="${crit.settled} of ${crit.total} criteria settled">${ratio}</span>
+        <span class="closest__blocked">${crit.blocked ? `${crit.blocked} blk` : ''}</span>
         <span class="closest__t">${esc(card.title)}</span>
       </button>`;
     }).join('') || '<div class="empty"><div class="empty__glyph">—</div><div>no open cards with criteria</div></div>'}</div>`;
@@ -987,18 +997,22 @@ function viewClosest() {
   $('#closest-epoch').addEventListener('change', (ev) => { closestEpoch = ev.target.value; viewClosest(); });
   $('#closest-sort').addEventListener('change', (ev) => setClosestSort(parseSort(ev.target.value, CARD_SORTS)));
   $('#closest-direction').addEventListener('click', () => setClosestSort(nextSort(closestSort, closestSort.col, CARD_SORTS)));
+  for (const btn of v.querySelectorAll('[data-chain-goal]')) {
+    btn.addEventListener('click', () => { closestEpoch = closestEpoch === btn.dataset.chainGoal ? '' : btn.dataset.chainGoal; viewClosest(); });
+  }
   for (const row of v.querySelectorAll('[data-card-id]')) row.addEventListener('click', () => showDetail(row.dataset.cardId));
 }
 
 function viewBoard() {
   const v = $('#view');
   const cardsMode = isOpen('radar-cards', false);
+  const goalsTerm = TERM('epochs', 'Goals');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Board</h1>
-      <span class="viewhead__sub">roadmap ledger × ops table</span>
+      <span class="viewhead__sub">goal roadmap × ops table</span>
       <div class="viewhead__actions">
         <button class="btn btn--ghost" id="legend-btn" title="What the colors mean">Key</button>
         <button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button>
-        <button class="btn btn--ghost" id="radar-recent" title="Show every card in one list, newest first" aria-pressed="${radarRecent}">${radarRecent ? '☰ Epochs' : 'Recent'}</button>
+        <button class="btn btn--ghost" id="radar-recent" title="Show every card in one list, newest first" aria-pressed="${radarRecent}">${radarRecent ? `☰ ${esc(goalsTerm)}` : 'Recent'}</button>
         <button class="btn btn--red" id="new-card">+ New card</button>
       </div></div>
     <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
@@ -1077,6 +1091,60 @@ function viewBoard() {
 // One body per section, honoring the card/table mode toggle.
 const radarList = (cards, cardsMode) => cardsMode ? grid(sortCards(cards, radarSort, CFG().priorities)) : opsTable(cards);
 
+// Compute live progress percentage for a goal: milestones when present,
+// otherwise settled criteria across active+done cards, otherwise done/total cards.
+function goalProgress(r, cards) {
+  const frozen = cards.filter(c => c.phase === 'frozen').length;
+  const activeCards = cards.filter(c => c.phase !== 'frozen' && c.phase !== 'done');
+  const allFrozen = activeCards.length === 0 && frozen > 0;
+  if (r.milestoneTotal > 0) {
+    return { pct: r.pct, allFrozen, frozen, label: `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.pct}%` };
+  }
+  const doneCards = (S.cards || []).filter(c => c.epoch === r.id && c.phase === 'done' && c.track !== 'sidequest');
+  let settled = 0, total = 0;
+  for (const c of [...activeCards, ...doneCards]) {
+    const crit = c.crit || { open: 0, blocked: 0, settled: 0, total: 0 };
+    settled += crit.settled || 0;
+    total += crit.total || 0;
+  }
+  const pct = total > 0 ? Math.round((settled / total) * 100) : (doneCards.length + activeCards.length > 0 ? Math.round((doneCards.length / (doneCards.length + activeCards.length)) * 100) : 0);
+  const label = allFrozen ? `${frozen} frozen` : total > 0 ? `${settled}/${total} criteria settled (${pct}%)` : `${r.done}/${r.active + r.done} cards done`;
+  return { pct, allFrozen, frozen, settled, total, label };
+}
+
+// Compact scannable KPI strip at the top of the Board showing every goal's
+// live progress bar and counts; clicking a tile scrolls to that goal.
+function renderGoalStrip(radar, byEpoch) {
+  if (!radar.length) return null;
+  const strip = el('<div class="goal-strip" aria-label="Goal overview"></div>');
+  for (const r of radar) {
+    const e = S.epochs.find(x => x.id === r.id);
+    const cards = byEpoch.get(r.id) || [];
+    const prog = goalProgress(r, cards);
+    const cls = prog.allFrozen ? 'goal-tile--frozen' : r.role === 'active' ? 'goal-tile--active' : r.role === 'next' ? 'goal-tile--next' : '';
+    const stat = prog.allFrozen
+      ? `<span class="goal-tile__frost">❄ ${prog.frozen} frozen</span>`
+      : `<span><b>${r.active}</b> open</span><span><b>${r.openCriteria}</b> crit</span>${prog.frozen ? `<span class="goal-tile__frost">❄${prog.frozen}</span>` : ''}`;
+    const tile = el(`<button type="button" class="goal-tile ${cls}" data-jump-goal="${esc(r.id)}" title="${esc(prog.label)}">
+      <div class="goal-tile__top">
+        <span class="goal-tile__tag">${esc(e ? epochTag(e) : r.id)}</span>
+        <span class="goal-tile__pct">${prog.allFrozen ? 'FROZEN' : `${prog.pct}%`}</span>
+      </div>
+      <div class="goal-tile__name">${esc(r.name)}</div>
+      <div class="goal-tile__bar"><i style="width:${prog.allFrozen ? 100 : prog.pct}%"></i></div>
+      <div class="goal-tile__meta">${stat}</div>
+    </button>`);
+    tile.addEventListener('click', () => {
+      const sec = document.querySelector(`[data-goal-section="${CSS.escape(r.id)}"]`);
+      if (!sec) return;
+      if (!sec.classList.contains('is-open')) sec.querySelector('.epoch__head')?.click();
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    strip.appendChild(tile);
+  }
+  return strip;
+}
+
 function renderRadarBody() {
   const body = $('#radar-body');
   if (!body) return;
@@ -1087,11 +1155,9 @@ function renderRadarBody() {
   const cards = S.cards || [];
   const radar = boardEpochs(S.radar || [], S.epochs, cards, S.milestones || []);
 
-  // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
-  // on milestoneId already pins the epoch. Render one flat list, no sections —
-  // the bar carries the context and the way back out. Frozen cards stay in the
-  // list: the bar counts them, so hiding them leaves a milestone pointing at a
-  // card the owner cannot see.
+  // Milestone drill-down: a milestone belongs to exactly one goal, so matching
+  // on milestoneId already pins the goal. Render one flat list, no sections —
+  // the bar carries the context and the way back out.
   const drill = radarMilestone ? milestoneById(radarMilestone) : null;
   if (radarMilestone && !drill) radarMilestone = null;
   if (drill) {
@@ -1116,9 +1182,7 @@ function renderRadarBody() {
     return;
   }
 
-  // Sidequests: their own section — off-plan work, not part of any epoch.
-  // Frozen sidequests stay here too, badged like frozen epoch cards. Each
-  // epoch section gets its unfinished cards, frozen included (badged).
+  // Sidequests: their own section — off-plan work, not part of any goal.
   const sq = [];
   const byEpoch = new Map();
   for (const c of cards) {
@@ -1126,10 +1190,14 @@ function renderRadarBody() {
     if (c.track === 'sidequest') sq.push(c);
     else if (c.epoch) byEpoch.set(c.epoch, [...(byEpoch.get(c.epoch) || []), c]);
   }
+
+  const strip = renderGoalStrip(radar, byEpoch);
+  if (strip) body.appendChild(strip);
+
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
-    body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active epochs</div></div>`));
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active ${esc(TERM('epochs', 'Goals').toLowerCase())}</div></div>`));
     return;
   }
   for (const r of radar) body.appendChild(radarEpochSection(r, byEpoch.get(r.id) || [], needle, cardsMode));
@@ -1180,7 +1248,7 @@ function recentFilterBar(count) {
       <span class="milefilter__tag">Recent</span>
       <span class="milefilter__t">sorted by ${by}</span>
       <span class="milefilter__n">${count} card${count === 1 ? '' : 's'}</span>
-      <button class="btn btn--sm" data-clear>Epochs ✕</button>
+      <button class="btn btn--sm" data-clear>${esc(TERM('epochs', 'Goals'))} ✕</button>
     </div>`);
   $('[data-clear]', bar).addEventListener('click', () => { radarRecent = false; viewBoard(); });
   return bar;
@@ -1194,7 +1262,7 @@ const STAGE_HELP = [
   ['building', 'Building', 'Implementation in progress'],
   ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
   ['done', 'Done', 'Closed when exit criteria are met; leaves the board'],
-  ['frozen', 'Frozen', 'Owner-paused — stays in its epoch or sidequest section with a ❄ badge; the Frozen filter shows only these'],
+  ['frozen', 'Frozen', 'Owner-paused — stays in its goal or sidequest section with a ❄ badge; the Frozen filter shows only these'],
 ];
 
 function openLegend() {
@@ -1207,7 +1275,7 @@ function openLegend() {
       <div class="modal__h">Left bar on a card = its stage</div>
       <div class="legend">${STAGE_HELP.map(([id, name, desc]) => `<div class="legend__row"><span class="legend__bar" style="background:var(--s-${id})"></span><span class="legend__name">${name}</span><span class="legend__desc">${esc(desc)}</span></div>`).join('')}</div>
       <div class="modal__h">Work order badge</div>
-      <p class="prose">The small number at the top-left of a card is its <b>work order</b> within its epoch — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
+      <p class="prose">The small number at the top-left of a card is its <b>work order</b> within its ${esc(TERM('epoch', 'Goal').toLowerCase())} — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
       <div class="modal__h">Glowing red = it needs you</div>
       <p class="prose">A card <b style="color:var(--red)">glows red</b> when the next move is yours — a decision to record, or a visual/UX acceptance check. The same red drives the beacon, the “blocked on you” pill, and focus-mode dots.</p>
       <div class="modal__h">Blue = finished</div>
@@ -1238,16 +1306,28 @@ function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
     });
 }
 
-// One header per epoch: its E label and name, its place in the chain, the
-// milestone progress bar, its tallies and today's change in open work.
+// One header per goal: its G label and name, its place in the chain, the
+// criteria-backed progress bar, structured stat pills and today's delta.
 function radarEpochSection(r, cards, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
-  const frozen = cards.filter(c => c.phase === 'frozen').length;
-  return collapsible('radar:' + r.id, true,
-    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${chainBadge(r)}
-     <span class="epoch__bar" title="${r.milestonesMet}/${r.milestoneTotal} milestones met · ${r.pct}%"><i style="width:${r.pct}%"></i></span>
-     <span class="epoch__count">${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${r.active + r.done} cards${frozen ? ` · ${frozen} frozen` : ''}${criteriaLeftLabel(r)}${epochToday(r)}</span>`,
-    '', (body) => {
+  const prog = goalProgress(r, cards);
+  const pills = [];
+  if (r.milestoneTotal > 0) pills.push(`<span class="epoch__pill">${r.milestonesMet}/${r.milestoneTotal} ms</span>`);
+  if (!prog.allFrozen) {
+    pills.push(`<span class="epoch__pill epoch__pill--open"><b>${r.active}</b> open</span>`);
+    if (r.openCriteria) pills.push(`<span class="epoch__pill"><b>${r.openCriteria}</b> criteria</span>`);
+    if (r.blockedCriteria) pills.push(`<span class="epoch__pill epoch__pill--warn">${r.blockedCriteria} blocked</span>`);
+    if (r.done > 0) pills.push(`<span class="epoch__pill epoch__pill--done">${r.done} done</span>`);
+  }
+  if (prog.frozen > 0) pills.push(`<span class="epoch__pill epoch__pill--frost">❄ ${prog.frozen} frozen</span>`);
+  const today = epochToday(r);
+  if (today) pills.push(`<span class="epoch__pill epoch__pill--delta">${today}</span>`);
+  const sec = collapsible('radar:' + r.id, !prog.allFrozen,
+    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${prog.allFrozen ? '<span class="epoch__role epoch__role--frozen">frozen</span>' : chainBadge(r)}
+     <span class="epoch__bar${prog.allFrozen ? ' epoch__bar--frozen' : ''}" title="${esc(prog.label)}"><i style="width:${prog.allFrozen ? 100 : prog.pct}%"></i></span>
+     <span class="epoch__pct">${prog.allFrozen ? '—' : `${prog.pct}%`}</span>
+     <span class="epoch__pills">${pills.join('')}</span>`,
+    prog.allFrozen ? 'epoch--frozen' : '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarSparkline(r.burndown));
       if (r.milestones.length) body.appendChild(radarMilestones(r.milestones));
@@ -1262,20 +1342,23 @@ function radarEpochSection(r, cards, needle, cardsMode) {
       body.appendChild(el(`<div class="radar__subhead">Cards</div>`));
       body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
     });
+  sec.dataset.goalSection = r.id;
+  return sec;
 }
 
-// The epoch's place in the chain: the active epoch and the next one carry
+// The goal's place in the chain: the active goal and the next one carry
 // their staffing (agents to put on them).
 function chainBadge(r) {
   if (r.role !== 'active' && r.role !== 'next') return '';
-  return `<span class="epoch__role epoch__role--${r.role}" title="${r.role === 'active' ? 'first unfinished epoch in order' : 'the epoch after the active one'}">${r.role} · ${r.staff} agent${r.staff === 1 ? '' : 's'}</span>`;
+  const term = TERM('epoch', 'Goal').toLowerCase();
+  return `<span class="epoch__role epoch__role--${r.role}" title="${r.role === 'active' ? `first unfinished ${term} in order` : `the ${term} after the active one`}">${r.role} · ${r.staff} agent${r.staff === 1 ? '' : 's'}</span>`;
 }
 const criteriaLeftLabel = (r) => r.openCriteria || r.blockedCriteria
   ? ` · ${r.openCriteria} open criteria${r.blockedCriteria ? `, ${r.blockedCriteria} blocked` : ''}` : '';
 function epochToday(r) {
   const day = S.counts.today?.epochs?.[r.id];
   if (!day || (!day.openCardsDelta && !day.openCriteriaDelta)) return '';
-  return ` · today${day.openCardsDelta ? ` cards${dayChange(day.openCardsDelta)}` : ''}${day.openCriteriaDelta ? ` criteria${dayChange(day.openCriteriaDelta)}` : ''}`;
+  return `today${day.openCardsDelta ? ` ${dayChange(day.openCardsDelta)}c` : ''}${day.openCriteriaDelta ? ` ${dayChange(day.openCriteriaDelta)}cr` : ''}`;
 }
 
 function radarSparkline(days) {

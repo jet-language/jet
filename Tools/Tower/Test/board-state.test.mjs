@@ -154,6 +154,9 @@ test('an epoch is labeled E plus its number, from num or else from the id', () =
   assert.equal(epochLabel({ id: 'e7', name: 'e7' }), 'E7', 'a name equal to the id is not repeated');
   assert.equal(epochLabel({ id: 'later', name: 'Someday' }), 'later Someday', 'an id with no number shows as itself');
   assert.equal(epochNumber({ id: 'E21' }), 21);
+  assert.equal(epochLabel({ id: 'G1', name: 'Metaprogramming' }), 'G1 Metaprogramming');
+  assert.equal(epochLabel({ id: 'G9', name: 'JetOS' }, { name: false }), 'G9');
+  assert.equal(epochNumber({ id: 'G9' }), 9);
   assert.equal(epochNumber({ id: 'side' }), null);
 });
 
