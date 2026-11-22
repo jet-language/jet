@@ -1062,7 +1062,290 @@ ir_x64_homes: fn(starts: [Int], ends: [Int], weights: [Int], homed: [Bool], name
     if heat == peaks[slot] -> peak_weights[slot] = peak_weights[slot] + heat_w
 }
 
+// Single-pass O(N) fast-O0 allocator: skips loop-depth weights, linear scan
+// (general and XMM), leaf/clobber scans, and O(N^2) home sorting while keeping
+// constant folding, derived frame addresses, accurate debug variable ranges
+// across loops, and strictly disjoint O(N) temporary home reuse.
+ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
+    count: f.slot_type.len()
+    op_count: f.op.len()
+    classes := [IRX64Class]{}
+    classes.try_reserve(count) ?? panic("reserve failed")
+    starts := [Int]{}
+    starts.try_reserve(count) ?? panic("reserve failed")
+    ends := [Int]{}
+    ends.try_reserve(count) ?? panic("reserve failed")
+    first_writes := [Bool]{}
+    first_writes.try_reserve(count) ?? panic("reserve failed")
+    writes := [Int]{}
+    writes.try_reserve(count) ?? panic("reserve failed")
+    last_write := [Int]{}
+    last_write.try_reserve(count) ?? panic("reserve failed")
+    loop slot in 0..<count {
+        classes.push(ir_x64_row_class(m, f.slot_type[slot]))
+        if slot < f.param_count {
+            starts.push(-1)
+            ends.push(-1)
+            first_writes.push(true)
+        } else {
+            starts.push(op_count)
+            ends.push(-1)
+            first_writes.push(false)
+        }
+        writes.push(0)
+        last_write.push(-1)
+    }
+    loop_starts := [Int]{}
+    loop_ends := [Int]{}
+    loop at in 0..<op_count {
+        op: f.op[at]
+        if op == .Loop {
+            loop_starts.push(at)
+            loop_ends.push(f.a[at])
+        }
+        form: ir_x64_read_form(op)
+        if form != IR_X64_READS_NONE {
+            a: f.a[at]
+            if form != IR_X64_READS_ARGS && (form != IR_X64_READS_RESULT || a >= 0) {
+                if a >= 0 && a < count {
+                    if at < starts[a] {
+                        starts[a] = at
+                        first_writes[a] = false
+                    }
+                    if at > ends[a] -> ends[a] = at
+                }
+            }
+            if form == IR_X64_READS_AB {
+                b: f.b[at]
+                if b >= 0 && b < count {
+                    if at < starts[b] {
+                        starts[b] = at
+                        first_writes[b] = false
+                    }
+                    if at > ends[b] -> ends[b] = at
+                }
+            } else if form == IR_X64_READS_AC {
+                c: f.c[at]
+                if c >= 0 && c < count {
+                    if at < starts[c] {
+                        starts[c] = at
+                        first_writes[c] = false
+                    }
+                    if at > ends[c] -> ends[c] = at
+                }
+            } else if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
+                first_arg: f.b[at]
+                loop index in first_arg..<(first_arg + f.c[at]) {
+                    slot: f.args[index]
+                    if slot >= 0 && slot < count {
+                        if at < starts[slot] {
+                            starts[slot] = at
+                            first_writes[slot] = false
+                        }
+                        if at > ends[slot] -> ends[slot] = at
+                    }
+                }
+            }
+        }
+        written: ir_x64_write(f, at)
+        if written >= 0 && written < count {
+            if at < starts[written] {
+                starts[written] = at
+                first_writes[written] = true
+            }
+            if at > ends[written] -> ends[written] = at
+            writes[written] = writes[written] + 1
+            last_write[written] = at
+        }
+    }
+    consts := [Bool]{}
+    consts.try_reserve(count) ?? panic("reserve failed")
+    values := [Int]{}
+    values.try_reserve(count) ?? panic("reserve failed")
+    addressed := [Bool]{}
+    addressed.try_reserve(count) ?? panic("reserve failed")
+    has_addressed := false
+    loop slot in 0..<count {
+        at: last_write[slot]
+        constant: slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .Const && classes[slot] == .General
+        consts.push(constant)
+        values.push(if constant -> f.a[at] else -> 0)
+        addr: slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && classes[slot] == .General
+        if addr -> has_addressed = true
+        addressed.push(addr)
+    }
+    result_storage: ir_x64_result_storage(m, f, last_write, writes)
+    if result_storage >= 0 -> addressed[result_storage] = false
+    roots := [Int]{}
+    shifts := [Int]{}
+    if has_addressed {
+        roots.try_reserve(count) ?? panic("reserve failed")
+        shifts.try_reserve(count) ?? panic("reserve failed")
+        loop slot in 0..<count {
+            roots.push(if addressed[slot] -> slot else -> -1)
+            shifts.push(0)
+        }
+        derived := true
+        loop derived {
+            derived = false
+            loop slot in 0..<count {
+                at: last_write[slot]
+                if roots[slot] >= 0 || at < 0 || slot < f.param_count || writes[slot] != 1 || classes[slot] != .General {
+                    next
+                }
+                op: f.op[at]
+                if op != .Copy && op != .Move && op != .Offset -> next
+                source: f.a[at]
+                if source < 0 || source >= count || roots[source] < 0 -> next
+                type_row: f.slot_type[source]
+                if op == .Copy && m.types[type_row].drop != "" && m.types[type_row].kind != .Aggregate {
+                    next
+                }
+                root: roots[source]
+                shift: shifts[source] + (if op == .Offset -> f.b[at] else -> 0)
+                if shift < 0 || shift >= ir_x64_storage_size(f, last_write[root]) -> next
+                roots[slot] = root
+                shifts[slot] = shift
+                addressed[slot] = true
+                derived = true
+            }
+        }
+    }
+    if loop_starts.len() > 0 {
+        inner := [Int]{}
+        inner.try_reserve(op_count) ?? panic("reserve failed")
+        heads := [Int]{}
+        heads.try_reserve(op_count) ?? panic("reserve failed")
+        parents := [Int]{}
+        open := [Int]{}
+        nested := true
+        loop at in 0..<op_count {
+            loop open.len() > 0 && loop_ends[open[open.len() - 1]] < at -> _ := open.pop()
+            holder: if open.len() > 0 -> open[open.len() - 1] else -> -1
+            inner.push(holder)
+            if f.op[at] == .Loop {
+                row: parents.len()
+                heads.push(row)
+                parents.push(holder)
+                if loop_ends[row] <= at || loop_ends[row] >= op_count || (holder >= 0 && loop_ends[row] > loop_ends[holder]) {
+                    nested = false
+                }
+                open.push(row)
+            } else { heads.push(-1) }
+        }
+        loop slot in 0..<count {
+            if starts[slot] > ends[slot] || ends[slot] < 0 -> next
+            changed := true
+            loop changed {
+                changed = false
+                if nested {
+                    row := if starts[slot] >= 0 -> inner[starts[slot]] else -> -1
+                    loop row >= 0 {
+                        if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                            changed = true
+                        }
+                        row = parents[row]
+                    }
+                    row = if heads[ends[slot]] >= 0 -> heads[ends[slot]] else -> inner[ends[slot]]
+                    loop row >= 0 {
+                        if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                            changed = true
+                        }
+                        row = parents[row]
+                    }
+                } else {
+                    loop row in 0..<loop_starts.len() {
+                        if ir_x64_grow_range(starts, ends, slot, loop_starts[row], loop_ends[row], first_writes[slot]) {
+                            changed = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    regs := [Int]{}
+    regs.try_reserve(count) ?? panic("reserve failed")
+    xmms := [Int]{}
+    xmms.try_reserve(count) ?? panic("reserve failed")
+    homes := [Int]{}
+    homes.try_reserve(count) ?? panic("reserve failed")
+    temp_homes := [Int]{}
+    temp_ends := [Int]{}
+    depth := 0
+    loop slot in 0..<count {
+        regs.push(-1)
+        xmms.push(-1)
+        s: starts[slot]
+        if consts[slot] || addressed[slot] || s > ends[slot] || classes[slot] == .Empty {
+            homes.push(0)
+            next
+        }
+        if f.slot_name[slot] < 0 {
+            reused := 0
+            loop k in 0..<temp_ends.len() {
+                if temp_ends[k] < s {
+                    reused = temp_homes[k]
+                    temp_ends[k] = ends[slot]
+                    break
+                }
+            }
+            if reused < 0 {
+                homes.push(reused)
+                next
+            }
+            depth += 8
+            disp: 0 - depth
+            homes.push(disp)
+            if temp_homes.len() < 32 {
+                temp_homes.push(disp)
+                temp_ends.push(ends[slot])
+            }
+        } else {
+            depth += 8
+            homes.push(0 - depth)
+        }
+    }
+    result_home := 0
+    if f.result >= 0 && m.types[f.result].kind == .Aggregate {
+        depth += 8
+        result_home = 0 - depth
+    }
+    stack := [Int]{}
+    stack.try_reserve(op_count) ?? panic("reserve failed")
+    loop at in 0..<op_count {
+        disp := 0
+        op: f.op[at]
+        if op == .StackAddress && (result_storage < 0 || at != last_write[result_storage]) {
+            size: ir_x64_storage_size(f, at)
+            align: if f.b[at] > 16 -> 16 else if f.b[at] < 1 -> 1 else -> f.b[at]
+            depth = ir_x64_align(depth + size, align)
+            disp = 0 - depth
+        }
+        if (op == .Call || op == .CallRuntime || op == .CallIndirect) && f.dst[at] >= 0 {
+            dst_row: f.slot_type[f.dst[at]]
+            if m.types[dst_row].kind == .Aggregate {
+                align: if m.types[dst_row].align > 16 -> 16 else if m.types[dst_row].align < 8 -> 8 else -> m.types[dst_row].align
+                depth = ir_x64_align(depth + ir_x64_align(m.types[dst_row].size, 8), align)
+                disp = 0 - depth
+            }
+        }
+        stack.push(disp)
+    }
+    frames := [Int]{}
+    frames.try_reserve(count) ?? panic("reserve failed")
+    if has_addressed {
+        loop slot in 0..<count {
+            frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
+        }
+    } else {
+        loop _ in 0..<count -> frames.push(0)
+    }
+    frame_bytes: ir_x64_align(depth, 16)
+    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: [Int]{}, routed: [Int]{}, homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: [Int]{}, frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+}
+
 ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Allocation Never! {
+    if fast_o0 -> return ir_x64_allocate_fast_o0(m, f)
     count: f.slot_type.len()
     op_count: f.op.len()
     classes := [IRX64Class]{}

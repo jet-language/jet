@@ -2156,6 +2156,9 @@ JetDriverComptimeStaging: struct {
     taken: [String:Bool],
     declared: [SemaGraphModuleResult],
     sites: SemaComptimeValueSites,
+    module_count: Int{0},
+    type_count: Int{0},
+    impl_count: Int{0},
 }
 
 // A comptime item that checked completely and waits for its value: it
@@ -2353,6 +2356,7 @@ JetDriverComptimeRunResult: struct {
     trail: SemaGraphTrail,
     declared: [SemaGraphModuleResult],
     graph_facts: SemaComptimeGraphFacts?,
+    carried_staging: [JetDriverComptimeStaging]{[JetDriverComptimeStaging]{}},
 }
 
 jet_driver_comptime_run_result: fn(
@@ -2894,14 +2898,32 @@ jet_driver_comptime_stage: fn(
     if staging.staged -> return None
     module_count: sema_comptime_staged_module_count(programs[0]) ?? return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
     if staging.declared.len() > 0 && staging.declared.len() == module_count {
+        types := 0
+        impls := 0
+        loop checked in staging.declared {
+            types += checked.declarations.type_defs.len()
+            impls += checked.declarations.impls.len()
+        }
         declared := jet_driver_comptime_declared(staging.declared)
         staging.program = Shared{[IRProgram]{declared.move()}}
+        staging.module_count = module_count
+        staging.type_count = types
+        staging.impl_count = impls
         staging.staged = true
         return None
     }
     modules: sema_comptime_modules_with_values(programs, values, threads) ?? panic("the staged comptime declaration checks failed: {err}")
+    types := 0
+    impls := 0
+    loop checked in modules {
+        types += checked.declarations.type_defs.len()
+        impls += checked.declarations.impls.len()
+    }
     declared := jet_driver_comptime_declared(modules)
     staging.program = Shared{[IRProgram]{declared.move()}}
+    staging.module_count = modules.len()
+    staging.type_count = types
+    staging.impl_count = impls
     staging.staged = true
     None
 }
@@ -3311,6 +3333,22 @@ jet_driver_run_comptime: fn(
     // one the run builds (jet_driver_comptime_run).
     memory_plan: &[SemaFunctionMemoryPlan],
 ) -> JetDriverComptimeRunResult {
+    carried := [JetDriverComptimeStaging]{}
+    jet_driver_run_comptime_carried(staged, declared, graph_facts, sources, initial_values, initial_functions, request, diagnostics, memory_plan, carried)
+}
+
+jet_driver_run_comptime_carried: fn(
+    staged: &&SemaRegistrationGraph,
+    declared: &&[SemaGraphModuleResult],
+    graph_facts: &&SemaComptimeGraphFacts?,
+    sources: [SemaComptimeItemSource],
+    initial_values: [SemaComptimeItemValue],
+    initial_functions: [SemaComptimeFunctionResult],
+    request: JetDriverCompileRequest,
+    diagnostics: &[Diagnostic],
+    memory_plan: &[SemaFunctionMemoryPlan],
+    carried_staging: &[JetDriverComptimeStaging],
+) -> JetDriverComptimeRunResult {
     counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, item_functions_evaluated: 0, functions_built: 0}
     // Read before the tables take `staged`.
     keep_going := staged.keep_going
@@ -3340,7 +3378,9 @@ jet_driver_run_comptime: fn(
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
-    staging := JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, taken: [String:Bool]{}, declared: declared.move(), sites: sema_comptime_value_sites_empty()}
+    staging := if carried_staging.len() > 0 -> carried_staging.pop() ?? panic("carried staging slot lost") else -> JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, taken: [String:Bool]{}, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
+    staging.declared = declared.move()
+    staging.sites = sema_comptime_value_sites_empty()
     // Each in a one-row slot: a pass's prechecks move them into the threads'
     // shared state and back (moving a borrowed value out would copy the
     // whole graph once per pass).
@@ -3351,6 +3391,9 @@ jet_driver_run_comptime: fn(
     result := jet_driver_comptime_run(programs, environments, trail, keep_going, sources, initial_values, initial_functions, request, staging, counters, diagnostics, memory_plan)
     result.declared = staging.declared.move()
     staging.declared = [SemaGraphModuleResult]{}
+    if result.complete && !result.soft_stop && staging.staged {
+        result.carried_staging.push(staging.move())
+    }
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.items_checked", counters.items_checked, -1)
         sink.progress("counters.comptime.programs_built", counters.programs_built, -1)
@@ -5695,9 +5738,9 @@ jet_driver_checked_repeated_rows: fn(modules: [SemaGraphModuleResult]) -> [Bool]
     repeated := [Bool]{}
     loop graph_module in modules {
         loop function in graph_module.functions {
-            row: repeated.len()
-            repeated.push(name_rows_get_text(seen, function.key) != None)
-            name_rows_set_first(seen, function.key, row)
+            before: seen.rows.len()
+            name_rows_set_first(seen, function.key, repeated.len())
+            repeated.push(seen.rows.len() == before)
         }
     }
     repeated
@@ -5809,10 +5852,11 @@ jet_driver_finalize_program: fn(
     functions: &[SemaComptimeFunctionResult],
     trace: &JetDriverCompileTrace,
     request: JetDriverCompileRequest,
+    carried_staging: &[JetDriverComptimeStaging],
 ) -> SemaGraphResult {
     bodies := sema_finalize_bodies_empty()
     body_graph: sema_finalize_bodies(graph, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
-    landing := JetDriverLanding{stopped: false}
+    landing := JetDriverLanding{stopped: false, staging: compiler_take_rows<JetDriverComptimeStaging>(carried_staging)}
     early_graph: jet_driver_land_local_values(body_graph, bodies, SemaLocalSpliceInto.Undemanded, stage, values, functions, trace, request, landing)
     demand_graph := sema_finalize_demand(early_graph, trail, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
     loop {
@@ -5821,6 +5865,7 @@ jet_driver_finalize_program: fn(
         demand_graph = sema_finalize_demand(demand_graph, trail, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
         if functions.len() == held_functions -> break
     }
+    landing.staging = [JetDriverComptimeStaging]{}
     // A traced run whose Core is the built-in one counts how its Core
     // demand's checks split over the Core facts' sealed and excluded keys
     // (sema_core_bound_counters).
@@ -6181,7 +6226,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     printed_debug_trace: trace.debug_trace.len()
     printed_soft_stop: trace.soft_stop
     printed_exit_code: trace.exit_code
-    checked_graph := jet_driver_finalize_program(finalize_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)
+    checked_graph := jet_driver_finalize_program(finalize_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, comptime_run.carried_staging)
     if checked_graph.core_stand_in_rerun != "" {
         stood_graph: checked_graph.registration_graph.move()
         checked_graph.registration_graph = None
@@ -6198,7 +6243,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop trace.debug_trace.len() > printed_debug_trace -> _ := trace.debug_trace.pop()
         trace.soft_stop = printed_soft_stop
         trace.exit_code = printed_exit_code
-        checked_graph = jet_driver_finalize_program(rerun_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request)
+        rerun_staging := [JetDriverComptimeStaging]{}
+        checked_graph = jet_driver_finalize_program(rerun_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, rerun_staging)
     }
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
@@ -6472,8 +6518,19 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // Per row of `checked_functions`: false for a repeated key that
     // JET_KEEP_GOING leaves unlowered.
     lowering_candidates := [Bool]{}
-    registered_function_keys := jet_driver_registered_function_keys(registration_graph)
-    repeated_rows: jet_driver_checked_repeated_rows(checked_graph.modules)
+    repeated_rows := [Bool]{}
+    registered_function_keys := if compiler_threads_admit(request.compiler_threads, checked_graph.modules.len(), checked_graph.modules.len(), 32, 0, 0) > 1 -> {
+        out := [JetDriverRegisteredKeys]{}
+        task.group driver_prelower_owners_index {
+            reg_task: task jet_driver_registered_function_keys(registration_graph)
+            repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
+            out.push(reg_task.join() ?? panic(compiler_threads_failure_text(err)))
+        }
+        out.pop() ?? panic("lost registered function keys")
+    } else -> {
+        repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
+        jet_driver_registered_function_keys(registration_graph)
+    }
     loaded_identity_counts := jet_driver_loaded_identity_counts(load.modules)
     checked_row := 0
     failed_stage := JetDriverStage?{None}
@@ -7172,7 +7229,16 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
         if !cli {
             loop effect_name in functions[index].effects.direct -> required.push(effect_name.copy())
         }
-        loop edge in jet_driver_effect_edges(functions[index]) {
+        loop edge in functions[index].effects.call_edges {
+            callee: name_rows_get_text(by_key, edge) ?? next
+            if jet_driver_toolchain_env_read(functions[callee]) -> next
+            if cli && functions[callee].module_name.starts_with("core.") -> next
+            if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") {
+                parser = callee
+            }
+            pending.push(callee)
+        }
+        loop edge in functions[index].effects.value_edges {
             callee: name_rows_get_text(by_key, edge) ?? next
             if jet_driver_toolchain_env_read(functions[callee]) -> next
             if cli && functions[callee].module_name.starts_with("core.") -> next
@@ -7507,19 +7573,31 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     // discovery order.
     reached := (loop _ in functions -> false)
     order := [Int]{}
-    // The rows each reached function's edges resolve to.
+    // The rows each reached function's edges resolve to, and indices of any
+    // unresolved edges (such as EFFECT_PANIC_EDGE) for functions with a row
+    // (non-negative into call_edges, negative -(i + 1) into value_edges).
     callees := (loop _ in functions -> [Int]{})
+    extra_edges := (loop _ in functions -> [Int]{})
     pending := [Int]{entry_row}
     loop pending.len() > 0 {
         index: pending.pop() ?? break
         if reached[index] -> next
         reached[index] = true
         order.push(index)
-        loop edge in jet_driver_effect_edges(functions[index]) {
-            callee: name_rows_get_text(by_key, edge) ?? next
-            if jet_driver_toolchain_env_read(functions[callee]) -> next
-            callees[index].push(callee)
-            pending.push(callee)
+        has_row: rows[index] >= 0
+        loop (edge_idx, edge) in functions[index].effects.call_edges {
+            if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if jet_driver_toolchain_env_read(functions[callee]) -> next
+                callees[index].push(callee)
+                pending.push(callee)
+            } else if has_row { extra_edges[index].push(edge_idx) }
+        }
+        loop (edge_idx, edge) in functions[index].effects.value_edges {
+            if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if jet_driver_toolchain_env_read(functions[callee]) -> next
+                callees[index].push(callee)
+                pending.push(callee)
+            } else if has_row { extra_edges[index].push(-(edge_idx + 1)) }
         }
     }
     // The generated typed-CLI entry `__jet_cli_run…` and the parser it calls
@@ -7648,32 +7726,45 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         }
     }
     // The enforcer's keys: `module.function`, a method `module.Type.name`.
+    // Only entry-reachable functions participate in pkg_compute_package_effects;
+    // keep function_keys in function index order so witness order is unchanged,
+    // and insert into the sorted String maps in ascending key order (O(1) append
+    // instead of O(N^2) shifts across tens of thousands of keys).
     sites := (loop _ in functions -> "")
+    effect_keys := (loop _ in functions -> "")
+    sited := [Int]{}
     loop (index, function) in functions {
+        if !reached[index] -> next
         row: rows[index]
         if row < 0 -> next
         effect_key := sema_effect_chain_name(function)
         sites[index] = "{program.modules[row].alias}.{effect_key}"
-        // A witness is the function's name; a function registration does not
-        // name (a lambda, a generated body) is its declaration.
-        program.modules[row].function_spans[effect_key] = name_spans.get(function.key) ?? function.source_span
+        effect_keys[index] = effect_key
         program.modules[row].function_keys.push(effect_key.move())
+        sited.push(index)
     }
+    site_keys: sites
+    sited.sort_by(fn(left: Int, right: Int) { (site_keys[left] <=> site_keys[right]).then(left <=> right) })
     summaries := [String:PackageEffectSummary]{}
     solved := [String:[String]]{}
-    loop (index, function) in functions {
-        if sites[index] == "" -> next
+    loop index in sited {
+        function: functions[index]
+        row: rows[index]
+        // A witness is the function's name; a function registration does not
+        // name (a lambda, a generated body) is its declaration.
+        program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
         // A same-package edge names its callee's site, and one to a callee
-        // with no site leaves, built in one forward pass.
+        // with no site leaves, built from the already-resolved BFS edges.
         kept_edges := [String]{}
-        raw_edges := jet_driver_effect_edges(function)
-        loop edge in raw_edges.move() {
-            if name_rows_get_text(by_key, edge) == .Val(callee) {
-                if sites[callee] != "" -> kept_edges.push(sites[callee].copy())
-            } else { kept_edges.push(edge) }
+        loop callee in callees[index] {
+            if site_keys[callee] != "" -> kept_edges.push(site_keys[callee].copy())
         }
-        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: kept_edges.move(), maximal: false}
-        solved[sites[index]] = if reached[index] -> compiler_take_rows<String>(local[index]) else -> function.effects.direct.copy()
+        loop edge_idx in extra_edges[index] {
+            text: if edge_idx >= 0 -> function.effects.call_edges[edge_idx] else -> function.effects.value_edges[-(edge_idx + 1)]
+            kept_edges.push(text.copy())
+        }
+        summaries[site_keys[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: kept_edges.move(), maximal: false}
+        solved[site_keys[index]] = compiler_take_rows<String>(local[index])
     }
     entry_module: module_rows.get(load.entry_module_identity.id) ?? rows[entry_row]
     program.entry = entry_module
@@ -7912,7 +8003,7 @@ jet_driver_run_tidy_lints: fn(load: &JetDriverLoadResult, checked_functions: [Fn
         }
     }
     tidy := if collect_cost -> jet_driver_cost_sites_to_lints(load, cost_sites) else -> [Diagnostic]{}
-    loop lint in jet_driver_recursion_lints_from_calls(load, checked_functions, bodies, registration_graph.decls, calls) {
+    loop lint in jet_driver_recursion_lints_from_calls(load, checked_functions, bodies, registration_graph.decls, calls, threads) {
         tidy.push(lint)
     }
     loop lint in jet_driver_float_seed_hits_to_lints(load, checked_functions, float_hits) {

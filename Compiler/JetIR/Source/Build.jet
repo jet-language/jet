@@ -988,10 +988,106 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
 // implementation methods and trait method tables that name function rows.
 // `decls` is the run's declaration table their direct calls name.
 // The declarations stay, so one declared program serves many builds.
+ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, workers: Int) {
+    symbols_ref: p.symbols
+    type_rows_ref: p.type_rows
+    types_ref: p.types
+    impl_slots_ref: p.impl_slots
+    impl_traits_ref: p.impl_traits
+    owner_methods := name_rows()
+    render_impls := name_rows()
+    close_methods := name_rows()
+    core_roles := [Int]{}
+    decl_parts := [IRBindDeclPart]{}
+    task.group ir_program_bind_tasks {
+        t_rows: task ir_first_function_rows(owned)
+        t_traits: task ir_trait_methods(owned, symbols_ref, type_rows_ref, types_ref, impl_slots_ref, impl_traits_ref)
+        t_decls: task ir_bind_decl_parts(owned, decls, symbols_ref, workers)
+        t_intrinsics: task ir_core_intrinsics(owned)
+        loop (index, function) in owned {
+            if function.role != "" -> core_roles.push(index)
+            if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
+                next
+            }
+            if function.kind == {
+                .TopLevel -> {}
+                .Method(_, owner_type) -> {
+                    key: "{function.name}||{ir_render_type_key(type_rows_ref, types_ref, owner_type)}"
+                    name_rows_set_first(owner_methods, key, index)
+                }
+                .TraitMethod(_, _, owner_type, trait_name, _) -> {
+                    trait_short: ir_short_name(symbol_table_key(symbols_ref, trait_name))
+                    owner_key: ir_render_type_key(type_rows_ref, types_ref, owner_type)
+                    key: "{function.name}|{trait_short}|{owner_key}"
+                    name_rows_set_first(owner_methods, key, index)
+                    selected: (trait_short == "Display" && function.name == "display") || (trait_short == "Printable" && function.name == "show")
+                    if selected {
+                        render_key: "{trait_short}|{owner_key}"
+                        name_rows_set_first(render_impls, render_key, index)
+                    }
+                }
+            }
+        }
+        loop implementation in p.impl_methods {
+            row: name_rows_value(owner_methods, "{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? name_rows_value(owner_methods, "{implementation.method}||{implementation.owner_key}") ?? -1
+            if row < 0 -> next
+            if implementation.trait_short == "Close" {
+                name_rows_set_first(close_methods, implementation.owner_key, row)
+            } else {
+                render_key: "{implementation.trait_short}|{implementation.owner_key}"
+                name_rows_set_first(render_impls, render_key, row)
+            }
+        }
+        p.rows = t_rows.join() ?? panic(compiler_threads_failure_text(err))
+        p.trait_methods = t_traits.join() ?? panic(compiler_threads_failure_text(err))
+        decl_parts = t_decls.join() ?? panic(compiler_threads_failure_text(err))
+        p.intrinsics = t_intrinsics.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
+    loop part in decl_parts {
+        loop i in 0..<part.decl_indices.len() {
+            d: part.decl_indices[i]
+            if decl_rows[d] < 0 -> decl_rows[d] = part.fn_rows[i]
+        }
+    }
+    p.decl_rows = decl_rows.move()
+    p.decl_foreign = [Int]{}
+    p.foreign_rows = [SemaCheckedForeignFunction]{}
+    loop operator_trait in OWNED_TRAITS {
+        if !owned_trait_arithmetic(operator_trait.name) -> next
+        trait_short: operator_trait.name
+        hook: owned_trait_operator_hook(trait_short) ?? next
+        loop index in (p.trait_methods.get("{trait_short}|{hook}") ?? [Int]{}) {
+            if owned[index].params.len() != 1 -> next
+            if owned[index].kind == {
+                .Method(_, owner) -> {
+                    ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                }
+                .TraitMethod(_, _, owner, _, _) -> {
+                    ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                }
+                .TopLevel -> {}
+            }
+        }
+    }
+    p.render_impls = render_impls
+    p.close_methods = close_methods
+    p.core_roles = core_roles
+}
+
 ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, threads: CompilerThreads{compiler_threads_single()}) Never! {
     owned := functions.move()
     ir_declared_owners(owned, p.types)
     ir_add_signature_union_types(p.types, p.type_rows, owned)
+    workers: compiler_threads_admit(threads, owned.len(), owned.len(), 1024, 0, 0)
+    if workers > 1 {
+        ir_program_bind_parallel(p, owned, decls, workers) ?? panic("the IR program bind threads failed")
+        p.functions = owned.move()
+        p.quiet_points = ir_quiet_points(p)
+        p.decode_helpers = ir_codec_decode_rows(p)
+        ir_program_scan_bodies(p, threads)
+        return
+    }
     rows: ir_first_function_rows(owned)
     // An implementation method is checked as its owner's method of that name
     // (a TraitMethod when its trait resolves in the implementing module,
@@ -1177,6 +1273,53 @@ ir_program_bind_decls: fn(p: &IRProgram, decls: DeclTable) Never! {
     p.decl_rows = decl_rows.move()
     p.decl_foreign = [Int]{}
     p.foreign_rows = [SemaCheckedForeignFunction]{}
+}
+
+IRBindDeclPart: struct {
+    decl_indices: [Int],
+    fn_rows: [Int],
+}
+
+ir_bind_decl_range: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, start: Int, end: Int) -> IRBindDeclPart Never! {
+    decl_indices := [Int]{}
+    fn_rows := [Int]{}
+    loop row in start..<end {
+        if decl_table_find(decls, symbols, functions[row].key) == .Val(id) {
+            decl_indices.push(id.row.index())
+            fn_rows.push(row)
+        }
+    }
+    IRBindDeclPart{decl_indices: decl_indices.move(), fn_rows: fn_rows.move()}
+}
+
+ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, starts: [Int], ends: [Int], at: Int) -> [IRBindDeclPart] {
+    if at >= starts.len() -> return [IRBindDeclPart]{}
+    if at + 1 == starts.len() {
+        return [IRBindDeclPart]{ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])}
+    }
+    out := [IRBindDeclPart]{}
+    task.group ir_bind_decl_group {
+        head: task ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])
+        rest := ir_bind_decl_threads(functions, decls, symbols, starts, ends, at + 1)
+        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<IRBindDeclPart>(out, rest)
+    }
+    out
+}
+
+ir_bind_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, workers: Int) -> [IRBindDeclPart] {
+    count: functions.len()
+    starts := [Int]{}
+    ends := [Int]{}
+    loop w in 0..<workers {
+        s: (w * count) /% workers
+        e: ((w + 1) * count) /% workers
+        if s < e {
+            starts.push(s)
+            ends.push(e)
+        }
+    }
+    ir_bind_decl_threads(functions, decls, symbols, starts, ends, 0)
 }
 
 // The function row of declaration `id` (-1: no bound function).

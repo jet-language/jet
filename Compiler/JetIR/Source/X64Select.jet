@@ -377,6 +377,9 @@ IRX64FunctionResult: struct {
     // (IRX64FunctionTables hot and cold).
     hot: [Int]{[Int]{}},
     cold: [Int]{[Int]{}},
+    // Indices in `function.relocs` pointing at IR_X64_LOCAL_DATA + k, built on
+    // the selecting worker thread so ir_x64_resolve skips scanning all relocs.
+    local_relocs: [Int]{[Int]{}},
 }
 
 // The layout of `slot`'s type (a scalar row: reading it copies no type tree).
@@ -5529,23 +5532,30 @@ ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64
 // code names use k as data row IR_X64_LOCAL_DATA + k until ir_x64_resolve.
 // It keeps an emission log when JET_X64_EMIT_LOG entry list `names` names
 // it (ir_x64_log_names).
-ir_x64_select_function: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionResult Never! {
+ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}) -> IRX64FunctionResult Never! {
     tables: ir_x64_function_tables(m, row, names)
-    compiled := ir_x64_select_row(m, tables, row)
+    compiled := ir_x64_select_row(m, tables, row, poll, trap, turn)
     compiled.uses = tables.uses.move()
     compiled.hot = tables.hot.move()
     compiled.cold = tables.cold.move()
+    if compiled.uses.kinds.len() > 0 {
+        locals := [Int]{}
+        loop (at, reloc) in compiled.function.relocs {
+            if reloc.target == .Data(id) && id.value >= IR_X64_LOCAL_DATA -> locals.push(at)
+        }
+        compiled.local_relocs = locals.move()
+    }
     compiled
 }
 
 // A stop poll, an `#FFI(asm)` leaf or a body.
-ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int) -> IRX64FunctionResult Never! {
+ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int, poll: Int{-2}, trap: Int{-2}, turn: Int{-2}) -> IRX64FunctionResult Never! {
     key: m.functions[row].key
     if ir_stop_key(key) -> return ir_x64_stop_poll(m.functions[row], row)
     if m.functions[row].asm == .Val(leaf) {
         return ir_x64_asm_function(m, m.functions[row], leaf, row, tables)
     }
-    ir_x64_compile_body(m, m.functions[row], tables, row)
+    ir_x64_compile_body(m, m.functions[row], tables, row, poll, trap, turn)
 }
 
 // The emission log of a function JET_X64_EMIT_LOG names (X64Code): `x64`
@@ -6067,13 +6077,24 @@ ir_x64_stack_saved_xmm: fn(xmm: Int) -> Int Never! {
 
 // Function row `row` (`f`, borrowed from `m`). A function with a fixed slot
 // keeps its encoder's emission log for the fixed-timing check (Timing.jet).
-ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables, row: Int) -> IRX64FunctionResult Never! {
+ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables, row: Int, poll_in: Int{-2}, trap_in: Int{-2}, turn_in: Int{-2}) -> IRX64FunctionResult Never! {
     checked: ir_timing_marked(f)
     logged: tables.logged
     fast_o0: m.fast_o0 && f.frame_bound < 0 && !checked && !logged
     al: ir_x64_allocate(m, f, fast_o0)
+    op_count: f.op.len()
     e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_head: [Int]{}, end_tail: [Int]{}, end_sites: [Int]{}, end_next: [Int]{}, end_pending: 0, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
-    loop _ in 0..<f.op.len() {
+    if op_count > 0 {
+        e.end_of.try_reserve(op_count) ?? panic("reserve failed")
+        e.pad_label.try_reserve(op_count) ?? panic("reserve failed")
+        e.absorbed.try_reserve(op_count) ?? panic("reserve failed")
+        e.picks.try_reserve(op_count) ?? panic("reserve failed")
+        e.tests.try_reserve(op_count) ?? panic("reserve failed")
+        e.rotated.try_reserve(op_count) ?? panic("reserve failed")
+        e.exits.try_reserve(op_count) ?? panic("reserve failed")
+        e.code.bytes.try_reserve(op_count * 12 + 64) ?? panic("reserve failed")
+    }
+    loop _ in 0..<op_count {
         e.end_of.push(-1)
         e.pad_label.push(-1)
         e.absorbed.push(false)
@@ -6083,7 +6104,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         e.exits.push(-1)
     }
     if !fast_o0 {
-        loop at in 0..<f.op.len() {
+        loop at in 0..<op_count {
             if f.op[at] != .If -> next
             e.picks[at] = ir_x64_selectable(m, f, al, at)
             if e.picks[at] < 0 -> next
@@ -6101,8 +6122,9 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     if f.stack_check -> grow_site = ir_x64_stack_check(e, 16 + 8 * al.saved.len() + al.frame_bytes)
     entered: e.code.bytes.len()
     positions := [Int]{}
+    positions.try_reserve(op_count + 1) ?? panic("reserve failed")
     fast_regs := [Int]{}
-    wrap: ir_x64_wrap(e, m, f, al, fast_regs)
+    wrap: if fast_o0 -> 0 else -> ir_x64_wrap(e, m, f, al, fast_regs)
     if wrap > 0 {
         fast: ir_x64_wrap_allocation(al, fast_regs)
         loop slot in 0..<f.param_count {
@@ -6186,9 +6208,9 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     // the function's own line until a body line replaces it.
     body: e.code.bytes.len()
     if f.line > 0 -> lines.push(X64LineRow{at: body, line: f.line})
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: if poll_in != -2 -> poll_in else -> name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: if trap_in != -2 -> trap_in else -> name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: if turn_in != -2 -> turn_in else -> name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     // The slow paths of the instruction before `at` start at colds[traps].
     traps := 0
     at := wrap
@@ -6285,36 +6307,6 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         grow = ir_x64_stack_grow(e, row, entered, 16 + 8 * al.saved.len() + al.frame_bytes + e.below, stacked)
         ir_x64_patch(e, grow_site, grow.start)
     }
-    // Rel8 branches where they reach, and (outside fast O0) the heads of the
-    // innermost loops of the hot code on their alignment (X64Relax.jet): every
-    // offset taken so far moves with the code. Fast O0 shrinks rel32 branches
-    // to rel8 for compact code without loop-head alignment padding.
-    heads := [Int]{}
-    head_ends := [Int]{}
-    if !fast_o0 {
-        loop (closed, head) in e.loops {
-            if head >= epilogue -> next
-            innermost := true
-            loop inner in 0..<closed {
-                if head <= e.loops[inner] && e.loop_ends[inner] <= e.loop_ends[closed] {
-                    innermost = false
-                }
-            }
-            if innermost {
-                heads.push(head)
-                head_ends.push(e.loop_ends[closed])
-            }
-        }
-    }
-    relax: ir_x64_relax(e.code.bytes, e.branches, e.zone_sites, heads, head_ends)
-    align: relax.align
-    // A zone site's offset is its jmp's start (X64CompiledFunction.zones),
-    // whose opcode byte the code holds as `test eax, imm32` until the runtime
-    // turns zones on (ir_x64_zone_stub); each stub ends at the instruction
-    // after its jump back (X64CompiledFunction.zone_ends).
-    zones: loop site in e.zone_sites -> ir_x64_relaxed_at(relax, site - 1)
-    loop site in zones -> e.code.bytes[site] = U8{0xa9}
-    zone_ends: loop stub_end in e.stub_ends -> ir_x64_relaxed_at(relax, stub_end)
     // The call rows join the statement rows (X64LineRow): each where its
     // call starts and, unless a row starts at its return, one there back
     // on its statement's line, so a call row holds its call instruction
@@ -6343,31 +6335,78 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         }
         lines = merged
     }
-    // Each run is mostly in code order: a walk maps it without a search per
-    // offset.
-    walk := ir_x64_relax_walk()
-    loop k in 0..<e.relocs.len() {
-        e.relocs[k].at = ir_x64_relaxed_next(relax, walk, e.relocs[k].at)
+    // Outside fast O0: relax branches to rel8 where they reach and align the
+    // heads of innermost hot loops (X64Relax.jet), remapping all offsets.
+    // Fast O0 keeps emitted rel32 branches intact and skips relaxation entirely.
+    align := X64_FUNCTION_ALIGN
+    zones := [Int]{}
+    zone_ends := [Int]{}
+    ret_at := ret
+    ends := epilogue
+    body_at := body
+    cfa_at := pushed
+    moved := based
+    saved_marks := saves
+    grow_marks := [Int]{grow.start, grow.pushed, grow.based, grow.returned, grow.resumed, grow.left}
+    if fast_o0 {
+        loop site in e.zone_sites {
+            at_site: site - 1
+            zones.push(at_site)
+            e.code.bytes[at_site] = U8{0xa9}
+        }
+        zone_ends = e.stub_ends.move()
+    } else {
+        heads := [Int]{}
+        head_ends := [Int]{}
+        loop (closed, head) in e.loops {
+            if head >= epilogue -> next
+            innermost := true
+            loop inner in 0..<closed {
+                if head <= e.loops[inner] && e.loop_ends[inner] <= e.loop_ends[closed] {
+                    innermost = false
+                }
+            }
+            if innermost {
+                heads.push(head)
+                head_ends.push(e.loop_ends[closed])
+            }
+        }
+        relax: ir_x64_relax(e.code.bytes, e.branches, e.zone_sites, heads, head_ends)
+        align = relax.align
+        loop site in e.zone_sites {
+            at_site: ir_x64_relaxed_at(relax, site - 1)
+            zones.push(at_site)
+            e.code.bytes[at_site] = U8{0xa9}
+        }
+        zone_ends = loop stub_end in e.stub_ends -> ir_x64_relaxed_at(relax, stub_end)
+        walk := ir_x64_relax_walk()
+        loop k in 0..<e.relocs.len() {
+            e.relocs[k].at = ir_x64_relaxed_next(relax, walk, e.relocs[k].at)
+        }
+        walk = ir_x64_relax_walk()
+        loop k in 0..<e.calls.len() {
+            e.calls[k].at = ir_x64_relaxed_next(relax, walk, e.calls[k].at)
+        }
+        walk = ir_x64_relax_walk()
+        loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
+        walk = ir_x64_relax_walk()
+        loop k in 0..<positions.len() {
+            positions[k] = ir_x64_relaxed_next(relax, walk, positions[k])
+        }
+        walk = ir_x64_relax_walk()
+        loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_next(relax, walk, e.tails[k])
+        ret_at = ir_x64_relaxed_at(relax, ret)
+        ends = ir_x64_relaxed_at(relax, epilogue)
+        body_at = ir_x64_relaxed_at(relax, body)
+        cfa_at = ir_x64_relaxed_at(relax, pushed)
+        moved = ir_x64_relaxed_at(relax, based)
+        saved_marks = loop mark in saved_marks -> ir_x64_relaxed_at(relax, mark)
+        if grow.start >= 0 {
+            grow_marks = loop offset in grow_marks -> ir_x64_relaxed_at(relax, offset)
+        }
     }
     // An allocating call returns to the end of its rel32 field.
     allocs: loop (k, reloc) in e.alloc_relocs -> X64AllocSite{at: e.relocs[reloc].at + 4, ty: e.alloc_rows[k]}
-    // Each call site's return address, relaxed.
-    walk = ir_x64_relax_walk()
-    loop k in 0..<e.calls.len() -> e.calls[k].at = ir_x64_relaxed_next(relax, walk, e.calls[k].at)
-    walk = ir_x64_relax_walk()
-    loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
-    walk = ir_x64_relax_walk()
-    loop k in 0..<positions.len() -> positions[k] = ir_x64_relaxed_next(relax, walk, positions[k])
-    walk = ir_x64_relax_walk()
-    loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_next(relax, walk, e.tails[k])
-    ret_at: ir_x64_relaxed_at(relax, ret)
-    ends: ir_x64_relaxed_at(relax, epilogue)
-    body_at: ir_x64_relaxed_at(relax, body)
-    cfa_at := ir_x64_relaxed_at(relax, pushed)
-    moved: ir_x64_relaxed_at(relax, based)
-    saved_marks: loop mark in saves -> ir_x64_relaxed_at(relax, mark)
-    grow_marks := [Int]{grow.start, grow.pushed, grow.based, grow.returned, grow.resumed, grow.left}
-    if grow.start >= 0 -> grow_marks = loop offset in grow_marks -> ir_x64_relaxed_at(relax, offset)
     // The call frame instructions, as the old selector's: up to `push rbp`
     // (the whole frame-free prefix) the CFA is rsp + 8; after it rsp + 16
     // with rbp below the return address; after `mov rbp, rsp` it is
