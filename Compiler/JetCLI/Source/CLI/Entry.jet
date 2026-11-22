@@ -783,6 +783,35 @@ jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: 
     JetCLIStockEntry.Unported{shape: "package whose run default names no output"}
 }
 
+// Whether `byte` can appear inside a Jet identifier.
+jet_cli_is_ident_byte: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95
+}
+
+// Fast sound prefilter for `jet_cli_package_run_member`: whether `source`
+// contains the word `run` followed by optional spaces/tabs and `:`. Any file
+// declaring a top-level `run: fn` matches this; files that don't need no parse.
+jet_cli_source_may_declare_run: fn(source: String) -> Bool Never! {
+    bytes: source.bytes()
+    len: bytes.len()
+    at := 0
+    loop at + 3 < len {
+        if bytes[at] == (U8{114}) && bytes[at + 1] == (U8{117}) && bytes[at + 2] == (U8{110}) {
+            before_ok: at == 0 || !jet_cli_is_ident_byte(bytes[at - 1])
+            if before_ok {
+                next_at := at + 3
+                loop next_at < len && (bytes[next_at] == (U8{32}) || bytes[next_at] == (U8{9})) {
+                    next_at += 1
+                }
+                if next_at < len && bytes[next_at] == (U8{58}) -> return true
+            }
+        }
+        at += 1
+    }
+    false
+}
+
 // `package_run_member`: the first discovered source (not `package.jet`) that
 // parses cleanly and declares a top-level `run: fn`.
 jet_cli_package_run_member: fn(root: String) -[FS]> String? Never! {
@@ -790,6 +819,7 @@ jet_cli_package_run_member: fn(root: String) -[FS]> String? Never! {
     if jet_cli_discover_sources(root, files) != None -> return None
     loop file in files {
         if jet_cli_file_name(file.relative_path) == JET_CLI_PACKAGE_FILE -> next
+        if !jet_cli_source_may_declare_run(file.source) -> next
         program: jet_cli_parsed_program(file.source) ?? next
         if jet_cli_function_count(program, "run") > 0 -> return Val(file.path)
     }
@@ -804,10 +834,10 @@ jet_cli_find_project_entry: fn(root_path: String, command: String, color: Bool, 
 
 // The stock entry; without `run_member` a package without `run.jet` or
 // `<name>.jet` stands on its first source file instead of parsing every
-// member for `run: fn`. Either way the entry is a real file, so a caller that
-// only asks whether the project has an entry (the workspace member scan) needs
-// no parse; it resolves the member entry of the one it selects.
-jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Bool, notices: &[String], run_member: Bool) -[FS, Env]> JetCLIEntryFound Never! {
+// member for `run: fn`. Without `first_source` it skips reading every source
+// file of a library package whose entry won't be used (e.g. a depended
+// workspace member checked through its dependents).
+jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Bool, notices: &[String], run_member: Bool, first_source: Bool{true}) -[FS, Env]> JetCLIEntryFound Never! {
     root: cli_files.realpath(root_path) ?? root_path
     package := JetCLIManifest?{None}
     if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) != None {
@@ -850,9 +880,11 @@ jet_cli_find_project_entry_at: fn(root_path: String, command: String, color: Boo
             if run_member && jet_cli_package_run_member(root) == .Val(member) {
                 return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: member, callable: None}}
             }
-            files := [JetDriverAuthorizedSourceFile]{}
-            if jet_cli_package_sources(root, files) == .None && files.len() > 0 {
-                return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: files[0].path, callable: None}}
+            if first_source {
+                files := [JetDriverAuthorizedSourceFile]{}
+                if jet_cli_package_sources(root, files) == .None && files.len() > 0 {
+                    return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: files[0].path, callable: None}}
+                }
             }
         }
     }
@@ -1368,11 +1400,23 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]
     entries := [String]{}
     found := false
     loop directory in directories {
-        if jet_cli_find_project_entry_at(directory, "check", color, notices, true) == {
+        if depended.contains(directory) -> next
+        if jet_cli_find_project_entry_at(directory, "check", color, notices, true, first_source: true) == {
             .Entry(entry) -> {
                 if !cli_files.is_file(entry.path) -> next
                 found = true
-                if !depended.contains(directory) -> entries.push(entry.path.copy())
+                entries.push(entry.path.copy())
+            }
+            .Refused(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
+            .Absent -> {}
+        }
+    }
+    loop directory in directories {
+        if !depended.contains(directory) -> next
+        if jet_cli_find_project_entry_at(directory, "check", color, notices, false, first_source: !found) == {
+            .Entry(entry) -> {
+                if !cli_files.is_file(entry.path) -> next
+                found = true
             }
             .Refused(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
             .Absent -> {}

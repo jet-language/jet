@@ -6538,29 +6538,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // repeats (CostQueries.jet). One inside a site `#Allow` for it is the
     // author's recorded decision, as for sema's lints (LintAllowances.jet).
     if request.mode == JetDriverCompileMode.Check || request.mode == JetDriverCompileMode.Program {
-        tidy := [Diagnostic]{}
-        if !request.capture_cost_report {
-            tidy = jet_driver_cost_copy_lints(load, checked_functions)
-        }
-        recursion_callees: jet_driver_cost_callees(checked_functions, runtime_semantic_modules, registration_graph.decls, registration_graph.symbols)
-        loop lint in jet_driver_recursion_lints(load, checked_functions, recursion_callees.bodies, registration_graph.decls) {
-            tidy.push(lint)
-        }
-        loop lint in jet_driver_float_seed_lints(load, checked_functions, registration_graph.symbols) {
-            tidy.push(lint)
-        }
-        loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) {
-            tidy.push(lint)
-        }
-        allowances := [SemaLintAllowance]{}
-        if tidy.len() > 0 {
-            loop module_index in 0..<registration_graph.modules.len() {
-                sema_lint_allowances(registration_graph.modules[module_index].program, registration_graph.modules[module_index].source_segments, allowances)
-            }
-        }
-        loop lint in tidy.move() {
-            if !sema_lint_allowed(lint, allowances) -> load.diagnostics.push(lint)
-        }
+        jet_driver_run_tidy_lints(load, checked_functions, registration_graph, !request.capture_cost_report, request.compiler_threads, request.trace_sink)
     }
     // `jet check` stops before lowering: no C export rows, no Core
     // reachability pruning. The entry resolves over every checked function
@@ -6684,6 +6662,22 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                     },
                 )
             }
+        } else if request.release_state_aside {
+            jet_driver_release_aside(
+                checked_row,
+                JetDriverHeldState{
+                    load: load.move(),
+                    registration: registration_graph.move(),
+                    checked: checked_graph.move(),
+                    functions: checked_functions.move(),
+                    modules: runtime_semantic_modules.move(),
+                    values: comptime_values.move(),
+                    stage: comptime_stage.move(),
+                    run: comptime_run.move(),
+                    trail: trail.move(),
+                    canonical_effect_module_identity: canonical_effect_module_identity,
+                },
+            )
         }
         return result
     }
@@ -7517,36 +7511,111 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         }
     }
     // Each reached function's own-package effects, to a fixpoint over the
-    // same-package and Core call and value edges.
+    // same-package and Core call and value edges. Intern the small set of
+    // distinct effect names into bit positions and propagate in reverse
+    // discovery order (callees before callers) with a single bitwise OR per
+    // edge; fall back to list propagation only if >62 distinct names appear.
+    effect_table := name_table_sized(64)
+    local_bits := (loop _ in functions -> 0)
+    overflow := false
     local := (loop _ in functions -> [String]{})
     loop index in order {
         if cli[index] -> next
         loop effect_name in functions[index].effects.direct {
-            if !local[index].contains(effect_name) -> local[index].push(effect_name.copy())
+            id: name_intern(effect_table, effect_name)
+            bit: Int{id.id} - 1
+            if bit < 62 -> local_bits[index] = local_bits[index] | (1 << bit) else {
+                overflow = true
+                text: name_text(effect_table, id)
+                if !local[index].contains(text) -> local[index].push(text)
+            }
         }
         // A package effect root a function's row names (no Prelude root
         // covers it, so `direct` doesn't show it).
         own_roots: jet_driver_package_effect_roots_of(package_roots, functions[index].key)
         loop effect_name in own_roots {
-            if !local[index].contains(effect_name) -> local[index].push(effect_name)
+            id: name_intern(effect_table, effect_name)
+            bit: Int{id.id} - 1
+            if bit < 62 -> local_bits[index] = local_bits[index] | (1 << bit) else {
+                overflow = true
+                text: name_text(effect_table, id)
+                if !local[index].contains(text) -> local[index].push(text)
+            }
         }
-        if functions[index].effects.call_edges.contains(EFFECT_PANIC_EDGE) && !local[index].contains(AUTHORITY_PANIC_ROOT) {
-            local[index].push(AUTHORITY_PANIC_ROOT)
+        if functions[index].effects.call_edges.contains(EFFECT_PANIC_EDGE) {
+            id: name_intern(effect_table, AUTHORITY_PANIC_ROOT)
+            bit: Int{id.id} - 1
+            if bit < 62 -> local_bits[index] = local_bits[index] | (1 << bit) else {
+                overflow = true
+                if !local[index].contains(AUTHORITY_PANIC_ROOT) {
+                    local[index].push(AUTHORITY_PANIC_ROOT)
+                }
+            }
         }
     }
-    changed := true
-    loop changed {
-        changed = false
-        loop index in order {
-            owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
-            loop callee in callees[index] {
-                if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
-                if cli[index] && functions[callee].module_name.starts_with("core.") -> next
-                reached_effects: local[callee].copy()
-                loop effect_name in reached_effects {
-                    if local[index].contains(effect_name) -> next
-                    local[index].push(effect_name)
+    effect_total: name_count(effect_table) - 1
+    bit_count: if effect_total > 62 -> 62 else -> effect_total
+    is_core := (loop f in functions -> f.module_name.starts_with("core."))
+    if !overflow {
+        changed := true
+        loop changed {
+            changed = false
+            at := order.len() - 1
+            loop at >= 0 {
+                index: order[at]
+                at -= 1
+                owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
+                before := local_bits[index]
+                bits := before
+                is_cli: cli[index]
+                loop callee in callees[index] {
+                    if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
+                    if is_cli && is_core[callee] -> next
+                    bits = bits | local_bits[callee]
+                }
+                if bits != before {
+                    local_bits[index] = bits
                     changed = true
+                }
+            }
+        }
+        loop index in order {
+            bits := local_bits[index]
+            if bits == 0 -> next
+            loop k in 0..<bit_count {
+                if (bits & (1 << k)) != 0 {
+                    local[index].push(name_text(effect_table, Name{id: U32{k + 1}}))
+                }
+            }
+        }
+    } else {
+        loop index in order {
+            bits := local_bits[index]
+            if bits == 0 -> next
+            loop k in 0..<bit_count {
+                if (bits & (1 << k)) != 0 {
+                    text: name_text(effect_table, Name{id: U32{k + 1}})
+                    if !local[index].contains(text) -> local[index].push(text)
+                }
+            }
+        }
+        changed := true
+        loop changed {
+            changed = false
+            at := order.len() - 1
+            loop at >= 0 {
+                index: order[at]
+                at -= 1
+                owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
+                loop callee in callees[index] {
+                    if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
+                    if cli[index] && is_core[callee] -> next
+                    reached_effects: local[callee].copy()
+                    loop effect_name in reached_effects {
+                        if local[index].contains(effect_name) -> next
+                        local[index].push(effect_name)
+                        changed = true
+                    }
                 }
             }
         }
@@ -7703,4 +7772,154 @@ jet_driver_core_source_alias: fn(unit: JetDriverSourceUnit, loaded_module: JetDr
         return ""
     }
     owner.alias
+}
+
+// Per-chunk output of Pass A (decl-row lookup, L2511 cost sites, L0306 float
+// seed hits, L0308 SQL row-loop hits).
+JetDriverTidyPartA: struct {
+    body_rows: [Int],
+    body_positions: [Int],
+    cost_sites: [TCostSite],
+    float_hits: [JetDriverFloatSeedHit],
+    sql_hits: [JetDriverSQLRowHit],
+}
+
+jet_driver_tidy_pass_a_range: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, start: Int, end: Int, collect_cost: Bool) -> JetDriverTidyPartA Never! {
+    body_rows := [Int]{}
+    body_positions := [Int]{}
+    cost_sites := [TCostSite]{}
+    float_hits := [JetDriverFloatSeedHit]{}
+    sql_hits := [JetDriverSQLRowHit]{}
+    loop pos in start..<end {
+        function: functions[pos]
+        if decl_table_find(decls, symbols, function.key) == .Val(id) {
+            body_rows.push(id.row.index())
+            body_positions.push(pos)
+        }
+        if collect_cost -> jet_driver_cost_tidy_function_sites(function, cost_sites)
+        jet_driver_float_seed_function_hits(pos, function, symbols, float_hits)
+        jet_driver_sql_row_loop_function_hits(pos, function, symbols, sql_hits)
+    }
+    JetDriverTidyPartA{body_rows: body_rows, body_positions: body_positions, cost_sites: cost_sites, float_hits: float_hits, sql_hits: sql_hits}
+}
+
+jet_driver_tidy_pass_a_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolTable, starts: [Int], ends: [Int], at: Int, collect_cost: Bool) -> [JetDriverTidyPartA] {
+    if at >= starts.len() -> return [JetDriverTidyPartA]{}
+    if at + 1 == starts.len() {
+        return [JetDriverTidyPartA]{jet_driver_tidy_pass_a_range(functions, decls, symbols, starts[at], ends[at], collect_cost)}
+    }
+    out := [JetDriverTidyPartA]{}
+    task.group driver_tidy_a {
+        head: task jet_driver_tidy_pass_a_range(functions, decls, symbols, starts[at], ends[at], collect_cost)
+        rest := jet_driver_tidy_pass_a_threads(functions, decls, symbols, starts, ends, at + 1, collect_cost)
+        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<JetDriverTidyPartA>(out, rest)
+    }
+    out
+}
+
+jet_driver_tidy_pass_b_threads: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, starts: [Int], ends: [Int], at: Int) -> [[[Int]]] {
+    if at >= starts.len() -> return [[[Int]]]{}
+    if at + 1 == starts.len() {
+        return [[[Int]]]{jet_driver_recursion_calls_range(functions, bodies, decls, starts[at], ends[at])}
+    }
+    out := [[[Int]]]{}
+    task.group driver_tidy_b {
+        head: task jet_driver_recursion_calls_range(functions, bodies, decls, starts[at], ends[at])
+        rest := jet_driver_tidy_pass_b_threads(functions, bodies, decls, starts, ends, at + 1)
+        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<[[Int]]>(out, rest)
+    }
+    out
+}
+
+// Runs the four post-check tidy lint passes (L2511, L0305, L0306, L0308) in
+// parallel across `threads`, and filters `#Allow` only across modules that
+// produced a lint.
+jet_driver_run_tidy_lints: fn(load: &JetDriverLoadResult, checked_functions: [FnBody], registration_graph: SemaRegistrationGraph, collect_cost: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?) {
+    jet_driver_trace_step_begin(trace_sink, "driver.tidy")
+    count: checked_functions.len()
+    workers: compiler_threads_admit(threads, count, count, 256, 0, 0)
+    decls_count: registration_graph.decls.rows.len()
+    cost_sites := [TCostSite]{}
+    float_hits := [JetDriverFloatSeedHit]{}
+    sql_hits := [JetDriverSQLRowHit]{}
+    bodies := [Int?]{}
+    loop _ in 0..<decls_count -> bodies.push(None)
+    calls := [[Int]]{}
+    if workers <= 1 {
+        loop pos in 0..<count {
+            function: checked_functions[pos]
+            if decl_table_find(registration_graph.decls, registration_graph.symbols, function.key) == .Val(id) {
+                bodies[id.row.index()] = Val(pos)
+            }
+            if collect_cost -> jet_driver_cost_tidy_function_sites(function, cost_sites)
+            jet_driver_float_seed_function_hits(pos, function, registration_graph.symbols, float_hits)
+            jet_driver_sql_row_loop_function_hits(pos, function, registration_graph.symbols, sql_hits)
+        }
+        calls = jet_driver_recursion_calls_range(checked_functions, bodies, registration_graph.decls, 0, count)
+    } else {
+        starts := [Int]{}
+        ends := [Int]{}
+        loop w in 0..<workers {
+            s: (w * count) /% workers
+            e: ((w + 1) * count) /% workers
+            if s < e {
+                starts.push(s)
+                ends.push(e)
+            }
+        }
+        parts_a := jet_driver_tidy_pass_a_threads(checked_functions, registration_graph.decls, registration_graph.symbols, starts, ends, 0, collect_cost)
+        loop part in parts_a.move() {
+            loop i in 0..<part.body_rows.len() {
+                bodies[part.body_rows[i]] = Val(part.body_positions[i])
+            }
+            part_cost := part.cost_sites.move()
+            compiler_transfer_rows<TCostSite>(cost_sites, part_cost)
+            part_float := part.float_hits.move()
+            compiler_transfer_rows<JetDriverFloatSeedHit>(float_hits, part_float)
+            part_sql := part.sql_hits.move()
+            compiler_transfer_rows<JetDriverSQLRowHit>(sql_hits, part_sql)
+        }
+        parts_b := jet_driver_tidy_pass_b_threads(checked_functions, bodies, registration_graph.decls, starts, ends, 0)
+        loop part_calls in parts_b.move() {
+            moved_part := part_calls.move()
+            compiler_transfer_rows<[Int]>(calls, moved_part)
+        }
+    }
+    tidy := if collect_cost -> jet_driver_cost_sites_to_lints(load, cost_sites) else -> [Diagnostic]{}
+    loop lint in jet_driver_recursion_lints_from_calls(load, checked_functions, bodies, registration_graph.decls, calls) {
+        tidy.push(lint)
+    }
+    loop lint in jet_driver_float_seed_hits_to_lints(load, checked_functions, float_hits) {
+        tidy.push(lint)
+    }
+    loop lint in jet_driver_sql_row_loop_hits_to_lints(load, checked_functions, sql_hits) {
+        tidy.push(lint)
+    }
+    allowances := [SemaLintAllowance]{}
+    if tidy.len() > 0 {
+        wanted := name_table_sized(16)
+        loop lint in tidy {
+            if lint.source_path == .Val(path) -> _ := name_intern(wanted, path)
+        }
+        loop module_index in 0..<registration_graph.modules.len() {
+            matched := name_find(wanted, registration_graph.modules[module_index].source_file) != None
+            if !matched {
+                loop segment in registration_graph.modules[module_index].source_segments {
+                    if name_find(wanted, segment.source_file) != None {
+                        matched = true
+                        break
+                    }
+                }
+            }
+            if matched {
+                sema_lint_allowances(registration_graph.modules[module_index].program, registration_graph.modules[module_index].source_segments, allowances)
+            }
+        }
+    }
+    loop lint in tidy.move() {
+        if !sema_lint_allowed(lint, allowances) -> load.diagnostics.push(lint)
+    }
+    jet_driver_trace_step_end(trace_sink, "driver.tidy", count)
 }

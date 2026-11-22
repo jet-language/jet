@@ -17,33 +17,57 @@ use jet_foundation.[
     symbol_key_leaf,
 ]
 
+JetDriverFloatSeedHit: struct {
+    pos: Int,
+    stmt_index: Int,
+    sign: Int,
+}
+
+// Collects L0306 hits for one checked function at index `pos`.
+jet_driver_float_seed_function_hits: fn(pos: Int, function: FnBody, symbols: SymbolTable, hits: &[JetDriverFloatSeedHit]) Never! {
+    if !jet_driver_cost_reports(function) {
+        return
+    }
+    tree: function.tree
+    loop (stmt_index, statement) in tree.stmts {
+        if statement == .Let(local, _, init, _, _, _) && local.mutable && local.ty == Type.Float {
+            symbol: local.symbol_id ?? next
+            sign: jet_driver_float_seed_sign(tree, symbols, init) ?? next
+            if !jet_driver_float_seed_int_only(tree, symbol) -> next
+            hits.push(JetDriverFloatSeedHit{pos: pos, stmt_index: stmt_index, sign: sign})
+        }
+    }
+}
+
+// Deduplicates and formats L0306 diagnostics from collected `hits`.
+jet_driver_float_seed_hits_to_lints: fn(load: JetDriverLoadResult, functions: [FnBody], hits: [JetDriverFloatSeedHit]) -> [Diagnostic] {
+    lints := [Diagnostic]{}
+    if hits.len() == 0 -> return lints
+    files := name_table()
+    seen := [Int:Bool]{}
+    loop hit in hits {
+        function: functions[hit.pos]
+        if function.tree.stmts[hit.stmt_index] == .Let(local, _, _, _, _, _) {
+            site: (Int{name_intern(files, function.source_file).id} << 32) | local.span.start
+            if seen.get(site) != None -> next
+            seen[site] = true
+            seed: if hit.sign > 0 -> "infinity" else -> "-infinity"
+            bound: if hit.sign > 0 -> "Int.MAX" else -> "Int.MIN"
+            lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0306", local.span, "`{local.name}` is a Float seeded with {seed}, but every value assigned to it is an Int", "Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program", "Make `{local.name}` an `Int?` that starts as `None`, or an Int that starts at `{bound}`"))
+        }
+    }
+    lints
+}
+
 // The L0306 tidy errors of `functions`, whose constants' keys `symbols`
 // holds: one per seeded binding, at its name, once however many
 // specializations share its source.
 jet_driver_float_seed_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
-    lints := [Diagnostic]{}
-    // The reported bindings, each by its file's id in `files` (high half)
-    // and its start offset (low half).
-    files := name_table()
-    seen := [Int:Bool]{}
-    loop function in functions {
-        if !jet_driver_cost_reports(function) -> next
-        tree: function.tree
-        loop statement in tree.stmts {
-            if statement == .Let(local, _, init, _, _, _) && local.mutable && local.ty == Type.Float {
-                symbol: local.symbol_id ?? next
-                sign: jet_driver_float_seed_sign(tree, symbols, init) ?? next
-                if !jet_driver_float_seed_int_only(tree, symbol) -> next
-                site: (Int{name_intern(files, function.source_file).id} << 32) | local.span.start
-                if seen.get(site) != None -> next
-                seen[site] = true
-                seed: if sign > 0 -> "infinity" else -> "-infinity"
-                bound: if sign > 0 -> "Int.MAX" else -> "Int.MIN"
-                lints.push(jet_driver_diagnostic_at_loaded_site(load, function.module_identity, "L0306", local.span, "`{local.name}` is a Float seeded with {seed}, but every value assigned to it is an Int", "Each Int widens to Float as it is assigned, so the result reads `5.0` where the input held `5`, and an Int beyond 2^53 stops the program", "Make `{local.name}` an `Int?` that starts as `None`, or an Int that starts at `{bound}`"))
-            }
-        }
+    hits := [JetDriverFloatSeedHit]{}
+    loop (pos, function) in functions {
+        jet_driver_float_seed_function_hits(pos, function, symbols, hits)
     }
-    lints
+    jet_driver_float_seed_hits_to_lints(load, functions, hits)
 }
 
 // 1 when node `id` of `tree` is positive infinity (`Float.INFINITY`,

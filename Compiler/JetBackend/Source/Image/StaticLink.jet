@@ -3272,6 +3272,29 @@ link_image_symbol: fn(symtab: &[U8], strtab: &[U8], names_base: Int, name: Strin
     elf64_u64(symtab, size)
 }
 
+// Append to `symtab` the symbol whose NUL-terminated name starts at
+// `name_at` in `bufs[b]`, copying the name bytes directly into `strtab`
+// without allocating a String.
+link_image_symbol_from_buf: fn(bufs: [[U8]], b: Int, name_at: Int, symtab: &[U8], strtab: &[U8], names_base: Int, info: Int, header: Int, value: Int, size: Int) Never! {
+    offset: strtab.len()
+    buf: bufs[b]
+    i := name_at
+    limit: buf.len()
+    loop i < limit {
+        byte: buf[i]
+        strtab.push(byte)
+        if byte == (U8{0}) -> break
+        i += 1
+    }
+    if i >= limit -> strtab.push(U8{0})
+    elf64_u32(symtab, names_base + offset)
+    symtab.push(U8{info})
+    symtab.push(U8{0})
+    elf64_u16(symtab, header)
+    elf64_u64(symtab, value)
+    elf64_u64(symtab, size)
+}
+
 // Append the debug sections, the symbol table and the section headers to
 // the loaded image `out`, and point the ELF header at the headers. A side
 // debug file's `out` (`side`, link_debug_file) is its ELF header and the
@@ -3325,7 +3348,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     symtab := [U8]{}
     loop _ in 0..<24 -> symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
-        b: c.obj_buffer[obj].copy()
+        b: c.obj_buffer[obj]
         loop k in 1..<c.obj_first_global[obj] {
             at: link_sym_at(c, obj, k)
             info: link_u8(c.bufs, b, at + 4)
@@ -3335,7 +3358,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
             s: link_sym_shndx(c, obj, k)
             header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
-            link_image_symbol(symtab, strtab, 0, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+            link_image_symbol_from_buf(c.bufs, b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
     first_global: symtab.len().div_euclid(24)

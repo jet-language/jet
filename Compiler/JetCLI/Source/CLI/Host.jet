@@ -285,7 +285,7 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // `style` (`jet check --style`) adds the opt-in style checks' findings
 // (StyleCheck.jet) to the compile's own. `target_machine` is the machine
 // without an OS the program is checked for ("" for the host).
-jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}, target_machine: String{""}) -> JetDriverVerbOutput {
+jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}, target_machine: String{""}, prior_exit: Int{JET_DRIVER_EXIT_OK}, release_state_aside: Bool{false}) -> JetDriverVerbOutput {
     watch: cli_time.start()
     // copy: `profile` still selects the compile below.
     selected: if profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> profile.copy()
@@ -301,8 +301,8 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // With `finish` the process ends below with `compiled` still held, so the
     // check's compile state need not drop first (jet_cli_compile_prepared).
-    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine, hold_check_state: finish)
-    if compiled == {
+    compiled := jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile, target_machine, hold_check_state: finish, release_state_aside: release_state_aside)
+    if compiled.move() == {
         .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -337,7 +337,22 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
                 if recording == .Val(claimed) && jet_cli_check_snapshot_inputs(snapshot) == .Val(sources) {
                     jet_cli_check_receipt_publish(claimed, output, sources)
                 }
+                if prior_exit > output.exit_code -> output.exit_code = prior_exit
                 jet_cli_finish(output, trace_sink)
+            }
+            if release_state_aside {
+                held: JetCLICompileHeld{
+                    diagnostics: result.diagnostics.move(),
+                    _generated: result.generated_source_files.move(),
+                    _structure_facts: result.structure_facts.move(),
+                    _comptime_values: result.comptime_values.move(),
+                    _doc_modules: result.doc_modules.move(),
+                    _inputs: None,
+                    _rows: None,
+                    _snapshot: snapshot.move(),
+                }
+                released: task &&held { held.diagnostics.len() }
+                released.detach()
             }
         }
     }
@@ -412,7 +427,8 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
 jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     exit_code := JET_DRIVER_EXIT_OK
     loop index in 0..<files.len() {
-        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, profile, style, trace_sink, false)
+        last: index == files.len() - 1
+        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, profile, style, trace_sink, last, prior_exit: exit_code, release_state_aside: !last)
         jet_cli_write_output(output)
         if output.exit_code > exit_code -> exit_code = output.exit_code
     }
@@ -1486,22 +1502,116 @@ jet_cli_runtime_export_names: fn(runtime: JetCLIRuntimeExports) -> [String] Neve
     names
 }
 
+// The byte order of `a[a0..<a1]` against `b[b0..<b1]`: -1, 0 or 1.
+jet_cli_bytes_range_compare: fn(a: [U8], a0: Int, a1: Int, b: [U8], b0: Int, b1: Int) -> Int Never! {
+    at := 0
+    loop a0 + at < a1 && b0 + at < b1 {
+        if a[a0 + at] != b[b0 + at] -> return if a[a0 + at] < b[b0 + at] -> -1 else -> 1
+        at += 1
+    }
+    if {
+        a0 + at < a1 -> 1
+        b0 + at < b1 -> -1
+        else -> 0
+    }
+}
+
 // The runtime routes no stop poll follows in a program built over `runtime`
 // (IRChecks.quiet_routes): its exports that its stops receipt leaves out,
-// interned. None without the receipt: every route polls.
+// interned. None without the receipt: every route polls. Both files are
+// emitted sorted, so a linear two-pointer byte merge avoids building a
+// `stopping` table or splitting thousands of lines; unsorted inputs fall back
+// to a pre-sized stopping table.
 jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Never! {
-    quiet := name_table_sized(2)
-    receipt: runtime.stops ?? return quiet
-    stops: String.from_bytes(receipt) ?? return quiet
-    exports: String.from_bytes(runtime.exports) ?? return quiet
-    stopping := name_table_sized(2)
-    stop_rows: stops.split("\n").to_list()
-    loop symbol in stop_rows.move() -> _ := name_intern(stopping, symbol)
-    export_rows: exports.split("\n").to_list()
-    loop symbol in export_rows.move() {
-        if symbol != "" && name_find(stopping, symbol) == None -> _ := name_intern(quiet, symbol)
+    receipt: runtime.stops ?? return name_table_sized(2)
+    exp_bytes: runtime.exports
+    exports: String.from_bytes(exp_bytes) ?? return name_table_sized(2)
+    quiet_cap: if exp_bytes.len() > 8192 -> 4096 else -> 64
+    quiet := name_table_sized(quiet_cap)
+    sorted := true
+    e_pos := 0
+    s_pos := 0
+    s0 := 0
+    s1 := 0
+    s_has := false
+    prev_e0 := -1
+    prev_e1 := -1
+    prev_s0 := -1
+    prev_s1 := -1
+    loop s_pos < receipt.len() {
+        start := s_pos
+        loop s_pos < receipt.len() && receipt[s_pos] != (U8{10}) -> s_pos += 1
+        end := s_pos
+        if s_pos < receipt.len() -> s_pos += 1
+        if end > start {
+            s0 = start
+            s1 = end
+            s_has = true
+            break
+        }
     }
-    quiet
+    loop e_pos < exp_bytes.len() {
+        e0 := e_pos
+        loop e_pos < exp_bytes.len() && exp_bytes[e_pos] != (U8{10}) -> e_pos += 1
+        e1 := e_pos
+        if e_pos < exp_bytes.len() -> e_pos += 1
+        if e1 == e0 -> next
+        if prev_e0 >= 0 && jet_cli_bytes_range_compare(exp_bytes, e0, e1, exp_bytes, prev_e0, prev_e1) < 0 {
+            sorted = false
+            break
+        }
+        prev_e0 = e0
+        prev_e1 = e1
+        loop s_has && jet_cli_bytes_range_compare(receipt, s0, s1, exp_bytes, e0, e1) < 0 {
+            prev_s0 = s0
+            prev_s1 = s1
+            s_has = false
+            loop s_pos < receipt.len() {
+                start := s_pos
+                loop s_pos < receipt.len() && receipt[s_pos] != (U8{10}) -> s_pos += 1
+                end := s_pos
+                if s_pos < receipt.len() -> s_pos += 1
+                if end > start {
+                    if prev_s0 >= 0 && jet_cli_bytes_range_compare(receipt, start, end, receipt, prev_s0, prev_s1) < 0 {
+                        sorted = false
+                    }
+                    s0 = start
+                    s1 = end
+                    s_has = true
+                    break
+                }
+            }
+            if !sorted -> break
+        }
+        if !sorted -> break
+        if s_has && jet_cli_bytes_range_compare(receipt, s0, s1, exp_bytes, e0, e1) == 0 -> next
+        _ := name_intern(quiet, exports.slice(e0, e1))
+    }
+    if sorted -> return quiet
+    stops: String.from_bytes(receipt) ?? return name_table_sized(2)
+    stop_cap: if receipt.len() > 4096 -> 2048 else -> 64
+    stopping := name_table_sized(stop_cap)
+    pos := 0
+    loop pos < receipt.len() {
+        start := pos
+        loop pos < receipt.len() && receipt[pos] != (U8{10}) -> pos += 1
+        end := pos
+        if pos < receipt.len() -> pos += 1
+        if end > start -> _ := name_intern(stopping, stops.slice(start, end))
+    }
+    fallback := name_table_sized(quiet_cap)
+    pos = 0
+    loop pos < exp_bytes.len() {
+        start := pos
+        loop pos < exp_bytes.len() && exp_bytes[pos] != (U8{10}) -> pos += 1
+        end := pos
+        if pos < exp_bytes.len() -> pos += 1
+        if end > start {
+            symbol: exports.slice(start, end)
+            if name_find(stopping, symbol) == None -> _ := name_intern(fallback, symbol)
+        }
+    }
+    fallback
 }
 
 // Whether program `m` provably runs on one thread only, so x86-64 selection
@@ -2655,8 +2765,9 @@ JetCLIRunStep: enum {
 // its replay (jet_cli_run_recorded). The receipt's walk reuses
 // `discovery`, the command's discovery cache.
 jet_cli_run_step: fn(step: &&JetCLIRunStep, discovery: &WorkspaceDeclarationCache) -> JetDriverVerbOutput {
+    result := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if step.move() == {
-        .Output(output) -> output
+        .Output(output) -> { result = output }
         .Launch(executable, file, binary, program_args, options, invocation, read_scope, verbose, color, json) -> {
             vars := jet_cli_production_receipt_env(discovery, file, program_args)
             jet_cli_discovery_counters(discovery)
@@ -2665,12 +2776,11 @@ jet_cli_run_step: fn(step: &&JetCLIRunStep, discovery: &WorkspaceDeclarationCach
                 // copy: the observed run's fields join the receipt's.
                 loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
             }
-            if options.record != "" {
-                return jet_cli_run_recorded(executable, file, program_args, options, invocation, read_scope, vars.move(), color)
-            }
-            jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
+            output: if options.record != "" -> jet_cli_run_recorded(executable, file, program_args, options, invocation, read_scope, vars.move(), color) else -> jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
+            jet_cli_finish(output)
         }
     }
+    result
 }
 
 // Under `--phase-counters`, the command's discovery work as
@@ -2903,7 +3013,7 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
         listed: if used.len() == 0 -> "none" else -> used.join(", ")
         cli_term.eprint("jet run: effects used: {listed}")
     }
-    jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, invocation, jet_cli_build_digests(snapshot, options))
+    jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, invocation, [X64DebugSource]{})
 }
 
 // `jet run <file>`: build it (jet_cli_run_build), then hand its program to

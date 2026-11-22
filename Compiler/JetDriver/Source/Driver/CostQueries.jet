@@ -317,19 +317,140 @@ jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Di
     lints
 }
 
-// The L2511 tidy errors of `functions`: one per distinct site
-// (jet_driver_cost_tidy) that a loop of a function the program wrote
-// repeats. A plain check and a program compile (`jet build`) list them
-// without keeping a cost report, and a function without a loop is not walked.
-jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -> [Diagnostic] {
-    sites := [TCostSite]{}
-    loop function in functions {
-        if !jet_driver_cost_reports(function) -> next
-        depths: jet_driver_cost_loop_depths(function.tree)
-        if depths.len() == 0 -> next
-        jet_driver_cost_function_sites(function, function.name, jet_driver_cost_nodes(function), depths, sites)
+// Flat loop depth per node index (body_node_index(tree, id)) of `tree`; empty
+// when `tree` has no loop statements so loopless functions allocate nothing.
+jet_driver_cost_loop_depth_array: fn(tree: BodyTree) -> [Int] Never! {
+    has_loop := false
+    loop statement in tree.stmts {
+        if statement == .Loop(_, _, _) || statement == .While(_, _, _, _) || statement == .CountedLoop(_, _, _, _, _, _, _) || statement == .ForRange(_, _, _, _, _, _, _, _, _) || statement == .Range(_, _, _, _, _, _, _, _, _, _) || statement == .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) {
+            has_loop = true
+            break
+        }
     }
+    if !has_loop -> return [Int]{}
+    depths := [Int]{}
+    loop _ in 0..<tree.nodes.len() -> depths.push(0)
+    iterated := [Int]{}
+    loop i in 0..<tree.stmts.len() {
+        iterated.clear()
+        jet_driver_cost_iterated(tree, tree.stmts[i], iterated)
+        loop id in iterated {
+            at: body_node_index(tree, id)
+            depths[at] = depths[at] + 1
+        }
+    }
+    depths
+}
+
+// Whether `tree` has any loop-nested Int assignment that could possibly trigger
+// jet_driver_cost_growth (a `*=`, `<<=`, or `= Mul/Shl/OverflowOpt` on an Int
+// place inside a loop).
+jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, depths: [Int]) -> Bool Never! {
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, value, _, _) {
+            if depths[body_node_index(tree, value)] == 0 -> next
+            if !jet_driver_cost_int_place(tree, place) -> next
+            if op == .Val(operator) {
+                if operator == TBinaryOp.Mul || operator == TBinaryOp.Shl -> return true
+                next
+            }
+            kind: body_node(tree, value).kind
+            if kind == .Binary(operator, _, _, _, _) {
+                if operator == TBinaryOp.Mul || operator == TBinaryOp.Shl -> return true
+            } else if kind == .OverflowOpt(_, _, _, _, _) { return true }
+        }
+    }
+    false
+}
+
+// Fast L2511-only site scanner for one checked function: skips loopless
+// functions with zero allocations, skips OutcomeConstruction/consumed tracking,
+// computes shared-edits and Int-growth maps lazily only when a loop-nested
+// candidate exists, and pushes only tidy SemanticRemainder sites.
+jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) Never! {
+    if !jet_driver_cost_reports(function) {
+        return
+    }
+    tree: function.tree
+    depths: jet_driver_cost_loop_depth_array(tree)
+    if depths.len() == 0 {
+        return
+    }
+    grown_nodes := [Int:Bool]{}
+    grown_updates := [Int:Bool]{}
+    growth_loaded: jet_driver_cost_has_growth_candidate(tree, depths)
+    if growth_loaded -> jet_driver_cost_growth(tree, grown_nodes, grown_updates)
+    shared_loaded := false
+    shared := [Int:Bool]{}
+    nodes: jet_driver_cost_nodes(function)
+    loop id in nodes {
+        depth: depths[body_node_index(tree, id)]
+        if depth == 0 -> next
+        node: body_node(tree, id)
+        fact: body_cost_fact(tree, node) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_nodes, id) else -> None) ?? next
+        if fact.state != TCostState.SemanticRemainder -> next
+        if fact.kind == TCostKind.OutcomeConstruction -> next
+        is_shared := false
+        grows := false
+        if fact.kind == TCostKind.ExactIntSpill {
+            if !growth_loaded || grown_nodes.get(id) == None -> next
+            grows = true
+        } else {
+            if fact.written -> next
+            if fact.kind == TCostKind.CollectionCopyOnWrite {
+                if !shared_loaded {
+                    shared = jet_driver_cost_shared_edits(tree)
+                    shared_loaded = true
+                }
+                if shared.get(id) == None -> next
+                is_shared = true
+            } else if fact.kind != TCostKind.ViewMaterialization && fact.kind != TCostKind.ImplicitCopy {
+                next
+            }
+        }
+        span := node.span
+        if node.kind == .CoreCall(_, _, source_span, _, _, _) -> span = source_span
+        view := ""
+        if node.kind == .MaterializeView(value) -> view = type_name(body_type(tree, value)) else if node.kind == .Clone(value, _) {
+            view = type_name(body_type(tree, value))
+        } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
+            view = type_name(body_type(tree, receiver))
+        }
+        sites.push(TCostSite{function: function.name, module_identity: function.module_identity, span: span, loop_depth: depth, kind: fact.kind, state: fact.state, view: view, shared: is_shared, written: fact.written, grows: grows})
+    }
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, value, _, span) {
+            depth: depths[body_node_index(tree, value)]
+            if depth == 0 -> next
+            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_updates, value) else -> None) ?? next
+            if fact.state != TCostState.SemanticRemainder -> next
+            edited := false
+            grows := false
+            if fact.kind == TCostKind.ExactIntSpill {
+                if !growth_loaded || grown_updates.get(value) == None -> next
+                grows = true
+            } else {
+                if fact.written -> next
+                if fact.kind == TCostKind.CollectionCopyOnWrite {
+                    if !shared_loaded {
+                        shared = jet_driver_cost_shared_edits(tree)
+                        shared_loaded = true
+                    }
+                    if place == .Expr(expression) -> edited = shared.get(expression) != None
+                    if !edited -> next
+                } else if fact.kind != TCostKind.ViewMaterialization && fact.kind != TCostKind.ImplicitCopy {
+                    next
+                }
+            }
+            sites.push(TCostSite{function: function.name, module_identity: function.module_identity, span: span, loop_depth: depth, kind: fact.kind, state: fact.state, view: "", shared: edited, written: fact.written, grows: grows})
+        }
+    }
+}
+
+// Formats and deduplicates L2511 tidy diagnostics from `sites`.
+jet_driver_cost_sites_to_lints: fn(load: JetDriverLoadResult, sites: [TCostSite]) -> [Diagnostic] {
     lints := [Diagnostic]{}
+    if sites.len() == 0 -> return lints
     seen := name_table_sized(16)
     loop site in sites {
         if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_tidy(site) {
@@ -343,6 +464,16 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
         lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2511", site.span, "{operation} inside a loop", jet_driver_cost_tidy_why(site.kind), jet_driver_cost_tidy_fix(site.kind)))
     }
     lints
+}
+
+// The L2511 tidy errors of `functions`: one per distinct site
+// (jet_driver_cost_tidy) that a loop of a function the program wrote
+// repeats. A plain check and a program compile (`jet build`) list them
+// without keeping a cost report, and a function without a loop is not walked.
+jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -> [Diagnostic] {
+    sites := [TCostSite]{}
+    loop function in functions -> jet_driver_cost_tidy_function_sites(function, sites)
+    jet_driver_cost_sites_to_lints(load, sites)
 }
 
 // The cost sites L2511 lists: a copy sema made that the source doesn't

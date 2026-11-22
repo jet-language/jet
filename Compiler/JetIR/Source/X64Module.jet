@@ -1539,8 +1539,15 @@ ir_x64_hash_start: fn(symbol: String) -> Int Never! {
 // section 0 and `.symtab_shndx`.
 ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
+    ir_x64_library_object_into(owned, exports, data_exports, debug_info, own_sections)
+}
+
+// Same as ir_x64_library_object, borrowing `owned` so `owned.program` stays
+// intact when the caller still needs it for another partition (such as the
+// runtime's web partition after unblocking Core).
+ir_x64_library_object_into: fn(owned: &IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     if owned.errors.len() > 0 {
-        return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
+        return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(owned.errors)}
     }
     program := ir_x64_object_module(owned)
     debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
