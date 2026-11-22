@@ -1631,10 +1631,14 @@ from_unix_microseconds: fn(value: Int) -> DateTime Never! {
 }
 
 from_unix_nanoseconds: fn(value: Int) -> DateTime Never! {
+    // A timestamp after the last leap second (2017) and within packed small Int
+    // (below 2^61 - 1, year 2043) is positive and avoids BigInt and leap lookup.
+    if value >= 1483228801000000000 && value < 2305843009000000000 {
+        seconds: value /% 1000000000
+        return DateTime{secs: seconds, nanos: value - seconds * 1000000000, leap_second: false}
+    }
     seconds: civil_floor(value, 1000000000)
     nanos: civil_mod(value, 1000000000)
-    // A second after the last leap second (2017) and well inside Int64 is
-    // its own timestamp: no leap epoch to step back from, nothing to clamp.
     if seconds > 1483228800 && seconds < 9223372036 {
         return DateTime{secs: seconds, nanos: nanos, leap_second: false}
     }
