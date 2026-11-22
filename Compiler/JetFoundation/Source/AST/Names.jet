@@ -39,6 +39,7 @@ name_table_sized: fn(slots: Int) -> NameTable Never! {
     capacity := 2
     loop capacity < slots -> capacity *= 2
     initial := [Int]{}
+    initial.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> initial.push(0)
     table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: initial, mask: capacity - 1}
     name_intern_bytes(table, [U8]{}, 0, 0)
@@ -80,14 +81,19 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
 
 // The slot of `bytes[start..<end]` (whose `name_hash` is `hash`) in
 // `table`: the one holding its id, or the empty one a new id takes.
+// Each occupied slot packs `((hash & 0x3fffffff) << 32) | (id + 1)` so a
+// probe rejects mismatched hashes without touching `table.hashes`.
 name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) -> Int Never! {
     mask: table.mask
+    hash_tag: hash & 0x3fffffff
     slot := hash & mask
     loop {
         entry: table.slots[slot]
         if entry == 0 -> break
-        id: entry - 1
-        if table.hashes[id] == hash && name_bytes_equal(table, id, hash, bytes, start, end) -> return slot
+        if (entry >> 32) == hash_tag {
+            id: (entry & 0xffffffff) - 1
+            if name_bytes_equal(table, id, hash, bytes, start, end) -> return slot
+        }
         slot = (slot + 1) & mask
     }
     slot
@@ -101,7 +107,7 @@ name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int
     table.ends.push(table.bytes.len())
     table.hashes.push(hash)
     table.texts.push(text)
-    table.slots[slot] = id + 1
+    table.slots[slot] = ((hash & 0x3fffffff) << 32) | (id + 1)
     if (id + 1) * 2 > table.mask -> name_table_grow(table)
     Name{id: U32{id}}
 }
@@ -111,7 +117,8 @@ name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int
 name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
     hash: name_hash(bytes, start, end)
     slot: name_slot(table, hash, bytes, start, end)
-    if table.slots[slot] != 0 -> return Name{id: U32{table.slots[slot] - 1}}
+    entry: table.slots[slot]
+    if entry != 0 -> return Name{id: U32{(entry & 0xffffffff) - 1}}
     name_insert(table, slot, hash, bytes, start, end, String.from_bytes(bytes.slice(start, end)) ?? "")
 }
 
@@ -125,8 +132,9 @@ name_find: fn(table: NameTable, text: String) -> Name? Never! {
 // interns.
 name_find_bytes: fn(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name? Never! {
     slot: name_slot(table, name_hash(bytes, start, end), bytes, start, end)
-    if table.slots[slot] == 0 -> return None
-    Val(Name{id: U32{table.slots[slot] - 1}})
+    entry: table.slots[slot]
+    if entry == 0 -> return None
+    Val(Name{id: U32{(entry & 0xffffffff) - 1}})
 }
 
 name_intern: fn(table: &NameTable, text: String) -> Name Never! {
@@ -138,11 +146,13 @@ name_table_grow: fn(table: &NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
+    slots.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> slots.push(0)
     loop id in 0..<table.texts.len() {
-        slot := table.hashes[id] & mask
+        hash: table.hashes[id]
+        slot := hash & mask
         loop slots[slot] != 0 -> slot = (slot + 1) & mask
-        slots[slot] = id + 1
+        slots[slot] = ((hash & 0x3fffffff) << 32) | (id + 1)
     }
     table.slots = slots.move()
     table.mask = mask
@@ -165,14 +175,16 @@ name_pool_adopt: fn(table: &NameTable, shared: NameTable, own: &NameTable) Never
         end: table.ends[id]
         hash: table.hashes[id]
         found: name_slot(shared, hash, table.bytes, start, end)
-        if shared.slots[found] != 0 {
-            table.texts[id] = name_text(shared, Name{id: U32{shared.slots[found] - 1}})
+        shared_entry: shared.slots[found]
+        if shared_entry != 0 {
+            table.texts[id] = name_text(shared, Name{id: U32{(shared_entry & 0xffffffff) - 1}})
             next
         }
         slot: name_slot(own, hash, table.bytes, start, end)
-        if own.slots[slot] == 0 {
+        own_entry: own.slots[slot]
+        if own_entry == 0 {
             _ := name_insert(own, slot, hash, table.bytes, start, end, name_text(table, Name{id: U32{id}}))
-        } else { table.texts[id] = name_text(own, Name{id: U32{own.slots[slot] - 1}}) }
+        } else { table.texts[id] = name_text(own, Name{id: U32{(own_entry & 0xffffffff) - 1}}) }
     }
 }
 
@@ -226,12 +238,15 @@ NAME_ERR: Name{id: U32{7}}
 // the remap a merged source's rows are renumbered by.
 name_table_merge: fn(into: &NameTable, from: NameTable, first: Int) -> [Name] Never! {
     ids := [Name]{}
+    count: from.texts.len() - first
+    if count > 0 -> ids.try_reserve(count) ?? panic("reserve failed")
     loop id in first..<from.texts.len() {
         start: name_start(from, id)
         end: from.ends[id]
         slot: name_slot(into, from.hashes[id], from.bytes, start, end)
-        if into.slots[slot] != 0 {
-            ids.push(Name{id: U32{into.slots[slot] - 1}})
+        entry: into.slots[slot]
+        if entry != 0 {
+            ids.push(Name{id: U32{(entry & 0xffffffff) - 1}})
             next
         }
         ids.push(name_insert(into, slot, from.hashes[id], from.bytes, start, end, name_text(from, Name{id: U32{id}})))
@@ -343,20 +358,24 @@ NAME_ROWS_INITIAL_SLOTS: 16
 
 name_rows: fn() -> NameRows Never! {
     slots := [Int]{}
+    slots.try_reserve(NAME_ROWS_INITIAL_SLOTS) ?? panic("reserve failed")
     loop _ in 0..<NAME_ROWS_INITIAL_SLOTS -> slots.push(0)
     NameRows{texts: [String]{}, hashes: [Int]{}, rows: [Int]{}, slots: slots, mask: NAME_ROWS_INITIAL_SLOTS - 1}
 }
 
 // The key index of `text` (whose name_rows_hash is `hash`), if the map ever
-// held it.
+// held it. Each occupied slot packs `(hash << 32) | (key + 1)` so a probe
+// rejects mismatched hashes without touching `map.hashes`.
 name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
     mask: map.mask
     slot := hash & mask
     loop {
         entry: map.slots[slot]
         if entry == 0 -> break
-        key: entry - 1
-        if map.hashes[key] == hash && map.texts[key] == text -> return Val(key)
+        if (entry >> 32) == hash {
+            key: (entry & 0xffffffff) - 1
+            if map.texts[key] == text -> return Val(key)
+        }
         slot = (slot + 1) & mask
     }
     None
@@ -401,7 +420,7 @@ name_rows_append: fn(map: &NameRows, text: String, hash: Int, row: Int) Never! {
     }
     slot := hash & map.mask
     loop map.slots[slot] != 0 -> slot = (slot + 1) & map.mask
-    map.slots[slot] = key + 1
+    map.slots[slot] = (hash << 32) | (key + 1)
 }
 
 // Rebuilds the slots at twice the capacity from the stored hashes.
@@ -409,11 +428,13 @@ name_rows_grow: fn(map: &NameRows) Never! {
     capacity: (map.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
+    slots.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> slots.push(0)
     loop key in 0..<map.texts.len() {
-        slot := map.hashes[key] & mask
+        hash: map.hashes[key]
+        slot := hash & mask
         loop slots[slot] != 0 -> slot = (slot + 1) & mask
-        slots[slot] = key + 1
+        slots[slot] = (hash << 32) | (key + 1)
     }
     map.slots = slots.move()
     map.mask = mask

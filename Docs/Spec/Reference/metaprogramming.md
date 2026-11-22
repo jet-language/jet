@@ -22,12 +22,13 @@ become part of a program. The boundary is visible in source:
   element types, optional elements, and function return types are not inferred
   again from the evaluator's erased value representation. The retired
   `@ { ... }` spelling teaches `#run { ... }` (E0388).
-- `@name: expression` binds a value evaluated during compilation.
-- Compiler facts carry `$`: members of their subject such as `T.reflect().fields`, or
-  the roots `#build`, `#package`, `#phase` and `#program`. They do not replace
-  preparation or compile-time bindings.
-- `@if` selects a compile-time branch.
-- `@loop` repeats a typed body over a compile-time collection.
+- `NAME: #run expression` forces a binding to evaluate during compilation (a
+  plain `NAME: value` also folds while building when it can).
+- Compiler facts use `x.reflect().fact` (such as `T.reflect().fields`) and the
+  roots `#build`, `#package`, `#phase`, `#program`, `#here`, and `#caller`. They
+  do not replace preparation or compile-time bindings.
+- `#if` selects a compile-time branch.
+- `#loop` repeats a typed body over a compile-time collection.
 - Derive (`impl Trait.Derive`) and marker templates use ordinary items and
   statements rather than a string macro language.
 
@@ -180,9 +181,9 @@ stops with E3007 at the call whose work it ran, and the command ends with
 128 plus the signal, as a shell reports a process that signal ended
 ([`comptime_ended_by_an_outside_signal.jet`](../../../Tests/UI/comptime_ended_by_an_outside_signal.jet)).
 
-`@if` performs compile-time selection. The selected arm is type-checked and
+`#if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
-Nested `@if` forms use the same rule. See
+Nested `#if` forms use the same rule. See
 [`comptime_if.jet`](../../../Examples/Metaprogramming/Comptime/ComptimeIf.jet).
 
 `#loop` is the one typed compile-time repetition mechanism used by derive

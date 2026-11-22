@@ -625,8 +625,7 @@ sema_core_is_http_nominal: fn(name: String) -> Bool Never! {
 }
 
 sema_core_is_crypto_nominal: fn(name: String) -> Bool Never! {
-    leaf_parts: name.split(".").to_list()
-    leaf: if leaf_parts.len() > 0 -> leaf_parts[leaf_parts.len() - 1] else -> name
+    leaf: if name.cut_last(".") == .Val(parts) -> parts.after else -> name
     if leaf == {
         "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash" -> true
         else -> false
@@ -647,10 +646,8 @@ sema_core_note_type_modules: fn(name: String, registered: NameTable, used: &[Str
     loop module_name in core_type_modules(name) {
         sema_core_note_usage(used, spans, "{module_name}.__type__", span)
     }
-    leaf_parts := name.split(".").to_list()
-    leaf := if leaf_parts.len() > 0 -> leaf_parts[leaf_parts.len() - 1] else -> name
     // These are semantic runtime seams rather than ordinary generated exports.
-    if leaf == "Ptr" -> sema_core_note_usage(used, spans, "core.mem.__type__", span)
+    if name == "Ptr" || name.ends_with(".Ptr") -> sema_core_note_usage(used, spans, "core.mem.__type__", span)
 }
 
 sema_core_collect_type: fn(ty: Type, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
@@ -746,9 +743,9 @@ sema_core_note_typed_head: fn(used: &[String], spans: &[SemaCoreUsageSpan], name
 }
 
 sema_core_is_internal_task_key: fn(name: String, suffix: String) -> Bool Never! {
+    if name.count_bytes() != 9 + suffix.count_bytes() -> return false
     bytes: name.bytes()
     suffix_bytes: suffix.bytes()
-    if bytes.len() != 9 + suffix_bytes.len() -> return false
     if bytes[0] != (U8{0}) || bytes[1] != (U8{106}) || bytes[2] != (U8{101}) || bytes[3] != (U8{116}) || bytes[4] != (U8{46}) || bytes[5] != (U8{116}) || bytes[6] != (U8{97}) || bytes[7] != (U8{115}) || bytes[8] != (U8{107}) {
         return false
     }
@@ -1139,19 +1136,13 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                     sema_core_note_usage(used, spans, "core.mem.pool_shared", None)
                 }
             }
-            if receiver == {
-                .Ident(name, _, _) -> {
-                    if name == "Path" {
-                        sema_core_note_usage(used, spans, "core.files.__pathapi__", Val(method_span))
-                    }
+            recv_name := ""
+            if receiver == .Ident(name, _, _) {
+                recv_name = name
+                if name == "Path" {
+                    sema_core_note_usage(used, spans, "core.files.__pathapi__", Val(method_span))
                 }
-                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
-            }
-            if receiver == {
-                .Ident(name, _, _) -> {
-                    sema_core_note_builtin_math_type(name, registered, used, spans, Val(method_span))
-                }
-                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+                sema_core_note_builtin_math_type(name, registered, used, spans, Val(method_span))
             }
             loop ty in owner_type_args {
                 sema_core_collect_type(ty, registered, used, spans, Val(method_span))
@@ -1159,55 +1150,51 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
             loop ty in type_args {
                 sema_core_collect_type(ty, registered, used, spans, Val(method_span))
             }
-            recv_name := if receiver == {
-                .Ident(name, _, _) -> name
-                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
-            }
-            if sema_core_is_internal_task_key(recv_name, "") {
-                sema_core_note_usage(used, spans, "core.concurrency.task", Val(method_span))
-            }
             if method == {
                 "trim_start" | "trim_end" | "pad_start" | "pad_end" | "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii" | "to_title" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize" | "last_index_of" | "remove_prefix" | "remove_suffix" -> {
                     sema_core_note_usage(used, spans, "core.text.__string_surface__", Val(method_span))
                 }
                 else -> {}
             }
-            if sema_core_is_http_nominal(recv_name) {
-                sema_core_note_usage(used, spans, "core.http.__nominal__", Val(method_span))
-            }
-            if recv_name == "Duration" {
-                sema_core_note_usage(used, spans, "core.time.__duration__", Val(method_span))
-            }
             if method == "cmd" && (recv_name == "" || recv_name == "UIShortcut") {
                 sema_core_note_usage(used, spans, "core.ui.host.shortcut", Val(method_span))
             }
-            // `input.csv<Row>()` and its kin read through `__input_<method>`
-            // (sema_call_try_ambient_input_method).
-            if recv_name == "input" {
-                member: core_input_method_member(method)
-                loop owner in core_input_method_modules(method) {
-                    if sema_core_generated_module_member(owner, member) {
-                        sema_core_note_usage(used, spans, "{owner}.{member}", Val(method_span))
+            if recv_name != "" {
+                if sema_core_is_internal_task_key(recv_name, "") {
+                    sema_core_note_usage(used, spans, "core.concurrency.task", Val(method_span))
+                }
+                if sema_core_is_http_nominal(recv_name) {
+                    sema_core_note_usage(used, spans, "core.http.__nominal__", Val(method_span))
+                }
+                if recv_name == "Duration" {
+                    sema_core_note_usage(used, spans, "core.time.__duration__", Val(method_span))
+                }
+                // `input.csv<Row>()` and its kin read through `__input_<method>`
+                // (sema_call_try_ambient_input_method).
+                if recv_name == "input" {
+                    member: core_input_method_member(method)
+                    loop owner in core_input_method_modules(method) {
+                        if sema_core_generated_module_member(owner, member) {
+                            sema_core_note_usage(used, spans, "{owner}.{member}", Val(method_span))
+                        }
                     }
                 }
-            }
-            if recv_name != "" {
-                row: sema_core_import_find(imports, "{recv_name}.{method}")
-                if {
-                    row != None -> {
-                        imported := row
-                        if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) {
-                            sema_core_note_usage(used, spans, sema_core_import_usage(imported, method), Val(method_span))
-                        }
+                dotted_len: recv_name.count_bytes() + 1 + method.count_bytes()
+                dotted_row := SemaCoreImport?{None}
+                plain_row := SemaCoreImport?{None}
+                loop candidate in imports {
+                    if dotted_row == None && candidate.alias.count_bytes() == dotted_len && candidate.alias.starts_with(recv_name) && candidate.alias.ends_with(method) && candidate.alias == ("{recv_name}.{method}") {
+                        dotted_row = Val(candidate)
+                        break
                     }
-                    else -> {
-                        row2: sema_core_import_find(imports, recv_name)
-                        if row2 != None {
-                            imported2 := row2
-                            if sema_core_import_is_core(imported2.module_name) && sema_core_import_usage_is_known(imported2, method) {
-                                sema_core_note_usage(used, spans, sema_core_import_usage(imported2, method), Val(method_span))
-                            }
-                        }
+                    if plain_row == None && candidate.alias == recv_name {
+                        plain_row = Val(candidate)
+                    }
+                }
+                matched_row := if dotted_row != None -> dotted_row else -> plain_row
+                if matched_row == .Val(imported) {
+                    if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) {
+                        sema_core_note_usage(used, spans, sema_core_import_usage(imported, method), Val(method_span))
                     }
                 }
             }

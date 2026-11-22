@@ -57,7 +57,9 @@ use jet_foundation.[
     type_name,
     type_union_member_tag,
     type_unqualified_nominals,
+    name_rows_get,
     name_rows_get_text,
+    name_rows_hash,
     core_identity_in_module,
     core_identity_is,
     MODULE_CORE_PREFIX,
@@ -925,18 +927,16 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
 
 sema_type_graph_resolve_apply_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return name
-    if sema_type_source_owns_nominal(graph, name, caller) {
-        return sema_type_graph_canonical_symbol_name(graph, resolved)
-    }
-    if sema_resolved_kind(graph, resolved) == SymbolKind.Type && module_is_core(resolved.source_module_identity) && sema_type_graph_resolved_nominal_row(graph, resolved) == None {
-        if sema_resolved_ty(graph, resolved) == .Val(builtin) {
-            if builtin == .Named(leaf) -> return leaf
+    if sema_resolved_kind(graph, resolved) == SymbolKind.Type {
+        nominal: sema_type_graph_resolved_nominal_row(graph, resolved)
+        if nominal != None -> return sema_type_graph_canonical_name_at(graph, resolved, nominal)
+        if module_is_core(resolved.source_module_identity) {
+            if sema_resolved_ty(graph, resolved) == .Val(builtin) {
+                if builtin == .Named(leaf) -> return leaf
+            }
         }
     }
-    if {
-        sema_resolved_kind(graph, resolved) == SymbolKind.Type && sema_type_graph_resolved_nominal_row(graph, resolved) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
-        else -> name
-    }
+    if true -> name else -> ""
 }
 
 sema_type_graph_resolve_trait_bound: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
@@ -1480,24 +1480,40 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) {
                 return Type.Apply{name: "Ptr", args: rewritten}
             }
-            is_generic: sema_type_name_is_generic(generic_params, name)
-            head: if is_generic -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
+            if sema_type_name_is_generic(generic_params, name) {
+                return Type.Apply{name: name, args: rewritten}
+            }
+            resolved: sema_type_graph_lookup_symbol_at(graph, caller, name)
+            head := name
+            row := SemaRegistrationRowRef?{None}
+            if resolved == .Val(found) {
+                if sema_resolved_kind(graph, found) == SymbolKind.Type {
+                    nominal := sema_type_graph_resolved_nominal_row(graph, found)
+                    if nominal != None {
+                        head = sema_type_graph_canonical_name_at(graph, found, nominal)
+                        row = nominal
+                    } else if module_is_core(found.source_module_identity) {
+                        if sema_resolved_ty(graph, found) == .Val(builtin) {
+                            if builtin == .Named(leaf) -> head = leaf
+                        }
+                    }
+                }
+            } else if !(caller >= 0 && module_is_core(graph.modules[caller].module_identity)) {
+                row = sema_type_unscoped_nominal_row(graph, name, caller)
+            }
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets; under
             // JET_KEEP_GOING an alias expands only from a settled module row
             // (sema_registration_module_settled), so a cycle reported in its
             // module is never followed.
-            if !is_generic {
-                row := sema_type_resolve_nominal_row_at(graph, Type.Named{name: head}, caller)
-                if row == .Val(alias_row) {
-                    if graph.modules[alias_row.module_index].nominals[alias_row.row].kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == graph.modules[alias_row.module_index].nominals[alias_row.row].generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
-                        nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
-                        item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
-                        if item == .TypeAlias(definition) {
-                            names: loop parameter in definition.type_params -> parameter.name
-                            target: sema_type_alias_expanded(graph, alias_row.module_index, definition, rewritten, names) ?? return Type.Apply{name: head, args: rewritten}
-                            return sema_type_resolve_declared_recursive(graph, target, sema_registration_module_index(graph, nominal.symbol.module_identity) ?? -1, generic_params)
-                        }
+            if row == .Val(alias_row) {
+                if graph.modules[alias_row.module_index].nominals[alias_row.row].kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == graph.modules[alias_row.module_index].nominals[alias_row.row].generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
+                    nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
+                    item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
+                    if item == .TypeAlias(definition) {
+                        names: loop parameter in definition.type_params -> parameter.name
+                        target: sema_type_alias_expanded(graph, alias_row.module_index, definition, rewritten, names) ?? return Type.Apply{name: head, args: rewritten}
+                        return sema_type_resolve_declared_recursive(graph, target, sema_registration_module_index(graph, nominal.symbol.module_identity) ?? -1, generic_params)
                     }
                 }
             }
@@ -1809,27 +1825,33 @@ sema_type_graph_lookup_symbol: fn(graph: SemaRegistrationGraph, module_identity:
 // sema_type_graph_lookup_symbol from the caller module's row `caller`. An
 // unregistered caller (-1) has no local names, imports or visible owners.
 sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> SemaRegistrationResolvedSymbol? {
+    hash: name_rows_hash(name)
     if caller >= 0 {
         // The identity is passed as a place: binding it copied the String.
-        local: sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, name)
+        local: sema_registration_lookup_name_hashed(graph, caller, graph.modules[caller].module_identity, name, hash)
         if local != None -> return local
     }
     // A canonical nominal spelling's owner and whole name (SemaCanonicalNominals),
     // which the cut below also finds unless the name itself holds a `.`.
     if graph.canonical_nominals == .Val(canonical_table) {
-        if name_rows_get_text(canonical_table.rows, name) == .Val(row) {
+        if name_rows_get(canonical_table.rows, name, hash) == .Val(row) {
             return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
         }
     }
     // The name is cut in place; no part list is built per lookup.
+    // If `cut_last(".")` is None, `name` contains no `.`, so `split_once(".")`
+    // would also be None and is skipped.
     if name.cut_last(".") == .Val(canonical) {
         if sema_registration_module_index_text(graph, canonical.before) == .Val(owner_index) {
             return sema_registration_lookup_name_at(graph, owner_index, graph.modules[owner_index].module_identity, canonical.after)
         }
-    }
-    if name.split_once(".") == .Val(qualified) {
         if caller < 0 -> return None
-        return sema_registration_lookup_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after)
+        if !canonical.before.contains(".") {
+            return sema_registration_lookup_qualified(graph, graph.modules[caller].module_identity, canonical.before, canonical.after)
+        }
+        if name.split_once(".") == .Val(qualified) {
+            return sema_registration_lookup_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after)
+        }
     }
     // Only the established bare-owner trigger set may supply a global alias
     // or trait. Local declarations and explicit imports have already won above.
@@ -2000,11 +2022,12 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
     SemaTypeOwnerScan{found: found, ambiguous: false}
 }
 
-// Rust `split_type_name`'s leaf: after the last `.`, else after the last `.`.
+// Rust `split_type_name`'s leaf: after the last `.`.
 sema_type_graph_leaf: fn(name: String) -> String Never! {
-    separator: if name.contains(".") -> "." else -> "."
-    parts: name.split(separator).to_list()
-    parts[parts.len() - 1]
+    if name.cut_last(".") == {
+        .Val(parts) -> parts.after
+        .None -> name
+    }
 }
 
 sema_type_graph_base_name: fn(ty: Type) -> String? {

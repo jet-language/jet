@@ -4243,12 +4243,26 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
 }
 
 sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    // `.origin()` is retired: a `#Track` binding's origin is the compile-time
-    // fact `value.reflect().origin`, ahead of any method or root function `origin`.
-    if method == "origin" && args.len() == 0 && receiver == .Ident(name, _, _) {
-        if sema_scope_resolve_index(scopes, name) == .Val(index) && scopes.bindings[index].origin != None {
-            diagnostics.push(sema_error("E0311", method_span, "`.origin()` is retired for tracked values", "a `#Track` binding's origin is a compile-time fact, not a method", "read `value.reflect().origin` in comptime code"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
+    // Resolve an identifier receiver once: a local or parameter binding never
+    // names a Core module, type owner, or static handle unless `.origin()` or
+    // closure `.reflect()` applies.
+    if receiver == .Ident(name, _, _) {
+        if sema_scope_resolve_index(scopes, name) == .Val(index) {
+            kind: scopes.bindings[index].symbol.kind
+            if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
+                // `.origin()` is retired: a `#Track` binding's origin is the compile-time
+                // fact `value.reflect().origin`, ahead of any method or root function `origin`.
+                if method == "origin" && args.len() == 0 && scopes.bindings[index].origin != None {
+                    diagnostics.push(sema_error("E0311", method_span, "`.origin()` is retired for tracked values", "a `#Track` binding's origin is a compile-time fact, not a method", "read `value.reflect().origin` in comptime code"))
+                    return SemaMethodSpecialCheck{handled: true, value: None}
+                }
+                if name != sema_taskgroup_internal_receiver() && name != "FieldError" && method != "reflect" {
+                    return SemaMethodSpecialCheck{handled: false, value: None}
+                }
+            } else if method == "origin" && args.len() == 0 && scopes.bindings[index].origin != None {
+                diagnostics.push(sema_error("E0311", method_span, "`.origin()` is retired for tracked values", "a `#Track` binding's origin is a compile-time fact, not a method", "read `value.reflect().origin` in comptime code"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
         }
     }
     task_surface := sema_taskgroup_check_surface_method(receiver, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -4369,13 +4383,58 @@ sema_expr_try_hardware_pre_receiver: fn(receiver: Expr, method: String, args: [C
 sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     // Rust `infer_method_call`: a secret-bearing crypto value is move-only and
     // exposes no clone, encode, hash, debug or display method.
-    if sema_call_reflection_secret_bearing(receiver_value.ty) && (method == "clone" || method == "encode" || method == "hash" || method == "debug" || method == "display") {
+    if (method == "clone" || method == "encode" || method == "hash" || method == "debug" || method == "display") && sema_call_reflection_secret_bearing(receiver_value.ty) {
         diagnostics.push(sema_error("E0311", span, "`{method}` is forbidden on secret-bearing `{type_name(receiver_value.ty)}`", "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display operation", "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required"))
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    debug := sema_call_try_debug_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, diagnostics)
-    if debug.handled -> return debug
+    if method == "debug" && args.len() == 0 && type_args.len() == 0 {
+        debug := sema_call_try_debug_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, diagnostics)
+        if debug.handled -> return debug
+    }
+
+    // Dispatch on receiver type shape: List/Map/FixedList and primitive/structural
+    // types cannot match the 27 Named/Apply domain and handle routes.
+    if receiver_value.ty == {
+        .List(_) | .Map(_, _, _) | .FixedList(_, _) -> {
+            if method == "encode" || method == "encode_stored" || (method == "query" && receiver_value.ty == .List(_)) {
+                data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if data.handled -> return data
+            }
+            if method == "swizzle" && receiver_value.ty == .FixedList(_, _) {
+                swizzle := sema_expr_try_numeric_swizzle(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if swizzle.handled -> return swizzle
+            }
+            collections := sema_call_try_builtin_collections(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if collections.handled -> return collections
+            if method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" {
+                concurrency := sema_call_try_builtin_concurrency(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if concurrency.handled -> return concurrency
+            }
+            value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if value_method.handled -> return value_method
+            builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if builtin.handled -> return builtin
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
+        .String | .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .Option(_) | .Result(_, _) | .Tuple(_) | .InlineRange(_, _, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) -> {
+            if method == "encode" || method == "encode_stored" {
+                data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if data.handled -> return data
+            }
+            if method == "abs" && receiver_value.ty == Type.Int {
+                int_abs := sema_call_try_int_abs_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if int_abs.handled -> return int_abs
+            }
+            value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if value_method.handled -> return value_method
+            builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if builtin.handled -> return builtin
+            return SemaMethodSpecialCheck{handled: false, value: None}
+        }
+        .Named(_) | .Apply(_, _) | .Shared(_) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if data.handled -> return data
 
@@ -4432,15 +4491,17 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if reactive.handled -> return reactive
     event_handle := sema_call_try_event_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if event_handle.handled -> return event_handle
-    int_abs := sema_call_try_int_abs_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if int_abs.handled -> return int_abs
-    pointer_cast := sema_expr_try_pointer_cast(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, context, diagnostics)
-    if pointer_cast.handled -> return pointer_cast
-    err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, diagnostics)
-    if err_as.handled -> return err_as
+    if method == "cast" {
+        pointer_cast := sema_expr_try_pointer_cast(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, context, diagnostics)
+        if pointer_cast.handled -> return pointer_cast
+    }
+    if method == "as" {
+        err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, diagnostics)
+        if err_as.handled -> return err_as
+    }
     // Complex is not Numeric; its magnitude is its own
     // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
-    if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
+    if method == "abs" && receiver_value.ty == (Type.Named{name: "Complex"}) && args.len() == 0 {
         magnitude := sema_tree_node(Type.Float, TExprKind.MathBuiltin{type_name: "Complex", function: "abs", args: [TExpr]{receiver_value}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, diagnostics)}
     }
@@ -4450,23 +4511,33 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     }
     geometry := sema_call_try_geometry(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if geometry.handled -> return geometry
-    swizzle := sema_expr_try_numeric_swizzle(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if swizzle.handled -> return swizzle
-    transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, state)
-    hardware := sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if hardware == .Val(result) && result.check.handled {
-        return sema_expr_record_hardware_result(result, scopes, context)
+    if method == "swizzle" {
+        swizzle := sema_expr_try_numeric_swizzle(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if swizzle.handled -> return swizzle
+    }
+    if method == "wait" || method == "start" || method == "read" || method == "write" || method == "set" || method == "clear" {
+        transfer_fact := sema_hardware_transfer_fact_for_expr(receiver, scopes, state)
+        hardware := sema_call_try_hardware_method(receiver, receiver_value, method, args, transfer_fact, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if hardware == .Val(result) && result.check.handled {
+            return sema_expr_record_hardware_result(result, scopes, context)
+        }
     }
     memory := sema_call_try_memory_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if memory.handled -> return memory
     collections := sema_call_try_builtin_collections(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if collections.handled -> return collections
-    concurrency := sema_call_try_builtin_concurrency(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if concurrency.handled -> return concurrency
-    task_group := sema_taskgroup_check_group_method(receiver, receiver_value.ty, method, args, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if task_group.handled -> return task_group
-    task_handle := sema_taskgroup_check_task_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, context, diagnostics)
-    if task_handle.handled -> return task_handle
+    if method == "send" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" {
+        concurrency := sema_call_try_builtin_concurrency(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if concurrency.handled -> return concurrency
+    }
+    if receiver_value.ty == (Type.Named{name: "Group"}) {
+        task_group := sema_taskgroup_check_group_method(receiver, receiver_value.ty, method, args, span, environment, program, scopes, state, tail_store, context, diagnostics)
+        if task_group.handled -> return task_group
+    }
+    if method == "join" || method == "detach" {
+        task_handle := sema_taskgroup_check_task_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, context, diagnostics)
+        if task_handle.handled -> return task_handle
+    }
 
     value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if value_method.handled -> return value_method
@@ -8156,8 +8227,7 @@ sema_expr_probe_type: fn(expr: Expr, carrier: Bool, environment: SemaScopeEnviro
     if expr == .Ident(_, _, _) -> return sema_stmt_return_known_type(expr, environment, scopes)
     scope_mark: sema_scope_mark(scopes)
     context_mark: sema_check_context_save(context)
-    // copy: the probe's ownership state is restored after the check.
-    saved_state: state.copy()
+    ownership_fork: sema_ownership_mark(state)
     diagnostic_count: diagnostics.len()
     tail_body_count: tail_store.bodies.len()
     previous_root_read: context.suppress_partial_move_root_read
@@ -8166,7 +8236,8 @@ sema_expr_probe_type: fn(expr: Expr, carrier: Bool, environment: SemaScopeEnviro
     context.suppress_partial_move_root_read = previous_root_read
     sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
-    sema_ownership_state_restore(state, saved_state.move())
+    sema_ownership_fork_rollback(state, ownership_fork)
+    sema_ownership_fork_close(state, ownership_fork)
     loop diagnostics.len() > diagnostic_count -> _ := diagnostics.pop()
     loop tail_store.bodies.len() > tail_body_count -> _ := tail_store.bodies.pop()
     checked: probed ?? return None

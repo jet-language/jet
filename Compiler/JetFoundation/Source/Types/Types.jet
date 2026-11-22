@@ -694,10 +694,14 @@ symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int?
         return None
     }
     slot := hash & keys.mask
-    loop keys.slots[slot] != 0 {
-        row: keys.slots[slot] - 1
-        if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
-            return Val(row)
+    loop {
+        entry: keys.slots[slot]
+        if entry == 0 -> break
+        if (entry >> 32) == hash {
+            row: (entry & 0xffffffff) - 1
+            if symbol_local_keys_spells(keys, row, key.bytes()) {
+                return Val(row)
+            }
         }
         slot = (slot + 1) & keys.mask
     }
@@ -723,9 +727,10 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
         mask: capacity - 1
         slots := (loop _ in 0..<capacity -> 0)
         loop index in 0..<keys.hashes.len() {
-            slot := keys.hashes[index] & mask
+            item_hash: keys.hashes[index]
+            slot := item_hash & mask
             loop slots[slot] != 0 -> slot = (slot + 1) & mask
-            slots[slot] = index + 1
+            slots[slot] = (item_hash << 32) | (index + 1)
         }
         keys.slots = slots.move()
         keys.mask = mask
@@ -733,7 +738,7 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
     }
     slot := hash & keys.mask
     loop keys.slots[slot] != 0 -> slot = (slot + 1) & keys.mask
-    keys.slots[slot] = row + 1
+    keys.slots[slot] = (hash << 32) | (row + 1)
     symbol_local_id(row)
 }
 
@@ -779,9 +784,13 @@ symbol_key_rows: fn(slots: Int) -> SymbolKeyRows Never! {
 // The row of `key`, whose `name_rows_hash` is `hash`, when `rows` holds it.
 symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Never! {
     slot := hash & rows.mask
-    loop rows.slots[slot] != 0 {
-        row: rows.slots[slot] - 1
-        if rows.hashes[row] == hash && rows.texts[row] == key -> return Val(row)
+    loop {
+        entry: rows.slots[slot]
+        if entry == 0 -> break
+        if (entry >> 32) == hash {
+            row: (entry & 0xffffffff) - 1
+            if rows.texts[row] == key -> return Val(row)
+        }
         slot = (slot + 1) & rows.mask
     }
     None
@@ -800,9 +809,10 @@ symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
         mask: capacity - 1
         slots := (loop _ in 0..<capacity -> 0)
         loop index in 0..<rows.texts.len() {
-            slot := rows.hashes[index] & mask
+            item_hash: rows.hashes[index]
+            slot := item_hash & mask
             loop slots[slot] != 0 -> slot = (slot + 1) & mask
-            slots[slot] = index + 1
+            slots[slot] = (item_hash << 32) | (index + 1)
         }
         rows.slots = slots.move()
         rows.mask = mask
@@ -810,7 +820,7 @@ symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
     }
     slot := hash & rows.mask
     loop rows.slots[slot] != 0 -> slot = (slot + 1) & rows.mask
-    rows.slots[slot] = row + 1
+    rows.slots[slot] = (hash << 32) | (row + 1)
     row
 }
 
