@@ -475,11 +475,11 @@ function renderChrome() {
     tabs.appendChild(t);
   }
   const day = S.counts.today;
-  $('#feed').innerHTML = `<b>${day.openCards}</b> open cards${dayChange(day.openCardsDelta)} · <b>${day.openCriteria}</b> open criteria${dayChange(day.openCriteriaDelta)} · <b>${S.counts.agentReady}</b> agent-ready`;
+  $('#feed').innerHTML = `<b>${day.openCards}</b> Open Cards${dayChange(day.openCardsDelta)} · <b>${day.openCriteria}</b> Open Criteria${dayChange(day.openCriteriaDelta)} · <b>${S.counts.agentReady}</b> Agent-Ready`;
   updatePill();
 }
 // Today's change in an open count, against the board at the first write of the day.
-const dayChange = (d) => d ? ` <span class="top__delta top__delta--${d > 0 ? 'up' : 'down'}" title="since the start of ${esc(S.counts.today.date)}">${d > 0 ? '+' : ''}${d}</span>` : '';
+const dayChange = (d) => d ? ` <span class="top__delta top__delta--${d > 0 ? 'up' : 'down'}" title="Since the start of ${esc(S.counts.today.date)}">${d > 0 ? '+' : ''}${d}</span>` : '';
 function updatePill() {
   const decisions = openGenericDecisions().length;
   const checks = verifyQueue().length;
@@ -487,9 +487,9 @@ function updatePill() {
   pill.className = 'top__pill' + (decisions && checks ? ' top__pill--mixed'
     : checks ? ' top__pill--verify' : decisions ? '' : ' clear');
   pill.innerHTML = [
-    decisions ? `<span class="top__status"><span class="beat"></span>${decisions} decision${decisions === 1 ? '' : 's'}</span>` : '',
-    checks ? `<span class="top__status top__status--verify"><span class="beat"></span>${checks} owner check${checks === 1 ? '' : 's'}</span>` : '',
-  ].filter(Boolean).join('') || '&#10003; tower clear';
+    decisions ? `<span class="top__status"><span class="beat"></span>${decisions} Decision${decisions === 1 ? '' : 's'}</span>` : '',
+    checks ? `<span class="top__status top__status--verify"><span class="beat"></span>${checks} Owner Check${checks === 1 ? '' : 's'}</span>` : '',
+  ].filter(Boolean).join('') || '&#10003; Tower Clear';
   pill.onclick = () => go('now');
 }
 function undoToast(label, rev) {
@@ -499,7 +499,7 @@ function undoToast(label, rev) {
   $('#undo-btn', t).addEventListener('click', async () => {
     t.hidden = true;
     await api('undo', { expectRev: rev });
-    toast('undone');
+    toast('Undone');
   });
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
 }
@@ -537,7 +537,7 @@ const nextSort = (sort, col, sorts) => sort.col === col
   ? { col, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
   : parseSort(col, sorts);
 const sortOptions = (sorts, sort) => sorts.map(s => `<option value="${s.key}" ${sort.col === s.key ? 'selected' : ''}>Sort: ${esc(s.label)}</option>`).join('');
-const sortDirButton = (id, sort) => `<button class="btn btn--ghost" id="${id}" aria-label="Reverse sort" title="Reverse sort">${sort.dir === 'asc' ? '↑' : '↓'}</button>`;
+const sortDirButton = (id, sort) => `<button class="btn btn--ghost" id="${id}" aria-label="Reverse Sort" title="Reverse Sort">${sort.dir === 'asc' ? '↑' : '↓'}</button>`;
 
 // ---- NOW ----------------------------------------------------------------------
 function viewNow() {
@@ -546,12 +546,12 @@ function viewNow() {
   const decisions = openGenericDecisions().length;
   const checks = verifyQueue().length;
   const waiting = [
-    decisions ? `<b>${decisions}</b> decision${decisions === 1 ? '' : 's'}` : '',
-    checks ? `<span class="owner-check-count"><b>${checks}</b> owner check${checks === 1 ? '' : 's'}</span>` : '',
-  ].filter(Boolean).join(' and ');
+    decisions ? `<b>${decisions}</b> Decision${decisions === 1 ? '' : 's'}` : '',
+    checks ? `<span class="owner-check-count"><b>${checks}</b> Owner Check${checks === 1 ? '' : 's'}</span>` : '',
+  ].filter(Boolean).join(' & ');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Now</h1>
-    <span class="viewhead__sub">${waiting ? `${waiting} waiting on you` : 'no decisions or checks waiting on you'}</span>
-    ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
+    <span class="viewhead__sub">${waiting ? `${waiting} Waiting on You` : 'No Decisions or Checks Waiting'}</span>
+    ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide All →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
   v.appendChild(nowReportsNode());
@@ -565,8 +565,8 @@ function viewNow() {
   if (!items.length) {
     v.appendChild(el(`<div class="nowclear">
       <div class="nowclear__mark">▲</div>
-      <div class="nowclear__t">Tower clear — nothing is blocked on you.</div>
-      <div class="nowclear__sub">${S.counts.agentReady} cards agent-ready · new ballots land here</div>
+      <div class="nowclear__t">Tower Clear — Nothing Blocked on You</div>
+      <div class="nowclear__sub">${S.counts.agentReady} Agent-Ready Cards · New Ballots Land Here</div>
     </div>`));
     return;
   }
@@ -963,21 +963,21 @@ function viewClosest() {
   const goalsTerm = TERM('epochs', 'Goals');
   const goalTerm = TERM('epoch', 'Goal');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Closest</h1>
-      <span class="viewhead__sub">cards nearest to done — fewest open criteria first</span></div>
+      <span class="viewhead__sub">Cards Nearest to Done — Fewest Open Criteria First</span></div>
     <div class="chain">${activeChain.map(e => {
-      return `<button type="button" class="chain__step chain__step--${e.role}${closestEpoch === e.id ? ' chain__step--selected' : ''}" data-chain-goal="${esc(e.id)}" title="${esc(e.name)} · ${e.openCards} open cards · ${e.openCriteria} open criteria">
+      return `<button type="button" class="chain__step chain__step--${e.role}${closestEpoch === e.id ? ' chain__step--selected' : ''}" data-chain-goal="${esc(e.id)}" title="${esc(e.name)} · ${e.openCards} Open Cards · ${e.openCriteria} Open Criteria">
         <b>${esc(e.label)}</b> <span class="chain__name">${esc(e.name)}</span>
-        <span class="chain__meta">${e.openCards}c · ${e.openCriteria} open${e.blockedCriteria ? ` · ${e.blockedCriteria} blk` : ''}</span>
+        <span class="chain__meta">${e.openCards} Cards · ${e.openCriteria} Open${e.blockedCriteria ? ` · ${e.blockedCriteria} Blocked` : ''}</span>
       </button>`;
     }).join('<span class="chain__arrow">→</span>')}</div>
     <div class="radar-tools">
-      <select id="closest-epoch" aria-label="Filter by ${esc(goalTerm.toLowerCase())}">
-        <option value="">All ${esc(goalsTerm.toLowerCase())}</option>
+      <select id="closest-epoch" aria-label="Filter by ${esc(goalTerm)}">
+        <option value="">All ${esc(goalsTerm)}</option>
         ${activeChain.map(e => `<option value="${esc(e.id)}" ${closestEpoch === e.id ? 'selected' : ''}>${esc(e.label)}${e.name ? ` ${esc(e.name)}` : ''}</option>`).join('')}
       </select>
-      <select id="closest-sort" aria-label="Sort cards">${sortOptions(CARD_SORTS, closestSort)}</select>
+      <select id="closest-sort" aria-label="Sort Cards">${sortOptions(CARD_SORTS, closestSort)}</select>
       ${sortDirButton('closest-direction', closestSort)}
-      <span class="viewhead__sub">${rows.length} card${rows.length === 1 ? '' : 's'}</span>
+      <span class="viewhead__sub">${rows.length} Card${rows.length === 1 ? '' : 's'}</span>
     </div>
     <div class="closest">${rows.map(({ card, crit }) => {
       const e = S.epochs.find(x => x.id === card.epoch);
@@ -987,12 +987,12 @@ function viewClosest() {
         <span class="closest__num">#${esc(card.num)}</span>
         <span class="closest__epoch">${esc(e ? epochTag(e) : card.epoch || '—')}</span>
         <span class="prio prio-${esc(card.priority || 'P2')}">${esc(card.priority || 'P2')}</span>
-        <span class="closest__open">${ready ? 'ready' : `${crit.open} open`}</span>
-        <span class="closest__ratio" title="${crit.settled} of ${crit.total} criteria settled">${ratio}</span>
-        <span class="closest__blocked">${crit.blocked ? `${crit.blocked} blk` : ''}</span>
+        <span class="closest__open">${ready ? 'Ready' : `${crit.open} Open`}</span>
+        <span class="closest__ratio" title="${crit.settled} of ${crit.total} Criteria Settled">${ratio}</span>
+        <span class="closest__blocked">${crit.blocked ? `${crit.blocked} Blocked` : ''}</span>
         <span class="closest__t">${esc(card.title)}</span>
       </button>`;
-    }).join('') || '<div class="empty"><div class="empty__glyph">—</div><div>no open cards with criteria</div></div>'}</div>`;
+    }).join('') || '<div class="empty"><div class="empty__glyph">—</div><div>No Open Cards with Criteria</div></div>'}</div>`;
   const setClosestSort = (sort) => { closestSort = sort; saveSort('closest', sort); viewClosest(); };
   $('#closest-epoch').addEventListener('change', (ev) => { closestEpoch = ev.target.value; viewClosest(); });
   $('#closest-sort').addEventListener('change', (ev) => setClosestSort(parseSort(ev.target.value, CARD_SORTS)));
@@ -1008,46 +1008,46 @@ function viewBoard() {
   const cardsMode = isOpen('radar-cards', false);
   const goalsTerm = TERM('epochs', 'Goals');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Board</h1>
-      <span class="viewhead__sub">goal roadmap × ops table</span>
+      <span class="viewhead__sub">Goal Roadmap × Ops Table</span>
       <div class="viewhead__actions">
-        <button class="btn btn--ghost" id="legend-btn" title="What the colors mean">Key</button>
-        <button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button>
-        <button class="btn btn--ghost" id="radar-recent" title="Show every card in one list, newest first" aria-pressed="${radarRecent}">${radarRecent ? `☰ ${esc(goalsTerm)}` : 'Recent'}</button>
-        <button class="btn btn--red" id="new-card">+ New card</button>
+        <button class="btn btn--ghost" id="legend-btn" title="What the Colors Mean">Key</button>
+        <button class="btn btn--ghost" id="radar-mode" title="Switch Between Table Rows and Card Tiles">${cardsMode ? '☰ Table View' : '⊞ Card View'}</button>
+        <button class="btn btn--ghost" id="radar-recent" title="Show Every Card in One List, Newest First" aria-pressed="${radarRecent}">${radarRecent ? `☰ ${esc(goalsTerm)}` : 'Recent'}</button>
+        <button class="btn btn--red" id="new-card">+ New Card</button>
       </div></div>
-    <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
+    <div class="capture"><input id="idea-input" placeholder="Capture an Idea — It Waits in Ideas Until You Make It a Card…">
       <button class="btn" id="idea-btn">Capture</button></div>
     <div class="radar-tools">
-      <input id="radar-filter" aria-label="Filter cards" placeholder="Search #12 #45 or a title…" value="${esc(radarFilterText)}">
-      <select id="radar-workflow" aria-label="Filter by workflow">
-        <option value="all">All work</option>
-        <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>In progress</option>
+      <input id="radar-filter" aria-label="Filter Cards" placeholder="Search #12 #45 or a Title…" value="${esc(radarFilterText)}">
+      <select id="radar-workflow" aria-label="Filter by Workflow">
+        <option value="all">All Work</option>
+        <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>In Progress</option>
         <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready</option>
         <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Plan</option>
         <option value="3" ${radarWorkflow === '3' ? 'selected' : ''}>Blocked</option>
         <option value="frozen" ${radarWorkflow === 'frozen' ? 'selected' : ''}>Frozen</option>
       </select>
-      <select id="radar-priority" aria-label="Filter by priority">
-        <option value="all">All priorities</option>
+      <select id="radar-priority" aria-label="Filter by Priority">
+        <option value="all">All Priorities</option>
         ${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${radarPriority === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
       </select>
-      <select id="radar-kind" aria-label="Filter by kind">
-        <option value="all">All kinds</option>
-        ${(CFG().kinds || ['task', 'feature', 'idea', 'bug']).map(k => `<option value="${esc(k)}" ${radarKind === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
+      <select id="radar-kind" aria-label="Filter by Kind">
+        <option value="all">All Kinds</option>
+        ${(CFG().kinds || ['task', 'feature', 'idea', 'bug']).map(k => `<option value="${esc(k)}" ${radarKind === k ? 'selected' : ''}>${esc(k.charAt(0).toUpperCase() + k.slice(1))}</option>`).join('')}
       </select>
-      <select id="radar-sort" aria-label="Sort cards">${sortOptions(CARD_SORTS, radarSort)}</select>
+      <select id="radar-sort" aria-label="Sort Cards">${sortOptions(CARD_SORTS, radarSort)}</select>
       ${sortDirButton('radar-direction', radarSort)}
     </div>
     <div id="radar-body"></div>`;
 
   $('#new-card').addEventListener('click', async () => {
-    const c = await api('card/add', { title: 'New card', by: 'owner' });  // server defaults epoch to the active one
+    const c = await api('card/add', { title: 'New Card', by: 'owner' });  // server defaults epoch to the active one
     if (c) showDetail(c.id);
   });
   $('#legend-btn').addEventListener('click', openLegend);
   const fire = async () => {
     const i = $('#idea-input'); const t = i.value.trim(); if (!t) return; i.value = '';
-    await api('idea/add', { text: t, by: 'owner' }); toast('captured');
+    await api('idea/add', { text: t, by: 'owner' }); toast('Captured');
   };
   $('#idea-btn').addEventListener('click', fire);
   $('#idea-input').addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
@@ -1069,12 +1069,12 @@ function viewBoard() {
   const ideas = S.ideas.filter(b => b.status !== 'tagged');
   if (ideas.length) {
     const ideasSec = collapsible('board-ideas', true,
-      `<span class="epoch__tag" style="color:var(--amber)">Ideas</span><span class="epoch__name">to triage</span><span class="epoch__count">${ideas.length}</span>`,
+      `<span class="epoch__tag" style="color:var(--amber)">Ideas</span><span class="epoch__name">To Triage</span><span class="epoch__count">${ideas.length}</span>`,
       'epoch--off', (body) => {
         const wrap = el('<div class="ideas"></div>');
         for (const b of ideas) {
           const row = el(`<div class="idea"><span class="idea__t">${esc(b.text)}${b.note ? ` <span class="idea__note">— ${esc(b.note)}</span>` : ''}</span>
-              <button class="btn btn--red btn--sm">Make card</button><button class="btn btn--ghost btn--sm">Dismiss</button></div>`);
+              <button class="btn btn--red btn--sm">Make Card</button><button class="btn btn--ghost btn--sm">Dismiss</button></div>`);
           const [mk, dl] = row.querySelectorAll('button');
           mk.addEventListener('click', async () => { const c = await api('idea/promote', { id: b.id, by: 'owner' }); if (c) showDetail(c.id); });
           dl.addEventListener('click', () => api('idea/delete', { id: b.id, by: 'owner' }));
@@ -1098,7 +1098,7 @@ function goalProgress(r, cards) {
   const activeCards = cards.filter(c => c.phase !== 'frozen' && c.phase !== 'done');
   const allFrozen = activeCards.length === 0 && frozen > 0;
   if (r.milestoneTotal > 0) {
-    return { pct: r.pct, allFrozen, frozen, label: `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.pct}%` };
+    return { pct: r.pct, allFrozen, frozen, label: `${r.milestonesMet}/${r.milestoneTotal} Milestones · ${r.pct}%` };
   }
   const doneCards = (S.cards || []).filter(c => c.epoch === r.id && c.phase === 'done' && c.track !== 'sidequest');
   let settled = 0, total = 0;
@@ -1108,7 +1108,7 @@ function goalProgress(r, cards) {
     total += crit.total || 0;
   }
   const pct = total > 0 ? Math.round((settled / total) * 100) : (doneCards.length + activeCards.length > 0 ? Math.round((doneCards.length / (doneCards.length + activeCards.length)) * 100) : 0);
-  const label = allFrozen ? `${frozen} frozen` : total > 0 ? `${settled}/${total} criteria settled (${pct}%)` : `${r.done}/${r.active + r.done} cards done`;
+  const label = allFrozen ? `${frozen} Frozen` : total > 0 ? `${settled}/${total} Criteria Settled (${pct}%)` : `${r.done}/${r.active + r.done} Cards Done`;
   return { pct, allFrozen, frozen, settled, total, label };
 }
 
@@ -1116,19 +1116,19 @@ function goalProgress(r, cards) {
 // live progress bar and counts; clicking a tile scrolls to that goal.
 function renderGoalStrip(radar, byEpoch) {
   if (!radar.length) return null;
-  const strip = el('<div class="goal-strip" aria-label="Goal overview"></div>');
+  const strip = el('<div class="goal-strip" aria-label="Goal Overview"></div>');
   for (const r of radar) {
     const e = S.epochs.find(x => x.id === r.id);
     const cards = byEpoch.get(r.id) || [];
     const prog = goalProgress(r, cards);
     const cls = prog.allFrozen ? 'goal-tile--frozen' : r.role === 'active' ? 'goal-tile--active' : r.role === 'next' ? 'goal-tile--next' : '';
     const stat = prog.allFrozen
-      ? `<span class="goal-tile__frost">❄ ${prog.frozen} frozen</span>`
-      : `<span><b>${r.active}</b> open</span><span><b>${r.openCriteria}</b> crit</span>${prog.frozen ? `<span class="goal-tile__frost">❄${prog.frozen}</span>` : ''}`;
+      ? `<span class="goal-tile__frost">❄ ${prog.frozen} Frozen</span>`
+      : `<span><b>${r.active}</b> Open</span><span><b>${r.openCriteria}</b> Criteria</span>${prog.frozen ? `<span class="goal-tile__frost">❄ ${prog.frozen}</span>` : ''}`;
     const tile = el(`<button type="button" class="goal-tile ${cls}" data-jump-goal="${esc(r.id)}" title="${esc(prog.label)}">
       <div class="goal-tile__top">
         <span class="goal-tile__tag">${esc(e ? epochTag(e) : r.id)}</span>
-        <span class="goal-tile__pct">${prog.allFrozen ? 'FROZEN' : `${prog.pct}%`}</span>
+        <span class="goal-tile__pct">${prog.allFrozen ? 'Frozen' : `${prog.pct}%`}</span>
       </div>
       <div class="goal-tile__name">${esc(r.name)}</div>
       <div class="goal-tile__bar"><i style="width:${prog.allFrozen ? 100 : prog.pct}%"></i></div>
@@ -1163,7 +1163,7 @@ function renderRadarBody() {
   if (drill) {
     body.appendChild(milestoneFilterBar(drill));
     const hits = cards.filter(c => radarMatches(c, needle));
-    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">No Match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
@@ -1171,13 +1171,13 @@ function renderRadarBody() {
   const hits = cards.filter(c => radarMatches(c, needle));
   if (needle) {
     body.appendChild(searchFilterBar(needle, hits.length));
-    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">No Match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
   if (radarRecent) {
     body.appendChild(recentFilterBar(hits.length));
-    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no cards</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">No Cards</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
@@ -1194,10 +1194,10 @@ function renderRadarBody() {
   const strip = renderGoalStrip(radar, byEpoch);
   if (strip) body.appendChild(strip);
 
-  if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
+  if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'Off-Plan Work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
-    body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active ${esc(TERM('epochs', 'Goals').toLowerCase())}</div></div>`));
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>No Active ${esc(TERM('epochs', 'Goals'))}</div></div>`));
     return;
   }
   for (const r of radar) body.appendChild(radarEpochSection(r, byEpoch.get(r.id) || [], needle, cardsMode));
@@ -1213,12 +1213,12 @@ function setMilestoneFilter(id) {
 function milestoneFilterBar(m) {
   const done = m.progress?.done ?? 0;
   const total = m.progress?.total ?? 0;
-  const count = m.progress?.met === true ? 'milestone met' : m.progress?.reviewReady === true ? 'ready for review' : `${done}/${total} cards done`;
+  const count = m.progress?.met === true ? 'Milestone Met' : m.progress?.reviewReady === true ? 'Ready for Review' : `${done}/${total} Cards Done`;
   const bar = el(`<div class="milefilter">
       <span class="milefilter__tag">${esc(milestoneTag(m))}</span>
       <span class="milefilter__t">${esc(m.title)}</span>
       <span class="milefilter__n">${count}</span>
-      <button class="btn btn--sm" data-clear>Clear filter ✕</button>
+      <button class="btn btn--sm" data-clear>Clear Filter ✕</button>
     </div>`);
   $('[data-clear]', bar).addEventListener('click', () => setMilestoneFilter(null));
   return bar;
@@ -1230,8 +1230,8 @@ function searchFilterBar(text, count) {
   const bar = el(`<div class="milefilter">
       <span class="milefilter__tag">Search</span>
       <span class="milefilter__t">${esc(label)}</span>
-      <span class="milefilter__n">${count} card${count === 1 ? '' : 's'}</span>
-      <button class="btn btn--sm" data-clear>Clear filter ✕</button>
+      <span class="milefilter__n">${count} Card${count === 1 ? '' : 's'}</span>
+      <button class="btn btn--sm" data-clear>Clear Filter ✕</button>
     </div>`);
   $('[data-clear]', bar).addEventListener('click', () => {
     radarFilterText = '';
@@ -1243,11 +1243,11 @@ function searchFilterBar(text, count) {
 }
 
 function recentFilterBar(count) {
-  const by = radarSort.col === 'created' ? 'created' : 'modified';
+  const by = radarSort.col === 'created' ? 'Created' : 'Modified';
   const bar = el(`<div class="milefilter">
       <span class="milefilter__tag">Recent</span>
-      <span class="milefilter__t">sorted by ${by}</span>
-      <span class="milefilter__n">${count} card${count === 1 ? '' : 's'}</span>
+      <span class="milefilter__t">Sorted by ${by}</span>
+      <span class="milefilter__n">${count} Card${count === 1 ? '' : 's'}</span>
       <button class="btn btn--sm" data-clear>${esc(TERM('epochs', 'Goals'))} ✕</button>
     </div>`);
   $('[data-clear]', bar).addEventListener('click', () => { radarRecent = false; viewBoard(); });
@@ -1256,42 +1256,42 @@ function recentFilterBar(count) {
 
 // ---- legend / key ----------------------------------------------------------
 const STAGE_HELP = [
-  ['deciding', 'Deciding', 'Blocked on a decision (owner)'],
-  ['planning', 'Planning', 'Agent builds a plan + raises decisions'],
-  ['ready', 'Ready', 'Plan vetted, decisions cleared — implement it'],
-  ['building', 'Building', 'Implementation in progress'],
-  ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
-  ['done', 'Done', 'Closed when exit criteria are met; leaves the board'],
-  ['frozen', 'Frozen', 'Owner-paused — stays in its goal or sidequest section with a ❄ badge; the Frozen filter shows only these'],
+  ['deciding', 'Deciding', 'Blocked on a Decision (Owner)'],
+  ['planning', 'Planning', 'Agent Builds a Plan & Raises Decisions'],
+  ['ready', 'Ready', 'Plan Vetted, Decisions Cleared — Ready to Implement'],
+  ['building', 'Building', 'Implementation in Progress'],
+  ['verify', 'Review', 'Owner Visual Review for Flagged Cards'],
+  ['done', 'Done', 'Closed When Exit Criteria Are Met'],
+  ['frozen', 'Frozen', 'Owner-Paused — Stays in Its Goal Section with a ❄ Badge'],
 ];
 
 function openLegend() {
   const m = $('#detail');
   openCard = null;
-  m.innerHTML = `<div class="modal__panel"><div class="modal__bar"><span class="num">KEY</span>
-      <span class="card__kind">what the colors mean</span>
+  m.innerHTML = `<div class="modal__panel"><div class="modal__bar"><span class="num">Key</span>
+      <span class="card__kind">What the Colors Mean</span>
       <button class="modal__x" title="Close (Esc)">×</button></div>
     <div class="modal__body">
-      <div class="modal__h">Left bar on a card = its stage</div>
+      <div class="modal__h">Left Bar on a Card = Stage</div>
       <div class="legend">${STAGE_HELP.map(([id, name, desc]) => `<div class="legend__row"><span class="legend__bar" style="background:var(--s-${id})"></span><span class="legend__name">${name}</span><span class="legend__desc">${esc(desc)}</span></div>`).join('')}</div>
-      <div class="modal__h">Work order badge</div>
-      <p class="prose">The small number at the top-left of a card is its <b>work order</b> within its ${esc(TERM('epoch', 'Goal').toLowerCase())} — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
-      <div class="modal__h">Glowing red = it needs you</div>
-      <p class="prose">A card <b style="color:var(--red)">glows red</b> when the next move is yours — a decision to record, or a visual/UX acceptance check. The same red drives the beacon, the “blocked on you” pill, and focus-mode dots.</p>
-      <div class="modal__h">Blue = finished</div>
+      <div class="modal__h">Work Order Badge</div>
+      <p class="prose">The small number at the top-left of a card is its <b>Work Order</b> within its ${esc(TERM('epoch', 'Goal'))} — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
+      <div class="modal__h">Glowing Red = Needs You</div>
+      <p class="prose">A card <b style="color:var(--red)">glows red</b> when the next move is yours — a decision to record, or a visual/UX acceptance check. The same red drives the beacon, the “Blocked on You” pill, and focus-mode dots.</p>
+      <div class="modal__h">Blue = Finished</div>
       <p class="prose">A completed card reads <b style="color:var(--blue)">blue</b> on the beacon and in the Now queue. Blue is news, not a duty — nothing blue is waiting on you.</p>
-      <div class="modal__h">Milestone tag</div>
+      <div class="modal__h">Milestone Tag</div>
       <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. Typing a card number in Search does the same: matching cards come up in one list.</p>
-      <div class="modal__h">Priority chips</div>
+      <div class="modal__h">Priority Chips</div>
       <div class="legend">
-        <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
-        <div class="legend__row"><span class="prio prio-P1">P1</span><span class="legend__desc">High — amber</span></div>
-        <div class="legend__row"><span class="prio prio-P2">P2</span><span class="legend__desc">Normal — muted</span></div>
-        <div class="legend__row"><span class="prio prio-P3">P3</span><span class="legend__desc">Low — faint</span></div>
+        <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — Red (Glows)</span></div>
+        <div class="legend__row"><span class="prio prio-P1">P1</span><span class="legend__desc">High — Amber</span></div>
+        <div class="legend__row"><span class="prio prio-P2">P2</span><span class="legend__desc">Normal — Muted</span></div>
+        <div class="legend__row"><span class="prio prio-P3">P3</span><span class="legend__desc">Low — Faint</span></div>
       </div>
       <p class="prose" style="margin-top:8px">Only P0/P1 carry color so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
-      <div class="modal__h">Action tag (bottom of a card)</div>
-      <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>needs you</span> · <span class="card__lane lane-agent"><span class="pip"></span>an agent's</span> · <span class="card__lane lane-none"><span class="pip"></span>waiting / blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to implement”, “Review”).</p>
+      <div class="modal__h">Action Tag (Bottom of Card)</div>
+      <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>Needs You</span> · <span class="card__lane lane-agent"><span class="pip"></span>Agent Work</span> · <span class="card__lane lane-none"><span class="pip"></span>Waiting / Blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to Implement”, “Review”).</p>
     </div></div>`;
   $('.modal__x', m).addEventListener('click', closeDetail);
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
@@ -1302,7 +1302,7 @@ function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
   return collapsible(key, defOpen,
     `<span class="epoch__tag" style="color:var(--frost)">${esc(name)}</span><span class="epoch__name">${esc(sub)}</span><span class="epoch__count">${total}</span>`,
     'epoch--off', (body) => {
-      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">No Match</p>`));
     });
 }
 
@@ -1312,18 +1312,18 @@ function radarEpochSection(r, cards, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
   const prog = goalProgress(r, cards);
   const pills = [];
-  if (r.milestoneTotal > 0) pills.push(`<span class="epoch__pill">${r.milestonesMet}/${r.milestoneTotal} ms</span>`);
+  if (r.milestoneTotal > 0) pills.push(`<span class="epoch__pill">${r.milestonesMet}/${r.milestoneTotal} Milestones</span>`);
   if (!prog.allFrozen) {
-    pills.push(`<span class="epoch__pill epoch__pill--open"><b>${r.active}</b> open</span>`);
-    if (r.openCriteria) pills.push(`<span class="epoch__pill"><b>${r.openCriteria}</b> criteria</span>`);
-    if (r.blockedCriteria) pills.push(`<span class="epoch__pill epoch__pill--warn">${r.blockedCriteria} blocked</span>`);
-    if (r.done > 0) pills.push(`<span class="epoch__pill epoch__pill--done">${r.done} done</span>`);
+    pills.push(`<span class="epoch__pill epoch__pill--open"><b>${r.active}</b> Open</span>`);
+    if (r.openCriteria) pills.push(`<span class="epoch__pill"><b>${r.openCriteria}</b> Criteria</span>`);
+    if (r.blockedCriteria) pills.push(`<span class="epoch__pill epoch__pill--warn">${r.blockedCriteria} Blocked</span>`);
+    if (r.done > 0) pills.push(`<span class="epoch__pill epoch__pill--done">${r.done} Done</span>`);
   }
-  if (prog.frozen > 0) pills.push(`<span class="epoch__pill epoch__pill--frost">❄ ${prog.frozen} frozen</span>`);
+  if (prog.frozen > 0) pills.push(`<span class="epoch__pill epoch__pill--frost">❄ ${prog.frozen} Frozen</span>`);
   const today = epochToday(r);
   if (today) pills.push(`<span class="epoch__pill epoch__pill--delta">${today}</span>`);
   const sec = collapsible('radar:' + r.id, !prog.allFrozen,
-    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${prog.allFrozen ? '<span class="epoch__role epoch__role--frozen">frozen</span>' : chainBadge(r)}
+    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${prog.allFrozen ? '<span class="epoch__role epoch__role--frozen">Frozen</span>' : chainBadge(r)}
      <span class="epoch__bar${prog.allFrozen ? ' epoch__bar--frozen' : ''}" title="${esc(prog.label)}"><i style="width:${prog.allFrozen ? 100 : prog.pct}%"></i></span>
      <span class="epoch__pct">${prog.allFrozen ? '—' : `${prog.pct}%`}</span>
      <span class="epoch__pills">${pills.join('')}</span>`,
@@ -1334,13 +1334,13 @@ function radarEpochSection(r, cards, needle, cardsMode) {
       const retired = retiredMilestones(r.id);
       if (retired) body.appendChild(retired);
 
-      const ledgerLine = el(`<p class="epoch__goal" style="opacity:.6">ledger: ${r.done} done live</p>`);
+      const ledgerLine = el(`<p class="epoch__goal" style="opacity:.6">Ledger: ${r.done} Done Live</p>`);
       body.appendChild(ledgerLine);
-      archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
+      archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `Ledger: ${r.done} Done Live · ${n} Archived`; });
 
       const shown = cards.filter(c => radarMatches(c, needle));
       body.appendChild(el(`<div class="radar__subhead">Cards</div>`));
-      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
+      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'No Match' : 'No Cards'}</p>`));
     });
   sec.dataset.goalSection = r.id;
   return sec;
@@ -1350,15 +1350,16 @@ function radarEpochSection(r, cards, needle, cardsMode) {
 // their staffing (agents to put on them).
 function chainBadge(r) {
   if (r.role !== 'active' && r.role !== 'next') return '';
-  const term = TERM('epoch', 'Goal').toLowerCase();
-  return `<span class="epoch__role epoch__role--${r.role}" title="${r.role === 'active' ? `first unfinished ${term} in order` : `the ${term} after the active one`}">${r.role} · ${r.staff} agent${r.staff === 1 ? '' : 's'}</span>`;
+  const term = TERM('epoch', 'Goal');
+  const roleTitle = r.role === 'active' ? 'Active' : 'Next';
+  return `<span class="epoch__role epoch__role--${r.role}" title="${r.role === 'active' ? `First Unfinished ${term} in Order` : `Next ${term} After Active`}">${roleTitle} · ${r.staff} Agent${r.staff === 1 ? '' : 's'}</span>`;
 }
 const criteriaLeftLabel = (r) => r.openCriteria || r.blockedCriteria
-  ? ` · ${r.openCriteria} open criteria${r.blockedCriteria ? `, ${r.blockedCriteria} blocked` : ''}` : '';
+  ? ` · ${r.openCriteria} Open Criteria${r.blockedCriteria ? `, ${r.blockedCriteria} Blocked` : ''}` : '';
 function epochToday(r) {
   const day = S.counts.today?.epochs?.[r.id];
   if (!day || (!day.openCardsDelta && !day.openCriteriaDelta)) return '';
-  return `today${day.openCardsDelta ? ` ${dayChange(day.openCardsDelta)}c` : ''}${day.openCriteriaDelta ? ` ${dayChange(day.openCriteriaDelta)}cr` : ''}`;
+  return `Today${day.openCardsDelta ? ` ${dayChange(day.openCardsDelta)} Cards` : ''}${day.openCriteriaDelta ? ` ${dayChange(day.openCriteriaDelta)} Criteria` : ''}`;
 }
 
 function radarSparkline(days) {
@@ -2323,12 +2324,12 @@ async function loadDocsIndex() {
 async function viewDocs() {
   const v = $('#view');
   if (!docsCache) {
-    v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1><span class="viewhead__sub">loading…</span></div>`;
-    try { await loadDocsIndex(); } catch (e) { v.innerHTML = `<div class="empty"><div>Docs load failed: ${esc(e.message)}</div></div>`; return; }
+    v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1><span class="viewhead__sub">Loading…</span></div>`;
+    try { await loadDocsIndex(); } catch (e) { v.innerHTML = `<div class="empty"><div>Docs Load Failed: ${esc(e.message)}</div></div>`; return; }
   }
   const sections = docsCache.sections || [];
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1>
-      <span class="viewhead__sub">scratchpad, Markdown notes, and HTML reports under Docs/</span>
+      <span class="viewhead__sub">Scratchpad, Markdown Notes &amp; HTML Reports Under Docs/</span>
       <div class="viewhead__actions docs__types" role="group" aria-label="File type">
         <button class="btn btn--ghost btn--sm" data-docs-type="all" aria-pressed="${docsTypeFilter === 'all'}">All</button>
         <button class="btn btn--ghost btn--sm" data-docs-type="md" aria-pressed="${docsTypeFilter === 'md'}">MD</button>
@@ -2539,7 +2540,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
     docsDirty = false;
     docsDraft = null;
     save.disabled = true;
-    toast('saved');
+    toast('Saved');
     await loadDocsIndex();
   };
   save.addEventListener('click', doSave);
@@ -2554,7 +2555,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
     docsDraft = null;
     await loadDocsIndex();
     viewDocs();
-    toast('deleted');
+    toast('Deleted');
   });
 }
 
@@ -2584,11 +2585,11 @@ function loadGuidance() {
 async function viewGuidance() {
   const v = $('#view');
   if (!guidanceCache) {
-    v.innerHTML = '<div class="viewhead"><h1 class="h1">AGENTS.md</h1><span class="viewhead__sub">loading…</span></div>';
+    v.innerHTML = '<div class="viewhead"><h1 class="h1">AGENTS.md</h1><span class="viewhead__sub">Loading…</span></div>';
     try { await loadGuidance(); }
     catch (e) {
       if (VIEW !== 'guidance') return;
-      v.innerHTML = `<div class="empty"><div>AGENTS.md load failed: ${esc(e.message)}</div><button class="btn" id="guidance-retry">Retry</button></div>`;
+      v.innerHTML = `<div class="empty"><div>AGENTS.md Load Failed: ${esc(e.message)}</div><button class="btn" id="guidance-retry">Retry</button></div>`;
       $('#guidance-retry').addEventListener('click', viewGuidance);
       return;
     }
@@ -2602,11 +2603,11 @@ async function viewGuidance() {
   const body = guidanceDraft ?? guidanceCache.body;
   const updated = String(guidanceCache.updated || '').slice(0, 19).replace('T', ' ');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">AGENTS.md</h1>
-      <span class="viewhead__sub">repository-root instructions for every agent</span>
+      <span class="viewhead__sub">Repository-Root Instructions for Every Agent</span>
     </div>
     <section class="guidance">
       <div class="guidance__seal">
-        <span>Owner controlled</span>
+        <span>Owner Controlled</span>
         <b>Agents may read this file. Changes require the owner's explicit permission.</b>
       </div>
       <div class="guidance__toolbar">
@@ -2742,19 +2743,19 @@ function showGauntletDetail(v, view, entry, peer, mode = 'build') {
 
 async function viewGauntlet() {
   const v = $('#view');
-  if (!gauntletCache) v.innerHTML = '<div class="viewhead"><h1 class="h1">Gauntlet</h1><span class="viewhead__sub">loading…</span></div>';
+  if (!gauntletCache) v.innerHTML = '<div class="viewhead"><h1 class="h1">Gauntlet</h1><span class="viewhead__sub">Loading…</span></div>';
   try { await loadGauntlet(); }
   catch (e) {
     if (!gauntletCache) {
-      v.innerHTML = `<div class="empty"><div>Gauntlet load failed: ${esc(e.message)}</div></div>`;
+      v.innerHTML = `<div class="empty"><div>Gauntlet Load Failed: ${esc(e.message)}</div></div>`;
       return;
     }
   }
   const view = gauntletCache.data ? projectGauntletStandings(gauntletCache.data) : null;
   const body = view ? renderGauntletStandings(view, gauntletMode)
-    : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the table has no standings section')}</div>`;
+    : `<div class="empty">Gauntlet Unavailable: ${esc(gauntletCache.error || 'No Standings Data')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">Jet's wins and losses on compile time, startup, run time and memory · Compiled judges jet build's binary, Scripting judges jet run · click a cell for its details</span>
+      <span class="viewhead__sub">Compile Time, Startup, Run Time &amp; Memory vs. Peers · Click Any Cell for Details</span>
     </div>${body}`;
   if (!view) return;
   const open = (event) => {
