@@ -404,6 +404,9 @@ jet_driver_fact_error_diagnostic: fn(error: FactError) -> Diagnostic Never! {
     if error == .Conflict(key, layer, first, second) {
         return jet_driver_diagnostic_without_span("E3521", "fact `{key}` has conflicting values at the {layer.name()} layer", "`{first.source}` writes {first.value.display()}; `{second.source}` writes {second.value.display()}", "make same-layer writers agree, or move one value to a more explicit contribution layer")
     }
+    if error == .PinnedConflict(key, pinned, conflicting) {
+        return jet_driver_diagnostic_without_span("E2113", "`{key}` is pinned to `{pinned.value.display()}` at `{pinned.source}`, so `{conflicting.source}` can't change it", "`{pinned.source}` pins `{key}` at the {pinned.layer.name()} layer; a later writer may only match the pinned value.", "remove the conflicting `{conflicting.layer.name()}` override, or remove the pin at `{pinned.source}`")
+    }
     jet_driver_diagnostic_without_span("E3521", "a build fact has no single effective writer", error.message(), "make the writers agree, or move one value to a more explicit contribution layer")
 }
 

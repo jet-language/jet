@@ -303,7 +303,13 @@ FactContribution: struct {
         updated
     }
 
-    forced: fn(&&self) -> FactContribution Never! { self.force_with_reason(".Force") }
+    pinned_with_reason: fn(&&self, reason: String) -> FactContribution Never! {
+        self.force_with_reason(reason)
+    }
+
+    pinned: fn(&&self) -> FactContribution Never! { self.force_with_reason(".Pin") }
+
+    forced: fn(&&self) -> FactContribution Never! { self.force_with_reason(".Pin") }
 
     with_reason: fn(&&self, reason: String) -> FactContribution Never! {
         updated := self
@@ -352,23 +358,27 @@ EffectiveFact: struct {
 FactError: enum {
     InvalidForce(key: String, layer: ContributionLayer, source: String),
     Conflict(key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution),
+    PinnedConflict(key: String, pinned: FactContribution, conflicting: FactContribution),
     SafetyWidening(key: String, previous: FactContribution, next: FactContribution),
     SafetyIncomparable(key: String, previous: FactContribution, next: FactContribution),
 
     message: fn(self) -> String Never! {
         if self == {
-            .InvalidForce(key, layer, source) -> "fact `{key}` uses `.Force` at the unsupported {layer.name()} layer ({source})"
+            .InvalidForce(key, layer, source) -> "fact `{key}` uses `.Pin` at the unsupported {layer.name()} layer ({source})"
             .Conflict(key, layer, first, second) -> "fact `{key}` has conflicting values at the {layer.name()} layer: {first.source}:{first.span.start} and {second.source}:{second.span.start}"
+            .PinnedConflict(key, pinned, conflicting) -> "`{key}` is pinned to `{pinned.value.display()}` at `{pinned.source}`, so `{conflicting.source}` (`{conflicting.value.display()}`) can't change it"
             .SafetyWidening(key, previous, next) -> "fact `{key}` widens from {previous.value.display()} at {previous.source} to {next.value.display()} at {next.source}"
             .SafetyIncomparable(key, previous, next) -> "fact `{key}` has unrelated safety values at {previous.source} and {next.source}"
         }
     }
 
     // The same typed conflict reaches the product diagnostic and names both
-    // written locations. Other resolver failures remain typed resolver errors.
+    // written locations. A host or fleet pin refused by a conflicting later
+    // writer uses E2113, the same registered error as a build-code pin.
     diagnostic: fn(self) -> Diagnostic? Never! {
         if self == {
             .Conflict(key, layer, first, second) -> Val(diagnostic_from_registry("E3521", Val(second.span), "fact `{key}` has conflicting values at the {layer.name()} layer", "`{first.source}` writes {first.value.display()} at {first.span.start}:{first.span.end}; `{second.source}` writes {second.value.display()} at {second.span.start}:{second.span.end}.", "make same-layer writers agree, or move one value to a more explicit contribution layer"))
+            .PinnedConflict(key, pinned, conflicting) -> Val(diagnostic_from_registry("E2113", Val(conflicting.span), "`{key}` is pinned to `{pinned.value.display()}` at `{pinned.source}`, so `{conflicting.source}` can't change it", "`{pinned.source}` pins `{key}` at the {pinned.layer.name()} layer; a later writer may only match the pinned value.", "remove the conflicting `{conflicting.layer.name()}` override, or remove the pin at `{pinned.source}`"))
             .InvalidForce(_, _, _) | .SafetyWidening(_, _, _) | .SafetyIncomparable(_, _, _) -> None
         }
     }
@@ -384,9 +394,10 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
 }
 
 // Resolve one fact from every writer that names it: the most explicit
-// eligible layer and nearest scope decide, `.Force` caps eligibility at its
-// layer, and a tighten-only key may never widen along the chain. None when
-// nobody writes the fact and the key has no default.
+// eligible layer and nearest scope decide, a System/Fleet `.Pin` refuses any
+// conflicting higher-layer writer with E2113 while allowing a matching value,
+// and a tighten-only key may never widen along the chain. None when nobody
+// writes the fact and the key has no default.
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
@@ -464,6 +475,14 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
         second: chain[candidates[position]]
         if second.value != first.value {
             return Err(FactError.Conflict{key: key.name, layer: first.layer, first: first, second: second})
+        }
+    }
+    if force_layer >= 0 {
+        loop index in 0..<chain.len() {
+            later: chain[index]
+            if later.layer.rank() > force_layer && later.value != first.value {
+                return Err(FactError.PinnedConflict{key: key.name, pinned: first.copy(), conflicting: later.copy()})
+            }
         }
     }
     if key.merge == FactMerge.TightenOnly {
