@@ -49,9 +49,21 @@ const paragraphCap = (s) => { if (!isReport(s)) return true; const long = paragr
 const proseRun = (s) => {
   if (!isReport(s)) return true;
   // Three consecutive <p> siblings (nothing but whitespace between them) with more than 40 words each is a prose wall.
+  // No capture may span a closing </p>, so separate pairs in different containers (<div><p/><p/></div><div><p/><p/></div>) pass.
   const b = body(s);
-  const re = /(<p\b[^>]*>[\s\S]*?<\/p>)\s*(<p\b[^>]*>[\s\S]*?<\/p>)\s*(<p\b[^>]*>[\s\S]*?<\/p>)/gi;
+  const re = /(<p\b[^>]*>(?:(?!<\/p\b)[\s\S])*<\/p>)\s*(<p\b[^>]*>(?:(?!<\/p\b)[\s\S])*<\/p>)\s*(<p\b[^>]*>(?:(?!<\/p\b)[\s\S])*<\/p>)/gi;
   let m; while ((m = re.exec(b))) { if ([m[1], m[2], m[3]].every((p) => words(p) > 40)) return false; re.lastIndex = m.index + m[1].length; }
+  return true;
+};
+const noExternalResources = (s) => {
+  const clean = s.replace(/<!--[\s\S]*?-->/g, '');
+  // Refuse loaded external dependencies: <link>, @import, <script src=...>, external src/srcset/poster/data URLs, and CSS url(http(s):// or //).
+  // Citation hyperlinks (<a href="https://...">) remain allowed.
+  if (/<link\b/i.test(clean)) return false;
+  if (/@import\b/i.test(clean)) return false;
+  if (/<script\b[^>]*\bsrc\s*=/i.test(clean)) return false;
+  if (/\b(?:src|srcset|poster|data)\s*=\s*["']?\s*(?:https?:)?\/\//i.test(clean)) return false;
+  if (/\burl\(\s*["']?\s*(?:https?:)?\/\//i.test(clean)) return false;
   return true;
 };
 // A section is a prose wall when it holds over 150 words of loose paragraphs and they are more than three quarters of its words.
@@ -64,7 +76,7 @@ const checks = [
   ['viewport', (s) => /<meta name="viewport"/i.test(s)],
   ['color-scheme dark', (s) => /<meta name="color-scheme" content="dark">/i.test(s) || /color-scheme:\s*dark/.test(s)],
   ['single style block', (s) => (s.match(/<style[\s>]/gi) || []).length === 1],
-  ['no external resources', (s) => !/https?:\/\/|<link\b|@import|src=["']\/\//i.test(s.replace(/<!--[\s\S]*?-->/g, ''))],
+  ['no external resources', noExternalResources],
   ['jet palette tokens', (s) => ['--jet', '--bone', '--ember', '--oxblood', '--smoke', '--ok', '--amber', '--cyan', '--blue'].every((t) => s.includes(t + ':'))],
   ['code is highlighted', (s) => !/<pre[\s>]/.test(s) || /class="hl-|function hl\(/.test(s)],
   ['code wraps, never scrolls sideways', (s) => /pre\s*\{[^}]*white-space:\s*pre-wrap/.test(s)],
