@@ -21,6 +21,7 @@ stderr: ~ " cycles:u=" # with the cycles
 stderr: ~ " cpu_ns=" # the CPU its reap reported
 stderr: ~ " peak_rss_bytes=" # and its peak memory
 stderr: ~ "Trace: " # then the trace
+capture: took = elapsed
 json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.status = "counted" # the kernel counted it
 json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.instructions_u > 100000000 # the child's loop included
 json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.cycles_u > 0 # and its cycles
@@ -28,6 +29,13 @@ json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value
 json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.peak_rss_bytes > 0 # the largest resident set of its processes
 json: file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.wall_ns > 0 # from its start to its reap
 json: file spin.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+json: file spin.jettrace doc $.content.profile.window_wall_ns > 0 # its wall time, from its start to its reap
+json: file spin.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # inside the attach, as this case timed it
+capture: cpu file spin.jettrace doc $.content.receipt_sections[?name="counts"][0].value.cpu_ns
+json: file spin.jettrace doc $.content.profile.window_cpu_ns >= {cap:cpu}+0 # the window's CPU is the CPU its reap reported
+json: file spin.jettrace doc $.content.profile.window_cpu_ns <= {cap:cpu}+0 # no more and no less
 step: jet perf view spin.jettrace
 exit: 0
+stdout: ~ " window=exit run_wall=" # the header's window is the command's run
+stdout: !~ " run_cpu=0ns" # with its CPU in it
 stdout: ~ "counts instructions:u=" # the view prints the same line

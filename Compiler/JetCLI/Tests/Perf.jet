@@ -300,6 +300,44 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert((jet_cli_perf_profile_summary(coarse_trace) ?? "").ends_with(" window=live run_wall=5000ns run_cpu=30000000ns run_cpu_resolution=10ms"))
 }
 
+#Test("an attach's wall and cpu samples and native process CPU are its window's, not its live snapshot's") {
+    // The snapshot published 50 ns of wall and 25 ns of CPU; the window held
+    // 5000 ns of wall and 900 ns of CPU.
+    opened := [Int:U64]{}
+    opened[1] = U64{1000}
+    shut := [Int:U64]{}
+    shut[1] = U64{1900}
+    first: JetCLIPerfAttachCPU{ns: U64{1000}, resolution_ns: U64{1}, threads: opened}
+    last: JetCLIPerfAttachCPU{ns: U64{1900}, resolution_ns: U64{1}, threads: shut}
+    live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{0}, live: live}}
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    seen := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(seen, 7, jet_cli_perf_attach_closed(U64{5000}, Val(first), Val(last)), [String]{"its live snapshot"})
+    assert_eq(seen.samples.len(), 2)
+    assert_eq(seen.samples[0].domain, "wall")
+    assert_eq(seen.samples[0].duration_ns, U64{5000})
+    assert_eq(seen.samples[1].domain, "cpu")
+    assert_eq(seen.samples[1].duration_ns, U64{900})
+    assert_eq(seen.native.len(), 1)
+    assert_eq(seen.native[0].status, "captured")
+    assert_eq(seen.native[0].duration_ns, Val(U64{900}))
+    assert_eq(seen.native[0].observed_at_ns, U64{5000})
+    _: verify_jettrace(jet_cli_perf_capture_bytes(seen, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+    // A window /proc showed no CPU for at one end keeps its wall and drops
+    // the snapshot's CPU.
+    blind := jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_attach_keep_window(blind, 7, jet_cli_perf_attach_closed(U64{5000}, None, Val(last)), [String]{"its live snapshot"})
+    assert_eq(blind.samples.len(), 1)
+    assert_eq(blind.samples[0].domain, "wall")
+    assert_eq(blind.samples[0].duration_ns, U64{5000})
+    assert_eq(blind.native[0].status, "unavailable")
+    assert_eq(blind.native[0].duration_ns, None)
+    assert_eq(blind.native[0].task_id, None)
+    _: verify_jettrace(jet_cli_perf_capture_bytes(blind, "attach", [String]{"attach", "7"}, toolchain, hardware) ?? panic(err.message)) ?? panic(err.message)
+}
+
 #Test("a zones attach's run window is the program's zones window, its wall and its process's CPU in it") {
     zoned: jet_cli_perf_attach_zoned(512000000, U64{300000000})
     assert_eq(zoned.window.elapsed_ns, U64{512000000})

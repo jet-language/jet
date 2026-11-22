@@ -1,0 +1,41 @@
+# `jet perf attach <pid> --for=500ms` samples a program from outside for
+# that window even when the program runs under `jet run --observe`: `--for=`
+# reads nothing the program publishes, so the attach takes no source from
+# its run and doesn't read its flight ring instead. The trace's run window
+# is the samplers' own, the 500 ms asked for at least and no longer than
+# the attach took, and the header gives the program's CPU in it, which its
+# tick loop spent. The program runs under the authorizer, so jet may trace
+# it, as an attach needs.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:cc
+requires: probe test -r /proc/self/schedstat # the window's CPU is its threads' schedstat run time
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may sample its own processes
+fixture: AttachTurnsZonesOn.fixture
+env: NO_COLOR=1
+copy: {root}/Tests/Fixtures/Ptrace/authorizer.c authorizer.c
+step: cc authorizer.c -o authorizer
+exit: 0
+session live line: {work}/authorizer {jet} run --observe live.jet
+stderr: null
+recv live
+stdout.trim: ~ "READY" # the program is running its loop
+step: jet perf attach {pid:live} --for=500ms --out outside.jettrace
+exit: 0
+stderr: ~ "functions samples=" # the kernel's samples of it, not its flight ring
+stderr: ~ " window_ms=500 " # for the window asked
+capture: took = elapsed
+json: file outside.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # the kernel sampled its CPU
+json: file outside.jettrace doc $.content.profile.window_status = "live" # the header's window is the samplers'
+json: file outside.jettrace doc $.content.profile.window_reason ~ "sampled from outside for 500 ms" # what the attach read in it
+json: file outside.jettrace doc $.content.profile.window_reason !~ "flight ring" # not the ring the program publishes
+json: file outside.jettrace doc $.content.profile.window_wall_ns >= 500000000 # the samplers stay open for the 500 ms asked
+json: file outside.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # inside the attach, as this case timed it
+json: file outside.jettrace doc $.content.profile.window_cpu_ns > 0 # the program's CPU in the window: its tick loop ran
+step: jet perf view outside.jettrace
+exit: 0
+stdout: ~ " window=live run_wall=" # the header's window is the samplers'
+stdout: !~ " run_cpu=0ns" # with the program's CPU in it
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program

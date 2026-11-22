@@ -555,7 +555,9 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         .Ok(found) -> browser = found
         .Err(failure) -> return jet_cli_perf_failed(failure.message, color)
     }
-    if browser == None && source == None && observations.len() == 1 {
+    // `--for=` reads nothing the program publishes, so it names no source:
+    // an observed program is sampled from outside for that window too.
+    if browser == None && source == None && observations.len() == 1 && for_ms == 0 {
         source = jet_cli_perf_published_source(target_pid, observations[0].live.source_id)
     }
     if browser == .Val(relayed) {
@@ -672,7 +674,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Exe
         }
         if spans == .Val(taken) -> jet_cli_perf_log_spans_read(capture, taken, path, origin, timed)
         observed = true
-    } else if live_error == None {
+    } else if live_error == None && for_ms == 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     } else if follow {
         return jet_cli_perf_attach_unobserved(target_pid, "it publishes no live snapshot jet can read ({live_error ?? ""}), so it has no zones to follow", "start the program with `jet run --observe <file.jet>`, then attach with `--follow`", color)
@@ -1277,13 +1279,14 @@ jet_cli_perf_attach_cpu: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfAttachCPU
 }
 
 // Record the attach's window on program `pid` in its trace: the profile's
-// run window, with why, and the `window` receipt section (type
-// `JetPerfAttachWindow`): its CPU's clock, `schedstat`, `ticks` or a zones
-// window's `process`, and resolution, null where it has no CPU, and the
-// threads that exited in it. `read` is what the attach read of the
-// program, in order.
+// run window, with why, its run-wide rows (jet_cli_perf_attach_rows), and
+// the `window` receipt section (type `JetPerfAttachWindow`): its CPU's
+// clock, `schedstat`, `ticks` or a zones window's `process`, and
+// resolution, null where it has no CPU, and the threads that exited in it.
+// `read` is what the attach read of the program, in order.
 jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, closed: JetCLIPerfAttachWindow, read: [String]) Never! {
     jet_cli_perf_window(capture.profile, closed.window)
+    jet_cli_perf_attach_rows(capture, closed.window)
     clock := CanonicalJSON.Null
     resolution := CanonicalJSON.Null
     how := "/proc showed no CPU for it at one end"
@@ -1312,6 +1315,41 @@ jet_cli_perf_attach_keep_window: fn(capture: &JetCLIPerfCapture, pid: Int, close
         },
     )
     capture.receipts.push(TraceReceiptSection{name: "window", type_name: "JetPerfAttachWindow", value: value, digest: canonical_json_sha256(value)})
+}
+
+// An attach's run-wide rows, which a run's exit publication sets, are its
+// window's: its `wall` and `cpu` samples, and its native process CPU,
+// observed at the window's close, timed from its opening. The live
+// snapshot's are the program's latest publication, which can be the one
+// before its entry, so they would time the program up to then, not the
+// window. A row the window has no figure for goes.
+jet_cli_perf_attach_rows: fn(capture: &JetCLIPerfCapture, window: JetCLIPerfRuntimeWindow) Never! {
+    loop index in 0..<capture.samples.len() {
+        if capture.samples[index].domain == "wall" {
+            capture.samples[index].duration_ns = window.elapsed_ns
+        }
+        if capture.samples[index].domain == "cpu" && window.cpu_ns == .Val(cpu) {
+            capture.samples[index].duration_ns = cpu
+        }
+    }
+    // The `cpu` sample is the last row jet_cli_perf_capture_observations
+    // pushes.
+    last: capture.samples.len() - 1
+    if window.cpu_ns == None && last >= 0 && capture.samples[last].domain == "cpu" {
+        _: capture.samples.pop()
+    }
+    loop index in 0..<capture.native.len() {
+        if capture.native[index].clock != "process_cpu" || capture.native[index].task_id == None {
+            next
+        }
+        capture.native[index].observed_at_ns = window.elapsed_ns
+        capture.native[index].duration_ns = window.cpu_ns
+        if window.cpu_ns == None {
+            capture.native[index].status = "unavailable"
+            capture.native[index].reason = "/proc showed no CPU for the attach's window at one end"
+            capture.native[index].task_id = None
+        }
+    }
 }
 
 // The start of the first row of the spans file `path`, 0 when it has none.
