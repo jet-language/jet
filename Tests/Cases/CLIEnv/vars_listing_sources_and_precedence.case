@@ -1,0 +1,20 @@
+# D-ENV-SURFACE1=A: `jet env vars` is a pure read-only listing (no project or
+# lock required) showing every control's effective value and winning source
+# across default, setting, environment, and flag, in text and --json UI snapshots.
+fixture: VarsListingSourcesAndPrecedence.fixture
+env: NO_COLOR=1
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet env vars --command=check -- --keep-going --trace-detail=functions
+env: XDG_CONFIG_HOME={work}/config
+env: JET_PHASE_COUNTERS=1
+env: JET_TRACE_DETAIL=phases
+exit: 0
+stdout: = vars_listing_sources_and_precedence.text.out
+step: jet env vars --command=check --json -- --keep-going --trace-detail=functions
+env: XDG_CONFIG_HOME={work}/config
+env: JET_PHASE_COUNTERS=1
+env: JET_TRACE_DETAIL=phases
+exit: 0
+json: stdout doc $ valid # machine output is valid JSON
+stdout: = vars_listing_sources_and_precedence.json.out

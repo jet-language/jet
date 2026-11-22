@@ -1,0 +1,15 @@
+# Export a named typed Jet config value as JSON and decode it back into the same typed struct.
+fixture: Fixtures/AppConfig
+env: NO_COLOR=1
+step: jet os config export app.jet APP_CONFIG --format json
+exit: 0
+json: stdout doc $ valid # exported JSON must parse cleanly
+json: stdout doc $.listen_port = 8080 # #Rename wire key is honored
+json: stdout doc $.host = "0.0.0.0" # string field is preserved
+json: stdout doc $.tls = true # bool field is preserved
+stdout: !~ "internal_tag" # #Codable(.Skip) fields are never written
+capture: exported = text stdout
+write: exported.json = "{cap:exported}"
+step: jet run decode_json.jet
+exit: 0
+stdout: ~ "round_trip_json: ok" # exported JSON decodes back into the identical typed AppConfig
