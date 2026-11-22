@@ -1,0 +1,95 @@
+// State machines: a `state { }` block declares every state, its legal
+// transitions (`->`), and named state groups (`Active: Queued | Running`).
+// Method signatures carry those state types directly on parameters and return
+// values, so out-of-order calls (E0150) and undeclared transitions (E0174) are
+// rejected at compile time while struct states erase to zero runtime cost.
+Job: struct {
+    state {
+        Queued -> Running, Failed
+        Running -> Done, Failed
+        Done
+        Failed
+        Active: Queued | Running
+        Settled: Done | Failed
+    }
+
+    id: Int,
+    note: String,
+
+    submit: fn(id: Int) -> Job.Queued { Job{id: id, note: "queued"} }
+
+    start: fn(self: &&Job.Queued) -> Job.Running { Job{id: self.id, note: "running"} }
+
+    finish: fn(self: &&Job.Running) -> Job.Done { Job{id: self.id, note: "done"} }
+
+    fail: fn(self: &&Job.Running, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
+
+    abort: fn(self: &&Job.Active, reason: String) -> Job.Failed { Job{id: self.id, note: reason} }
+}
+
+// Parameters carry a single state, a state union, or a named state group.
+describe_active: fn(job: Job.Active) -> String { "active #{job.id}: {job.note}" }
+
+describe_settled: fn(job: Job.Settled) -> String { "settled #{job.id}: {job.note}" }
+
+// Enum state machine with per-state payloads and exhaustive transition dispatch.
+Turnstile: enum {
+    Locked(coins: Int),
+    Unlocked(coins: Int, passes: Int),
+
+    state {
+        Locked -> Unlocked
+        Unlocked -> Locked
+    }
+
+    closed: fn() -> Turnstile.Locked { .Locked(coins: 0) }
+
+    insert_coin: fn(self: Turnstile.Locked) -> Turnstile.Unlocked {
+        if self == {
+            .Locked(coins) -> .Unlocked{coins: coins + 1, passes: 0}
+            .Unlocked(coins, passes) -> .Unlocked{coins: coins, passes: passes}
+        }
+    }
+
+    pass: fn(self: Turnstile.Unlocked) -> Turnstile.Locked {
+        if self == {
+            .Unlocked(coins, _) -> .Locked{coins: coins}
+            .Locked(coins) -> .Locked{coins: coins}
+        }
+    }
+
+    status: fn(self) -> String {
+        if self == {
+            .Locked(coins) -> "locked coins={coins}"
+            .Unlocked(coins, passes) -> "unlocked coins={coins} passes={passes}"
+        }
+    }
+}
+
+// Exhaustive dispatch narrows `gate` to each case's state type inside its arm.
+step_turnstile: fn(gate: Turnstile, action: String) -> Turnstile {
+    if gate == {
+        .Locked(_) -> if action == "coin" -> gate.insert_coin() else -> gate.copy()
+        .Unlocked(_, _) -> if action == "pass" -> gate.pass() else -> gate.copy()
+    }
+}
+
+run: fn() {
+    first: Job.submit(1)
+    print(describe_active(first))
+    running: first.start()
+    print(describe_active(running))
+    done: running.finish()
+    print(describe_settled(done))
+
+    canceled: Job.submit(2).abort("canceled before start")
+    print(describe_settled(canceled))
+
+    failed: Job.submit(3).start().fail("timeout")
+    print(describe_settled(failed))
+
+    gate := step_turnstile(Turnstile.closed(), "pass")
+    actions: [String]{"coin", "pass", "coin", "coin", "pass"}
+    loop action in actions -> gate = step_turnstile(gate, action)
+    print(gate.status())
+}
