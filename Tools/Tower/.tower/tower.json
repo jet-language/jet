@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113201,
+    "rev": 113206,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28837,6 +28837,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
+          "text": "Wave 2B (dev 4e1196227c): c3 met (alias.Ptr<T>.from_addr), plus full Frontend/Parser/Formatter/Sema/JetRuntime layer for @T live links landed (Types.jet, Parser, Formatter, Sema/Links.jet, pure-Jet JetRuntime/Links.jet with 0 #Unsafe blocks, JetSema 22/22 PASS). Wave 3B now wires JetIR native lowering end-to-end."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #3723: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -28891,10 +28896,10 @@
           "n": 3,
           "text": "(was #4971) Jet parser has no `alias.Ptr<T>.from_addr(addr)` form (Expr.PtrFromAddr); restore Core mem.from_addr",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: With CardClose-11 (wave/14/in): Core/Mem/Mem.jet from_addr body becomes `mem.Ptr<T>.from_addr(addr)`, replacing the panic \"mem.from_addr is unavailable until the native parser reads...\"; the parser already has PtrFromAddr at Expressions.jet:1543-1548. New golden lowlevel/mem_from_addr_direct (prints 23): FAIL exit 70 on o0/o1/o2 with w12 Core, PASS on o0/o1/o2 with the patched Core (TestGreen testkit golden, w12 jet). Lane-check CHECK OK.",
-          "at": "2026-10-31T21:20:06.435Z"
+          "evidence": "dev 4e1196227c: generalized Parser/Expressions.jet (parser_dotted_ident_path) and Sema/Expressions.jet (sema_expr_core_import_module) so both mem.Ptr<T>.from_addr(addr) and core.mem.Ptr<T>.from_addr(addr) parse as Expr.PtrFromAddr and typecheck cleanly; JetParser ptr_from_addr_parses_single_and_dotted_aliases + Stage-2 check PASS.",
+          "at": "2026-11-22T17:41:38.409Z"
         },
         {
           "n": 4,
@@ -28949,7 +28954,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-22T14:57:28.785Z",
+      "updated": "2026-11-22T17:41:39.213Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
@@ -29895,6 +29900,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
+          "text": "Wave 2B (dev 4e1196227c + c7b432d894): both halves of D-METHOD-FOOTPRINT1=A (c20) landed — Sema persists receiver_footprint and emits '; footprint = self.[a, b]' in PublicAPI.jet (4e1196227c), and JetIR preserves disjoint field borrows of one local across &self calls with strict O0==O1==O2 I9 parity (c7b432d894). Wave 3A flips SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT live, fixes c21 (non-storing Map/Set string-view lookups & trim_start/trim_end), and streamlines Compiler/."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "Cleaned 2026-11-15 by TowerKeeper-1: the precut-audit notes on c6-c10 named UI rows that are no longer on dev; each criterion now names its own proof."
@@ -30156,7 +30166,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-22T17:36:16.877Z",
+      "updated": "2026-11-22T17:41:40.016Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 21
     },
@@ -35364,6 +35374,11 @@
         {
           "at": "2026-11-22",
           "by": "Orchestrator",
+          "text": "Combined Wave 2B (dev 4e1196227c + c7b432d894) verified: Stage-2 full -O2 toolchain, 9/9 CodegenCeiling, 1151 CompilerData, 1670 UnsafeRatchet, 182/182 JetIR (Text.jet:138 fixed + 2 new tests), 22/22 JetSema, 217/217 Tests/Guards PASS; ir.merge.functions -17.3%, ir.build.recursion -12.2%, lock-free O0 Opt partitions."
+        },
+        {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
           "text": "Pareto Stream B Wave 2A landed at dev ed1bac94eb (Combined Wave 2A full -O2 embedded toolchain, Stage-2 == Stage-3 exact fixed point, CodegenCeiling 9/9, CompilerData 1151 ok [Build 52->49, BuildTraits 1->0], UnsafeRatchet 1670 ok, copy_ratchet Build 78->75, BuildMerge 10->9, BuildTypes 65->61, Tests/Guards 217/217 PASS). Live cold uncached A/B vs Wave 1: 12t Throughput.jet O0 wall 49.03s->45.91s (21,861->23,348 LOC/s), O0 CPU 149.22s->131.93s (-11.6%: ir.opt -26.5% CPU, ir.build.program -25.3%, ir.lint -100% on unverified O0, load -28.0% CPU), check CPU 142.25s->128.26s (-9.8%, -27.98B insns)."
         },
         {
@@ -36188,7 +36203,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-22T16:42:13.556Z",
+      "updated": "2026-11-22T17:41:41.605Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 41
     },
@@ -52275,6 +52290,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "Orchestrator",
+          "text": "Wave 2B (dev c7b432d894): D-COLUMNS1 true per-field columnar SoA storage for Rows<T> landed in Compiler/JetIR/Source/BuildRows.jet (24*k inline column lists, O(1) zero-copy table.field view dropping 50k-row column reads 49ms->0ms at -O0/-O1/-O2, strict I9 parity, proven live on compiler DeclTable.rows). Wave 3 streamlines Compiler/ tables onto Rows<T>."
+        },
+        {
           "at": "2026-11-14",
           "by": "Main",
           "text": "Gap found 2026-11-14 while landing: Docs/spec/compiler-data.md says a parallel phase lends read-only tables to its workers, but the compiler has no mechanism to do that. A task's read capture copies the value (BuildExpr ir_copy_value), a lent parameter is E1102, and every parallel phase in Compiler/ uses Shared in a file whose row already counts it. So a new parallel phase (record take, Core body decode, O2 pass threads) either adds a Shared cell, which the ratchet refuses, or copies the whole input per worker. Withdrawn for this reason: Speed-2 6759-c2-core-record-take-parallel and 6759-c9-core-bodies-decode-parallel-r2. GoalsA-1's o2-*-threads and PrecompiledCore's parallel encode/pack are being reworked against the same constraint. Closing this needs a read-only lend for tasks, which is a language or Core surface and so an owner ballot."
@@ -52378,7 +52398,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-22T14:57:32.331Z",
+      "updated": "2026-11-22T17:41:40.815Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -133788,6 +133808,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T17:41:41.605Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T17:41:40.815Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T17:41:40.016Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00rqc09",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T17:41:39.213Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0s8gang",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T17:41:38.410Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s8gang",
+      "note": "#3"
+    },
     {
       "at": "2026-11-22T17:36:16.877Z",
       "by": "Orchestrator",
