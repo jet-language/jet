@@ -1,0 +1,20 @@
+# An absolute breakpoint path and a relative breakpoint path naming the same
+# file stop in the same function, even when another directory holds a file
+# with the same base name (`Alpha/Helper.jet` and `Beta/Helper.jet`).
+requires: os-name:linux
+fixture: AbsoluteAndRelativeBreakStopInSameFunction.fixture
+env: NO_COLOR=1
+step: jet build -O0 .
+exit: 0
+step: jet debug {work}/.jet/build/run --break Source/Beta/Helper.jet:6
+stdin: absolute_and_relative_break_stop_in_same_function.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  Helper.jet:6  in beta_step()" # relative path stops in Beta/Helper.jet
+stdout+stderr: !~ "in alpha_step()" # never binds to sibling Alpha/Helper.jet
+stdout+stderr: ~ "Program finished" # session completes cleanly
+step: jet debug {work}/.jet/build/run --break {work}/Source/Beta/Helper.jet:6
+stdin: absolute_and_relative_break_stop_in_same_function.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  Helper.jet:6  in beta_step()" # absolute path stops in the same function
+stdout+stderr: !~ "in alpha_step()" # never falls back to Alpha/Helper.jet
+stdout+stderr: ~ "Program finished" # session completes cleanly
