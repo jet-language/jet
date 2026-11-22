@@ -8020,7 +8020,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
-      "file": "Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet",
+      "file": "Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndO0/tooling_checked_text_type/checked_text_type.jet",
       "line": 20,
       "column": 5,
       "reason": "checked text example output"
@@ -8034,14 +8034,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
-      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet",
+      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeO0AndDefaultDev/Input/o1/run.jet",
       "line": 12,
       "column": 5,
       "reason": "fixed RFC interop vectors"
     },
     {
       "package": "Tests",
-      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet",
+      "file": "Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeO0AndDefaultDev/Input/o2/run.jet",
       "line": 12,
       "column": 5,
       "reason": "fixed RFC interop vectors"
@@ -13069,10 +13069,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/Comptime/NativeO0SharedTasksSelect.fixture/ffi.jet | 6:1 | "the scalar ABI contract matches the C definition" |
 | Tests | Tests/Cases/Comptime/NativeO0SharedTasksSelect.fixture/ffi.jet | 12:5 | "call the audited inline C contract" |
 | Tests | Tests/Cases/ComptimeCLIParity/ComptimeChildIsReapedBeforeTheProgramRuns.fixture/run.jet | 15:5 | "fork and reap the child before returning" |
-| Tests | Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndInterpreter/tooling_checked_text_type/checked_text_type.jet | 20:5 | "checked text example output" |
+| Tests | Tests/Cases/ComptimeCLIParity/Fixtures/TierParityExamplesRunThroughAOTJITAndO0/tooling_checked_text_type/checked_text_type.jet | 20:5 | "checked text example output" |
 | Tests | Tests/Cases/ComptimeCorePureParity/CryptoExpertAeadSignArgonAOTStdoutMatchesKnownAnswers.fixture/main.jet | 9:5 | "fixed RFC interop vectors" |
-| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o1/run.jet | 12:5 | "fixed RFC interop vectors" |
-| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeForcedInterpreterAndDefaultDev/Input/o2/run.jet | 12:5 | "fixed RFC interop vectors" |
+| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeO0AndDefaultDev/Input/o1/run.jet | 12:5 | "fixed RFC interop vectors" |
+| Tests | Tests/Cases/ComptimeCorePureParity/CryptoValuesMatchAOTComptimeO0AndDefaultDev/Input/o2/run.jet | 12:5 | "fixed RFC interop vectors" |
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet | 63:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
