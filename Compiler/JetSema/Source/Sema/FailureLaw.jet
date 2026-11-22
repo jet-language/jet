@@ -10,6 +10,7 @@ use {
         AppliedRuleApplication,
         Binding,
         BodyNode,
+        BodyTree,
         Call,
         CallArg,
         CORE_ERROR_TYPES,
@@ -37,12 +38,16 @@ use {
         StrFormat,
         StrPart,
         SymbolKind,
+        TTryConvert,
         TFuncKind,
         TextEdit,
         Type,
         TypeParam,
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_func,
+        body_each_expr_child,
+        body_each_stmt_child,
+        body_node_index,
         core_call_typed_signature,
         core_module_export,
         core_module_has_type,
@@ -983,34 +988,43 @@ SemaPreludeConversionDemand: struct {
     site: Span,
 }
 
-// The demand walk's state (SemaEffectWalk.PreludeDemands): the module and its
-// demands so far, in walk order.
+// // The demand walk's state: the module and its demands so far, in walk order.
 SemaPreludeDemandWalk: struct {
     module_identity: String,
     demands: [SemaPreludeConversionDemand],
 }
 
-// One node of the demand walk: a propagation site whose conversion is
-// this module's prelude routine for a source reaching `Err` by itself
-// demands it (first site per routine); the effect walk then walks its
-// children (Effects/Checks.jet sema_effect_walk_enter), in the order
-// body_each_expr_child visits them.
-sema_prelude_conversion_demands_enter: fn(state: Shared<SemaPreludeDemandWalk>, node: BodyNode) {
-    conversion: if node.kind == {
-        // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
-        .Try(_, value, _) -> Val(value.copy())
-        // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
-        .TryWithContext(_, _, value, _, _, _) -> Val(value.copy())
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> None
-    }
-    if conversion == .Val(value) {
-        if value == .Typed(key, source, target) {
-            sema_prelude_conversion_demand_add(state, key, source, target, node.span)
-        }
-        if value == .TypedIntoUnion(key, source, target, _, _) {
-            sema_prelude_conversion_demand_add(state, key, source, target, node.span)
+// Fast flat pre-check: true only when `tree.nodes` holds at least one `.Try`
+// or `.TryWithContext` node. Most functions hold none, so they skip both the
+// Shared state allocation and the recursive AST walk.
+sema_prelude_tree_has_try: fn(tree: BodyTree) -> Bool Never! {
+    loop i in 0..<tree.nodes.len() {
+        if tree.nodes[i].kind == {
+            .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return true
+            .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
         }
     }
+    false
+}
+
+sema_prelude_conversion_check_conversion: fn(state: Shared<SemaPreludeDemandWalk>, value: TTryConvert, span: Span) {
+    if value == .Typed(key, source, target) {
+        sema_prelude_conversion_demand_add(state, key, source, target, span)
+    } else if value == .TypedIntoUnion(key, source, target, _, _) {
+        sema_prelude_conversion_demand_add(state, key, source, target, span)
+    }
+}
+
+sema_prelude_conversion_walk_expr: fn(state: Shared<SemaPreludeDemandWalk>, tree: BodyTree, expression: Int) {
+    idx: body_node_index(tree, expression)
+    if tree.nodes[idx].kind == {
+        .Try(_, value, _) -> sema_prelude_conversion_check_conversion(state, value, tree.nodes[idx].span)
+        .TryWithContext(_, _, value, _, _, _) -> sema_prelude_conversion_check_conversion(state, value, tree.nodes[idx].span)
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+    }
+    body_each_expr_child(tree, tree.nodes[idx], fn(child) {
+        sema_prelude_conversion_walk_expr(state, tree, child)
+    })
 }
 
 // A declared conversion under the routine's key is a module function, which
@@ -1032,14 +1046,13 @@ sema_prelude_conversion_demand_add: fn(state: Shared<SemaPreludeDemandWalk>, key
 
 // Keeps a demand some function's own walk found (sema_prelude_conversion_demands),
 // unless an earlier function already demanded its routine.
-sema_prelude_conversion_demand_keep: fn(state: Shared<SemaPreludeDemandWalk>, demand: SemaPreludeConversionDemand) {
-    permit: state.guard_edit()
-    loop kept in permit.value.demands {
+sema_prelude_conversion_demand_keep: fn(demands: &[SemaPreludeConversionDemand], demand: SemaPreludeConversionDemand) {
+    loop kept in demands {
         if kept.key == demand.key {
             return
         }
     }
-    permit.value.demands.push(demand.copy())
+    demands.push(demand.copy())
 }
 
 sema_prelude_demand_walk_take: fn(state: Shared<SemaPreludeDemandWalk>) -> [SemaPreludeConversionDemand] {
@@ -1061,21 +1074,24 @@ sema_prelude_demand_walk_take: fn(state: Shared<SemaPreludeDemandWalk>) -> [Sema
 // unless an earlier function demanded its routine gives what walking it here
 // would.
 sema_prelude_conversion_demands: fn(module_identity: String, functions: [FnBody], walked: [Int:[SemaPreludeConversionDemand]]) -> [SemaPreludeConversionDemand] {
-    walk_state: Shared{SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}}
-    walk: SemaEffectWalk.PreludeDemands{state: walk_state}
-    nodes := [SemaEffectNode]{}
-    facts: SemaEffectCallIndex{modules: [SemaEffectModuleCalls]{}, node_by_key: name_rows()}
-    ignored := [Diagnostic]{}
+    out := [SemaPreludeConversionDemand]{}
     loop (position, function) in functions {
         if walked.get(position) == .Val(demands) {
-            loop demand in demands -> sema_prelude_conversion_demand_keep(walk_state, demand)
+            loop demand in demands -> sema_prelude_conversion_demand_keep(out, demand)
             next
         }
+        if !sema_prelude_tree_has_try(function.tree) -> next
+        walk_state: Shared{SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}}
         loop statement in function.body {
-            sema_effect_walk_stmt_children(walk, nodes, facts, ignored, sema_effect_caller_slot(facts, 0, function.key), function.tree, function.tree.stmts[statement])
+            body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child) {
+                sema_prelude_conversion_walk_expr(walk_state, function.tree, child)
+            })
+        }
+        loop demand in sema_prelude_demand_walk_take(walk_state) {
+            sema_prelude_conversion_demand_keep(out, demand)
         }
     }
-    sema_prelude_demand_walk_take(walk_state)
+    out
 }
 
 // Demand-driven injection (the Rust reference's

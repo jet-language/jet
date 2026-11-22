@@ -70,6 +70,17 @@ ir_lazy_kind: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
 // one such as a Task) does not. One `seen` set shared by the whole walk
 // visits each type once; a type already seen adds nothing to the
 // conjunction.
+ir_lazy_can_clone_cached: fn(m: IRModule, row: Int) -> Int Never! {
+    if row >= 0 && row < m.lazy_can_clone.len() -> return m.lazy_can_clone[row]
+    0
+}
+
+ir_lazy_can_clone_store: fn(m: &IRModule, row: Int, can_clone: Bool) Never! {
+    if row < 0 -> return
+    loop m.lazy_can_clone.len() <= row -> m.lazy_can_clone.push(0)
+    m.lazy_can_clone[row] = if can_clone -> 1 else -> -1
+}
+
 ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
@@ -93,8 +104,17 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
     }
     if ir_iter_element(ty) != None -> return false
     if ir_value_type(m, p, ty) == .Val(row) {
-        if ir_is_handle(m, row) -> return m.types[row].clone != ""
-        if ir_close_handle(m, row) -> return false
+        cached: ir_lazy_can_clone_cached(m, row)
+        if cached != 0 -> return cached > 0
+        if ir_is_handle(m, row) {
+            can_clone: m.types[row].clone != ""
+            ir_lazy_can_clone_store(m, row, can_clone)
+            return can_clone
+        }
+        if ir_close_handle(m, row) {
+            ir_lazy_can_clone_store(m, row, false)
+            return false
+        }
     }
     key: type_carrier_identity(ty)
     if seen.get(key) != None -> return true
@@ -147,8 +167,16 @@ ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! 
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
+    row := -1
+    if ir_value_type(m, p, ty) == .Val(found) {
+        row = found
+        cached: ir_lazy_can_clone_cached(m, found)
+        if cached != 0 -> return cached > 0
+    }
     seen := [String:Bool]{}
-    ir_lazy_can_clone(m, p, ty, seen)
+    result: ir_lazy_can_clone(m, p, ty, seen)
+    ir_lazy_can_clone_store(m, row, result)
+    result
 }
 
 // ---------------------------------------------------------------------------

@@ -81,25 +81,23 @@ body_rows_fitted: fn<T>(rows: &&[T]) -> [T] Never! {
 // the last id is tried first: it is the answer when it holds `id` and no
 // row before it does. Otherwise the rows are searched.
 body_node_index: fn(tree: BodyTree, id: Int) -> Int Never! {
-    count: I64{tree.nodes.len()}
-    if (count > I64{0}) {
-        last_idx: Int{wrapping(count - I64{1})}
-        guess: wrapping(wrapping(count - I64{1}) - wrapping(I64{tree.nodes[last_idx].id} - I64{id}))
-        if (guess >= I64{0} && guess < count) {
-            g: Int{guess}
-            if tree.nodes[g].id == id {
-                if (guess == I64{0}) || tree.nodes[Int{wrapping(guess - I64{1})}].id < id -> return g
+    count: tree.nodes.len()
+    if count > 0 {
+        last_idx: count - 1
+        guess: last_idx - (tree.nodes[last_idx].id - id)
+        if guess >= 0 && guess < count {
+            if tree.nodes[guess].id == id {
+                if guess == 0 || tree.nodes[guess - 1].id < id -> return guess
             }
         }
     }
-    low := I64{0}
+    low := 0
     high := count
     loop low < high {
-        middle: (low + high) >> I64{1}
-        if tree.nodes[Int{middle}].id < id -> low = wrapping(middle + I64{1}) else -> high = middle
+        middle: (low + high) >> 1
+        if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
     }
-    at: Int{low}
-    if low < count && tree.nodes[at].id == id -> return at
+    if low < count && tree.nodes[low].id == id -> return low
     panic("body tree has no node {id}")
 }
 

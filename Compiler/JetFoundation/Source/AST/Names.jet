@@ -350,14 +350,14 @@ name_rows: fn() -> NameRows Never! {
 // The key index of `text` (whose name_rows_hash is `hash`), if the map ever
 // held it.
 name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
-    mask: I64{map.mask}
-    slot := I64{hash} & mask
+    mask: map.mask
+    slot := hash & mask
     loop {
-        entry: map.slots[Int{slot}]
+        entry: map.slots[slot]
         if entry == 0 -> break
-        key: Int{I64{entry} - I64{1}}
+        key: entry - 1
         if map.hashes[key] == hash && map.texts[key] == text -> return Val(key)
-        slot = (slot + I64{1}) & mask
+        slot = (slot + 1) & mask
     }
     None
 }

@@ -342,11 +342,27 @@ parser_current: fn(state: &JetParserState) -> Token Never! {
     if state.pending_type_gt {
         return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start + 1, end: state.pending_type_gt_span.end})
     }
-    parser_skip_trivia(state)
-    if state.position < 0 || state.position >= state.tokens.len() {
+    pos := state.position
+    len: state.tokens.len()
+    if pos < 0 || pos >= len {
         return parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
     }
-    state.tokens[state.position]
+    kind := state.tokens[pos].kind
+    if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT {
+        return state.tokens[pos]
+    }
+    loop {
+        pos += 1
+        if pos >= len {
+            state.position = pos
+            return parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
+        }
+        kind = state.tokens[pos].kind
+        if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT {
+            state.position = pos
+            return state.tokens[pos]
+        }
+    }
 }
 
 parser_lookahead_forward: fn(state: JetParserState, start: Int, skip: Int) -> Token Never! {
@@ -407,9 +423,23 @@ parser_lookahead_kind_forward: fn(state: JetParserState, start: Int, skip: Int) 
 parser_current_kind: fn(state: &JetParserState) -> Int Never! {
     // Keep parser_current's split-token, trivia, and EOF cursor rules.
     if state.pending_type_gt -> return TOKEN_GT
-    parser_skip_trivia(state)
-    if state.position < 0 || state.position >= state.tokens.len() -> return TOKEN_EOF
-    state.tokens[state.position].kind
+    pos := state.position
+    len: state.tokens.len()
+    if pos < 0 || pos >= len -> return TOKEN_EOF
+    kind := state.tokens[pos].kind
+    if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return kind
+    loop {
+        pos += 1
+        if pos >= len {
+            state.position = pos
+            return TOKEN_EOF
+        }
+        kind = state.tokens[pos].kind
+        if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT {
+            state.position = pos
+            return kind
+        }
+    }
 }
 
 parser_kind_at: fn(state: &JetParserState, offset: Int) -> Int Never! {

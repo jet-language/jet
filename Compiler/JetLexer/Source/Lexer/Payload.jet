@@ -507,27 +507,65 @@ shifted_diagnostic: fn(diagnostic: &Diagnostic, offset: Int) Never! {
 // lands before its fact's token, and its diagnostics go to
 // `terminator_diagnostics`.
 lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables, terminator_diagnostics: &[Diagnostic]) -> LexedTokens {
+    fact_count: facts.len() /% 4
+    event_count: events.len() /% 3
     tokens := [Token]{}
+    tokens.try_reserve(fact_count + event_count) ?? panic("reserve failed")
     diagnostics := [Diagnostic]{}
     cursor := from
     index := 0
     event_index := 0
-    fact_count: facts.len() /% 4
+    source_len: source.len()
     loop index < fact_count {
-        event_index = terminator_events_apply(facts, events, event_index, index, tokens, terminator_diagnostics)
-        kind: kind_at(facts, index)
-        start: facts[index * 4 + 1]
-        end: facts[index * 4 + 2]
-        gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
-        text: intern_token_source(tables, kind, source, start, end)
-        built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
-        if built.keep {
-            tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
+        if event_index < event_count && events[event_index * 3 + 1] == index {
+            event_index = terminator_events_apply(facts, events, event_index, index, tokens, terminator_diagnostics)
+        }
+        base: index * 4
+        kind: facts[base]
+        start: facts[base + 1]
+        end: facts[base + 2]
+        if cursor < start {
+            // Fast path: skip ordinary ASCII whitespace inline without entering gap_diagnostic.
+            limit: if start < source_len -> start else -> source_len
+            loop cursor < limit {
+                b: source[cursor]
+                if (b == U8{32} || (b >= U8{9} && b <= U8{13})) {
+                    cursor += 1
+                    next
+                }
+                break
+            }
+            if cursor < start {
+                gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+            }
+        }
+        if fixed_spelling_kind(kind) {
+            text: intern_token_source(tables, kind, source, start, end)
+            tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
+        } else {
+            text: intern_source(tables, source, start, end)
+            built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+            if built.keep {
+                tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
+            }
         }
         cursor = end
         index += 1
     }
-    gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+    if cursor < to {
+        limit: if to < source_len -> to else -> source_len
+        loop cursor < limit {
+            b: source[cursor]
+            if (b == U8{32} || (b >= U8{9} && b <= U8{13})) {
+                cursor += 1
+                next
+            }
+            break
+        }
+        if cursor < to {
+            gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        }
+    }
     // An interpolation's nested source is a copy of bytes the depth-0 range
     // already covers.
     if depth == 0 -> lexer_report_bidi_controls(source, from, to, diagnostics)
@@ -547,9 +585,10 @@ lexer_bidi_control_at: fn(source: [U8], at: Int) -> Bool Never! {
 // E0088: every literal bidirectional control in `source[from..<to]`, in
 // code, comments and quoted text alike.
 lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: &[Diagnostic]) {
+    limit: if to < source.len() -> to else -> source.len()
     at := from
-    loop at < to {
-        if byte_at(source, at) == 226 && lexer_bidi_control_at(source, at) {
+    loop at < limit {
+        if (source[at] == U8{226}) && lexer_bidi_control_at(source, at) {
             row: diagnostic_registry_row("E0088") ?? panic("E0088 has no registry row")
             add_diagnostic(diagnostics, row.code, at, at + 3, row.what.replace("{{character}}", codepoint_hex(scalar_codepoint(source, at, 3))), row.why, row.fix)
             at += 3
