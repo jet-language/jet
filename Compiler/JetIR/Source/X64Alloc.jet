@@ -545,7 +545,7 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
             noisy.push(noisy[at] + (if calm -> 0 else -> 1))
         }
     }
-    silent := loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && noisy[ends[slot] + 1] == noisy[starts[slot]]
+    silent := loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && (if routes -> noisy[ends[slot] + 1] == noisy[starts[slot]] else -> starts[slot] + 1 >= ends[slot] || noisy[ends[slot]] == noisy[starts[slot] + 1])
     if arm_starts.len() == 0 -> return silent
 
     reads := [Int]{}

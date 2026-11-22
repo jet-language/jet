@@ -337,18 +337,79 @@ ir_opt_version_function: fn(m: IRModule, f: &IRFunction, body: Int, options: IRO
         return false
     }
     ir_opt_ssa(m, f, options, lint, versioned)
-    if versioned.lint.len() > 0 || ir_version_gains(m, f, slots) > 0 {
-        if versioned.lint.len() > 0 -> checking = false
+    if versioned.lint.len() > 0 {
+        checking = false
+        ir_opt_report_add(report, versioned)
+        return true
+    }
+    profitable: ir_version_profitable(m, f, slots)
+    if profitable && ir_version_gains(m, f, slots) > 0 {
         ir_opt_report_add(report, versioned)
         return true
     }
     trial := ir_opt_report(report.level)
     ir_opt_ssa(m, plain, options, lint, trial)
-    if trial.lint.len() == 0 && ir_version_gains(m, plain, slots) == 0 {
+    if trial.lint.len() == 0 && (!profitable || ir_version_gains(m, plain, slots) == 0) {
         f = plain.move()
         ir_opt_report_add(report, trial)
     } else { ir_opt_report_add(report, versioned) }
     true
+}
+
+// Whether at least one newly versioned loop pair in `f` (whose fast copy or
+// guards write a slot >= `slots`) converted more Int operations to wrapping
+// than it added in per-iteration IntBig head guards, or eliminated a
+// range-head If without head guards. Returns true when no duplicated pair
+// remains (e.g., constant guards folded one copy away).
+ir_version_profitable: fn(m: IRModule, f: IRFunction, slots: Int) -> Bool Never! {
+    count: f.op.len()
+    new_pairs := 0
+    profitable := false
+    loop fall in 0..<count {
+        if f.op[fall] != .Loop || f.b[fall] != IR_LOOP_VERSIONED -> next
+        fall_loop_end: f.a[fall]
+        if fall_loop_end <= fall || fall_loop_end >= count -> next
+        wrapped: fall > 0 && f.op[fall - 1] == .Block && f.a[fall - 1] == fall_loop_end + 1
+        fall_start: if wrapped -> fall - 1 else -> fall
+        fall_end: if wrapped -> fall_loop_end + 1 else -> fall_loop_end
+        outer_end := fall_end + 1
+        loop outer_end < count && f.op[outer_end] == .Nop -> outer_end += 1
+        if outer_end >= count || f.op[outer_end] != .End -> next
+        outer: f.a[outer_end]
+        if outer < 0 || outer >= fall_start || f.op[outer] != .Block -> next
+        fast := -1
+        is_new := false
+        loop k in (outer + 1)..<fall_start {
+            w: ir_x64_write(f, k)
+            if w >= slots -> is_new = true
+            if fast < 0 && f.op[k] == .Loop && f.b[k] == IR_LOOP_VERSIONED {
+                fast = k
+            }
+        }
+        if fast < 0 || !is_new -> next
+        fast_end: f.a[fast]
+        if fast_end <= fast || fast_end >= fall_start -> next
+        new_pairs += 1
+        fast_traps := 0
+        head_bigs := 0
+        fast_ifs := 0
+        loop k in (fast + 1)..<fast_end {
+            if ir_version_gain(m, f, k) -> fast_traps += 1
+            if f.op[k] == .IntBig -> head_bigs += 1
+            if f.op[k] == .If -> fast_ifs += 1
+        }
+        fall_traps := 0
+        fall_ifs := 0
+        loop k in (fall + 1)..<fall_loop_end {
+            if ir_version_gain(m, f, k) -> fall_traps += 1
+            if f.op[k] == .If -> fall_ifs += 1
+        }
+        wrapped_gain: fall_traps - fast_traps
+        if (wrapped_gain > 0 && wrapped_gain >= head_bigs) || (fall_ifs > fast_ifs && head_bigs == 0) {
+            profitable = true
+        }
+    }
+    new_pairs == 0 || profitable
 }
 
 // How many instructions inside the loops of `f` a guard could still make
@@ -1720,3 +1781,59 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     assert_eq(int_bigs, 0)
     assert(wrapped_counts >= 1)
 }
+
+// A loop accumulating loaded Int elements (`total += xs[i]`): guarding `total`
+// at the head with IntBig cannot make `total + elem` wrap because `elem` is
+// loaded from memory, so OptVersion reverts to the plain unversioned loop.
+#Test("A loop whose loaded operand prevents wrapping is not unprofitably versioned") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_word_row(m)
+    g := ir_function_new("load_accum", "test:load.jet.load_accum", "", "load.jet", 1)
+    ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
+    n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    g.result = exact
+    total: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    eight: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    off: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    elem: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, eight, 8, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Mul, off, i, eight, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Add, addr, ptr, off, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Load, elem, addr, 0, -1, 4)
+    _ := ir_emit(g, IROp.Add, total, total, elem, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 5)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    loops := 0
+    int_bigs := 0
+    loop op in f.op {
+        if op == .Loop -> loops += 1
+        if op == .IntBig -> int_bigs += 1
+    }
+    assert_eq(loops, 1)
+    assert_eq(int_bigs, 0)
+}
+

@@ -260,7 +260,7 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
 
                 if op == .Load {
                     if !mem_pure -> next
-                    if dst_ty.drop != "" -> next
+                    if dst_ty.drop != "" && !(dst_ty.kind == .Int && f.c[k] == IR_LOAD_LENGTH) -> next
                     if !always_runs[k - loop_at] {
                         base: f.a[k]
                         offset: f.b[k]
@@ -413,3 +413,53 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
     }
     assert_eq(loads_inside, 1)
 }
+
+#Test("LICM hoists an IR_LOAD_LENGTH Int load from a memory-pure loop") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, Type.List{element: Type.Int}, 24, 8, IRClass.Pointer, false, 64, ""))
+    g := ir_function_new("len_hoist", "test:licm.jet.len_hoist", "", "licm.jet", 1)
+    xs: ir_slot(g, list, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
+    g.result = exact
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    n: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Load, n, xs, 0, IR_LOAD_LENGTH, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    loop_at := -1
+    loads_before := 0
+    loads_inside := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
+    }
+    assert(loop_at >= 0)
+    loop at in 0..<loop_at {
+        if f.op[at] == .Load -> loads_before += 1
+    }
+    loop at in (loop_at + 1)..<f.a[loop_at] {
+        if f.op[at] == .Load -> loads_inside += 1
+    }
+    assert_eq(loads_before, 1)
+    assert_eq(loads_inside, 0)
+}
+
