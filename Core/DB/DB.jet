@@ -958,7 +958,7 @@ Store: struct {
     // the words of the text `search` gives for each row, which
     // `Table.search` looks words up in.
     table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K, search: &&(fn(T) -[]> String)?{None}) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), search_of: search.move(), policy: None}
+        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), search_of: search.move(), policy: None, policy_join: None}
     }
 
     // An opened connection queries directly, meaning every row: `query`
@@ -1113,21 +1113,49 @@ Who: enum {
 // of a row replaces its words and a delete removes them, in the same
 // transaction; `upgrade` indexes every stored row again, so rows written
 // before the table had a search function are found too.
+// A read row policy compiled into SQL key-lookup semi-joins (`__guard_plan`):
+// each clause checks `EXISTS (SELECT 1 FROM "<table>" AS __jp<i> WHERE ...)`
+// over the joined table's key columns against the outer row's field columns
+// (`jet_row.<field>`), the caller's account id, or literal constants.
+priv TablePolicyJoinColumn: struct {
+    join_col: String,
+    source_kind: String,
+    source_value: String,
+}
+
+priv TablePolicyJoinClause: struct {
+    table: String,
+    columns: [TablePolicyJoinColumn],
+}
+
+priv TablePolicyJoin: struct {
+    requires_account: Bool,
+    clauses: [TablePolicyJoinClause],
+}
+
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv state: Shared<DBState>,
     priv name: String,
     priv key_of: fn(T) -[]> K,
     priv search_of: (fn(T) -[]> String)?,
     priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?,
+    priv policy_join: TablePolicyJoin?,
 
     // This table judged by the row policy `policy`, in place of any it had.
     guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move())}
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move()), policy_join: None}
+    }
+
+    // Compiler lowering target for `Table.guard(policy)`: carries the policy
+    // name and compiled SQL join plan (or per-row reason) so queries run
+    // key-lookup policies in SQL and `jet inspect choices` names every policy.
+    __guard_plan: fn(self, _policy_name: String, join_spec: String, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move()), policy_join: table_parse_policy_join(join_spec)}
     }
 
     // This table again, over the same store, for a query to read later.
     priv again: fn(self) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: self.policy}
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: self.policy, policy_join: self.policy_join.copy()}
     }
 
     // The row whose key is `key`, or None, also when the policy refuses to
@@ -1258,11 +1286,30 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         if !sql_identifier(self.name.bytes()) -> return Err(table_name_error(self.name))
         who: table_who()
         table: self.again()
-        deferred: data.__query_narrowed<T>("table", fn(condition: String, values: [String]) {
-            stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
-            rows: table_readable<K, T>(table, stored_rows, who) ?? return Err(table_data_error(err))
-            Ok(rows)
-        })
+        count_table: self.again()
+        deferred: data.__query_narrowed<T>(
+            "table",
+            fn(condition: String, values: [String]) {
+                if table_rows_joined<K, T>(table, condition, table_bound(values), Val(values.copy()), who) == {
+                    .Ok(joined) -> {
+                        if joined == .Val(stored_rows) {
+                            rows: table_decode_sorted<K, T>(table, stored_rows) ?? return Err(table_data_error(err))
+                            return Ok(rows)
+                        }
+                    }
+                    .Err(failure) -> return Err(table_data_error(failure))
+                }
+                stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
+                rows: table_readable<K, T>(table, stored_rows, who) ?? return Err(table_data_error(err))
+                Ok(rows)
+            },
+            Val(fn(column: String, condition: String, values: [String]) -[DB.Read]> [{key: String, count: Int}]? data.DataError! {
+                if table_count_by_sql<K, T>(count_table, column, condition, values, who) == {
+                    .Ok(groups) -> Ok(groups)
+                    .Err(failure) -> Err(table_data_error(failure))
+                }
+            }),
+        )
         Ok(deferred)
     }
 
@@ -1366,6 +1413,227 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
         return table_read(guard.value.driver, table.name, every, [DBValue]{}, None)
     }
     table_read(guard.value.driver, table.name, "{every} WHERE {filter}", values, None)
+}
+
+// Parses a compiler-generated policy join spec (`__guard_plan`). A spec that
+// starts with `join\t` carries a read policy whose reads are key lookups;
+// `per_row\t...` or anything else returns None so reads run the policy per row.
+priv table_parse_policy_join: fn(spec: String) -> TablePolicyJoin? Never! {
+    lines: spec.split("\n").to_list()
+    if lines.len() == 0 -> return None
+    head: lines[0].split("\t").to_list()
+    if head.len() < 2 || head[0] != "join" -> return None
+    requires_account: head[1] == "1"
+    clauses := [TablePolicyJoinClause]{}
+    loop i in 1..<lines.len() {
+        line: lines[i]
+        if line.len() == 0 -> next
+        parts: line.split("\t").to_list()
+        if parts.len() == 2 && parts[0] == "table" {
+            if !sql_identifier(parts[1].bytes()) -> return None
+            clauses.push(TablePolicyJoinClause{table: parts[1].copy(), columns: [TablePolicyJoinColumn]{}})
+            next
+        }
+        if parts.len() == 4 && parts[0] == "col" && clauses.len() > 0 {
+            if !sql_identifier(parts[1].bytes()) -> return None
+            kind: parts[2]
+            if kind == "field" && !sql_identifier(parts[3].bytes()) -> return None
+            clauses[clauses.len() - 1].columns.push(TablePolicyJoinColumn{join_col: parts[1].copy(), source_kind: kind.copy(), source_value: parts[3].copy()})
+            next
+        }
+        return None
+    }
+    loop clause in clauses {
+        if clause.columns.len() == 0 -> return None
+    }
+    Val(TablePolicyJoin{requires_account: requires_account, clauses: clauses})
+}
+
+// The SQL semi-join condition enforcing `join` for `who` on `table_name`.
+priv table_policy_sql: fn(table_name: String, join: TablePolicyJoin, who: Who) -> {sql: String, values: [DBValue], denied: Bool, tables: [String]} Never! {
+    tables := [String]{}
+    loop clause in join.clauses {
+        if !tables.contains(clause.table) -> tables.push(clause.table.copy())
+    }
+    if who == Who.System -> return {sql: "", values: [DBValue]{}, denied: false, tables: [String]{}}
+    caller := ""
+    has_caller := false
+    if who == .Account(account) {
+        caller = account.raw()
+        has_caller = true
+    }
+    if join.requires_account && !has_caller {
+        return {sql: "", values: [DBValue]{}, denied: true, tables: tables}
+    }
+    exists_clauses := [String]{}
+    values := [DBValue]{}
+    loop i in 0..<join.clauses.len() {
+        clause: join.clauses[i]
+        alias: "__jp{i}"
+        terms := [String]{}
+        loop col in clause.columns {
+            if col.source_kind == "field" {
+                terms.push("\"{alias}\".\"{col.join_col}\" = \"{table_name}\".\"{TABLE_ROW_COLUMN}.{col.source_value}\"")
+            } else if col.source_kind == "caller" {
+                terms.push("\"{alias}\".\"{col.join_col}\" = ?")
+                values.push(.Text(caller.copy()))
+            } else if col.source_kind == "int" {
+                terms.push("\"{alias}\".\"{col.join_col}\" = ?")
+                values.push(.Int(Int.parse(col.source_value) ?? 0))
+            } else if col.source_kind == "bool" {
+                terms.push("\"{alias}\".\"{col.join_col}\" = ?")
+                values.push(.Bool(col.source_value == "true"))
+            } else if col.source_kind == "text" {
+                terms.push("\"{alias}\".\"{col.join_col}\" = ?")
+                values.push(.Text(col.source_value.copy()))
+            }
+        }
+        exists_clauses.push("EXISTS (SELECT 1 FROM \"{clause.table}\" AS \"{alias}\" WHERE {terms.join(" AND ")})")
+    }
+    {sql: exists_clauses.join(" AND "), values: values, denied: false, tables: tables}
+}
+
+// Decodes `stored_rows` and returns them in ascending key order (the order
+// `Table.query` guarantees), for rows already admitted by a SQL policy join.
+priv table_decode_sorted: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]]) -> [T] DBError! {
+    keyed := [{key: K, row: T}]{}
+    loop stored in stored_rows {
+        row: table_decode<T>(stored) ?? return Err(err)
+        keyed.push({key: table.key_of(row.copy()), row: row})
+    }
+    keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
+    out := [T]{}
+    loop entry in keyed -> out.push(entry.row.copy())
+    Ok(out)
+}
+
+// Reads `table` with its compiled read policy join in one SQL statement, or
+// returns None when the table has no compiled join (or an older table lacks a
+// field column) so the caller falls back to `table_rows` + `table_readable`.
+priv table_rows_joined: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, filter: String, values: [DBValue], narrowed: [String]?, who: Who) -[DB.Read]> [[String:DBValue]]? DBError! {
+    join: table.policy_join ?? return Ok(None)
+    if who == Who.System -> return Ok(None)
+    if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
+    policy: table_policy_sql(table.name, join, who)
+    guard := table.state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, table.state, call) ?? return Err(err)
+    table_blob_known<K, T>(table, guard.value.store)
+    if app.live_reads.running() {
+        db_live_watch(guard.value, table.state, table.name)
+        if filter.len() > 0 && narrowed == .Val(bound) {
+            app.live_reads.record_where(live_source(table.name), filter, bound)
+        } else { app.live_reads.record(live_source(table.name)) }
+        loop joined_table in policy.tables {
+            app.live_reads.record(live_source(joined_table))
+            db_live_watch(guard.value, table.state, joined_table)
+        }
+    }
+    if policy.denied -> return Ok(Val([[String:DBValue]]{}))
+    where_clause := ""
+    bound_values := [DBValue]{}
+    if filter.len() > 0 && policy.sql.len() > 0 {
+        where_clause = " WHERE ({filter}) AND ({policy.sql})"
+        bound_values = values.copy()
+        bound_values.extend(policy.values.copy())
+    } else if filter.len() > 0 {
+        where_clause = " WHERE {filter}"
+        bound_values = values.copy()
+    } else if policy.sql.len() > 0 {
+        where_clause = " WHERE {policy.sql}"
+        bound_values = policy.values.copy()
+    }
+    sql: "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\"{where_clause}"
+    if __driver_query(guard.value.driver, sql, bound_values) == {
+        .Ok(rows) -> Ok(Val(rows))
+        .Err(_) -> {
+            if !table_exists(guard.value.driver, table.name) -> return Ok(Val([[String:DBValue]]{}))
+            loop joined_table in policy.tables {
+                if !table_exists(guard.value.driver, joined_table) {
+                    return Ok(Val([[String:DBValue]]{}))
+                }
+            }
+            Ok(None)
+        }
+    }
+}
+
+// Counts rows of `table` grouped by `column` (`jet_row.<field>`) in one SQL
+// `GROUP BY` query, with any compiled read policy joined in. Returns None when
+// a per-row policy must run or a field column is absent so `Query.count_by`
+// falls back to reading rows and counting in memory.
+priv table_count_by_sql: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, column: String, filter: String, values: [String], who: Who) -[DB.Read]> [{key: String, count: Int}]? DBError! {
+    if !sql_identifier(table.name.bytes()) -> return Err(table_name_error(table.name))
+    prefix: "{TABLE_ROW_COLUMN}."
+    if !column.starts_with(prefix) -> return Ok(None)
+    field_name: column.slice(prefix.len(), column.len())
+    if !sql_identifier(field_name.bytes()) -> return Ok(None)
+    policy_sql := ""
+    policy_values := [DBValue]{}
+    policy_denied := false
+    policy_tables := [String]{}
+    if table.policy != None && who != Who.System {
+        join: table.policy_join ?? return Ok(None)
+        built: table_policy_sql(table.name, join, who)
+        policy_sql = built.sql
+        policy_values = built.values
+        policy_denied = built.denied
+        policy_tables = built.tables
+    }
+    guard := table.state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, table.state, call) ?? return Err(err)
+    table_blob_known<K, T>(table, guard.value.store)
+    if app.live_reads.running() {
+        db_live_watch(guard.value, table.state, table.name)
+        if filter.len() > 0 -> app.live_reads.record_where(live_source(table.name), filter, values) else {
+            app.live_reads.record(live_source(table.name))
+        }
+        loop joined_table in policy_tables {
+            app.live_reads.record(live_source(joined_table))
+            db_live_watch(guard.value, table.state, joined_table)
+        }
+    }
+    if policy_denied -> return Ok(Val([{key: String, count: Int}]{}))
+    where_clause := ""
+    bound_values := [DBValue]{}
+    if filter.len() > 0 && policy_sql.len() > 0 {
+        where_clause = " WHERE ({filter}) AND ({policy_sql})"
+        bound_values = table_bound(values)
+        bound_values.extend(policy_values)
+    } else if filter.len() > 0 {
+        where_clause = " WHERE {filter}"
+        bound_values = table_bound(values)
+    } else if policy_sql.len() > 0 {
+        where_clause = " WHERE {policy_sql}"
+        bound_values = policy_values
+    }
+    sql: "SELECT \"{column}\" AS jet_group_key, COUNT(*) AS jet_group_count FROM \"{table.name}\"{where_clause} GROUP BY \"{column}\""
+    if __driver_query(guard.value.driver, sql, bound_values) == {
+        .Ok(rows) -> {
+            out := [{key: String, count: Int}]{}
+            loop row in rows {
+                key_val: row_value(row, "jet_group_key") ?? return Ok(None)
+                if key_val == .Null -> return Ok(None)
+                count: row_int(row, "jet_group_count") ?? return Ok(None)
+                out.push({key: render_value(key_val), count: count})
+            }
+            Ok(Val(out))
+        }
+        .Err(_) -> {
+            if !table_exists(guard.value.driver, table.name) {
+                return Ok(Val([{key: String, count: Int}]{}))
+            }
+            loop joined_table in policy_tables {
+                if !table_exists(guard.value.driver, joined_table) {
+                    return Ok(Val([{key: String, count: Int}]{}))
+                }
+            }
+            Ok(None)
+        }
+    }
 }
 
 // The stored row under the key `cells`, read without the row policy.
@@ -1825,8 +2093,13 @@ priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBVal
             app.live_reads.record_where(live_source(name), read.condition, read.values)
         } else { app.live_reads.record(live_source(name)) }
     }
-    if !table_exists(driver, name) -> return Ok([[String:DBValue]]{})
-    __driver_query(driver, sql, values)
+    if __driver_query(driver, sql, values) == {
+        .Ok(rows) -> Ok(rows)
+        .Err(failure) -> {
+            if !table_exists(driver, name) -> return Ok([[String:DBValue]]{})
+            Err(failure)
+        }
+    }
 }
 
 // A stored row, read back through its type's storage codec.

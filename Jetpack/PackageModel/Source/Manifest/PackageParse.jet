@@ -186,7 +186,10 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
         }
         facts.inline_configs[declared.name] = declared.facts
     }
-    if !config -> facts.validate_test_profiles()
+    if !config {
+        facts.apply_strictness()
+        facts.validate_test_profiles()
+    }
     Ok(facts)
 }
 
@@ -263,6 +266,9 @@ impl PackageFacts {
             "grants" -> return Err(PackageParseError.RetiredAuthorityField{field: field, replacement: "authority.grants"})
             "authority" -> self.apply_authority(pkg_parse_authority_value(value))
             "policy" -> self.policy = pkg_parse_package_policy(pkg_record_body(value, "policy"))
+            "strictness" -> {
+                self.strictness = Val(PackageStrictness.parse(value) ?? return Err(PackageParseError.InvalidValue{field: "strictness", value: value.trim()}))
+            }
             MANIFEST_BLOCK_MEMBERS -> self.members = pkg_parse_members(value)
             "configs" -> self.configs = pkg_parse_list(value)
             // U1/S52/E1209: reserved for a future feature; legal only empty.
@@ -292,7 +298,7 @@ pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
     Ok(
         if field == {
-            "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
+            "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "strictness" | "configs" -> true
             MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "purposes" | "test" | "suites" -> true
             else -> false
         },

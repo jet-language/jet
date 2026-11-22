@@ -260,3 +260,35 @@ sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: Se
     _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(condition, span), Val(sema_call_http_core_string(sql.condition, span)), source_args, argument_types, typed)
     _: sema_data_query_push_argument(sema_call_http_core_synthetic_arg(texts, span), bound, source_args, argument_types, typed)
 }
+
+// A `Query.count_by(fn(row) { row.<field> })` selector over a `#Codable`
+// non-migrated struct's scalar `Int`, `String` or `Bool` field lowers to
+// `Query.__count_by_int` / `__count_by_string` / `__count_by_bool` with the
+// table's field column name so a database table runs one `GROUP BY` query.
+SemaDataCountByTarget: struct {
+    column: String,
+    method: String,
+}
+
+sema_data_count_by_target: fn(callback: Expr, row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaDataCountByTarget? Never! {
+    if callback == .Lambda(lambda, _) {
+        if lambda.params.len() != 1 -> return None
+        body := Expr?{None}
+        if lambda.body == .Expr(value) -> body = Val(value) else if lambda.body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) {
+            body = Val(value)
+        }
+        selected: body ?? return None
+        fields: sema_data_filter_fields(row, environment, program)
+        if fields.len() == 0 -> return None
+        field: sema_data_filter_field(selected, lambda.params[0].name, fields) ?? return None
+        method: if field.bound == {
+            "CAST(? AS INTEGER)" -> "__count_by_int"
+            "?" -> "__count_by_string"
+            "(? = 'true')" -> "__count_by_bool"
+            else -> ""
+        }
+        if method == "" -> return None
+        return Val(SemaDataCountByTarget{column: "{SEMA_DATA_FILTER_ROW_COLUMN}.{field.name}", method: method})
+    }
+    None
+}

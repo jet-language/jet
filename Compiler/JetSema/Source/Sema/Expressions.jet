@@ -4765,6 +4765,28 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         }
         return sema_expr_check_declared_method(receiver, receiver_value, method, routed_method, method_span, owner_type_args, type_args, rule, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    if method == "count_by" && args.len() == 1 && type_args.len() == 0 && receiver_signature == .Apply(query_name, query_params) && sema_data_nominal_is(query_name, "Query") && query_params.len() == 1 {
+        if sema_data_count_by_target(args[0].expr, query_params[0], environment, program) == .Val(target) {
+            col_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: target.column}}, span: method_span, id: AST_NODE_GENERATED}
+            planned_args: [CallArg]{sema_call_http_core_synthetic_arg(col_expr, method_span), args[0]}
+            return sema_expr_check_declared_method(receiver, receiver_value, method, target.method, method_span, owner_type_args, [Type]{}, planned_args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+        probe_diagnostics := [Diagnostic]{}
+        probe_cb: sema_data_infer_query_callback("count_by", query_params[0], args[0], environment, program, scopes, state, tail_store, context, probe_diagnostics)
+        fallback_method: if probe_cb.result == .Val(ret_ty) -> if ret_ty == Type.Int -> "__count_by_int" else if ret_ty == Type.String -> "__count_by_string" else if ret_ty == Type.Bool -> "__count_by_bool" else -> "" else -> ""
+        if fallback_method != "" {
+            empty_col: Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: method_span, id: AST_NODE_GENERATED}
+            planned_args: [CallArg]{sema_call_http_core_synthetic_arg(empty_col, method_span), args[0]}
+            return sema_expr_check_declared_method(receiver, receiver_value, method, fallback_method, method_span, owner_type_args, [Type]{}, planned_args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+    }
+    if method == "guard" && args.len() == 1 && type_args.len() == 0 && !module_is_core(environment.module_identity) && receiver_signature == .Apply(table_name, table_params) && sema_db_is_table_type(table_name, table_params) {
+        plan: sema_db_policy_plan(args[0].expr, table_params[1], environment, program)
+        name_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: plan.policy_name}}, span: method_span, id: AST_NODE_GENERATED}
+        spec_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: plan.join_spec}}, span: method_span, id: AST_NODE_GENERATED}
+        planned_args: [CallArg]{sema_call_http_core_synthetic_arg(name_expr, method_span), sema_call_http_core_synthetic_arg(spec_expr, method_span), args[0]}
+        return sema_expr_check_declared_method(receiver, receiver_value, method, "__guard_plan", method_span, owner_type_args, [Type]{}, planned_args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) {
         return None
     }

@@ -14,6 +14,10 @@ use {
         ModuleLayer,
         RuntimeLayer,
         PolicyDeclaration,
+        PolicyKey,
+        PolicyScope,
+        PolicyValue,
+        Span,
         evidence_outcome_is_failure,
         evidence_record_is_expected_failure,
         evidence_record_is_unexpected_pass,
@@ -513,6 +517,8 @@ PackageFacts: struct {
     // Every successful contributor to a field, in composition order.
     provenance: [String:[String]],
     origin: String,
+    // Package-level strictness dial (`strictness: .Script | .App | .Library | .Hardened`).
+    strictness: PackageStrictness?{None},
     // The markers written on the package record, in order (`package.jet`'s
     // header; pkg_package_markers).
     markers: [PackageMarker]{[PackageMarker]{}},
@@ -582,11 +588,48 @@ PackageFacts: struct {
         self.provenance.get(field) ?? [String]{}
     }
 
-    // Contained names must belong to this package's declared dependencies.
+    // Apply the package strictness table onto the existing policy fields so
+    // levels bundle existing checks without introducing a second mechanism.
+    apply_strictness: fn(&self) Never! {
+        level: self.strictness ?? return
+        if level.hardened() {
+            self.policy.harden = true
+            has_sentries := false
+            has_unsafe := false
+            loop declaration in self.policy.declarations {
+                if declaration.key == PolicyKey.Sentries -> has_sentries = true
+                if declaration.key == PolicyKey.Unsafe -> has_unsafe = true
+            }
+            if !has_sentries {
+                self.policy.declarations.push(PolicyDeclaration{key: PolicyKey.Sentries, value: PolicyValue.On, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: self.origin})
+            }
+            if !has_unsafe {
+                self.policy.declarations.push(PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Obligations, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: self.origin})
+            }
+        }
+    }
+
+    // Contained names must belong to this package's declared dependencies, and
+    // a strictness level's bundled requirements must hold without loosening.
     validate_guarantees: fn(self) PackageParseError! {
         loop name in self.policy.contain {
             if !self.deps.has_key(name) {
                 return Err(PackageParseError.BadGuaranteePolicy{detail: "`policy.contain` names `{name}`, but `deps:` does not declare that dependency"})
+            }
+        }
+        if self.strictness == .Val(level) {
+            if level.requires_authority_allow() && self.authority.allow == None {
+                return Err(PackageParseError.BadGuaranteePolicy{detail: "`strictness: {level.render()}` requires an `authority: {{ allow: […] }}` allow list; run `jet explain effects` to see the inferred list"})
+            }
+            if level.hardened() {
+                loop declaration in self.policy.declarations {
+                    if declaration.key == PolicyKey.Sentries && declaration.value == PolicyValue.Off {
+                        return Err(PackageParseError.BadGuaranteePolicy{detail: "`strictness: .Hardened` sets `sentries: .On` and strictness levels only tighten; pick a lower level and add keys individually"})
+                    }
+                    if declaration.key == PolicyKey.Unsafe && (declaration.value == PolicyValue.Default || declaration.value == PolicyValue.Allow || declaration.value == PolicyValue.Relaxed) {
+                        return Err(PackageParseError.BadGuaranteePolicy{detail: "`strictness: .Hardened` sets `unsafe: .Obligations` and strictness levels only tighten; pick a lower level and add keys individually"})
+                    }
+                }
             }
         }
     }
@@ -595,5 +638,84 @@ PackageFacts: struct {
     // workspace locks; origins and provenance never enter it.
     semantic_digest: fn(self) -> String Never! {
         pkg_sha256_hex(pkg_facts_semantic_text(self).bytes())
+    }
+}
+
+// Package strictness dial: four fixed bundles over existing policy keys,
+// driven by `pkg_strictness_table()`.
+PackageStrictness: struct {
+    spelling: String,
+
+    script: fn() -> PackageStrictness Never! { PackageStrictness{spelling: ".Script"} }
+
+    app: fn() -> PackageStrictness Never! { PackageStrictness{spelling: ".App"} }
+
+    library: fn() -> PackageStrictness Never! { PackageStrictness{spelling: ".Library"} }
+
+    hardened_level: fn() -> PackageStrictness Never! { PackageStrictness{spelling: ".Hardened"} }
+
+    parse: fn(raw: String) -> PackageStrictness? Never! {
+        trimmed: raw.trim()
+        loop row in pkg_strictness_table() {
+            if row.spelling == trimmed -> return Val(PackageStrictness{spelling: row.spelling})
+        }
+        None
+    }
+
+    render: fn(self) -> String Never! { self.spelling }
+
+    name: fn(self) -> String Never! { self.spelling.removeprefix(".") }
+
+    requires_authority_allow: fn(self) -> Bool Never! { self.spelling != ".Script" }
+
+    requires_stable_surface: fn(self) -> Bool Never! {
+        self.spelling == ".Library" || self.spelling == ".Hardened"
+    }
+
+    hardened: fn(self) -> Bool Never! { self.spelling == ".Hardened" }
+}
+
+// One row in the single strictness table.
+PackageStrictnessRow: struct {
+    level: PackageStrictness,
+    spelling: String,
+    keys: [String],
+    summary: String,
+}
+
+// The single manifest line `jet new` writes for a template that sets a
+// strictness level.
+pkg_strictness_manifest_line: fn(level: PackageStrictness) -> String Never! {
+    "strictness: {level.render()}\n"
+}
+
+// The single source-of-truth table mapping each strictness level to its bundled
+// policy keys.
+pkg_strictness_table: fn() -> [PackageStrictnessRow] Never! {
+    [PackageStrictnessRow]{
+        PackageStrictnessRow{
+            level: PackageStrictness.script(),
+            spelling: ".Script",
+            keys: [String]{"effects: inferred", "authority.allow: optional"},
+            summary: "Default script behavior: effects are inferred and no authority allow list is required.",
+        },
+        PackageStrictnessRow{
+            level: PackageStrictness.app(),
+            spelling: ".App",
+            keys: [String]{"authority.allow: required"},
+            summary: "Application floor: requires an explicit `authority: {{ allow: [...] }}` list.",
+        },
+        PackageStrictnessRow{
+            level: PackageStrictness.library(),
+            spelling: ".Library",
+            keys: [String]{"authority.allow: required", "public_surface: locked"},
+            summary: "Library floor: adds stable public API checking for types, effects, and errors.",
+        },
+        PackageStrictnessRow{
+            level: PackageStrictness.hardened_level(),
+            spelling: ".Hardened",
+            keys: [String]{"authority.allow: required", "public_surface: locked", "policy.harden: true", "policy.sentries: .On", "policy.unsafe: .Obligations", "test.profile: hardened"},
+            summary: "Hardened floor: adds memory hardening, sentries, unsafe obligations, and the hardened test profile.",
+        },
     }
 }

@@ -13,6 +13,7 @@ use {
         policy_key_name,
     ]
     jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
+    jet_pkg_model.[pkg_strictness_table]
 }
 
 // Source queries must be selected before syntax typo classification. build_fact_name:
@@ -70,6 +71,36 @@ jet_cli_explain_policy: fn(query: String, color: Bool, json: Bool) -> JetCLIPlan
     name: policy_key_name(key)
     explanation: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None}
     Val(jet_cli_explanation_output(explanation, color, json))
+}
+
+// `jet explain strictness`: render the single strictness table of package.jet.
+jet_cli_explain_strictness: fn(color: Bool, json: Bool) -> JetCLIPlan Never! {
+    rows: pkg_strictness_table()
+    if json {
+        items := [JetCLIStatusValue]{}
+        loop row in rows {
+            items.push(
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("level", jet_cli_status_text(row.spelling)),
+                        jet_cli_status_field("keys", jet_cli_status_texts(row.keys)),
+                        jet_cli_status_field("summary", jet_cli_status_text(row.summary)),
+                    },
+                ),
+            )
+        }
+        return jet_cli_done("{jet_cli_status_json(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("field", jet_cli_status_text("strictness")), jet_cli_status_field("levels", JetCLIStatusValue.Array{values: items})}))}\n", "", 0)
+    }
+    lines := [String]{"Package Strictness Levels (`strictness:` in `package.jet`)", ""}
+    loop row in rows {
+        lines.push("  {row.spelling}")
+        lines.push("    Summary: {row.summary}")
+        lines.push("    Keys: {row.keys.join(", ")}")
+    }
+    lines.push("")
+    lines.push("Note: Levels only tighten. Pick a lower level and add individual keys to loosen one setting.")
+    _: color
+    jet_cli_done("{lines.join("\n")}\n", "", 0)
 }
 
 // `marker_argument_declarations`: the `core.compiler.lang` menus the signature

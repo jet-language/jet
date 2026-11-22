@@ -39,6 +39,9 @@ use {
         Param,
         ParseResult,
         PolicyDeclaration,
+        PolicyKey,
+        PolicyScope,
+        PolicyValue,
         Program,
         Span,
         ast_program,
@@ -165,6 +168,7 @@ use {
         PackageGrant,
         PackageMarker,
         PackageParseError,
+        PackageStrictness,
         pkg_build_entry_source,
         pkg_dep_display,
         pkg_inline_deps_collect,
@@ -1479,6 +1483,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     policy_expert := Bool?{None}
     policy_lints_deny := [String]{}
     policy_harden := false
+    strictness := PackageStrictness?{None}
     name_seen := false
     version_seen := false
     edition_seen := false
@@ -1490,6 +1495,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     configs_seen := false
     outputs_seen := false
     policy_seen := false
+    strictness_seen := false
     boundaries_seen := false
     purposes_seen := false
     targets_seen := false
@@ -1822,12 +1828,56 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                     }
                     index = close_index
                 }
+                "strictness" -> {
+                    if strictness_seen {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.Composition("`strictness` is declared more than once")))
+                    }
+                    strictness_seen = true
+                    strictness_value: jet_driver_manifest_field_value(source, tokens, value_index)
+                    if PackageStrictness.parse(strictness_value.text) == {
+                        .Val(level) -> { strictness = Val(level) }
+                        .None -> {
+                            diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.InvalidValue{field: "strictness", value: strictness_value.text.trim()}))
+                        }
+                    }
+                    index = strictness_value.next_index - 1
+                }
                 else -> {}
             }
         }
         if token.kind == TOKEN_LBRACE -> brace_depth += 1
         if token.kind == TOKEN_RBRACE && brace_depth > 0 -> brace_depth -= 1
         index += 1
+    }
+    if strictness == .Val(level) {
+        if level.requires_authority_allow() && authority_allow == None {
+            diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.BadGuaranteePolicy{detail: "`strictness: {level.render()}` requires an `authority: {{ allow: […] }}` allow list; run `jet explain effects` to see the inferred list"}))
+        }
+        if level.hardened() {
+            policy_harden = true
+            has_sentries := false
+            has_unsafe := false
+            loop declaration in policy_declarations {
+                if declaration.key == PolicyKey.Sentries {
+                    has_sentries = true
+                    if declaration.value == PolicyValue.Off {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.BadGuaranteePolicy{detail: "`strictness: .Hardened` sets `sentries: .On` and strictness levels only tighten; pick a lower level and add keys individually"}))
+                    }
+                }
+                if declaration.key == PolicyKey.Unsafe {
+                    has_unsafe = true
+                    if declaration.value == PolicyValue.Default || declaration.value == PolicyValue.Allow || declaration.value == PolicyValue.Relaxed {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.BadGuaranteePolicy{detail: "`strictness: .Hardened` sets `unsafe: .Obligations` and strictness levels only tighten; pick a lower level and add keys individually"}))
+                    }
+                }
+            }
+            if !has_sentries {
+                policy_declarations.push(PolicyDeclaration{key: PolicyKey.Sentries, value: PolicyValue.On, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: manifest_path})
+            }
+            if !has_unsafe {
+                policy_declarations.push(PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Obligations, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: manifest_path})
+            }
+        }
     }
     jet_driver_check_profile_settings(settings, profile_settings, diagnostics)
     if edition != JET_DRIVER_EDITION {

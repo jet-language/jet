@@ -1,0 +1,51 @@
+# Package strictness levels (.Script, .App, .Library, .Hardened),
+# `jet new` templates (none on bare `jet new`, `.App` on `cli` and `web`),
+# and `jet explain strictness` (D-STRICT-DIAL1=A).
+fixture: StrictnessLevels.fixture
+env: NO_COLOR=1
+
+step explain: jet explain strictness
+exit: 0
+stdout: ~ "Package Strictness Levels" # title heading is printed
+stdout: ~ ".Script" # lists the script level
+stdout: ~ ".App" # lists the app level
+stdout: ~ ".Library" # lists the library level
+stdout: ~ ".Hardened" # lists the hardened level
+stdout: ~ "policy.harden: true" # hardened bundles harden
+stdout: ~ "policy.sentries: .On" # hardened bundles sentries
+stdout: ~ "policy.unsafe: .Obligations" # hardened bundles unsafe obligations
+
+step level_script: jet check script/run.jet
+exit: 0
+
+step level_app: jet check app/run.jet
+exit: 0
+
+step level_app_missing_allow: jet check app_missing/run.jet
+exit: 1
+stderr: ~ "strictness: .App" # names the strictness level
+stderr: ~ "authority" # explains the required authority allow list
+
+step level_library: jet check library/run.jet
+exit: 0
+
+step level_hardened: jet check hardened/run.jet
+exit: 0
+
+step level_hardened_loosen: jet check hardened_loosen/run.jet
+exit: 1
+stderr: ~ "only tighten" # refuses loosening a strictness level key
+
+step template_default: jet new default_proj
+exit: 0
+file: default_proj/package.jet !~ "strictness:" # bare jet new writes no strictness level
+
+step template_cli: jet new cli_proj --template cli
+exit: 0
+file: cli_proj/package.jet ~ "strictness: .App" # cli template writes .App
+file: cli_proj/package.jet ~ "authority:" # cli template fills in authority allow
+
+step template_web: jet new web_proj --template web
+exit: 0
+file: web_proj/package.jet ~ "strictness: .App" # web template writes .App
+file: web_proj/package.jet ~ "authority:" # web template fills in authority allow

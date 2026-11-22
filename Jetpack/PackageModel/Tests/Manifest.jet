@@ -1,18 +1,23 @@
 // Release status, the authority diagnostic family, and the package metadata
 // policy surface.
-use jet_pkg_model.[
-    JET_VERSION,
-    Manifest,
-    PackageFacts,
-    PolicySourceMap,
-    pkg_ascii_lower,
-    pkg_current_release_status,
-    pkg_jet_build_from_stamps,
-    pkg_satisfies_constraint,
-    pkg_version_banner,
-    pkg_version_json,
-    pkg_version_line,
-]
+use {
+    jet_foundation.[PolicyKey, PolicyValue]
+    jet_pkg_model.[
+        JET_VERSION,
+        Manifest,
+        PackageFacts,
+        PackageStrictness,
+        PolicySourceMap,
+        pkg_ascii_lower,
+        pkg_current_release_status,
+        pkg_jet_build_from_stamps,
+        pkg_satisfies_constraint,
+        pkg_strictness_table,
+        pkg_version_banner,
+        pkg_version_json,
+        pkg_version_line,
+    ]
+}
 
 #Test("current release status is separate from package semver") {
     status: pkg_current_release_status()
@@ -91,5 +96,49 @@ use jet_pkg_model.[
             assert(error.diagnostic.fix.contains("syntax-decisions.md"))
         }
         .Ok(_) -> panic("duplicate license policy entries must fail")
+    }
+}
+
+#Test("strictness dial bundles policy keys and only tightens") {
+    assert_eq(pkg_strictness_table().len(), 4)
+    script: PackageFacts.parse("name: \"demo\"\nstrictness: .Script\n", "package.jet") ?? panic("script parses")
+    assert_eq(script.strictness, Val(PackageStrictness.script()))
+    assert(!script.policy.harden)
+
+    app: PackageFacts.parse("name: \"demo\"\nstrictness: .App\nauthority: {{ allow: [IO] }}\n", "package.jet") ?? panic("app parses")
+    assert_eq(app.strictness, Val(PackageStrictness.app()))
+
+    if PackageFacts.parse("name: \"demo\"\nstrictness: .App\n", "package.jet") == {
+        .Err(error) -> { assert(error.message().contains("authority")) }
+        .Ok(_) -> panic(".App without authority.allow must fail")
+    }
+
+    lib: PackageFacts.parse("name: \"demo\"\nstrictness: .Library\nauthority: {{ allow: [IO] }}\n", "package.jet") ?? panic("library parses")
+    assert_eq(lib.strictness, Val(PackageStrictness.library()))
+
+    hardened: PackageFacts.parse("name: \"demo\"\nstrictness: .Hardened\nauthority: {{ allow: [IO] }}\n", "package.jet") ?? panic("hardened parses")
+    assert_eq(hardened.strictness, Val(PackageStrictness.hardened_level()))
+    assert(hardened.policy.harden)
+    saw_sentries := false
+    saw_unsafe := false
+    loop declaration in hardened.policy.declarations {
+        if declaration.key == PolicyKey.Sentries && declaration.value == PolicyValue.On {
+            saw_sentries = true
+        }
+        if declaration.key == PolicyKey.Unsafe && declaration.value == PolicyValue.Obligations {
+            saw_unsafe = true
+        }
+    }
+    assert(saw_sentries)
+    assert(saw_unsafe)
+
+    if PackageFacts.parse("name: \"demo\"\nstrictness: .Hardened\nauthority: {{ allow: [IO] }}\npolicy: {{ sentries: .Off }}\n", "package.jet") == {
+        .Err(error) -> { assert(error.message().contains("only tighten")) }
+        .Ok(_) -> panic("loosening sentries under .Hardened must fail")
+    }
+
+    if PackageFacts.parse("name: \"demo\"\nstrictness: .Bogus\n", "package.jet") == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("unknown strictness level must fail")
     }
 }

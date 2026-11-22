@@ -137,7 +137,13 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     facts: PackageFacts.parse_uncomposed(source, manifest) ?? return None
     chosen := named.move()
     from_default: chosen == ""
-    if from_default -> chosen = facts.defaults.get("test") ?? return None
+    if from_default {
+        chosen = facts.defaults.get("test") ?? {
+            if facts.strictness == .Val(level) && level.hardened() && facts.test_profile("hardened") != None -> "hardened" else -> {
+                return None
+            }
+        }
+    }
     profile: facts.test_profile(chosen) ?? {
         // A default that names no test profile names a Check output, which
         // a `configs:` file may add; without one, the name is a typo.

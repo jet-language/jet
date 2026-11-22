@@ -1,0 +1,247 @@
+// Proves `#6827 c2`:
+// 1. `Query.count_by` runs one SQL `GROUP BY` query (policy included).
+// 2. `my_projects` runs two statements whatever the number of projects,
+//    counting the policies' statements, because key-lookup policies
+//    (`project_policy`, `task_policy`) compile into the query as a SQL join.
+// 3. A policy whose read path inspects data beyond key presence
+//    (`audit_policy`) runs per row, memoized per key in the transaction,
+//    invalidated on writes to the table it read.
+// 4. `jet inspect choices` names both joined and per-row policies.
+use {
+    app
+    auth: core.auth
+    db: core.db
+}
+
+#Codable
+Project: struct {
+    id: Int,
+    name: String,
+}
+
+#Codable
+Task: struct {
+    id: Int,
+    project: Int,
+    status: String,
+    title: String,
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int,
+    account: String,
+}
+
+#Codable
+Member: struct {
+    project: Int,
+    account: String,
+    owner: Bool,
+}
+
+#Codable
+Audit: struct {
+    id: Int,
+    project: Int,
+    note: String,
+}
+
+mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
+
+ben: fn() -> auth.AccountID { auth.AccountID.from_string("ben") }
+
+account_of: fn(who: db.Who) -> String? {
+    if who == {
+        .Account(account) -> Val(account.raw())
+        .System | .Anonymous -> None
+    }
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+member_may: fn(store: db.Store, project: Int, who: db.Who) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: project, account: account}) == {
+        .Ok(found) -> Ok(found != None)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// Key-lookup policies: compile into the query as a SQL join on `members`.
+project_policy: fn(row: Project, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    member_may(store, row.id, who)
+}
+
+task_policy: fn(row: Task, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    member_may(store, row.project, who)
+}
+
+// Non-joinable policy: inspects `member.owner` beyond key presence, so it
+// runs per row, memoized per key in the transaction.
+audit_policy: fn(row: Audit, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: row.project, account: account}) == {
+        .Val(member) -> Ok(member.owner)
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+Stores: struct {
+    store: db.Store?,
+}
+
+STORE: Shared{Stores{store: None}}
+
+the_store: fn() -> db.Store {
+    stores: STORE.guard_read()
+    stores.value.store ?? panic("the store is open")
+}
+
+projects: fn() -> db.Table<Int, Project> {
+    the_store().table("projects", key: fn(row: Project) { row.id }).guard(project_policy)
+}
+
+tasks: fn() -> db.Table<Int, Task> {
+    the_store().table("tasks", key: fn(row: Task) { row.id }).guard(task_policy)
+}
+
+audits: fn() -> db.Table<Int, Audit> {
+    the_store().table("audits", key: fn(row: Audit) { row.id }).guard(audit_policy)
+}
+
+open_store: fn() {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(db.open_memory())
+}
+
+// Open task counts per project in one `GROUP BY` query, policy included.
+open_counts: fn() -[DB.Read]> [Int:Int] db.DBError! {
+    query: tasks().query() ?? return Err(err)
+    counts: query.filter(fn(row: Task) { row.status != "done" }).count_by(fn(row: Task) { row.project }) ?? return Err(db.DBError.Failed(err.reason))
+    Ok(counts)
+}
+
+// Two queries whatever the number of projects: open task counts by project,
+// then the caller's projects.
+my_projects: fn() -[DB.Read]> [String] db.DBError! {
+    counts: open_counts() ?? return Err(err)
+    project_query: projects().query() ?? return Err(err)
+    rows: project_query.collect() ?? return Err(db.DBError.Failed(err.reason))
+    cards := [String]{}
+    loop project in rows { cards.push("{project.name} ({counts.get(project.id) ?? 0} open)") }
+    Ok(cards)
+}
+
+measure_count_by: fn(who: auth.AccountID) -> {total_groups: Int, statements: Int} {
+    before: the_store().statements()
+    counts: app.as_caller(who, fn() { open_counts() }) ?? panic("count_by failed: {err}")
+    {total_groups: counts.len(), statements: the_store().statements() - before}
+}
+
+measure_my_projects: fn(who: auth.AccountID) -> {shown: String, statements: Int} {
+    before: the_store().statements()
+    cards: app.as_caller(who, fn() { my_projects() }) ?? panic("my_projects failed: {err}")
+    {shown: "[{cards.join(", ")}]", statements: the_store().statements() - before}
+}
+
+read_audits: fn() -[DB.Read]> [String] db.DBError! {
+    query: audits().query() ?? return Err(err)
+    rows: query.collect() ?? return Err(db.DBError.Failed(err.reason))
+    notes := [String]{}
+    loop row in rows -> notes.push(row.note)
+    Ok(notes)
+}
+
+measure_audits: fn(who: auth.AccountID) -> {notes: String, statements: Int} {
+    before: the_store().statements()
+    notes: app.as_caller(who, fn() { read_audits() }) ?? panic("audits failed: {err}")
+    {notes: "[{notes.join(", ")}]", statements: the_store().statements() - before}
+}
+
+run: fn() {
+    open_store()
+
+    app.as_system(fn() {
+        store: the_store()
+        raw_projects: store.table("projects", key: fn(row: Project) { row.id })
+        raw_tasks: store.table("tasks", key: fn(row: Task) { row.id })
+        raw_members: members_in(store)
+        raw_audits: store.table("audits", key: fn(row: Audit) { row.id })
+
+        _: raw_projects.add(Project{id: 1, name: "Gate repair"}) ?? panic("add p1: {err}")
+        _: raw_projects.add(Project{id: 2, name: "Spring fair"}) ?? panic("add p2: {err}")
+        _: raw_projects.add(Project{id: 3, name: "Board only"}) ?? panic("add p3: {err}")
+
+        _: raw_members.add(Member{project: 1, account: "mia", owner: true}) ?? panic("add m1: {err}")
+        _: raw_members.add(Member{project: 2, account: "mia", owner: false}) ?? panic("add m2: {err}")
+        _: raw_members.add(Member{project: 1, account: "ben", owner: false}) ?? panic("add m3: {err}")
+
+        _: raw_tasks.add(Task{id: 1, project: 1, status: "open", title: "Fix latch"}) ?? panic("add t1: {err}")
+        _: raw_tasks.add(Task{id: 2, project: 1, status: "open", title: "Paint frame"}) ?? panic("add t2: {err}")
+        _: raw_tasks.add(Task{id: 3, project: 1, status: "done", title: "Buy hinges"}) ?? panic("add t3: {err}")
+        _: raw_tasks.add(Task{id: 4, project: 2, status: "open", title: "Book hall"}) ?? panic("add t4: {err}")
+        _: raw_tasks.add(Task{id: 5, project: 3, status: "open", title: "Hidden task"}) ?? panic("add t5: {err}")
+
+        // Six audit rows spanning two projects: mia owns project 1, not project 2.
+        _: raw_audits.add(Audit{id: 1, project: 1, note: "a1"}) ?? panic("add a1: {err}")
+        _: raw_audits.add(Audit{id: 2, project: 1, note: "a2"}) ?? panic("add a2: {err}")
+        _: raw_audits.add(Audit{id: 3, project: 1, note: "a3"}) ?? panic("add a3: {err}")
+        _: raw_audits.add(Audit{id: 4, project: 1, note: "a4"}) ?? panic("add a4: {err}")
+        _: raw_audits.add(Audit{id: 5, project: 2, note: "b1"}) ?? panic("add a5: {err}")
+        _: raw_audits.add(Audit{id: 6, project: 2, note: "b2"}) ?? panic("add a6: {err}")
+    })
+
+    counted: measure_count_by(mia())
+    print("count_by groups={counted.total_groups} statements={counted.statements}")
+
+    two: measure_my_projects(mia())
+    print("mia (2 projects): {two.shown} statements={two.statements}")
+
+    ben_cards: measure_my_projects(ben())
+    print("ben (1 project): {ben_cards.shown} statements={ben_cards.statements}")
+
+    anon_cards: my_projects() ?? panic("anon my_projects: {err}")
+    print("anon projects: [{anon_cards.join(", ")}]")
+
+    // Add four more visible projects and two more hidden projects.
+    app.as_system(fn() {
+        store: the_store()
+        raw_projects: store.table("projects", key: fn(row: Project) { row.id })
+        raw_tasks: store.table("tasks", key: fn(row: Task) { row.id })
+        raw_members: members_in(store)
+        loop pid in 4..<8 {
+            _: raw_projects.add(Project{id: pid, name: "Crew {pid}"}) ?? panic("add p{pid}: {err}")
+            _: raw_members.add(Member{project: pid, account: "mia", owner: true}) ?? panic("add m{pid}: {err}")
+            _: raw_tasks.add(Task{id: 100 + pid, project: pid, status: "open", title: "Task {pid}"}) ?? panic("add t{pid}: {err}")
+        }
+        loop pid in 8..<10 {
+            _: raw_projects.add(Project{id: pid, name: "Secret {pid}"}) ?? panic("add s{pid}: {err}")
+            _: raw_tasks.add(Task{id: 200 + pid, project: pid, status: "open", title: "Hidden {pid}"}) ?? panic("add st{pid}: {err}")
+        }
+    })
+
+    six: measure_my_projects(mia())
+    print("mia (6 projects): {six.shown} statements={six.statements}")
+    print("my_projects stays two statements: {two.statements == 2 && six.statements == 2}")
+
+    // Per-row policy memoization within one transaction:
+    // 6 audit rows across 2 projects -> first read does 1 scan + 2 key lookups = 3;
+    // second read in the same transaction reuses the memoized lookups = 1;
+    // deleting a member invalidates the memoized lookups for `members`.
+    tx: the_store().begin() ?? panic("begin: {err}")
+    first_audit: measure_audits(mia())
+    second_audit: measure_audits(mia())
+    app.as_system(fn() {
+        _: members_in(the_store()).delete(MemberKey{project: 1, account: "mia"}) ?? panic("delete member: {err}")
+    })
+    after_delete: measure_audits(mia())
+    tx.commit() ?? panic("commit: {err}")
+
+    print("audit first={first_audit.notes} statements={first_audit.statements}")
+    print("audit memoized={second_audit.notes} statements={second_audit.statements}")
+    print("audit after delete={after_delete.notes} statements={after_delete.statements}")
+}
