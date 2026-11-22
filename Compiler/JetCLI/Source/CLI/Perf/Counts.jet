@@ -14,6 +14,7 @@ use {
         CanonicalJSON,
         CanonicalJSONField,
         SourceIdentity,
+        TraceProfile,
         TraceReceiptSection,
         canonical_json_sha256,
         jettrace_object_view,
@@ -75,7 +76,14 @@ jet_cli_perf_counts_capture: fn(counted: X64Counted, wall_ns: Int, paranoid: Int
 // window the command's whole run, `wall_ns` long, with `cpu_ns` of CPU.
 // The caller adds its receipt sections.
 jet_cli_perf_command_capture: fn(why: String, cpu_ns: Int, wall_ns: Int) -> JetCLIPerfCapture Never! {
-    capture := jet_cli_perf_capture_new(trace_profile_unsupported(why), [SourceIdentity]{})
+    jet_cli_perf_command_profiled(trace_profile_unsupported(why), [SourceIdentity]{}, cpu_ns, wall_ns)
+}
+
+// The capture of a command jet started, with `profile` of the `sources`
+// its rows are in, and its run window the command's whole run, as
+// jet_cli_perf_command_capture's.
+jet_cli_perf_command_profiled: fn(profile: TraceProfile, sources: [SourceIdentity], cpu_ns: Int, wall_ns: Int) -> JetCLIPerfCapture Never! {
+    capture := jet_cli_perf_capture_new(profile, sources)
     jet_cli_perf_window(capture.profile, JetCLIPerfRuntimeWindow{elapsed_ns: U64{wall_ns}, cpu_ns: Val(U64{cpu_ns}), exit: true})
     capture.profile.window_reason = "the command's whole run, from jet starting it to jet reaping it, on jet's monotonic clock; its CPU is the user and system time the reap reported, every child it waited for included"
     capture

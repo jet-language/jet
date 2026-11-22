@@ -13,6 +13,7 @@
 use {
     perf_files: core.files
     perf_process: core.process
+    perf_sys: core.sys
     perf_time: core.time
     jet_backend.[
         X64ImageFunction,
@@ -33,7 +34,26 @@ use {
         x64_sampler_open,
     ]
     jet_driver.[JetDriverVerbOutput]
-    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jet_live_stat_ticks, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        ENV_JET_PERF_CODE,
+        JetSymbolRef,
+        SourceIdentity,
+        TRACE_PROFILE_ROW_LIMIT,
+        TraceCounter,
+        TraceProfile,
+        TraceProfileRow,
+        TraceProfileSource,
+        TraceReceiptSection,
+        canonical_json_sha256,
+        jet_live_stat_ticks,
+        jettrace_array,
+        jettrace_object_view,
+        sha256_hex,
+        trace_profile_unsupported,
+        trace_receipt_section_from_json,
+    ]
     jet_ir.[ir_runtime_intrinsic_specs]
 }
 
@@ -52,6 +72,13 @@ JET_CLI_PERF_OUTSIDE_ROWS: 32
 // The samples the `timeline` section keeps, the earliest drained first: 17
 // minutes of one busy thread's, or a minute of 16 threads'.
 JET_CLI_PERF_OUTSIDE_TIMELINE: 1048576
+
+// The variable a jet streams its trace to (JET_TRACE_FILE), `%p` in it the
+// jet's pid: a sampled command's phases are its jet's top-level spans.
+JET_CLI_PERF_OUTSIDE_TRACE_FILE: "JET_TRACE_FILE"
+
+// The prefix of a Core source's path in a location table.
+JET_CLI_PERF_OUTSIDE_CORELIB: "<corelib>/"
 
 // The most processes an outside attach samples: the one named and those it
 // started, and theirs.
@@ -184,6 +211,33 @@ JetCLIPerfOutsideMoment: struct {
     node: Int,
 }
 
+// A phase of a sampled command's jet: a top-level span of its trace (one
+// whose name is its kind), from `start_us` to `end_us` on the wall clock,
+// in microseconds.
+JetCLIPerfOutsidePhase: struct {
+    phase: String,
+    start_us: Int,
+    end_us: Int,
+}
+
+// A sampled command's profile (jet_cli_perf_outside_profile) and the
+// sources its rows are in.
+JetCLIPerfOutsideProfile: struct {
+    profile: TraceProfile,
+    sources: [SourceIdentity],
+}
+
+// A function of a compile-time batch its jet listed (ENV_JET_PERF_CODE):
+// its code from `start` to `end` in the child the batch loaded in, its
+// declaration's `file` and `line`, and its `name`.
+JetCLIPerfOutsideCode: struct {
+    start: Int,
+    end: Int,
+    line: Int,
+    file: String,
+    name: String,
+}
+
 // What an outside sampling has made of the samples it read so far
 // (jet_cli_perf_outside_take). `images` are the sampled processes'
 // executables' images, and `unreadable` the files none could be read of.
@@ -192,6 +246,11 @@ JetCLIPerfOutsideMoment: struct {
 // read), `before` its slot before its last execve, and `execs` that
 // execve's time. A sampled command's `mappings` are the code its processes
 // mapped, as the kernel reported it, and `parents` each process's parent.
+// `code` is the file a sampled jet lists the functions of a comptime
+// child's code no file holds in, its entry program's and each batch's
+// (ENV_JET_PERF_CODE, `%p` the child's pid; "" for none), each pid's
+// listing a slot of `listings` by `listed`, read at drain `listed_at`
+// (jet_cli_perf_outside_listed).
 // Then the functions the samples were in (`rows`, by name in `named`),
 // their call tree, the samples by package (`working`), how far each stack
 // unwound (`depth` is the kernel's frame limit), and each sample's moment
@@ -208,6 +267,10 @@ JetCLIPerfOutsideFold: struct {
     execs: [Int:Int],
     mappings: [X64SampleMapping],
     parents: [Int:Int],
+    code: String,
+    listings: [[JetCLIPerfOutsideCode]],
+    listed: [Int:Int],
+    listed_at: [Int],
     drains: Int,
     failure: String,
     rows: [JetCLIPerfOutsideRow],
@@ -304,7 +367,7 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
     x64_sampler_drain(sampler, taken)
     x64_sampler_close(sampler)
     jet_cli_perf_outside_take(fold, taken)
-    sections: jet_cli_perf_outside_sections(fold, taken, family.len(), sampled, window_ms, exited_ms, sampler.origin_unix_ns)
+    sections: jet_cli_perf_outside_sections(fold, taken, family.len(), sampled, window_ms, exited_ms, sampler.origin_unix_ns, [JetCLIPerfOutsidePhase]{})
     Ok(JetCLIPerfOutsideTaken{sections: sections, window: window})
 }
 
@@ -313,21 +376,43 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
 // and of every thread and process it starts, from its first instruction to
 // its end (x64_sampled_start), and write the trace to `out`, or where any
 // attach writes it. The trace holds the `functions` and `timeline`
-// sections (jet_cli_perf_outside_sections), and its run window is the
-// command's whole run. A process's frames are named by the mappings of
-// code the kernel reported it made (jet_cli_perf_outside_recorded), so
-// one that ends before its first sample is read names them too. The
-// command shares jet's terminal, and its exit code is the attach's. The
-// trace's recorded argv takes the command's words once the run has
-// started.
+// sections (jet_cli_perf_outside_sections), its profile is the functions
+// whose sources can be read (jet_cli_perf_outside_profile), and its run
+// window is the command's whole run. A process's frames are named by the
+// mappings of code the kernel reported it made
+// (jet_cli_perf_outside_recorded), so one that ends before its first
+// sample is read names them too, and a compile-time batch's frames by the
+// listing of its functions its jet writes to a file of the attach's
+// (jet_cli_perf_outside_listed). Unless the environment names a trace file
+// (JET_CLI_PERF_OUTSIDE_TRACE_FILE) already, a jet the command starts
+// streams its trace to a file of the attach's, whose top-level spans split
+// the samples by the phase they were taken in
+// (jet_cli_perf_outside_phases). The attach removes those files once the
+// last samples are folded. The command shares jet's terminal, and its exit
+// code is the attach's. The trace's recorded argv takes the command's
+// words once the run has started.
 jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
     cpus: jet_cli_perf_outside_cpus() ?? return jet_cli_perf_failed("Jet can't run `{name}`: {err.message}", color)
+    phased: perf_sys.getenv(JET_CLI_PERF_OUTSIDE_TRACE_FILE) == None
+    stem: "jet-perf-{perf_process.current_pid()}-{perf_time.unix_ns()}-"
+    fields := [String]{}
+    loop (key, value) in perf_sys.environment() {
+        if key != ENV_JET_PERF_CODE -> fields.push("{key}={value}")
+    }
+    listing: perf_files.join(perf_sys.temp_dir(), "{stem}%p.code")
+    fields.push("{ENV_JET_PERF_CODE}={listing}")
+    if phased {
+        fields.push("{JET_CLI_PERF_OUTSIDE_TRACE_FILE}={perf_files.join(perf_sys.temp_dir(), "{stem}%p.trace")}")
+    }
+    env: [String]?{Val(fields)}
     started: perf_time.instant()
-    run := x64_sampled_start(path, command, None, cpus, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
+    run := x64_sampled_start(path, command, env, cpus, JET_CLI_PERF_OUTSIDE_PERIOD_NS)
+    root: run.command.child
     fold := jet_cli_perf_outside_fold()
     fold.origin_ns = run.sampler.origin_ns
+    fold.code = listing
     taken := X64Samples{words: [Int]{}, execs: [Int]{}, maps: [X64SampleMapping]{}, forks: [Int]{}, samples: 0, lost: 0}
     // The rings are drained every 20 ms, well before one fills, until the
     // command is reaped; the last drain follows its reap.
@@ -339,13 +424,20 @@ jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [S
     wall: started.elapsed().ns
     x64_sampler_drain(run.sampler, taken)
     x64_sampled_close(run)
+    jet_cli_perf_outside_take(fold, taken)
+    phases := [JetCLIPerfOutsidePhase]{}
+    if phased {
+        phases = jet_cli_perf_outside_phases(perf_files.join(perf_sys.temp_dir(), "{stem}{root}.trace"))
+    }
+    jet_cli_perf_outside_sweep(stem)
     if run.failure != "" {
         return jet_cli_perf_failed("Jet can't run `{name}`: {run.failure}", color)
     }
-    jet_cli_perf_outside_take(fold, taken)
-    sections: jet_cli_perf_outside_sections(fold, taken, fold.pids.len(), fold.tids.len(), wall /% 1000000, None, run.sampler.origin_unix_ns)
+    sections: jet_cli_perf_outside_sections(fold, taken, fold.pids.len(), fold.tids.len(), wall /% 1000000, None, run.sampler.origin_unix_ns, phases)
     lines: jet_cli_perf_outside_lines(sections.functions.value)
-    capture := jet_cli_perf_command_capture("a command sampled from outside keeps its samples in its `functions` and `timeline` receipt sections", run.cpu_ns, wall)
+    // After the sections, which sort the rows the hottest first.
+    profiled := jet_cli_perf_outside_profile(fold, taken, path)
+    capture := jet_cli_perf_command_profiled(profiled.profile.move(), profiled.sources.move(), run.cpu_ns, wall)
     capture.receipts.push(sections.functions)
     capture.receipts.push(sections.timeline)
     capture.policy.allowlist = allowlist
@@ -363,6 +455,174 @@ jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [S
         text = "{text}Trace: {written}\n"
     }
     JetDriverVerbOutput{stdout: "", stderr: text, exit_code: jet_cli_perf_counts_exit(run.status)}
+}
+
+// The top-level spans of the trace a jet streamed to `file`
+// (JET_CLI_PERF_OUTSIDE_TRACE_FILE): each `B` and `E` event pair whose name
+// is its kind, on one lane, each on the wall clock by the `unix_us` the
+// trace's `trace.start` names (each event's `ts` counts from it), one left
+// open ending at the trace's last event. None when the file can't be read
+// or names no clock.
+jet_cli_perf_outside_phases: fn(file: String) -[FS.Read]> [JetCLIPerfOutsidePhase] Never! {
+    phases := [JetCLIPerfOutsidePhase]{}
+    text: perf_files.read(file) ?? return phases
+    origin := Int?{None}
+    // Each open span's start by its lane and kind.
+    open := [String:[Int]]{}
+    last := 0
+    loop line in text.lines() {
+        if line.starts_with("{{\"name\":\"trace.start\",") {
+            started: jet_cli_trace_field(line, "unix_us") ?? next
+            origin = Val(started.value)
+            next
+        }
+        base: origin ?? next
+        ts: jet_cli_trace_field(line, "ts") ?? next
+        at: base + ts.value
+        if at > last -> last = at
+        kind: jet_cli_perf_outside_span(line) ?? next
+        lane: jet_cli_trace_field(line, "tid") ?? next
+        key: "{lane.value}\n{kind.name}"
+        starts := open[key, or: [Int]{}]
+        if kind.begins {
+            starts.push(at)
+            open[key] = starts
+            next
+        }
+        begun: starts.pop() ?? next
+        open[key] = starts
+        phases.push(JetCLIPerfOutsidePhase{phase: kind.name, start_us: begun, end_us: at})
+    }
+    loop (key, starts) in open {
+        kind: key.split("\n").to_list()
+        loop begun in starts {
+            phases.push(JetCLIPerfOutsidePhase{phase: "{kind[kind.len() - 1]}", start_us: begun, end_us: last})
+        }
+    }
+    phases
+}
+
+// The kind of the trace event `line` when it opens (`begins`) or closes a
+// top-level span, whose name is its kind:
+// `{"name":"load","cat":"load","ph":"B",…`; None for any other event.
+jet_cli_perf_outside_span: fn(line: String) -> {name: String, begins: Bool}? Never! {
+    lead: "{{\"name\":\""
+    if !line.starts_with(lead) -> return None
+    rest: line.slice(lead.len(), line.len())
+    end: rest.find("\"")
+    if end <= 0 -> return None
+    name: rest.slice(0, end)
+    tail: rest.slice(end, rest.len())
+    if tail.starts_with("\",\"cat\":\"{name}\",\"ph\":\"B\"") {
+        return Val({name: name, begins: true})
+    }
+    if tail.starts_with("\",\"cat\":\"{name}\",\"ph\":\"E\"") {
+        return Val({name: name, begins: false})
+    }
+    None
+}
+
+// Remove the trace and listing files the attach's command's jets wrote:
+// those in the temporary directory whose names start with `stem`.
+jet_cli_perf_outside_sweep: fn(stem: String) -[FS, Env]> Never! {
+    folder: perf_sys.temp_dir()
+    entries: perf_files.list_dir(folder) ?? return
+    loop entry in entries {
+        if !entry.name.starts_with(stem) -> next
+        perf_files.remove(perf_files.join(folder, entry.name)).drop("a trace file that is already gone needs no removing")
+    }
+}
+
+// The profile of a sampled command's samples `taken` as `fold` made them,
+// its rows sorted the hottest first (jet_cli_perf_outside_sections): one
+// row of CPU-time samples for each function the samples were in whose
+// source can be read, at its declaration's line, holding the samples
+// whose innermost frame is in it and, inclusive, those with it anywhere on
+// their stack; the coldest fold past the row limit
+// (jet_cli_perf_profile_fold). A source is read where the location table
+// of `program`, the command's executable, names it: by its own path, or
+// below the nearest directory above the executable that holds it, else
+// the working directory (Core's, `<corelib>/…`, below either as `Core/…`).
+// Its coverage is complete when every sample is in a row and the kernel
+// lost none.
+jet_cli_perf_outside_profile: fn(fold: &JetCLIPerfOutsideFold, taken: X64Samples, program: String) -[FS.Read]> JetCLIPerfOutsideProfile Never! {
+    roots := [String]{}
+    dir := perf_files.canonicalize(program) ?? program
+    loop {
+        above: perf_files.dirname(dir)
+        if above == "" || above == dir -> break
+        roots.push("{above}")
+        dir = above
+    }
+    roots.push(".")
+    // Each source's index in `sources` by its path, -1 for one that can't
+    // be read.
+    digests := [String:Int]{}
+    sources := [SourceIdentity]{}
+    rows := [TraceProfileRow]{}
+    held := 0
+    loop row in fold.rows {
+        if row.file == "" || row.line <= 0 -> next
+        if !digests.has_key(row.file) {
+            digest: jet_cli_perf_outside_digest(row.file, roots)
+            digests[row.file] = if digest == "" -> -1 else -> sources.len()
+            if digest != "" {
+                sources.push(SourceIdentity{path: row.file, sha256: digest, symbols: [{name: String, kind: String}]{}})
+            }
+        }
+        source: digests[row.file]
+        if source < 0 -> next
+        digest: sources[source].sha256
+        held += row.own
+        place: TraceProfileSource{path: row.file, sha256: digest, start_line: U64{row.line}, start_column: U64{1}, end_line: U64{row.line}, end_column: U64{1}}
+        rows.push(TraceProfileRow{clock: "cpu", allocation_count: None, dtlb_miss_count: None, execution_count: None, inclusive_count: Val(U64{row.total}), l1d_miss_count: None, llc_miss_count: None, page_fault_count: None, sample_count: U64{row.own}, sample_weight: U64{row.own}, source: place, symbol: JetSymbolRef{path: row.file, name: row.name}})
+    }
+    if rows.len() == 0 {
+        why: if taken.samples == 0 -> "the kernel took no sample of the command" else -> "no function the command's {taken.samples} samples were in has a source that can be read"
+        return JetCLIPerfOutsideProfile{profile: trace_profile_unsupported(why), sources: [SourceIdentity]{}}
+    }
+    folded: jet_cli_perf_profile_fold(rows.move())
+    truncated: folded.dropped > (U64{0})
+    elsewhere: U64{taken.samples - held} + folded.dropped
+    lost: if taken.lost == 0 -> "" else -> "; the kernel lost {taken.lost} samples"
+    reason: "one CPU-time sample per {JET_CLI_PERF_OUTSIDE_PERIOD_NS /% 1000} microseconds of each thread's CPU time of the command and every process it started, taken from outside them, at the declaration of the function its program counter is in and, inclusive, once at each function on its stack; {elsewhere} of {taken.samples} samples are in no function whose source was read{lost}{folded.note}"
+    profile: TraceProfile{
+        method: "sampling",
+        counters: [TraceCounter]{},
+        status: if truncated -> "truncated" else -> "captured",
+        coverage: if elsewhere == (U64{0}) && taken.lost == 0 -> "complete" else -> "partial",
+        rows: folded.rows.move(),
+        row_limit: U64{TRACE_PROFILE_ROW_LIMIT},
+        rows_truncated: truncated,
+        overhead_ns: None,
+        overhead_runtime_ns: None,
+        overhead_kernel_ns: None,
+        overhead_status: "not_measured",
+        overhead_reason: "the kernel sampled the command from outside it, and that cost is not measured",
+        reason: reason,
+        window_status: "unavailable",
+        window_wall_ns: None,
+        window_cpu_ns: None,
+        window_reason: "the runtime published no run window",
+    }
+    JetCLIPerfOutsideProfile{profile: profile, sources: sources}
+}
+
+// The SHA-256 of the source `file`, as a location table names it, read by
+// its own path when that is absolute, else below the first of `roots` that
+// holds it (Core's, `<corelib>/…`, as `Core/…`); "" when none does.
+jet_cli_perf_outside_digest: fn(file: String, roots: [String]) -[FS.Read]> String Never! {
+    relative: if file.starts_with(JET_CLI_PERF_OUTSIDE_CORELIB) -> file.slice(JET_CLI_PERF_OUTSIDE_CORELIB.len(), file.len()) else -> file
+    if relative.starts_with("<") -> return ""
+    if relative.starts_with("/") {
+        text: perf_files.read(relative) ?? return ""
+        return sha256_hex(text)
+    }
+    loop root in roots {
+        text: perf_files.read(perf_files.join(root, relative)) ?? next
+        return sha256_hex(text)
+    }
+    ""
 }
 
 // The CPUs the kernel has online, from /sys/devices/system/cpu/online:
@@ -392,6 +652,10 @@ jet_cli_perf_outside_fold: fn() -[FS.Read]> JetCLIPerfOutsideFold Never! {
         execs: [Int:Int]{},
         mappings: [X64SampleMapping]{},
         parents: [Int:Int]{},
+        code: "",
+        listings: [[JetCLIPerfOutsideCode]]{},
+        listed: [Int:Int]{},
+        listed_at: [Int]{},
         drains: 0,
         failure: "",
         rows: [JetCLIPerfOutsideRow]{},
@@ -463,26 +727,27 @@ jet_cli_perf_outside_reread: fn(fold: &JetCLIPerfOutsideFold, pid: Int, slot: In
 }
 
 // Where process `pid`'s code is mapped, by the mappings of code the kernel
-// reported it made since its last execve; a process that has made none
-// since its fork runs its parent's. Each mapped file's images are read
-// into `fold.images` unless an earlier mapping's were; a file none can be
-// read of (an anonymous mapping's, the vDSO's) names none of its code.
-// None when the kernel reported no mapping of it.
+// reported it made since its last execve, and, until it makes one, those
+// its parent made, which its fork kept: a jet's comptime child runs the
+// runtime image the jet mapped before the fork, beside the batch code it
+// maps itself. Each mapped file's images are read into `fold.images`
+// unless an earlier mapping's were; a file none can be read of (an
+// anonymous mapping's, the vDSO's) names none of its code. None when the
+// kernel reported no mapping that names its code.
 jet_cli_perf_outside_recorded: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> [JetCLIPerfOutsideRange] Never! {
     ranges := [JetCLIPerfOutsideRange]{}
     owner := pid
     // Each step goes to a parent, so a pid reused as an ancestor's ends it.
     loop _ in 0..<fold.parents.len() + 1 {
         since: fold.execs[owner, or: -1]
-        mapped := false
         loop mapping in fold.mappings {
             if mapping.pid != owner || mapping.time < since -> next
-            mapped = true
             if !jet_cli_perf_outside_known(fold.images, fold.unreadable, mapping.path) -> next
             range: jet_cli_perf_outside_mapped(mapping.start, mapping.end, mapping.offset, mapping.path, fold.images)
             if range.image >= 0 -> ranges.push(range)
         }
-        if mapped -> break
+        // An execve replaced all its parent's code.
+        if since >= 0 -> break
         owner = fold.parents[owner, or: -1]
         if owner < 0 -> break
     }
@@ -502,9 +767,10 @@ jet_cli_perf_outside_known: fn(images: &[JetCLIPerfOutsideImage], unreadable: &[
 }
 
 // Fold the samples, execs, mappings and forks `taken` holds into `fold`,
-// each sample's frames named by its process's code, and empty them; their
-// totals stay. An execve's process names its later samples by its new
-// executable.
+// each sample's frames named by its process's code, or by the batch its
+// jet listed when that code holds the frame (jet_cli_perf_outside_listed),
+// and empty them; their totals stay. An execve's process names its later
+// samples by its new executable.
 jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) -[FS.Read]> Never! {
     fold.drains += 1
     at := 0
@@ -548,15 +814,18 @@ jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) 
             image: if range < 0 -> -1 else -> fold.processes[slot][range].image
             link: if range < 0 -> 0 else -> pc + fold.processes[slot][range].delta
             index: if range < 0 -> -1 else -> x64_image_function_find(fold.images[image].functions, link)
-            if index < 0 {
+            listed: if index < 0 -> jet_cli_perf_outside_listed(fold, pid, pc) else -> -1
+            if index < 0 && listed < 0 {
                 if k == 0 -> fold.unnamed += 1
                 next
             }
-            name: "{fold.images[image].functions[index].name}"
+            // The pid's listing, when the listing names the frame.
+            codes: fold.listed[pid, or: -1]
+            name: if listed >= 0 -> "{fold.listings[codes][listed].name}" else -> "{fold.images[image].functions[index].name}"
             row: fold.named[name, or: fold.rows.len()]
             if row == fold.rows.len() {
                 fold.named[name] = row
-                fold.rows.push(jet_cli_perf_outside_row(name, fold.images[image].lines, link))
+                fold.rows.push(if listed >= 0 -> jet_cli_perf_outside_placed(name, fold.listings[codes][listed].file, fold.listings[codes][listed].line) else -> jet_cli_perf_outside_row(name, fold.images[image].lines, link))
             }
             if k == 0 -> fold.rows[row].own = fold.rows[row].own + 1
             if fold.rows[row].seen != fold.sample {
@@ -605,17 +874,22 @@ jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) 
 // when its image's location table names them; the samples by the
 // `packages` they worked for, the package of each one's innermost frame in
 // a package of the program ("" for a sample with none: the runtime's own
-// work, Core's, or code no image names), the most first; the `stacks`
+// work, Core's, or code no image names), the most first; the samples by the
+// `phases` of the command's jet they were taken in
+// (jet_cli_perf_outside_phase_samples), the most first, none without
+// `phases`; the `stacks`
 // (jet_cli_perf_outside_folded); and how far each sample's stack was
 // unwound: `unwound` to JET_CLI_PERF_OUTSIDE_MAIN or a function of
 // JET_CLI_PERF_OUTSIDE_ENTRIES, `cut` at the kernel's frame limit
 // (jet_cli_perf_outside_depth), or `broken` anywhere else, where a frame
 // pointer was lost. The `timeline` section says when
 // (jet_cli_perf_outside_timeline), timed from `origin_unix_ns`.
-jet_cli_perf_outside_sections: fn(fold: &JetCLIPerfOutsideFold, taken: X64Samples, processes: Int, threads: Int, window_ms: Int, exited_ms: Int?, origin_unix_ns: Int) -> JetCLIPerfOutsideSections Never! {
+jet_cli_perf_outside_sections: fn(fold: &JetCLIPerfOutsideFold, taken: X64Samples, processes: Int, threads: Int, window_ms: Int, exited_ms: Int?, origin_unix_ns: Int, phases: [JetCLIPerfOutsidePhase]) -> JetCLIPerfOutsideSections Never! {
     stacks: jet_cli_perf_outside_folded(fold.tree, fold.rows, taken.samples)
-    // Before the rows are sorted: the timeline names them by index.
+    // Before the rows are sorted: the timeline names them by index. It
+    // sorts the samples by their time, as the phases' sweep needs.
     timeline: jet_cli_perf_outside_timeline(fold, origin_unix_ns)
+    phased: jet_cli_perf_outside_phase_samples(fold.timeline, phases, origin_unix_ns)
     packages := [JetCLIPerfOutsidePackage]{}
     loop (package, samples) in fold.working {
         packages.push(JetCLIPerfOutsidePackage{package: "{package}", samples: samples})
@@ -646,6 +920,17 @@ jet_cli_perf_outside_sections: fn(fold: &JetCLIPerfOutsideFold, taken: X64Sample
                 ),
             },
             {key: "period_ns", value: CanonicalJSON.Integer("{JET_CLI_PERF_OUTSIDE_PERIOD_NS}")},
+            {
+                key: "phases",
+                value: CanonicalJSON.Array(
+                    loop each in phased -> CanonicalJSON.Object(
+                        [CanonicalJSONField]{
+                            {key: "phase", value: CanonicalJSON.String(each.phase)},
+                            {key: "samples", value: CanonicalJSON.Integer("{each.samples}")},
+                        },
+                    ),
+                ),
+            },
             {key: "processes", value: CanonicalJSON.Integer("{processes}")},
             {key: "samples", value: CanonicalJSON.Integer("{taken.samples}")},
             {
@@ -666,6 +951,47 @@ jet_cli_perf_outside_sections: fn(fold: &JetCLIPerfOutsideFold, taken: X64Sample
         },
     )
     JetCLIPerfOutsideSections{functions: TraceReceiptSection{name: "functions", type_name: "JetPerfFunctions", digest: canonical_json_sha256(value), value: value}, timeline: timeline}
+}
+
+// The samples of `timeline`, sorted by their time from `origin_unix_ns`, by
+// the phase each was taken in: the innermost of `phases` open at its time,
+// the one opened last, or "" for one taken in none; the most first, and
+// none without `phases`.
+jet_cli_perf_outside_phase_samples: fn(timeline: [JetCLIPerfOutsideMoment], phases: [JetCLIPerfOutsidePhase], origin_unix_ns: Int) -> [{phase: String, samples: Int}] Never! {
+    if phases.len() == 0 -> return [{phase: String, samples: Int}]{}
+    order := phases
+    order.sort_by(fn(left: JetCLIPerfOutsidePhase, right: JetCLIPerfOutsidePhase) { left.start_us <=> right.start_us })
+    counts := [String:Int]{}
+    // The phases open at the sample's time, by their place in `order`; the
+    // next to open is `due`.
+    open := [Int]{}
+    due := 0
+    base: origin_unix_ns /% 1000
+    loop moment in timeline {
+        at: base + moment.us
+        loop due < order.len() && order[due].start_us <= at {
+            open.push(due)
+            due += 1
+        }
+        kept := 0
+        innermost := -1
+        loop index in 0..<open.len() {
+            span: open[index]
+            if order[span].end_us <= at -> next
+            open[kept] = span
+            kept += 1
+            if innermost < 0 || order[span].start_us >= order[innermost].start_us {
+                innermost = span
+            }
+        }
+        loop open.len() > kept -> _: open.pop()
+        phase: if innermost < 0 -> "" else -> "{order[innermost].phase}"
+        counts[phase] = counts[phase, or: 0] + 1
+    }
+    shares := [{phase: String, samples: Int}]{}
+    loop (phase, samples) in counts { shares.push({phase: "{phase}", samples: samples}) }
+    shares.sort_by(fn(left: {phase: String, samples: Int}, right: {phase: String, samples: Int}) { (right.samples <=> left.samples).then(left.phase <=> right.phase) })
+    shares
 }
 
 // The `timeline` section (type `JetPerfTimeline`): when each sample was
@@ -756,21 +1082,81 @@ jet_cli_perf_outside_function: fn(row: JetCLIPerfOutsideRow) -> CanonicalJSON Ne
 // image with location table `lines`: its declaration's file, line and
 // package when the table names the function there.
 jet_cli_perf_outside_row: fn(name: String, lines: X64Jetline, link: Int) -> JetCLIPerfOutsideRow Never! {
-    row := JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: "", line: 0, package: "", root: name == JET_CLI_PERF_OUTSIDE_MAIN}
+    found: x64_jetline_find(lines, link)
+    if found < 0 -> return jet_cli_perf_outside_placed(name, "", 0)
+    function: lines.functions[found]
+    jet_cli_perf_outside_placed(name, jet_cli_perf_outside_path(function.dir, function.file), function.decl)
+}
+
+// The row of function `name` declared at `line` of `file` ("" and 0 for
+// none), with the package of the program `file` lies in.
+jet_cli_perf_outside_placed: fn(name: String, file: String, line: Int) -> JetCLIPerfOutsideRow Never! {
+    row := JetCLIPerfOutsideRow{name: name, own: 0, total: 0, seen: -1, file: file, line: line, package: "", root: name == JET_CLI_PERF_OUTSIDE_MAIN}
     loop entry in JET_CLI_PERF_OUTSIDE_ENTRIES {
         if entry == row.name -> row.root = true
     }
-    found: x64_jetline_find(lines, link)
-    if found < 0 -> return row
-    function: lines.functions[found]
-    row.file = jet_cli_perf_outside_path(function.dir, function.file)
-    row.line = function.decl
     // Core's sources (`<corelib>/…`) are the library a package calls, so a
     // sample in them works for its caller's package.
     if row.file != "" && !row.file.starts_with("<") {
         row.package = jet_cli_perf_symbol_package(row.file)
     }
     row
+}
+
+// The function of a compile-time batch that holds address `pc` of process
+// `pid`, as `fold.code` lists the batches loaded in it: its index in the
+// pid's listing, `fold.listings[fold.listed[pid]]`; -1 when it lists none
+// there. A listing that misses `pc` is read again, at most once a drain:
+// the jet lists each batch before it runs, so one loaded since the last
+// read is listed by then.
+jet_cli_perf_outside_listed: fn(fold: &JetCLIPerfOutsideFold, pid: Int, pc: Int) -[FS.Read]> Int Never! {
+    if fold.code == "" -> return -1
+    slot := fold.listed[pid, or: -1]
+    if slot < 0 {
+        slot = fold.listings.len()
+        fold.listings.push([JetCLIPerfOutsideCode]{})
+        fold.listed_at.push(-1)
+        fold.listed[pid] = slot
+    }
+    found := jet_cli_perf_outside_code_at(fold.listings[slot], pc)
+    if found < 0 && fold.listed_at[slot] < fold.drains {
+        fold.listed_at[slot] = fold.drains
+        text: perf_files.read(fold.code.replace("%p", "{pid}")) ?? ""
+        fold.listings[slot] = jet_cli_perf_outside_listing(text)
+        found = jet_cli_perf_outside_code_at(fold.listings[slot], pc)
+    }
+    found
+}
+
+// The functions a listing `text` names (ENV_JET_PERF_CODE), sorted by
+// start: one a line, its start and end address, its declaration's line and
+// file, and its name, tab-separated. A line that doesn't parse names none.
+jet_cli_perf_outside_listing: fn(text: String) -> [JetCLIPerfOutsideCode] Never! {
+    found := [JetCLIPerfOutsideCode]{}
+    loop line in text.split("\n") {
+        fields: line.split("\t").to_list()
+        if fields.len() < 5 -> next
+        start: Int.parse(fields[0]) ?? next
+        end: Int.parse(fields[1]) ?? next
+        declared: Int.parse(fields[2]) ?? next
+        if end <= start || fields[4] == "" -> next
+        found.push(JetCLIPerfOutsideCode{start: start, end: end, line: declared, file: jet_cli_perf_outside_path("", fields[3]), name: fields[4]})
+    }
+    found.sort_by(fn(left: JetCLIPerfOutsideCode, right: JetCLIPerfOutsideCode) { left.start <=> right.start })
+    found
+}
+
+// The index of the function of `functions` (sorted by start) whose code
+// holds `pc`; -1 when none does.
+jet_cli_perf_outside_code_at: fn(functions: [JetCLIPerfOutsideCode], pc: Int) -> Int Never! {
+    low := 0
+    high := functions.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if functions[middle].start <= pc -> low = middle + 1 else -> high = middle
+    }
+    if low == 0 || pc >= functions[low - 1].end -> return -1
+    low - 1
 }
 
 // The source `file` a location table names, under its compilation
@@ -1064,7 +1450,9 @@ jet_cli_perf_outside_range: fn(ranges: [JetCLIPerfOutsideRange], pc: Int) -> Int
 // samples, and where it is declared when that is known: `  41.6% self
 // 68.2% total · Statements.sema_stmt_check at
 // Compiler/JetSema/Source/Statements.jet:212`; then the samples by
-// package, as a run's profile prints them (jet_cli_perf_package_lines).
+// package, as a run's profile prints them (jet_cli_perf_package_lines),
+// and by the phase of the command's jet they were taken in, the same way
+// under `cpu by phase`.
 jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
     lines := [String]{}
     fields: jettrace_object_view(value, "receipt functions") ?? return lines
@@ -1093,12 +1481,20 @@ jet_cli_perf_outside_lines: fn(value: CanonicalJSON) -> [String] Never! {
             }
         }
     }
+    period: jet_cli_perf_member_number(value, "period_ns") ?? 0
+    interval: if period > 0 -> Val(period /% 1000) else -> None
     if jet_cli_perf_key(fields, "packages") == .Val(at) {
         if jettrace_array(fields[at].value, "receipt functions.packages") == .Ok(rows) {
             parts: loop row in rows -> {dir: jet_cli_perf_member_text(row, "package") ?? "", weight: jet_cli_perf_member_number(row, "samples") ?? 0}
-            period: jet_cli_perf_member_number(value, "period_ns") ?? 0
-            interval: if period > 0 -> Val(period /% 1000) else -> None
             loop line in jet_cli_perf_package_lines(parts, samples, interval) -> lines.push(line)
+        }
+    }
+    if jet_cli_perf_key(fields, "phases") == .Val(at) {
+        if jettrace_array(fields[at].value, "receipt functions.phases") == .Ok(rows) {
+            parts: loop row in rows -> {dir: jet_cli_perf_member_text(row, "phase") ?? "", weight: jet_cli_perf_member_number(row, "samples") ?? 0}
+            loop line in jet_cli_perf_package_lines(parts, samples, interval, heading: "cpu by phase") {
+                lines.push(line)
+            }
         }
     }
     lines

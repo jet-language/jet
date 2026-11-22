@@ -137,9 +137,14 @@ JetEvalNativeImage: struct {
 
 // The host's read of the runtime image file; `None` when it can't be read.
 // A read may wait for an image still being linked (JetCLI Request.jet
-// JetCLICoreImageReader).
+// JetCLICoreImageReader). `loaded` tells the host child `pid` runs code no
+// file holds, its entry program's or a batch's, whose functions `listing`
+// names, one a line: its start and end address, its declaration's line
+// and file, and its name, tab-separated, for a sampler outside the
+// compiler to name that code by.
 JetEvalNativeImageReader: trait {
     read: fn(self, file: String) -[FS.Read, Env, FFI.Asm, Time.Wait]> X64ImageFile?,
+    loaded: fn(self, pid: Int, listing: String) -[FS, Env]> Never!,
 }
 
 // One child: the entry program bound to the image (`stub`, bound once,
@@ -178,6 +183,9 @@ JetEvalNativeProgram: struct {
     // no batch code, is named from them (jet_eval_native_overflow_name).
     functions: [X64ComptimeFunction]{[X64ComptimeFunction]{}},
     function_names: [String]{[String]{}},
+    // The listing of those functions the host is told of once the batch
+    // loads (JetEvalNativeImageReader.loaded).
+    listing: String{""},
 }
 
 // One call's state: the child (taken from the session for the call) and
@@ -361,9 +369,23 @@ jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession,
     spawned.stdout = [U8]{}
     spawned.stderr = [U8]{}
     c.child = spawned
+    // The entry program's functions, `main` among them, which the child's
+    // first stack starts in.
+    jet_eval_native_loaded(session, c.child.pid, jet_eval_native_stub_listing(c.stub))
     c.generation += 1
     c.failure = ""
     true
+}
+
+// The listing (JetEvalNativeImageReader.loaded) of the functions of the
+// bound entry program `stub`, which declare no source.
+jet_eval_native_stub_listing: fn(stub: X64Executable) -> String {
+    names := name_table_sized(8)
+    listed := [String]{}
+    loop function in x64_comptime_functions(x64_executable_header(stub), stub.tail, stub.tail_at, names, every: true) {
+        listed.push("{function.start}\t{function.end}\t0\t\t{names.texts[function.name]}\n")
+    }
+    listed.join("")
 }
 
 // Ends both children of `session` (EXIT, then wait4) once its compile is
@@ -509,13 +531,21 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         return program
     }
     // The function names by the id of the object symbol each one's code
-    // goes by (JetIR X64Select.jet), for a fault's report.
+    // goes by (JetIR X64Select.jet), for a fault's report, and each one's
+    // declaration, for the listing of the batch (JetEvalNativeProgram).
     symbols := name_table_sized(code.functions.len() * 2)
     labels := [String]{}
+    places := [String]{}
     loop function in code.functions {
         id: name_index(name_intern(symbols, if function.symbol != "" -> function.symbol else if function.key != "" -> function.key else -> function.name))
-        loop labels.len() <= id -> labels.push("")
-        if labels[id] == "" -> labels[id] = function.name
+        loop labels.len() <= id {
+            labels.push("")
+            places.push("")
+        }
+        if labels[id] == "" {
+            labels[id] = function.name
+            places[id] = "{function.line}\t{function.source_file}"
+        }
     }
     prepared: ir_x64_program(ir_x64_compile_module(code, threads))
     if prepared.errors.len() > 0 {
@@ -554,6 +584,13 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         return program
     }
     program.functions = x64_comptime_functions(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, symbols)
+    listed := [String]{}
+    loop function in program.functions {
+        if labels[function.name] != "" {
+            listed.push("{function.start}\t{function.end}\t{places[function.name]}\t{labels[function.name]}\n")
+        }
+    }
+    program.listing = listed.join("")
     program.function_names = labels.move()
     permit.value.base = program.code.high
     loaded: x64_comptime_load(permit.value.child, program.code)
@@ -562,8 +599,19 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         program.failure = loaded
         return program
     }
+    jet_eval_native_loaded(session.value, permit.value.child.pid, program.listing)
     program.generation = permit.value.generation
     program
+}
+
+// Tells the session's host that child `pid` loaded a batch whose functions
+// `listing` names (JetEvalNativeImageReader.loaded).
+jet_eval_native_loaded: fn(session: JetEvalNativeSession, pid: Int, listing: String) {
+    if listing == "" {
+        return
+    }
+    permit: session.image.guard_edit()
+    permit.value.reader.loaded(pid, listing)
 }
 
 // `__jet_comptime_item_{index}(cell, params...)`: calls item function `id`
@@ -764,6 +812,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
             jet_eval_ir_problem(s, loaded)
             return jet_eval_ir_result(s, None)
         }
+        jet_eval_native_loaded(session.value, permit.value.child.pid, program.listing)
         program.generation = permit.value.generation
     }
     s.child = permit.value.child.copy()

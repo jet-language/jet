@@ -32,6 +32,7 @@ use {
         ENV_JET_FRONT_RUNTIME_IMAGE_OUTPUT,
         ENV_JET_FRONT_RUNTIME_PACK_OUTPUT,
         ENV_JET_FRONT_RUNTIME_WEB_OUTPUT,
+        ENV_JET_PERF_CODE,
         ENV_JET_RECHECK_VERIFY,
         ENV_JET_TOOLCHAIN_ROOT,
         compiler_take_rows,
@@ -1899,6 +1900,10 @@ JetCLINativeImageReader: struct {
             if image.failure != "" -> return None
             Val(image)
         }
+
+        loaded: fn(self, pid: Int, listing: String) -[FS, Env]> Never! {
+            jet_cli_native_code_listed(pid, listing)
+        }
     }
 }
 
@@ -1914,7 +1919,25 @@ JetCLICoreImageReader: struct {
             arrived: self.arrival.receive() ?? return None
             arrived
         }
+
+        loaded: fn(self, pid: Int, listing: String) -[FS, Env]> Never! {
+            jet_cli_native_code_listed(pid, listing)
+        }
     }
+}
+
+// ENV_JET_PERF_CODE (`jet perf attach`, Perf/Outside.jet): the functions
+// `listing` names, of code no file holds that comptime child `pid` runs,
+// go to the end of the file the variable names, `%p` in it that pid, so
+// the samples the attach takes in that code are named. Unset, nothing is
+// written; a write that fails leaves those samples unnamed, which the
+// attach's coverage says.
+jet_cli_native_code_listed: fn(pid: Int, listing: String) -[FS, Env]> Never! {
+    file: cli_sys.get(ENV_JET_PERF_CODE) ?? return
+    if file == "" {
+        return
+    }
+    _ := jet_cli_trace_append(file.replace("%p", "{pid}"), listing)
 }
 
 // The CLI's raw build-input transport for checked `build: fn` input services:

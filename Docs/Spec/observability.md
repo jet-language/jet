@@ -1106,13 +1106,35 @@ command's whole run, and it exits with the command's exit code. The kernel
 also reports each mapping of code the command's processes make and each
 process they start, so a process's frames are named by where it mapped its
 code, read from the mapped files, even when it ended before its first
-sample was read. When the kernel won't sample it, the attach is
+sample was read; a process that hasn't run `execve` also runs the code its
+parent mapped before starting it, as a jet's compile-time process runs the
+runtime image the jet mapped. Each jet the command starts lists the code
+its compile-time process runs that no file holds, its entry program's
+functions and each compiled batch's, to a file of the attach's
+(`JET_PERF_CODE`, `%p` in it), so those frames are named too, each batch
+function at its declaration. Unless the environment names a
+`JET_TRACE_FILE` already, jet starts the command with one of its own
+there, `%p` in it, so each jet
+the command starts streams its trace to a file of the attach's; the root
+jet's top-level spans, each a phase, split the samples by the phase they
+were taken in, the innermost open at the sample's time. The `functions`
+section holds them as `phases`, each phase's `samples` ("" for those taken
+in none), and the attach prints them as `cpu by phase`, as it prints `cpu
+by package`; the attach removes the files. The trace's profile has a row
+for each function the samples were in whose source can be read, at its
+declaration's line, with its own samples and, inclusive, those with it
+anywhere on their stack: the source is read where the location table
+names it, below the nearest directory above the executable that holds it,
+else the working directory (Core's `<corelib>/…` as `Core/…`). Its
+coverage is `complete` when every sample is in a row and the kernel lost
+none. When the kernel won't sample it, the attach is
 `Jet.DriverOperationFailed` (exit 1) and the command doesn't run.
-`jet perf attach --quiet --out
-profile.jettrace -- jet check Compiler` profiles the compiler compiling
-itself, its timeline split by the phases of its `--trace-out` trace, as
-Tools/Perf/Scaling/Profile.mjs does.
-Tests/Cases/Perf/attach_samples_a_command.case is the worked example.
+`jet perf attach --quiet --out profile.jettrace -- jet build Compiler`
+profiles the compiler building itself, and `jet perf view
+profile.jettrace` gives its CPU by phase, its hottest functions and the
+profile's coverage. Tests/Cases/Perf/attach_samples_a_command.case and
+Tests/Cases/Perf/attach_profiles_a_commands_phases.case are the worked
+examples.
 
 `jet perf attach --lens=counts -- <command>` counts a command's work from
 its start (D-PERF-TARGET1): jet starts the command, opens two of the

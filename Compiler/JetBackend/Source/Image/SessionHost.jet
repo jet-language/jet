@@ -614,7 +614,8 @@ X64ComptimeFunction: struct {
 // The function symbols (STT_FUNC) of an executable's `.symtab` that
 // `symbols` holds, by start address; read as x64_comptime_symbols reads it
 // (`header` the ELF header, `file` the bytes from file offset `file_at` on).
-x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: NameTable) -> [X64ComptimeFunction] Never! {
+// With `every`, a function's symbol `symbols` doesn't hold yet is added.
+x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: &NameTable, every: Bool{false}) -> [X64ComptimeFunction] Never! {
     found := [X64ComptimeFunction]{}
     if header.len() < 64 -> return found
     sections: x64_comptime_unsigned(header, 40, 8) - file_at
@@ -642,7 +643,8 @@ x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: Name
             end := at
             loop end < file.len() && file[end] != (U8{0}) -> end += 1
             if at >= end -> next
-            name: name_find_bytes(symbols, file, at, end) ?? next
+            held: if every -> Val(name_intern_bytes(symbols, file, at, end)) else -> name_find_bytes(symbols, file, at, end)
+            name: held ?? next
             start: x64_comptime_unsigned(file, entry + 8, 8)
             found.push(X64ComptimeFunction{start: start, end: start + x64_comptime_unsigned(file, entry + 16, 8), name: name_index(name)})
         }

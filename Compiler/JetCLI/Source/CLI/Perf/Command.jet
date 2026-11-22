@@ -236,8 +236,11 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS, Env, Exec, Time]> JetDr
     flame: jet_cli_perf_flame(trace)
     timeline: jet_cli_perf_timeline(trace)
     totals: jet_cli_perf_line_totals(trace)
-    // The JSON view carries the trace itself, never the per-line table.
-    costs: if mode != "json" && totals.rows.len() > 0 -> jet_cli_perf_line_costs(trace) else -> jet_cli_perf_line_costs_none()
+    // The JSON view carries the trace itself, never the per-line table. An
+    // outside sampling's sources are where its functions are declared, not
+    // a program whose cost facts `jet explain --cost` gives.
+    explained: mode != "json" && totals.rows.len() > 0 && jet_cli_perf_outside_section(trace) == None
+    costs: if explained -> jet_cli_perf_line_costs(trace) else -> jet_cli_perf_line_costs_none()
     table: jet_cli_perf_line_table(totals, costs)
     if mode == "html" {
         return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -1972,20 +1975,21 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow], interval_us: Int?
     out
 }
 
-// `cpu by package` and a line for each of `parts` (a package's directory,
-// "" for the samples working for no package, and its CPU-time samples) of
-// the `total` samples, when they span more than one: heaviest first, at
-// most 12, `  Compiler/JetSema samples=612 cpu_us=612000 share=61%`, the
-// samples of no package as `(none)`. A sample stands for `interval_us` of
-// CPU time. Both `jet perf view` profiles print it: a run's rows
-// (jet_cli_perf_flame_profile) and an outside attach's `functions`
-// section (Outside.jet jet_cli_perf_outside_lines).
-jet_cli_perf_package_lines: fn(parts: [{dir: String, weight: Int}], total: Int, interval_us: Int?) -> [String] Never! {
+// `heading`, `cpu by package` unless the caller names another, and a line
+// for each of `parts` (a package's directory, "" for the samples working
+// for no package, and its CPU-time samples) of the `total` samples, when
+// they span more than one: heaviest first, at most 12, `  Compiler/JetSema
+// samples=612 cpu_us=612000 share=61%`, the samples of no package as
+// `(none)`. A sample stands for `interval_us` of CPU time. Both `jet perf
+// view` profiles print it: a run's rows (jet_cli_perf_flame_profile) and an
+// outside attach's `functions` section (Outside.jet
+// jet_cli_perf_outside_lines), which prints its phases the same way.
+jet_cli_perf_package_lines: fn(parts: [{dir: String, weight: Int}], total: Int, interval_us: Int?, heading: String{"cpu by package"}) -> [String] Never! {
     out := [String]{}
     if parts.len() < 2 || total <= 0 -> return out
     order := parts
     order.sort_by(fn(left: {dir: String, weight: Int}, right: {dir: String, weight: Int}) { (right.weight <=> left.weight).then(left.dir <=> right.dir) })
-    out.push("cpu by package")
+    out.push("{heading}")
     listed: if order.len() > 12 -> 12 else -> order.len()
     loop part in order[0..<listed] {
         name: if part.dir == "" -> "(none)" else -> part.dir
