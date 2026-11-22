@@ -27,6 +27,10 @@ use jet_foundation.[
     ir_host_value_name,
     ir_runtime_handle_row,
     module_is_core,
+    CompilerThreads,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     NameTable,
     name_count,
     name_find,
@@ -231,6 +235,80 @@ sema_copy_facts_table_empty: fn() -> SemaCopyFactsTable Never! {
 // The graph is read in place through the `.Val(…)` pattern on the parameter;
 // binding `registered: graph` (with or without `??`) copies the whole
 // graph.
+SEMA_COPY_CLOSE_MIN_NOMINALS_PER_THREAD: 128
+
+sema_copy_close_range: fn(graph: SemaRegistrationGraph?, from: Int, to: Int) -> [[{known: Bool, value: Bool}]] Never! {
+    out := [[{known: Bool, value: Bool}]]{}
+    if graph == .Val(registered) {
+        loop module_index in from..<to {
+            out.push((loop nominal in registered.modules[module_index].nominals -> sema_copy_nominal_has_impl(graph, nominal, "Close")))
+        }
+    }
+    out
+}
+
+sema_copy_close_parts: fn(graph: SemaRegistrationGraph?, bounds: [Int], at: Int) -> [[[{known: Bool, value: Bool}]]] Never! {
+    done := [[[{known: Bool, value: Bool}]]]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_copy_close_range(graph, from, to))
+        return done
+    }
+    task.group sema_copy_close_group {
+        head: task sema_copy_close_range(graph, from, to)
+        rest := sema_copy_close_parts(graph, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_copy_facts_table_threads: fn(graph: SemaRegistrationGraph?, threads: CompilerThreads) -> SemaCopyFactsTable Never! {
+    if graph == .Val(registered) {
+        weights := [Int]{}
+        work := 0
+        loop module_index in 0..<registered.modules.len() {
+            count: registered.modules[module_index].nominals.len()
+            weights.push(count)
+            work += count
+        }
+        workers: compiler_threads_admit(threads, weights.len(), work, SEMA_COPY_CLOSE_MIN_NOMINALS_PER_THREAD, 0, 0)
+        close := [[{known: Bool, value: Bool}]]{}
+        if workers <= 1 {
+            close = sema_copy_close_range(graph, 0, registered.modules.len())
+        } else {
+            parts := sema_copy_close_parts(graph, compiler_threads_partition(weights, workers), 0)
+            parts.reverse()
+            loop parts.len() > 0 {
+                part := parts.pop() ?? break
+                close.extend(part.move())
+            }
+        }
+        table := SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: close.move()}
+        rows := [[SemaCopyTypeFacts?]]{}
+        walk := sema_copy_walk()
+        walk.table = true
+        loop module_index in 0..<registered.modules.len() {
+            module_rows := [SemaCopyTypeFacts?]{}
+            loop row in 0..<registered.modules[module_index].nominals.len() {
+                entry := SemaCopyTypeFacts?{None}
+                if registered.modules[module_index].nominals[row].generic_params.len() == 0 && registered.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.Trait {
+                    walk.tainted = false
+                    facts: sema_copy_nominal_facts(registered.modules[module_index].nominals[row], SemaRegistrationRowRef{module_index: module_index, row: row}, Type.Named{name: registered.modules[module_index].nominals[row].symbol.name}, graph, table, -1, [TGenericParam]{}, walk)
+                    if !walk.tainted -> entry = Val(facts)
+                }
+                module_rows.push(entry)
+            }
+            rows.push(module_rows)
+        }
+        table.rows = rows.move()
+        return table.move()
+    }
+    sema_copy_facts_table_empty()
+}
+
 sema_copy_facts_table: fn(graph: SemaRegistrationGraph?) -> SemaCopyFactsTable Never! {
     if graph == .Val(registered) {
         close := [[{known: Bool, value: Bool}]]{}

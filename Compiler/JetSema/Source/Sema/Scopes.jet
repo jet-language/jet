@@ -2982,6 +2982,43 @@ sema_scope_resolve_key: fn(table: SemaScopeTable, name: String) -> String? {
 // copy, and each row's function type stays in `source` (read through
 // `environment.module_scope` via sema_scope_binding_type).
 sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
+    if source.base_binding_count > 0 && source.light_types.len() == source.bindings.len() {
+        return SemaScopeTable{
+            module_identity: source.module_identity,
+            frames: source.frames,
+            bindings: source.bindings,
+            name_slots: source.name_slots,
+            name_positions: source.name_positions,
+            base_table: source.base_table,
+            base_binding_count: source.base_binding_count,
+            loop_labels: source.loop_labels,
+            hardware_transfers: source.hardware_transfers,
+            hardware_definite_transfers: source.hardware_definite_transfers,
+            hardware_pending_transfers: source.hardware_pending_transfers,
+            current: source.current,
+            knowledge_gate: source.knowledge_gate,
+            return_type: source.return_type,
+            failure_carrier: source.failure_carrier,
+            loop_depth: source.loop_depth,
+            ownership_call_depth: source.ownership_call_depth,
+            comptime_execution_depth: source.comptime_execution_depth,
+            transaction_depth: source.transaction_depth,
+            transaction_wall_depth: source.transaction_wall_depth,
+            unit_explicit_units: source.unit_explicit_units,
+            copies_explicit: source.copies_explicit,
+            writes_explicit: source.writes_explicit,
+            failures_explicit: source.failures_explicit,
+            context_allocation: source.context_allocation,
+            policy_modules: source.policy_modules,
+            policy_rows: source.policy_rows,
+            binding_undo: source.binding_undo,
+            open_marks: source.open_marks,
+            location_function: source.location_function,
+            light_types: source.light_types,
+            lookup_counters: source.lookup_counters,
+            method_return_views: source.method_return_views,
+        }
+    }
     count: source.bindings.len()
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}

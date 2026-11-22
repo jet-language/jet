@@ -17,12 +17,16 @@ use jet_foundation.[
     CollectionAccess,
     CollectionReceivers,
     CollectionStatus,
+    CompilerThreads,
     Expr,
     Func,
     Item,
     NameTable,
     PlaceAccess,
     Stmt,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     name_find,
     name_index,
     name_intern,
@@ -154,6 +158,8 @@ sema_fixed_length_write_params: fn(items: [Item]) -> [String] Never! {
 // The same bundle-wide fact over every module of `graph`, in module order:
 // each module's items are read in place rather than first copied into one
 // bundle list.
+SEMA_WINDOW_MIN_BYTES_PER_THREAD: 131072
+
 sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [String] Never! {
     rows := [SemaWindowFunctionRow]{}
     loop module_index in 0..<graph.modules.len() {
@@ -165,6 +171,60 @@ sema_fixed_length_write_params_in_graph: fn(graph: SemaRegistrationGraph) -> [St
         sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
     }
     sema_window_fixed_length_params(candidates)
+}
+
+sema_fixed_length_write_params_in_graph_threads: fn(graph: SemaRegistrationGraph, threads: CompilerThreads) -> [String] Never! {
+    rows := [SemaWindowFunctionRow]{}
+    weights := [Int]{}
+    work := 0
+    loop module_index in 0..<graph.modules.len() {
+        sema_window_collect_rows(graph.modules[module_index].program.items, rows)
+        bytes: graph.modules[module_index].source.count_bytes()
+        weights.push(bytes)
+        work += bytes
+    }
+    positions: sema_window_positions(rows)
+    workers: compiler_threads_admit(threads, weights.len(), work, SEMA_WINDOW_MIN_BYTES_PER_THREAD, 0, 0)
+    candidates := [SemaWindowCandidate]{}
+    if workers <= 1 {
+        loop module_index in 0..<graph.modules.len() {
+            sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
+        }
+    } else {
+        parts := sema_window_collect_candidate_parts(graph, rows, positions, compiler_threads_partition(weights, workers), 0)
+        parts.reverse()
+        loop parts.len() > 0 {
+            part := parts.pop() ?? break
+            candidates.extend(part.move())
+        }
+    }
+    sema_window_fixed_length_params(candidates)
+}
+
+sema_window_collect_candidate_parts: fn(graph: SemaRegistrationGraph, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, bounds: [Int], at: Int) -> [[SemaWindowCandidate]] Never! {
+    done := [[SemaWindowCandidate]]{}
+    if at + 1 >= bounds.len() -> return done
+    from: bounds[at]
+    to: bounds[at + 1]
+    if at + 2 == bounds.len() {
+        done.push(sema_window_collect_candidate_range(graph, rows, positions, from, to))
+        return done
+    }
+    task.group sema_window_candidates_group {
+        head: task sema_window_collect_candidate_range(graph, rows, positions, from, to)
+        rest := sema_window_collect_candidate_parts(graph, rows, positions, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_window_collect_candidate_range: fn(graph: SemaRegistrationGraph, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, from: Int, to: Int) -> [SemaWindowCandidate] Never! {
+    candidates := [SemaWindowCandidate]{}
+    loop module_index in from..<to {
+        sema_window_collect_candidates(graph.modules[module_index].program.items, rows, positions, candidates)
+    }
+    candidates
 }
 
 sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], positions: SemaWindowPositions, candidates: &[SemaWindowCandidate]) {

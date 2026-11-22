@@ -188,6 +188,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     locals := [[String:Int]]{}
     exports := [[String:Int]]{}
     sema_units_dimension_declarations(inputs, declarations, module_rows, locals, exports)
+    if declarations.len() == 0 {
+        return
+    }
     visibility := [SemaUnitDimensionVisibility]{}
     loop local in locals {
         visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
