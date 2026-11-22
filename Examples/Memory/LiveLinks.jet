@@ -1,0 +1,48 @@
+// Live links (`@T`): shared references with auto-deref reads/writes,
+// value equality (`==`), identity comparison (`.same()`), and recursive
+// optional links (`@Node?`).
+Player: struct {
+    name: String,
+    hp: Int,
+
+    get_hp: fn(self) -> Int { self.hp }
+}
+
+Node: struct {
+    value: Int,
+    next: @Node?,
+}
+
+read_hp: fn(p: @Player) -> Int { p.hp + p.get_hp() }
+
+heal: fn(p: &@Player, amount: Int) { p.hp += amount }
+
+sum_chain: fn(head: @Node?) -> Int {
+    total := 0
+    cursor := head
+    loop {
+        if cursor == .Val(n) {
+            total += n.value
+            cursor = n.next
+        } else { break }
+    }
+    total
+}
+
+run: fn() {
+    hero := @Player{name: "Aria", hp: 10}
+    alias: hero
+    twin: @Player{name: "Aria", hp: 10}
+
+    print("same_alias={hero.same(alias)} same_twin={hero.same(twin)} eq_twin={hero == twin}")
+    heal(hero, 5)
+    print("after_heal={alias.hp} doubled={read_hp(alias)} eq_after={hero == twin}")
+
+    tail: @Node{value: 30, next: None}
+    mid: @Node{value: 20, next: Val(tail)}
+    head: @Node{value: 10, next: Val(mid)}
+    print("chain_sum={sum_chain(Val(head))}")
+
+    party: [@Player]{hero, twin}
+    print("party_hp={party[0].hp},{party[1].hp}")
+}
