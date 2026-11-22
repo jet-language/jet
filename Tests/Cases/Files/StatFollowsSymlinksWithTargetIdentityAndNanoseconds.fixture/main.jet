@@ -1,0 +1,62 @@
+package: {
+    name: "main"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+use files: core.files
+
+run: fn() {
+    scratch: files.temp_dir("stat-c16-case") ?? panic("temp dir")
+    target: files.join(scratch.path, "target.txt")
+    files.write(target, "canonical payload") ?? panic("write target")
+    twin: files.join(scratch.path, "twin.txt")
+    files.hard_link(target, twin) ?? panic("hard link")
+    link1: files.join(scratch.path, "link1")
+    link2: files.join(scratch.path, "link2")
+    broken: files.join(scratch.path, "broken")
+    files.symlink(target, link1) ?? panic("symlink link1")
+    files.symlink(link1, link2) ?? panic("symlink link2")
+    files.symlink(files.join(scratch.path, "missing"), broken) ?? panic("symlink broken")
+
+    canonical: files.stat(target) ?? panic("stat target")
+    followed1: files.stat(link1, links: .Follow) ?? panic("stat follow link1")
+    followed2: files.stat(link2, links: .Follow) ?? panic("stat follow link2")
+    eq_id: followed2.id.device == canonical.id.device && followed2.id.inode == canonical.id.inode
+    eq_mod: (followed2.modified.to_unix_ns() ?? -1) == (canonical.modified.to_unix_ns() ?? -2) && followed2.modified.nanosecond() == canonical.modified.nanosecond()
+    eq_chg: (followed2.changed.to_unix_ns() ?? -1) == (canonical.changed.to_unix_ns() ?? -2) && followed2.changed.nanosecond() == canonical.changed.nanosecond()
+    print("follow: file={followed1.is_file && followed2.is_file} sym={followed1.is_symlink || followed2.is_symlink} size={followed2.size} links={followed2.links} id={eq_id} mod_ns={eq_mod} chg_ns={eq_chg}")
+
+    own: files.stat(link2) ?? panic("stat default")
+    own_lstat: files.lstat(link2) ?? panic("lstat")
+    dir: files.open_directory(scratch.path) ?? panic("open directory")
+    own_dir: dir.entry_stat("link2") ?? panic("entry stat")
+    nofollow_ok: own.is_symlink && own_lstat.is_symlink && own_dir.is_symlink && !own.is_file
+    nofollow_id: own.id.inode != canonical.id.inode && own.id.inode == own_lstat.id.inode && own.id.inode == own_dir.id.inode
+    print("nofollow: sym={nofollow_ok} distinct_link_id={nofollow_id} is_symlink={files.is_symlink(link2)}")
+
+    refuse_link: if files.stat(link2, links: .Refuse) == {
+        .Ok(_) -> false
+        .Err(.InvalidInput(_)) -> true
+        .Err(_) -> false
+    }
+    refuse_target: (files.stat(target, links: .Refuse) ?? panic("refuse target")).id.inode == canonical.id.inode
+    print("refuse: link_rejected={refuse_link} target_ok={refuse_target}")
+
+    broken_own: (files.stat(broken) ?? panic("stat broken")).is_symlink && (files.lstat(broken) ?? panic("lstat broken")).is_symlink
+    broken_follow: if files.stat(broken, links: .Follow) == {
+        .Ok(_) -> false
+        .Err(.NotFound(_)) -> true
+        .Err(_) -> false
+    }
+    broken_refuse: if files.stat(broken, links: .Refuse) == {
+        .Ok(_) -> false
+        .Err(.InvalidInput(_)) -> true
+        .Err(_) -> false
+    }
+    print("broken: nofollow_sym={broken_own} follow_not_found={broken_follow} refuse_invalid={broken_refuse}")
+
+    reader := files.open(link2) ?? panic("open followed")
+    rstat: reader.stat() ?? panic("reader stat")
+    handle_eq: rstat.id.device == canonical.id.device && rstat.id.inode == canonical.id.inode && (rstat.modified.to_unix_ns() ?? -1) == (canonical.modified.to_unix_ns() ?? -2)
+    print("handle: matches_canonical={handle_eq}")
+}

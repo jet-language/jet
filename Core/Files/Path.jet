@@ -423,3 +423,65 @@ starts_dotdot: fn(text: String) -> Bool {
     // Pure lexical check: does not consult the filesystem or follow symlinks.
     assert(of("/nonexistent/link/target").is_within(of("/nonexistent/link")))
 }
+
+#Test("Path components handle roots, empty paths, separators, and prefixes") {
+    // Rooted Unix path
+    p_abs: of("/a/b")
+    assert_eq(parts(p_abs), [String]{"/", "a", "b"})
+    assert_eq(root(p_abs), "/")
+    assert_eq(anchor(p_abs), "/")
+    assert_eq(drive(p_abs), "")
+    assert(is_absolute(p_abs))
+    assert_eq(from_parts(parts(p_abs)).raw, "/a/b")
+
+    // Relative path
+    p_rel: of("a/b")
+    assert_eq(parts(p_rel), [String]{"a", "b"})
+    assert_eq(root(p_rel), "")
+    assert_eq(anchor(p_rel), "")
+    assert_eq(drive(p_rel), "")
+    assert(is_relative(p_rel))
+    assert_eq(from_parts(parts(p_rel)).raw, "a/b")
+
+    // Empty path and current directory
+    p_empty: of("")
+    assert_eq(parts(p_empty), [String]{})
+    assert(is_empty(p_empty))
+    assert(is_relative(p_empty))
+    assert_eq(from_parts(parts(p_empty)).raw, "")
+
+    p_dot: of(".")
+    assert_eq(parts(p_dot), [String]{})
+    assert(is_empty(p_dot))
+    assert(is_relative(p_dot))
+
+    // Doubled and trailing separators
+    p_seps: of("a//b/")
+    assert_eq(parts(p_seps), [String]{"a", "b"})
+    assert(is_relative(p_seps))
+    assert_eq(from_parts(parts(p_seps)).raw, "a/b")
+
+    // UNC-like prefix spelling
+    p_unc: of("//srv/share/x")
+    assert_eq(parts(p_unc), [String]{"/", "srv", "share", "x"})
+    assert_eq(root(p_unc), "/")
+    assert_eq(anchor(p_unc), "/")
+    assert(is_absolute(p_unc))
+    assert_eq(from_parts(parts(p_unc)).raw, "/srv/share/x")
+
+    // Windows drive prefix with backslashes and drive without separator
+    p_win: of("C:\\x\\y")
+    assert_eq(parts(p_win), [String]{"C:/", "x", "y"})
+    assert_eq(drive(p_win), "C:")
+    assert_eq(root(p_win), "C:/")
+    assert_eq(anchor(p_win), "C:/")
+    assert(is_absolute(p_win))
+    assert_eq(from_parts(parts(p_win)).raw, "C:/x/y")
+
+    p_drive: of("C:x")
+    assert_eq(parts(p_drive), [String]{"C:/", "x"})
+    assert_eq(drive(p_drive), "C:")
+    assert_eq(anchor(p_drive), "C:/")
+    assert(is_absolute(p_drive))
+    assert_eq(from_parts(parts(p_drive)).raw, "C:/x")
+}

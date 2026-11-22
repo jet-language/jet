@@ -3484,3 +3484,118 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
         .Err(_) -> assert(false)
     }
 }
+
+#Test("host_path components handle roots, empty paths, separators, and prefixes across Unix and Windows") {
+    collect: fn(raw: String, platform: host_path.PathPlatform) -> [String] Never! {
+        p: host_path.from_text(raw, platform)
+        cursor := host_path.components(p)
+        out := [String]{}
+        loop {
+            part: host_path.next(p, cursor) ?? break
+            text: slice(p.encoded, part.span.start, part.span.end)
+            tag: if part.kind == {
+                .Prefix -> "P:{text}"
+                .RootDir -> "R"
+                .CurDir -> "C"
+                .ParentDir -> "U"
+                .Normal -> "N:{text}"
+            }
+            out.push(tag)
+        }
+        out
+    }
+
+    assert_eq(collect("/a/b", .Unix), [String]{"R", "N:a", "N:b"})
+    assert_eq(collect("a/b", .Unix), [String]{"N:a", "N:b"})
+    assert_eq(collect("", .Unix), [String]{})
+    assert_eq(collect(".", .Unix), [String]{"C"})
+    assert_eq(collect("a//b/", .Unix), [String]{"N:a", "N:b"})
+    assert_eq(collect("//srv/share/x", .Unix), [String]{"R", "N:srv", "N:share", "N:x"})
+    assert(host_path.is_absolute(host_path.from_text("/a/b", .Unix)))
+    assert(!host_path.is_absolute(host_path.from_text("a/b", .Unix)))
+
+    assert_eq(collect("//srv/share/x", .Windows), [String]{"P://srv/share", "R", "N:x"})
+    assert_eq(collect("C:\\x\\y", .Windows), [String]{"P:C:", "R", "N:x", "N:y"})
+    assert_eq(collect("C:x", .Windows), [String]{"P:C:", "N:x"})
+    assert_eq(collect("a//b/", .Windows), [String]{"N:a", "N:b"})
+    assert_eq(collect("", .Windows), [String]{})
+    assert_eq(collect(".", .Windows), [String]{"C"})
+    assert(host_path.is_absolute(host_path.from_text("//srv/share/x", .Windows)))
+    assert(host_path.is_absolute(host_path.from_text("C:\\x\\y", .Windows)))
+    assert(!host_path.is_absolute(host_path.from_text("C:x", .Windows)))
+}
+
+#Test("stat following symlinks reports canonical target identity and nanosecond stamps while no-follow stays no-follow") {
+    root: temp_dir("stat-symlink-ns") ?? panic("temp_dir")
+    target: join(root.path, "target.txt")
+    write(target, "canonical payload") ?? panic("write target")
+    twin: join(root.path, "twin.txt")
+    hard_link(target, twin) ?? panic("hard_link")
+    link1: join(root.path, "link1")
+    link2: join(root.path, "link2")
+    broken: join(root.path, "broken")
+    if rt.os_family() == "unix" {
+        symlink(target, link1) ?? panic("symlink link1")
+        symlink(link1, link2) ?? panic("symlink link2")
+        symlink(join(root.path, "missing"), broken) ?? panic("symlink broken")
+
+        canonical: stat(target) ?? panic("stat target")
+        followed1: stat(link1, links: .Follow) ?? panic("stat follow link1")
+        followed2: stat(link2, links: .Follow) ?? panic("stat follow link2")
+        assert(!followed1.is_symlink && followed1.is_file)
+        assert(!followed2.is_symlink && followed2.is_file)
+        assert_eq(followed2.id.device, canonical.id.device)
+        assert_eq(followed2.id.inode, canonical.id.inode)
+        assert_eq(followed2.size, canonical.size)
+        assert_eq(followed2.links, 2)
+        assert_eq(followed2.modified.to_unix_ns() ?? -1, canonical.modified.to_unix_ns() ?? -2)
+        assert_eq(followed2.changed.to_unix_ns() ?? -1, canonical.changed.to_unix_ns() ?? -2)
+        assert_eq(followed2.modified.nanosecond(), canonical.modified.nanosecond())
+        assert_eq(followed2.changed.nanosecond(), canonical.changed.nanosecond())
+
+        // No-follow operations stay no-follow.
+        own: stat(link2) ?? panic("stat default")
+        own_lstat: lstat(link2) ?? panic("lstat")
+        dir: open_directory(root.path) ?? panic("open_directory")
+        own_dir: dir.entry_stat("link2") ?? panic("entry_stat")
+        assert(own.is_symlink && !own.is_file)
+        assert(own_lstat.is_symlink && !own_lstat.is_file)
+        assert(own_dir.is_symlink && !own_dir.is_file)
+        assert(own.id.inode != canonical.id.inode)
+        assert_eq(own.id.device, own_lstat.id.device)
+        assert_eq(own.id.inode, own_lstat.id.inode)
+        assert_eq(own.id.inode, own_dir.id.inode)
+        assert(is_symlink(link2))
+
+        // Refuse fails on symlinks and succeeds on the canonical target.
+        refused_ok: stat(target, links: .Refuse) ?? panic("refuse target")
+        assert_eq(refused_ok.id.inode, canonical.id.inode)
+        if stat(link2, links: .Refuse) == {
+            .Ok(_) -> { assert(false) }
+            .Err(.InvalidInput(_)) -> {}
+            .Err(_) -> assert(false)
+        }
+
+        // Broken symlink: no-follow succeeds as symlink; follow is NotFound; refuse is InvalidInput.
+        broken_own: stat(broken) ?? panic("stat broken")
+        broken_lstat: lstat(broken) ?? panic("lstat broken")
+        assert(broken_own.is_symlink && broken_lstat.is_symlink)
+        if stat(broken, links: .Follow) == {
+            .Ok(_) -> { assert(false) }
+            .Err(.NotFound(_)) -> {}
+            .Err(_) -> assert(false)
+        }
+        if stat(broken, links: .Refuse) == {
+            .Ok(_) -> { assert(false) }
+            .Err(.InvalidInput(_)) -> {}
+            .Err(_) -> assert(false)
+        }
+
+        // Open handle stat matches canonical target identity and nanosecond stamps.
+        reader := open(link2) ?? panic("open followed")
+        rstat: reader.stat() ?? panic("reader.stat")
+        assert_eq(rstat.id.device, canonical.id.device)
+        assert_eq(rstat.id.inode, canonical.id.inode)
+        assert_eq(rstat.modified.to_unix_ns() ?? -1, canonical.modified.to_unix_ns() ?? -2)
+    }
+}
