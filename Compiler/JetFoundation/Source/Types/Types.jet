@@ -867,7 +867,7 @@ symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
 // of every table, in this order, so a builtin's id is one constant in every
 // run and a reader with no table names it (symbol_builtin,
 // symbol_builtin_method).
-symbol_builtin_keys: fn() -> SymbolKeys Never! {
+symbol_builtin_keys_build: fn() -> SymbolKeys Never! {
     keys := symbol_keys(0, SYMBOL_LOCAL_BOUND)
     loop index in 0..<OWNED_TRAITS.len() {
         _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, "", "", OWNED_TRAITS[index].name))
@@ -885,6 +885,10 @@ symbol_builtin_keys: fn() -> SymbolKeys Never! {
     keys.bound = keys.keys.texts.len()
     keys
 }
+
+SYMBOL_BUILTIN_KEYS: #run symbol_builtin_keys_build()
+
+symbol_builtin_keys: fn() -> SymbolKeys Never! { SYMBOL_BUILTIN_KEYS }
 
 // The id of the owned trait or builtin owner type `name`
 // (symbol_builtin_keys).

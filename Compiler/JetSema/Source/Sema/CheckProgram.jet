@@ -13139,6 +13139,8 @@ sema_finalize_side_liveness_empty: fn() -> SemaLivenessResult {
 // order (most functions first), and the Core usage jobs.
 SemaFinalizeSideInputs: struct {
     table: SemaStateTable,
+    type_caps: [U32:SemaEffectTypeCap],
+    library: [SemaLibraryEffect],
     typestate_order: [Int],
     jobs: [SemaFinalizeCoreJob],
 }
@@ -13186,6 +13188,8 @@ SemaFinalizeSideClaimed: struct {
 sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], threads: CompilerThreads, diagnostics: &[Diagnostic], complete: &Bool, effect_inputs: &[SemaEffectModuleInput], effect_prepared: &SemaEffectPrepared, liveness: &SemaLivenessResult, taint: &[SemaTaintPrepared], typestate_found: &[Diagnostic], cores: &[SemaCoreModuleUsageResult]) -> SemaRegistrationGraph {
     owned: graph.move()
     table: sema_state_table_of(owned)
+    type_caps: sema_effect_type_caps(owned.modules)
+    library: sema_library_effects(owned)
     // Each item's source bytes and its module, over every registered module.
     weights := [Int]{}
     owners := [Int]{}
@@ -13203,9 +13207,10 @@ sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGra
     core_workers: compiler_threads_admit(threads, weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     workers: if core_workers > module_workers -> core_workers else -> module_workers
     if workers <= 1 {
-        sides: loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_run(job, owned, modules)
+        sides: loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_run(job, owned, modules, type_caps, library)
         sema_finalize_side_join(sides, diagnostics, complete, effect_inputs, effect_prepared, liveness, taint)
         loop module_row in modules {
+            if module_row.functions.len() == 0 -> next
             typestate_found.extend(sema_typestate_check_module(owned, table, module_row))
         }
         loop module_index in 0..<owned.modules.len() {
@@ -13219,7 +13224,7 @@ sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGra
     count := workers * SEMA_CORE_JOBS_PER_THREAD
     if count > weights.len() -> count = weights.len()
     function_counts: loop module_row in modules -> module_row.functions.len()
-    inputs: SemaFinalizeSideInputs{table: table.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)}
+    inputs: SemaFinalizeSideInputs{table: table.move(), type_caps: type_caps.move(), library: library.move(), typestate_order: compiler_threads_heaviest_first(function_counts), jobs: sema_finalize_core_jobs(compiler_threads_partition(weights, count), owners)}
     sides := loop job in 0..<SEMA_FINALIZE_SIDE_JOBS -> sema_finalize_side_new(job)
     found := loop _ in modules -> [Diagnostic]{}
     results := [SemaCoreCollected]{}
@@ -13271,7 +13276,7 @@ sema_finalize_side_checks: fn(graph: &&SemaRegistrationGraph, modules: &[SemaGra
 }
 
 // One side check over the graph and the checked modules.
-sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaFinalizeSide {
+sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], type_caps: [U32:SemaEffectTypeCap], library: [SemaLibraryEffect]) -> SemaFinalizeSide {
     side := sema_finalize_side_new(job)
     if {
         job == SEMA_FINALIZE_SIDE_INLINE_ALWAYS -> {
@@ -13294,8 +13299,6 @@ sema_finalize_side_run: fn(job: Int, graph: SemaRegistrationGraph, modules: [Sem
             part: job - SEMA_FINALIZE_SIDE_EFFECT_FIRST
             first: part * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
             last: (part + 1) * modules.len() /% SEMA_FINALIZE_SIDE_EFFECT_PARTS
-            type_caps: sema_effect_type_caps(graph.modules)
-            library: sema_library_effects(graph)
             loop module_index in first..<last {
                 source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
                 input := sema_effect_module_input(graph, source_index, module_index, type_caps, library)
@@ -13380,12 +13383,13 @@ sema_finalize_side_claimed: fn(graph: SemaRegistrationGraph, modules: [SemaGraph
     loop {
         rank: sema_finalize_core_claim(queue)
         if rank < SEMA_FINALIZE_SIDE_JOBS {
-            claimed.sides.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, graph, modules))
+            claimed.sides.push(sema_finalize_side_run(SEMA_FINALIZE_SIDE_JOBS - 1 - rank, graph, modules, inputs.type_caps, inputs.library))
             next
         }
         position: rank - SEMA_FINALIZE_SIDE_JOBS
         if position < typestate_count {
             module_index: inputs.typestate_order[position]
+            if modules[module_index].functions.len() == 0 -> next
             claimed.typestate.push(SemaFinalizeTypestate{module_index: module_index, found: sema_typestate_check_module(graph, inputs.table, modules[module_index])})
             next
         }

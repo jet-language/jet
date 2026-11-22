@@ -404,3 +404,57 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
     assert_eq(disjoint[1].place.projections, [String]{".log"})
 }
 
+#Test("disjoint method footprints allow non-overlapping field borrows and reject overlapping E0212") {
+    ok_source: `
+Counter: struct {
+    hits: Int,
+    log: [String],
+    bump: fn(&self.hits) { self.hits += 1 }
+    peek_log: fn(self.log) -> Int { self.log.len() }
+    record: fn(&self.[log, hits], msg: String) {
+        self.bump()
+        self.log.push(msg)
+    }
+}
+
+demo: fn() -> Int {
+    c := Counter{hits: 0, log: [String]{"a", "b"}}
+    view: c.log[0..<2]
+    c.bump()
+    n: c.peek_log()
+    view.len() + n + c.hits
+}
+`
+    parsed_ok: parse_generated_source(ok_source.bytes())
+    assert(parsed_ok.diagnostics.is_empty())
+    checked_ok: check_program(parsed_ok.program, "test", "test.jet", [SemaSourceSegment]{})
+    if !checked_ok.diagnostics.is_empty() {
+        panic("disjoint footprint check failed: {checked_ok.diagnostics[0].code}: {checked_ok.diagnostics[0].what}")
+    }
+
+    bad_source: `
+Counter: struct {
+    hits: Int,
+    log: [String],
+    push_log: fn(&self.log, msg: String) { self.log.push(msg) }
+}
+
+demo: fn() -> Int {
+    c := Counter{hits: 0, log: [String]{"a"}}
+    view: c.log[0..<1]
+    c.push_log("b")
+    view.len()
+}
+`
+    parsed_bad: parse_generated_source(bad_source.bytes())
+    assert(parsed_bad.diagnostics.is_empty())
+    checked_bad: check_program(parsed_bad.program, "test", "test.jet", [SemaSourceSegment]{})
+    has_e0212 := false
+    loop diag in checked_bad.diagnostics {
+        if diag.code == "E0212" -> has_e0212 = true
+    }
+    assert(has_e0212)
+}
+
+
+

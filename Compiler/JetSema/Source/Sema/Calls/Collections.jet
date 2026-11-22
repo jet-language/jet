@@ -64,10 +64,16 @@ sema_call_collections_fixed_join: fn(operation: SemaCollectionOperation, receive
 // 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
 // `[U64:V]`) checks on its own and then widens into the slot, as Rust `widen_numeric_argument` does
 // after inference.
-sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     reported: diagnostics.len()
     previous_lending: context.lambda_lending_views
+    previous_borrow: context.borrow_ctx
+    previous_view_read: context.allow_string_view_read
     context.lambda_lending_views = lending
+    if borrows_string_view {
+        context.borrow_ctx = true
+        context.allow_string_view_read = true
+    }
     // Rust `open_ret`: a callback slot whose result type is still open
     // (`fn(T)` with no return) accepts any function value; the method's own
     // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
@@ -85,18 +91,25 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         open_slot = (required_ret == None || failure_open) && !is_lambda
     }
     self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required, environment, program, scopes)
+    view_str_arg: borrows_string_view && sema_stmt_string_view_type(sema_stmt_return_known_type(argument.expr, environment, scopes) ?? Type.Int)
     checked := if {
-        open_slot || self_typed -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        open_slot || self_typed || view_str_arg -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         callback -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
         // An open callback result is adopted here and checked below.
         else -> sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
     }
     context.lambda_lending_views = previous_lending
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_view_read
     context.callback_failure_open = false
-    if !callback && !open_slot && !self_typed {
+    if !callback && !open_slot && !self_typed && !view_str_arg {
         sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    value: checked ?? return None
+    value := checked ?? return None
+    if view_str_arg && sema_stmt_string_view_type(value.ty) {
+        tree_expr_retype(value, Type.String)
+        return Val(value)
+    }
     if self_typed {
         return sema_stmt_numeric_slot_value(value, required, environment, program, diagnostics)
     }
@@ -311,7 +324,8 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                 // `filter` projects a fallible predicate's failure onto its
                 // `[T] E!` result (sema_collection_filtered).
                 context.callback_failure_open = callback && (contract.row.result == CollectionResult.Filtered || contract.row.result == CollectionResult.ListFiltered)
-                sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                borrows_string_view: !callback && !collection_row_takes_argument(contract.row, index) && sema_expr_unwrap_tag(required) == Type.String
+                sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, borrows_string_view, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -360,7 +374,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         // of materializing a copy. A bare name of a read parameter is reported
         // at the name by the ownership walk below, which names the consumer;
         // a field place reports at the mark.
-        stores_argument: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
+        stores_argument: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.stores
         consuming_mark: stores_argument && (updated_args[index].convention == AccessConvention.Move || noted_take) && !sema_ownership_type_is_copy(value.ty)
         taken_place := consuming_mark && sema_call_marked_move_place(updated_args[index].expr, value)
         walk_reports: takes_argument && updated_args[index].expr == .Ident(_, _, _)
@@ -409,7 +423,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     // read in place is refused (CopySites.jet), and an unmarked name inside a
     // carrier (`Val(name)`) or in a slot that does not take moves in when a
     // clone refuses it.
-    if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove" {
+    if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.stores {
         loop index in 0..<updated_args.len() {
             if index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, state, context, diagnostics, false) {
                 return SemaMethodSpecialCheck{handled: true, value: None}

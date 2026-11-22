@@ -88,7 +88,7 @@ sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: &Se
     none := [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            arity_ok: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1) || (method == "slice" && (args.len() == 1 || args.len() == 2))
+            arity_ok: ((method == "trim" || method == "trim_start" || method == "trim_end") && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1) || (method == "slice" && (args.len() == 1 || args.len() == 2))
             if !arity_ok -> return none
             if receiver == {
                 .Ident(name, _, _) -> {
@@ -120,10 +120,12 @@ sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
         .BuiltinMethod(receiver, operation, args) -> {
             view_operation: if operation == {
                 .Trim -> TBuiltinOp.TrimView
+                .TrimStart -> TBuiltinOp.TrimStart
+                .TrimEnd -> TBuiltinOp.TrimEnd
                 .After -> TBuiltinOp.AfterView
                 .Before -> TBuiltinOp.BeforeView
                 .Slice(line) -> TBuiltinOp.Slice{line: line}
-                .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {
+                .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {
                     return None
                 }
             }
@@ -150,10 +152,11 @@ sema_string_view_binding: fn(scopes: SemaScopeTable, name: String) -> Bool Never
     scopes.bindings[index].string_view
 }
 
-// `.trim()`/`.after()`/`.before()` take the view as the `&str` it is, and a
-// scalar read (sema_string_view_read_method) reads it in place.
+// `.trim()`/`.trim_start()`/`.trim_end()`/`.after()`/`.before()` take the view
+// as the `&str` it is, and a scalar read (sema_string_view_read_method) reads
+// it in place.
 sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, argument_count: Int, scopes: SemaScopeTable) -> Bool Never! {
-    if method != "trim" && method != "after" && method != "before" && !sema_string_view_read_method(method, argument_count) {
+    if method != "trim" && method != "trim_start" && method != "trim_end" && method != "after" && method != "before" && !sema_string_view_read_method(method, argument_count) {
         return false
     }
     if receiver == {
@@ -162,21 +165,27 @@ sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, argument_co
     }
 }
 
-// A builtin `String` method that only reads its receiver and answers a
-// scalar (`len`, `is_empty`, `index_of`, `count`, …): its runtime routine
-// borrows the text and keeps none of it, so a view receiver is passed as the
-// view it is and never materialized.
+// A builtin `String` method that only reads its receiver and returns a fresh
+// value (`len`, `is_empty`, `index_of`, `count`, `removeprefix`, `removesuffix`,
+// `partition`, `lower`, `upper`, `words`, `lines`, `parse`, …): its runtime
+// routine borrows the text and keeps none of it, so a view receiver is passed
+// as the view it is and never materialized.
 sema_string_view_read_method: fn(method: String, argument_count: Int) -> Bool Never! {
+    if method == "copy" -> return false
     row: builtin_method_row(Type.String, method, argument_count) ?? return false
     if row.access != AccessConvention.Read -> return false
-    if row.lowering == .Builtin(_) -> return sema_string_view_scalar(row.result)
+    if row.lowering == .Builtin(_) -> return sema_string_view_borrowing_result(row.result)
     false
 }
 
-// Int, Float, Bool or Char, or an Option of one.
-sema_string_view_scalar: fn(ty: Type) -> Bool Never! {
-    if ty == .Option(inner) -> return sema_string_view_scalar(inner)
-    ty == Type.Int || ty == Type.Float || ty == Type.Bool || ty == Type.Char
+// A result type that a builtin String runtime call constructs freshly without
+// retaining a pointer into the borrowed receiver (excludes lazy Iter handles).
+sema_string_view_borrowing_result: fn(ty: Type) -> Bool Never! {
+    if ty == .Option(inner) -> return sema_string_view_borrowing_result(inner)
+    if ty == {
+        .Int | .Float | .Bool | .Char | .String | .Tuple(_) | .List(_) | .Result(_, _) -> true
+        .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> String Never! {

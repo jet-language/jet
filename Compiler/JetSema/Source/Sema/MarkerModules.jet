@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -521,6 +521,34 @@ sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identit
     }
 }
 
+SEMA_PRELUDE_APPLIED_CATALOG: #run sema_marker_module_canonical_applied_catalog()
+
+SEMA_PRELUDE_MARKER_REGISTRY: #run sema_marker_module_canonical_registry()
+
+sema_marker_module_canonical_applied_catalog: fn() -> TAppliedRuleCatalog? {
+    argument_menus: foundation_core_argument_menus(EFFECT_VOCABULARY_ROOTS) ?? return None
+    sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, argument_menus)
+}
+
+sema_marker_module_canonical_registry: fn() -> SemaScopeMembersMarkerRegistry? {
+    applied: sema_marker_module_canonical_applied_catalog() ?? return None
+    sema_marker_module_catalog_registry(applied)
+}
+
+sema_marker_module_effect_roots_are_canonical: fn(graph: SemaRegistrationGraph) -> Bool {
+    effect_index: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return false
+    seen := 0
+    loop item_index in 0..<graph.modules[effect_index].program.items.len() {
+        if graph.modules[effect_index].program.items[item_index] == .EffectDecl(declaration) && !declaration.name.contains(".") {
+            if seen >= EFFECT_VOCABULARY_ROOTS.len() || declaration.name != EFFECT_VOCABULARY_ROOTS[seen] {
+                return false
+            }
+            seen += 1
+        }
+    }
+    seen == EFFECT_VOCABULARY_ROOTS.len()
+}
+
 // The applied-rule argument menus, as Rust RULE_ARG_DECLARATIONS reads them:
 // Core.rows's core.compiler.lang `types { … }` leaves, with `Effect` naming the
 // canonical effect declaration roots (Rust EFFECT_ROOTS: the undotted rows of
@@ -538,6 +566,7 @@ sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TApplied
 
 // The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
 sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
+    if sema_marker_module_effect_roots_are_canonical(graph) -> return SEMA_PRELUDE_APPLIED_CATALOG
     argument_menus: sema_marker_module_argument_menus(graph) ?? return None
     sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, argument_menus)
 }
@@ -563,6 +592,10 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
     loop module_row_index in 0..<graph.modules.len() {
         start: diagnostics.len()
         unknown := [Diagnostic]{}
+        if !graph.core_seal && (module_is_core(graph.modules[module_row_index].module_identity) || graph.modules[module_row_index].package_identity == "jet:canonical-prelude" || graph.modules[module_row_index].package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY) {
+            unknown_rules.push(unknown)
+            next
+        }
         markers: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
         own: Val(sema_marker_module_rows(graph.modules[module_row_index].program.items))
         seen := [String:Bool]{}

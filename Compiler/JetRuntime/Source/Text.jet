@@ -1439,6 +1439,14 @@ rt_text_frame_view: fn(cell: I64, value: I64, start: I64, end: I64) -> I64 {
     rt_text_frame_view(cell, value, start, rt_text_trim_end(value, start))
 }
 
+#Export(c) jet_rt_text_trim_start_frame: fn(value: I64, cell: I64) -> I64 {
+    rt_text_frame_view(cell, value, rt_text_trim_start(value), rt_text_len(value))
+}
+
+#Export(c) jet_rt_text_trim_end_frame: fn(value: I64, cell: I64) -> I64 {
+    rt_text_frame_view(cell, value, I64{0}, rt_text_trim_end(value, I64{0}))
+}
+
 // The cut of `value` around a separator at bytes found..<after: the text
 // before it as a frame view in the cell at `cells`, the text after it in
 // the cell at cells + 40. 1, for the cut found. No step can stop, so this

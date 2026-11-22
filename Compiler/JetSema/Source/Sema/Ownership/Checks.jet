@@ -4822,33 +4822,138 @@ sema_ownership_receiver_consumer: fn(callee: String) -> String Never! {
     if callee.contains(".") -> "`{callee}`" else -> ""
 }
 
-// Calls still count as touching the whole receiver until the native emitter
-// keeps disjoint field borrows of one local across statements (spec.md); flip
-// to `true` when JetIR lowers disjoint field borrows across method calls.
-SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT: false
+// Disjoint receiver field footprints are live alongside the JetIR disjoint
+// field-borrow emitter.
+SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT: true
+
+// Project `receiver_places` onto each field in `receiver_footprint` when
+// disjoint footprints are active and the callee has a bounded field set.
+sema_ownership_method_footprint_places: fn(receiver_places: [SemaOwnershipPlace], receiver_footprint: [String]?, disjoint_enabled: Bool, span: Span) -> [SemaOwnershipPlace] Never! {
+    projected_places := [SemaOwnershipPlace]{}
+    if disjoint_enabled && receiver_footprint == .Val(fields) {
+        loop receiver_place in receiver_places {
+            loop field in fields {
+                projected := sema_ownership_place_snapshot(receiver_place)
+                projected.projections.push(".{field}")
+                projected.typed_projections.push(SemaOwnershipProjection.Field{name: "{field}", span: span})
+                projected_places.push(projected)
+            }
+        }
+        return projected_places
+    }
+    loop receiver_place in receiver_places -> projected_places.push(sema_ownership_place_snapshot(receiver_place))
+    projected_places
+}
 
 // Expand `receiver_places` into per-field projected accesses when disjoint
 // method footprints are enabled and the callee has a bounded field footprint;
 // otherwise record whole-receiver accesses.
 sema_ownership_method_receiver_accesses: fn(receiver_places: [SemaOwnershipPlace], receiver_convention: AccessConvention, receiver_footprint: [String]?, disjoint_enabled: Bool, span: Span, reserved: Bool) -> [SemaOwnershipCallAccess] Never! {
     retained: !reserved && receiver_convention != AccessConvention.Move
-    if disjoint_enabled && receiver_footprint == .Val(fields) {
-        accesses := [SemaOwnershipCallAccess]{}
-        loop receiver_place in receiver_places {
-            loop field in fields {
-                projected := sema_ownership_place_snapshot(receiver_place)
-                projected.projections.push(".{field}")
-                projected.typed_projections.push(SemaOwnershipProjection.Field{name: "{field}", span: span})
-                accesses.push(SemaOwnershipCallAccess{place: projected, access: receiver_convention, span: span, reserved: reserved, retained: retained})
+    places: sema_ownership_method_footprint_places(receiver_places, receiver_footprint, disjoint_enabled, span)
+    loop place in places -> SemaOwnershipCallAccess{place: place, access: receiver_convention, span: span, reserved: reserved, retained: retained}
+}
+
+// Check a method call's receiver against its bounded field footprint when
+// `SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT` is active, so live borrows of
+// disjoint fields stay valid across the call while overlapping borrows fail.
+sema_ownership_check_call_receiver_with_footprint: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, receiver_footprint: [String]?, capability: Bool, method: String, consumer: String, params: [SemaCallParam], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if !SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT || receiver_footprint == None || convention == AccessConvention.Move {
+        return sema_ownership_check_call_receiver_as(state, receiver, convention, capability, method, consumer, params, scopes, span, change_span, diagnostics)
+    }
+    sema_ownership_note_call_receiver(state, receiver, convention)
+    if scopes.writes_explicit && convention != AccessConvention.Read {
+        sema_receiver_mark_sign(state, receiver, sema_ownership_signature_line(method, Val(convention), params))
+    }
+    base_places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
+    if base_places.len() == 0 {
+        if convention == AccessConvention.Write {
+            if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
+            diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then call the method on that name"))
+            return false
+        }
+        return true
+    }
+    places: sema_ownership_method_footprint_places(base_places, receiver_footprint, true, span)
+    if convention == AccessConvention.Read {
+        if sema_ownership_report_invalidated_view(state, receiver, scopes, expr_span(receiver), diagnostics) -> return false
+        if sema_ownership_report_stored_lambda_write(state, places, expr_source_span(receiver), diagnostics) -> return false
+        if sema_ownership_report_own_place_moved(state, receiver, scopes, diagnostics) -> return false
+        loop place in places {
+            if sema_ownership_place_moved(state, place) == .Val(origin) {
+                sema_ownership_report_moved(state, origin, place, expr_span(receiver), diagnostics)
+                return false
+            }
+            if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Read, receiver, scopes) == .Val(fact) {
+                diagnostics.push(sema_ownership_diag_owner_read(fact, place, expr_span(receiver), scopes))
+                next
+            }
+            conflict: sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Read, receiver, scopes)
+            if conflict == .Val(loan) && !sema_ownership_window_operand_read(loan, expr_span(receiver)) {
+                diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(place), true, expr_span(receiver)))
+                return false
             }
         }
-        return accesses
+        return true
     }
-    loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span, reserved: reserved, retained: retained}
+    action: if method != "" -> "be changed by `.{method}()`" else -> ""
+    if sema_ownership_deep_check_change(receiver, if action == "" -> "be edited" else -> action, scopes, diagnostics) -> return false
+    if sema_ownership_reject_frozen_write(state, receiver, if action == "" -> "be edited" else -> action, expr_span(receiver), scopes, diagnostics) -> return false
+    if sema_ownership_report_invalidated_view(state, receiver, scopes, expr_span(receiver), diagnostics) -> return false
+    loop place in places {
+        if sema_ownership_report_group_loan_change(state, place, if action == "" -> "be edited" else -> action, expr_span(receiver), diagnostics) -> return false
+    }
+    loop place in places {
+        if sema_ownership_place_refuses_write(state, place, scopes) {
+            sema_ownership_report_static_write(state, place, expr_span(receiver), diagnostics)
+            return false
+        }
+        if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Write, receiver, scopes) == .Val(fact) {
+            diagnostics.push(sema_ownership_diag_view_change(fact, place, action, expr_span(receiver), scopes))
+            return false
+        }
+        conflict: sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Write, receiver, scopes)
+        if conflict == .Val(loan) {
+            diagnostics.push(sema_ownership_diag_loan_change(state, loan, place, action, expr_span(receiver), scopes))
+            return false
+        }
+    }
+    if sema_ownership_block_allocator_refuses(state, places, if action == "" -> "be edited" else -> action, expr_span(receiver), diagnostics) -> return false
+    if capability {
+        has_view: sema_ownership_view_exists_for_expr(state, receiver, scopes)
+        if has_view && sema_ownership_view_has_access(state, receiver, scopes, AccessConvention.Read) {
+            diagnostics.push(sema_error("E0205", expr_span(receiver), "cannot edit through `{base_places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+            return false
+        }
+        binding: sema_ownership_binding_for_expr(state, receiver, scopes) ?? return false
+        info: binding
+        if info.mutable -> sema_ownership_note_mutation(state, info.symbol.span.start)
+        if sema_ownership_writes_read_shared_guard(receiver, scopes) {
+            diagnostics.push(sema_ownership_diag_read_shared_guard_write(expr_span(receiver)))
+            return false
+        }
+        persist: state.persist_roots.contains(base_places[0].root_id)
+        if !has_view && !persist && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(receiver, info.symbol.ty) {
+            root: sema_receiver_mark_place_root(receiver) ?? info.symbol.name
+            why: "{sema_ownership_signature_line(method, Val(AccessConvention.Write), params)} changes the value it's called on"
+            diagnostic: if {
+                root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `&self`")
+                info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
+                else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
+            }
+            diagnostics.push(diagnostic)
+            return false
+        }
+    }
+    loop place in places {
+        sema_ownership_clear_moved(state, place)
+        sema_ownership_note_place_reference(state, receiver, place, expr_span(receiver), scopes, SemaOwnershipReferenceKind.Write)
+    }
+    true
 }
 
 sema_ownership_check_method_call_with_footprint: fn(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, receiver_footprint: [String]?, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    accepted: sema_ownership_check_call_receiver_as(state, receiver, receiver_convention, capability, sema_window_plain_name(callee), consumer, params, scopes, span, change_span, diagnostics)
+    accepted: sema_ownership_check_call_receiver_with_footprint(state, receiver, receiver_convention, receiver_footprint, capability, sema_window_plain_name(callee), consumer, params, scopes, span, change_span, diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: receiver_convention, reserved: reserved}
     receiver_places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     accesses: sema_ownership_method_receiver_accesses(receiver_places, receiver_convention, receiver_footprint, SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT, span, reserved)

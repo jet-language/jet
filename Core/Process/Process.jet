@@ -13,7 +13,6 @@ package: {
 use {
     core: core
     files: core.files
-    unicode: core.text
     rt: jet.runtime.process
 }
 
@@ -159,14 +158,7 @@ Sh: struct {
 }
 
 sh_split_into: fn(text: String, argv: &[String]) Never! {
-    word := ""
-    loop scalar in unicode.scalars(text) {
-        if scalar.is_whitespace() {
-            if word != "" -> argv.push(word)
-            word = ""
-        } else { word = "{word}{scalar}" }
-    }
-    if word != "" -> argv.push(word)
+    loop word in text.words() -> argv.push(word)
 }
 
 args: fn() -[Exec.Args]> [String] Never! { args_from_argv(rt.argv()) }
@@ -529,7 +521,7 @@ env_set: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never!
 
 env_truthy: fn(name: String) -[Env]> Bool Never! {
     value: core.sys.get(name) ?? return false
-    lowered: core.text.lower(value)
+    lowered: value.lower()
     lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on"
 }
 

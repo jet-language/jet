@@ -26,6 +26,7 @@
 // The encoding is canonical and the decoder rejects every other byte form.
 // Decode problems carry the Rust codec's messages; a caller treats any
 // problem as a cache miss.
+use core.collections.[Row, Rows]
 
 RECORD_FORMAT: 1
 
@@ -394,15 +395,19 @@ record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
     order
 }
 
+RecordStringRow: struct {
+    value: String,
+}
+
 RecordStringTable: struct {
-    order: [String],
-    index: [String:Int],
+    rows: Rows<RecordStringRow>,
+    index: [String:Row<RecordStringRow>],
 }
 
 record_intern: fn(table: &RecordStringTable, value: String) Never! {
     if table.index.get(value) == None {
-        table.index[value] = table.order.len()
-        table.order.push(value.copy())
+        row: table.rows.add(RecordStringRow{value: value.copy()})
+        table.index[value] = row
     }
 }
 
@@ -423,7 +428,8 @@ record_intern_value: fn(table: &RecordStringTable, value: RecordValue) Never! {
 }
 
 record_put_ref: fn(out: &[U8], table: RecordStringTable, value: String) Never! {
-    record_put_uvarint(out, table.index.get(value) ?? 0)
+    slot: if table.index.get(value) == .Val(row) -> row.index() else -> 0
+    record_put_uvarint(out, slot)
 }
 
 record_put_value: fn(out: &[U8], table: RecordStringTable, value: RecordValue) Never! {
@@ -518,15 +524,15 @@ record_encode: fn(schema: String, sections: [RecordSection]) -> RecordEncodeResu
     }
     order: record_section_order(ids)
     if problems.len() > 0 -> return RecordEncodeResult{bytes: None, problem: Val(problems[0])}
-    table := RecordStringTable{order: [String]{}, index: [String:Int]{}}
+    table := RecordStringTable{rows: Rows<RecordStringRow>{}, index: [String:Row<RecordStringRow>]{}}
     loop index in order {
         loop element in canonical[index].elements -> record_intern_value(table, element)
     }
     out := [U8]{74, 69, 84, 82}
     record_put_uvarint(out, RECORD_FORMAT)
     record_put_str(out, schema)
-    record_put_uvarint(out, table.order.len())
-    loop text in table.order -> record_put_str(out, text)
+    record_put_uvarint(out, table.rows.len())
+    loop text in table.rows.value -> record_put_str(out, text)
     record_put_uvarint(out, order.len())
     loop index in order {
         record_put_uvarint(out, canonical[index].id)

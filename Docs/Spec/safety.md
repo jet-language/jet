@@ -3387,21 +3387,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
-      "line": 486,
+      "line": 485,
       "column": 5,
       "reason": "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
-      "line": 563,
+      "line": 562,
       "column": 9,
       "reason": "the probe answer is fixed for the process; a racing probe stores the same word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
-      "line": 578,
+      "line": 577,
       "column": 9,
       "reason": "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)"
     },
@@ -5452,7 +5452,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/VaultTestHooks.jet",
-      "line": 219,
+      "line": 218,
       "column": 5,
       "reason": "written under the vault test backup mutex"
     },
@@ -6586,14 +6586,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 667,
+      "line": 666,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 760,
+      "line": 759,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -7055,14 +7055,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 245,
+      "line": 237,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 351,
+      "line": 343,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -7076,182 +7076,182 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1020,
+      "line": 1018,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1223,
+      "line": 1221,
       "column": 1,
       "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1354,
+      "line": 1352,
       "column": 1,
       "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1455,
+      "line": 1453,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1461,
+      "line": 1459,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1466,
+      "line": 1464,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1474,
+      "line": 1472,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1479,
+      "line": 1477,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1489,
+      "line": 1487,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1499,
+      "line": 1497,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1506,
+      "line": 1504,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1777,
+      "line": 1775,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1797,
+      "line": 1795,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1818,
+      "line": 1816,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1821,
+      "line": 1819,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1824,
+      "line": 1822,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1831,
+      "line": 1829,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1838,
+      "line": 1836,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1841,
+      "line": 1839,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1865,
+      "line": 1863,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1873,
+      "line": 1871,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2068,
+      "line": 2070,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2071,
+      "line": 2073,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2076,
+      "line": 2078,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2084,
+      "line": 2086,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2089,
+      "line": 2091,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -12407,9 +12407,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 45:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 104:5 | "the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 140:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 486:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
-| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 563:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
-| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 578:9 | "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)" |
+| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 485:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
+| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 562:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
+| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 577:9 | "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 8:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 36:1 | "a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 213:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
@@ -12702,7 +12702,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/UIBackends.jet | 207:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 29:5 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 34:5 | "written under the TLS registry mutex" |
-| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 219:5 | "written under the vault test backup mutex" |
+| Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 218:5 | "written under the vault test backup mutex" |
 | Compiler | Compiler/JetRuntime/Source/World.jet | 647:5 | "the entry function sets the device store before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/World.jet | 719:5 | "device_mutex is held" |
 | Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 613:5 | "runtime-init runs before any other thread exists" |
@@ -12864,8 +12864,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 556:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Data.jet | 275:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Files/Files.jet | 667:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 760:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 704:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 136:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
@@ -12931,35 +12931,35 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 4625:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4628:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 245:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 351:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 237:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 343:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1684:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 1020:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 1223:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1354:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
-| Core | Core/Sys/Sys.jet | 1455:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 1461:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 1466:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 1474:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1479:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 1489:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 1499:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 1506:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 1777:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 1797:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 1818:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 1821:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 1824:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 1831:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 1838:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1841:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1865:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1873:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 2068:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 2071:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 2076:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 2084:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 2089:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 1018:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 1221:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1352:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 1453:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 1459:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 1464:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 1472:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1477:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 1487:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 1497:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 1504:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 1775:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 1795:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 1816:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 1819:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 1822:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 1829:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 1836:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1839:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1863:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1871:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 2070:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 2073:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 2078:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 2086:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 2091:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/TUI/TUI.jet | 108:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tasks/Tasks.jet | 115:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
 | Core | Core/Testing/Testing.jet | 1513:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |

@@ -4686,6 +4686,23 @@ sema_expr_allocator_view_receiver: fn(receiver: Expr, method: String, environmen
     false
 }
 
+sema_expr_receiver_has_method_footprint: fn(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    ty: sema_stmt_return_known_type(receiver, environment, scopes) ?? return false
+    if program.registration_graph == .Val(graph) {
+        dummy_diags := [Diagnostic]{}
+        candidates: sema_expr_registration_method_candidates(graph, environment.module_identity, ty, method, [Type]{}, [Type]{}, expr_span(receiver), environment, program, dummy_diags)
+        loop candidate in candidates {
+            if candidate.receiver_footprint != None -> return true
+        }
+    } else {
+        candidates: sema_call_local_method_candidates(environment, program, method, [Type]{}, [Type]{})
+        loop candidate in candidates {
+            if candidate.method.name == method && candidate.receiver_footprint != None -> return true
+        }
+    }
+    false
+}
+
 sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // L0505 / L0506: a growing call in a loop of a `core.mem` file, or inside
     // a `#Context` block that names no allocator, may reach the global heap.
@@ -4762,7 +4779,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         // allocator name run no owner read on it, or a live arena view would be
         // E0220 before `reset` can invalidate it.
         previous_root_read: context.suppress_partial_move_root_read
-        if sema_expr_allocator_view_receiver(receiver, method, environment, scopes) {
+        if sema_expr_allocator_view_receiver(receiver, method, environment, scopes) || (SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT && (state.views.len() > 0 || state.loans.len() > 0) && sema_expr_receiver_has_method_footprint(receiver, method, environment, program, scopes)) {
             context.suppress_partial_move_root_read = true
         }
         receiver_checked = sema_check_expression(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics)

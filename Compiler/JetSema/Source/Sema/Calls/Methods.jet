@@ -664,6 +664,12 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
         if trait_owner == None -> trait_owner = symbol_builtin(SymbolKind.Trait, trait_name_value)
     }
 
+    footprint := [String]?{None}
+    if func.params[0].declared_footprint == .Val(declared) {
+        names := [String]{}
+        loop field in declared -> names.push(field.name)
+        footprint = Val(names)
+    }
     reference: TMethodRef{symbol: symbol, name: func.name, mangled: mangled, trait_owner: trait_owner, operator_identity: None}
     SemaCallMethodCandidate{
         method: reference,
@@ -675,6 +681,7 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
         generic_params: generic_params,
         generic_substitutions: generic_substitutions,
         generic_evidence: [SemaInferenceBoundEvidence]{},
+        receiver_footprint: footprint,
     }
 }
 
@@ -1089,7 +1096,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     if resolved_candidate.receiver_convention == AccessConvention.Move && !sema_copy_site_refuse_resource_copy(receiver_value, environment, program, scopes, context, diagnostics) {
         return None
     }
-    ownership: sema_ownership_check_two_phase_method_call(state, resolved_candidate.method.name, consumer, receiver, resolved_candidate.receiver_convention, true, params, checked_args, scopes, span, span, diagnostics)
+    ownership: sema_ownership_check_method_call_with_footprint(state, resolved_candidate.method.name, consumer, receiver, resolved_candidate.receiver_convention, resolved_candidate.receiver_footprint, true, resolved_candidate.receiver_convention == AccessConvention.Write, true, params, checked_args, scopes, span, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, checked_args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, checked_args, lowered, environment, program, scopes, state, context, diagnostics) {

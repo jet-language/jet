@@ -1,0 +1,80 @@
+// Zero-copy string views (`.trim()`, `.trim_start()`, `.trim_end()`, `.after()`,
+// `.before()`) and explicit `View<str>` values borrow cleanly in non-storing
+// `Map`/`Set` lookup/remove methods and read-only `m[k]` under
+// `#Policy(copies: .Explicit)`, while owning writes (`m[k] = v`) still refuse
+// implicit copies with `E2307`.
+use {
+    jet_parser.[parse_generated_source]
+    jet_sema.[SemaSourceSegment, check_program]
+}
+
+#Test("string views and View<str> borrow cleanly in non-storing Map/Set lookups under copies: .Explicit") {
+    ok_source: `
+lookup_view: fn(m: &[String:Int], s: &Set<String>, key: View<str>) -> Int {
+    result := 0
+    #Policy(copies: .Explicit) {
+        total := m.get(key) ?? 0
+        if m.has_key(key) -> total += 1
+        total += m[key]
+        if s.has(key) -> total += 1
+        _ := m.remove(key)
+        _ := m.pop(key)
+        s.remove(key)
+        s.discard(key)
+        _ := s.pop(key)
+        _ := s.take(key)
+        result = total
+    }
+    result
+}
+
+demo: fn(line: String) -> Int {
+    result := 0
+    #Policy(copies: .Explicit) {
+        m := [String:Int]{"alpha": 1, "beta": 2}
+        s := Set.from([String]{"alpha", "beta"})
+        t1: line.trim()
+        t2: line.trim_start()
+        t3: line.trim_end()
+        t4: line.after("=")
+        t5: line.before("=")
+        total := (m.get(t1) ?? 0) + (m.get(t2) ?? 0) + m[t3]
+        if m.has_key(t4) -> total += 1
+        if s.has(t5) -> total += 1
+        _ := m.remove(t2)
+        _ := m.pop(t3)
+        s.remove(t4)
+        s.discard(t5)
+        _ := s.pop(t1)
+        _ := s.take(t1)
+        result = total
+    }
+    result
+}
+`
+    parsed_ok: parse_generated_source(ok_source.bytes())
+    assert(parsed_ok.diagnostics.is_empty())
+    checked_ok: check_program(parsed_ok.program, "test", "test.jet", [SemaSourceSegment]{})
+    if !checked_ok.diagnostics.is_empty() {
+        lines: loop diag in checked_ok.diagnostics -> "{diag.code}: {diag.what}"
+        panic("string-view lookup check failed: {lines.join("; ")}")
+    }
+
+    bad_source: `
+demo: fn(line: String) {
+    #Policy(copies: .Explicit) {
+        m := [String:Int]{}
+        k: line.trim()
+        m[k] = 1
+    }
+}
+`
+    parsed_bad: parse_generated_source(bad_source.bytes())
+    assert(parsed_bad.diagnostics.is_empty())
+    checked_bad: check_program(parsed_bad.program, "test", "test.jet", [SemaSourceSegment]{})
+    has_e2307 := false
+    loop diag in checked_bad.diagnostics {
+        if diag.code == "E2307" -> has_e2307 = true
+    }
+    assert(has_e2307)
+}

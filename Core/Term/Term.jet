@@ -12,7 +12,6 @@ package: {
 use {
     core: core
     rt: jet.runtime.term
-    fmt: core.text.fmt
     core.files.[FileReader]
 }
 
@@ -208,6 +207,26 @@ PrintStyle: struct {
 // sema_context_field_key).
 __print_style: PrintStyle{}
 
+priv print_radix_signed_width: fn(n: Int, base: Int, width: Int) -> String Never! {
+    sign: if n < 0 -> "-" else -> ""
+    magnitude: if n < 0 -> -n else -> n
+    digits := [U8]{}
+    if magnitude == 0 {
+        digits.push(U8{48})
+    } else {
+        x := magnitude
+        loop x > 0 {
+            d: x % base
+            if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
+            x /%= base
+        }
+        digits.reverse()
+    }
+    text: String.from_bytes(digits) ?? "0"
+    if digits.len() >= width -> return "{sign}{text}"
+    "{sign}{"0".repeat(width - digits.len())}{text}"
+}
+
 // The text `print` shows for an Int under the task's print style (JetIR
 // BuildTypes.jet ir_print_style_scalar calls it by name).
 __print_int: fn(n: Int) -> String Never! {
@@ -219,13 +238,58 @@ __print_int: fn(n: Int) -> String Never! {
         .Hex -> 16
     }
     if base == 10 && style.int_min_digits <= 0 -> return "{n}"
-    fmt.__radix_signed_width(n, base, style.int_min_digits)
+    print_radix_signed_width(n, base, style.int_min_digits)
+}
+
+priv print_float_fixed: fn(n: Float, frac: Int) -> String Never! {
+    if n != n || n - n != 0.0 -> return "{n}"
+    precision: if frac < 0 -> 0 else -> frac
+    if n == 0.0 {
+        if precision == 0 -> return "0"
+        return "0.{"0".repeat(precision)}"
+    }
+    sign: if n < 0.0 -> "-" else -> ""
+    x := if n < 0.0 -> -n else -> n
+    shift := 0
+    two52: Float{4503599627370496.0}
+    two53: Float{9007199254740992.0}
+    loop x >= two53 {
+        x /= two52
+        shift += 52
+    }
+    loop x < two52 {
+        x *= two52
+        shift -= 52
+    }
+    loop x >= two53 {
+        x /= 2.0
+        shift += 1
+    }
+    loop x < two52 {
+        x *= 2.0
+        shift -= 1
+    }
+    numerator := Int{x}
+    denominator := 1
+    if shift >= 0 -> numerator = numerator << shift else -> denominator = denominator << -shift
+    loop _ in 0..<precision -> numerator *= 10
+    rounded := numerator /% denominator
+    if (numerator % denominator) * 2 >= denominator -> rounded += 1
+    digits: "{rounded}"
+    if precision == 0 -> return "{sign}{digits}"
+    pad: precision + 1 - digits.bytes().len()
+    body: if pad > 0 -> "{"0".repeat(pad)}{digits}" else -> digits
+    raw: body.bytes()
+    split: raw.len() - precision
+    whole: String.from_bytes(raw[0..<split]) ?? "0"
+    tail: String.from_bytes(raw[split..<raw.len()]) ?? "0"
+    "{sign}{whole}.{tail}"
 }
 
 // The text `print` shows for a Float under the task's print style.
 __print_float: fn(n: Float) -> String Never! {
     digits: context.print.float_digits ?? return "{n}"
-    fmt.decimal(n, digits)
+    print_float_fixed(n, digits)
 }
 
 // The text between the elements of a list or tuple `print` shows.
