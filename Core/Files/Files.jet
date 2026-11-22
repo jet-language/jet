@@ -1212,7 +1212,18 @@ is_dir: fn(path: Path | String) -[FS.Read]> Bool Never! {
 /// reports `IOError.InvalidInput` when the path ends in a link.
 stat: fn(path: Path | String, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError! {
     text: path_text(path)
-    file_fault("FS.Read", .Read, text)
+    if rt.fault_should_fail("FS.Read") {
+        return Err(
+            IOError.Other(
+                IOContext{
+                    operation: .Read,
+                    resource: Val(text),
+                    os_code: None,
+                    cause: Val("fault injected: FS.Read"),
+                },
+            ),
+        )
+    }
     follow: links == .Val(.Follow)
     info: stat_from_row(core.files.__stat_at(-1, text, follow))
     if links == .Val(.Refuse) && info.is_symlink {
@@ -2019,7 +2030,9 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
 
 priv walk_sort_entries: fn(entries: &[WalkEntry]) Never! {
     n: entries.len()
-    if n <= 1 -> return
+    if n <= 1 {
+        return
+    }
     if n <= 32 {
         i := 1
         loop i < n {
@@ -2041,7 +2054,9 @@ priv walk_sort_entries: fn(entries: &[WalkEntry]) Never! {
 
 priv walk_sort_children: fn(children: &[{key: String, directory: Int}]) Never! {
     n: children.len()
-    if n <= 1 -> return
+    if n <= 1 {
+        return
+    }
     if n <= 32 {
         i := 1
         loop i < n {
@@ -2126,9 +2141,14 @@ priv WalkCursor: struct {
             }
             loop self.frames.len() > 0 {
                 top: self.frames.len() - 1
-                entries: self.frames[top].entries.len()
                 children: self.frames[top].children.len()
-                if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
+                if children == 0 {
+                    if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
+                    _ := self.frames.pop()
+                    next
+                }
+                entries: self.frames[top].entries.len()
+                if entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path {
                     child: self.frames[top].children.pop() ?? panic("walk child")
                     depth: self.frames[top].depth + 1
                     if walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
