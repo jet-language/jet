@@ -436,10 +436,9 @@ ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64Debug
     arms := [X64DebugVariant]{}
     box_size := 8
     loop variant in described.variants {
-        member: ir_x64_debug_arm(m, tables, shared, described.selector, variant)
+        member: ir_x64_debug_arm(tables, shared, described.selector, variant)
         arms.push(X64DebugVariant{value: if variant.selector < 0 -> None else -> Val(variant.selector), member: member})
-        end: ir_x64_debug_end(m, variant.members)
-        if end > box_size -> box_size = end
+        if variant.end > box_size -> box_size = variant.end
     }
     if described.selector == {
         .Box -> {
@@ -456,7 +455,7 @@ ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64Debug
 // payload member itself (a present Option's value, behind the box pointer
 // for a Pointer selector; a union's member), else a struct named as Jet
 // spells the variant whose members are its payload at their offsets.
-ir_x64_debug_arm: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
+ir_x64_debug_arm: fn(tables: &IRX64Tables, shared: &IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
     if variant.name == "" && variant.members.len() == 1 {
         held: variant.members[0]
         target: if held.boxed -> shared.pointer else -> held.ty
@@ -466,18 +465,8 @@ ir_x64_debug_arm: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows,
         return X64DebugMember{name: "", offset: held.offset, ty: target}
     }
     members: loop held in variant.members -> X64DebugMember{name: held.name, offset: held.offset, ty: if held.boxed -> shared.pointer else -> held.ty}
-    payload: ir_x64_debug_add(tables, X64DebugType{name: variant.name, size: ir_x64_debug_end(m, variant.members), kind: X64DebugTypeKind.Struct{members: members}})
+    payload: ir_x64_debug_add(tables, X64DebugType{name: variant.name, size: variant.end, kind: X64DebugTypeKind.Struct{members: members}})
     X64DebugMember{name: variant.name, offset: 0, ty: payload}
-}
-
-// The end of the last of `members`' bytes.
-ir_x64_debug_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
-    end := 0
-    loop member in members {
-        size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
-        if member.offset + size > end -> end = member.offset + size
-    }
-    end
 }
 
 // The tables of all of `m` at once: what ir_x64_compile_module_logged
