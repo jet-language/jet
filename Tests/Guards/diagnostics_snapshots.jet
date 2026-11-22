@@ -1,10 +1,10 @@
 use ds_files: core.files
 
-// Snapshot-scan gates of the deleted tests/diagnostics_coverage.rs:683-1189.
+// Snapshot-scan gates of the deleted
 // Rows, report openers and the rendered corpus come from the dc_* helpers in
 // diagnostics_coverage.jet.
 
-// tests/diagnostics_coverage.rs:843-849: direct fixture directories that carry
+// direct fixture directories that carry
 // rendered CLI and tool reports.
 DS_REPORT_FIXTURE_DIRS: [{directory: String, suffix: String}]{
     {directory: "Tests/CLI", suffix: ".txt"},
@@ -51,7 +51,7 @@ ds_ui_expected: fn(directory: String, lint: Bool, out: &[String]) {
     }
 }
 
-// tests/diagnostics_coverage.rs:866-942: the expected snapshot of every UI and
+// the expected snapshot of every UI and
 // lint fixture plus every direct report fixture, independent of whether the
 // snapshot file exists.
 ds_report_fixture_snapshot_paths: fn() -> [String] {
@@ -118,7 +118,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     trimmed.starts_with("{label}: ") && trimmed.count_bytes() > label.count_bytes() + 2
 }
 
-// tests/diagnostics_coverage.rs:1092-1110: only column-0 report openers count;
+// only column-0 report openers count
 // prose, comments, quoted assertions and indented text never do.
 #Test("report_openers_ignore_prose_comments_and_rust_assertion_text") {
     guards_enter_root()
@@ -126,7 +126,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     assert_eq(dc_report_codes(text).join(" "), "Jet.StrayCharacter L0001 Jet.UnterminatedText L0002 Jet.UnknownCommand")
 }
 
-// tests/diagnostics_coverage.rs:967-1067: every report a snapshot opens names a
+// every report a snapshot opens names a
 // registered row and renders the row's whole product: a What after the
 // opener, a `Why:` line, a `Fix:` line and the row's `More:` link. An opener
 // naming a user-declared diagnostic type (`app.UnservedRoute`) is not a
@@ -190,7 +190,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     assert_eq(failures.join("\n"), "")
 }
 
-// tests/diagnostics_coverage.rs:1070-1081: every UI, lint and report fixture
+// every UI, lint and report fixture
 // keeps its expected snapshot, unless the accepted-failing ledger owns it.
 #Test("every_report_fixture_has_a_snapshot_file") {
     guards_enter_root()
@@ -202,7 +202,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     assert_eq("diagnostic fixture lost its UI snapshot:\n{missing.join("\n")}", "diagnostic fixture lost its UI snapshot:\n")
 }
 
-// tests/diagnostics_coverage.rs:683-704, re-pointed at the current product:
+// re-pointed at the current product
 // `bench` routes through the active E2101 unknown-command row, which the
 // snapshot renders with its name and link.
 #Test("retired_bench_command_snapshot_keeps_registered_teaching_code") {
@@ -233,7 +233,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> {left_only: [String], right_
     {left_only: left_only, right_only: right_only}
 }
 
-// tests/diagnostics_coverage.rs:1114-1126: the reverse coverage diff names a
+// the reverse coverage diff names a
 // fixture code that is retired or no longer registered.
 #Test("reverse_coverage_diff_names_retired_and_unregistered_fixture_codes") {
     guards_enter_root()
@@ -242,7 +242,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> {left_only: [String], right_
     assert_eq(diff.right_only.join("\n  "), "E9999\n  Jet.RetiredStagedParameters")
 }
 
-// tests/diagnostics_coverage.rs:1171-1189: the voice scan covers the owned
+// the voice scan covers the owned
 // runtime and CLI artifacts. Tests/CLI/repl_e1801.txt left the tree with the
 // Rust REPL fixture and is not required.
 #Test("diagnostic_voice_scope_includes_owned_runtime_artifacts") {
