@@ -4,8 +4,10 @@
 # drains that ring, so the trace of a point capture holds the waits the
 # program made before the attach: what each waited for, at which line, and
 # what ended it. Its run window is the attach's own, from its first read of
-# the program to its last, with the program's CPU in it. The program runs
-# under the authorizer, so jet may trace it, as an attach needs.
+# the program to its last, with the program's CPU in it, and so are the
+# trace's wall and CPU samples and its native process CPU, not the figures
+# of the program's latest publication. The program runs under the
+# authorizer, so jet may trace it, as an attach needs.
 requires: os-name:linux
 requires: tool:cc
 fixture: AttachDrainsFlightRing.fixture
@@ -26,6 +28,16 @@ json: file ring.jettrace doc $.content.profile.window_wall_ns > 0 # its wall tim
 json: file ring.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # no more than the attach took, not the run since it started
 json: file ring.jettrace doc $.content.profile.window_cpu_ns >= 0 # the program's CPU in it, which a sleeping program may not have spent
 json: file ring.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "schedstat" # counted to the nanosecond
+capture: wall file ring.jettrace doc $.content.profile.window_wall_ns
+capture: cpu file ring.jettrace doc $.content.profile.window_cpu_ns
+json: file ring.jettrace doc $.content.samples[?domain="wall"][0].duration_ns >= {cap:wall}+0 # the trace's wall sample is the window's
+json: file ring.jettrace doc $.content.samples[?domain="wall"][0].duration_ns <= {cap:wall}+0 # no more and no less
+json: file ring.jettrace doc $.content.samples[?domain="cpu"][0].duration_ns >= {cap:cpu}+0 # its CPU sample is the window's CPU
+json: file ring.jettrace doc $.content.samples[?domain="cpu"][0].duration_ns <= {cap:cpu}+0 # no more and no less
+json: file ring.jettrace doc $.content.native[?clock="process_cpu"][0].duration_ns >= {cap:cpu}+0 # and so is its native process CPU
+json: file ring.jettrace doc $.content.native[?clock="process_cpu"][0].duration_ns <= {cap:cpu}+0 # no more and no less
+json: file ring.jettrace doc $.content.native[?clock="process_cpu"][0].observed_at_ns >= {cap:wall}+0 # observed at the window's close
+json: file ring.jettrace doc $.content.native[?clock="process_cpu"][0].observed_at_ns <= {cap:wall}+0 # timed from its opening
 step: jet perf view ring.jettrace
 exit: 0
 stdout: ~ "waits count=" # the ring's waits are the trace's

@@ -1,0 +1,21 @@
+# Claim: `print` evaluates a field and a method call of a parameter whose
+# type holds an enum with a variant whose payload is a U8, though the
+# evaluation reads no U8. The program's image lays out `Part.Byte` as the
+# tag word and a U8 at 8, 9 bytes. The evaluation's build reaches `Part`
+# through the parameter but never the U8, so it described the variant from
+# a row it doesn't hold, counted the U8 as a word, and found `Part.Byte`
+# 16 bytes: the evaluator then refused every expression with "`Byte`
+# changed its layout". A variant now keeps the extent its layout gave it.
+# The fixture's prog.jet line 14 is weigh's last line; its parameter `node`
+# is Node{count: 3, name: "pair", parts: [Byte, Text]}.
+fixture: PrintBesideAnUnreadEnumPayload.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:14 --do 'print node.count' --do 'print node.parts.len()'
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:14  in weigh()\n" # the stop is in weigh
+stdout: ~ "node.count = 3\n" # a field of the parameter
+stdout: ~ "node.parts.len() = 2\n" # and a method call on another of its fields
+stdout: !~ "changed its layout" # no layout of the image reads as changed
+stdout: !~ "Can't evaluate" # neither is refused

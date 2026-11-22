@@ -21,6 +21,7 @@ stderr: ~ "functions samples=" # the samples the kernel took of it
 stderr: ~ "% total · unit.rt_text_append_owner" # the hot function by its name: the runtime's text append the work spins in
 stderr: ~ "stacks unwound=" # how far its stacks unwound
 stderr: ~ "Trace: " # then the trace
+capture: took = elapsed
 json: file spin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.samples > 0 # the kernel sampled its CPU
 json: file spin.jettrace doc $.content.receipt_sections[?name="functions"][0].value.processes >= 2 # the jet check and the process its compile-time work runs in
 json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].type_name = "JetPerfTimeline"
@@ -28,7 +29,12 @@ json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].val
 json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.nodes #>= 2 # the call tree the nodes name
 json: file spin.jettrace doc $.content.receipt_sections[?name="timeline"][0].value.functions[?name~="rt_text_append_owner"] #>= 1 # the hot function among its functions
 json: file spin.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+json: file spin.jettrace doc $.content.profile.window_wall_ns > 0 # its wall time, from its start to its reap
+json: file spin.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # inside the attach, as this case timed it
+json: file spin.jettrace doc $.content.profile.window_cpu_ns > 0 # the CPU of the check and its compile-time process, which spun
 step: jet perf view spin.jettrace
 exit: 0
+stdout: ~ " window=exit run_wall=" # the header's window is the command's run
+stdout: !~ " run_cpu=0ns" # with its CPU in it
 stdout: ~ "functions samples=" # the view shows the section's lines
 stdout: ~ "% total · unit.rt_text_append_owner" # with the hot function

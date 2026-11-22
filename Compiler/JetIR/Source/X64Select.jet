@@ -2882,6 +2882,52 @@ ir_x64_word_shift: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, at: 
     } else { x64_shift_cl(e.code, if ty.signed -> X64Shift.Sar else -> X64Shift.Shr, X64_RAX) }
 }
 
+// Fuses `t = x & mask` or `t = x % 2^k` (or rem 2^k) immediately followed by
+// `t == 0` / `t != 0` (skipping Nops and folded Consts) when `t` dies at the
+// compare into one `test reg, mask` feeding the compare's flags directly.
+ir_x64_bit_test_fuse: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bool Never! {
+    if e.select >= 0 -> return false
+    op: f.op[at]
+    source := -1
+    mask := 0
+    if op == .BitAnd {
+        if al.consts[f.b[at]] && !al.consts[f.a[at]] {
+            source = f.a[at]
+            mask = al.values[f.b[at]]
+        } else if al.consts[f.a[at]] && !al.consts[f.b[at]] {
+            source = f.b[at]
+            mask = al.values[f.a[at]]
+        } else {
+            return false
+        }
+    } else if op == .Mod || op == .Rem {
+        k: ir_x64_power_of_two(al, f.b[at])
+        if k <= 0 || k > 30 || al.consts[f.a[at]] -> return false
+        source = f.a[at]
+        mask = (1 << k) - 1
+    } else {
+        return false
+    }
+    if !x64_fits_i32(mask) -> return false
+    dst: f.dst[at]
+    if dst < f.param_count || f.slot_kind[dst] != .Temp -> return false
+    cmp_at := at + 1
+    loop cmp_at < f.op.len() && (f.op[cmp_at] == .Nop || (f.op[cmp_at] == .Const && al.consts[f.dst[cmp_at]])) {
+        cmp_at += 1
+    }
+    if cmp_at >= f.op.len() || e.absorbed[cmp_at] || al.ends[dst] != cmp_at -> return false
+    cmp_op: f.op[cmp_at]
+    if cmp_op != .Eq && cmp_op != .Ne -> return false
+    other := -1
+    if f.a[cmp_at] == dst -> other = f.b[cmp_at] else if f.b[cmp_at] == dst -> other = f.a[cmp_at] else -> return false
+    if other < 0 || !al.consts[other] || al.values[other] != 0 -> return false
+    reg: ir_x64_use(e, m, f, al, source, X64_RAX)
+    x64_test_ri(e.code, reg, mask)
+    e.absorbed[cmp_at] = true
+    ir_x64_compare_result(e, m, f, al, cmp_at, if cmp_op == .Eq -> X64Cond.E else -> X64Cond.NE)
+    true
+}
+
 ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, at: Int, ty: IRX64Shape) Never! {
     op: f.op[at]
     if ir_x64_is_compare(op) {
@@ -2897,6 +2943,9 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             x64_alu_rr(e.code, X64Alu.Cmp, left, right)
         }
         return ir_x64_compare_result(e, m, f, al, at, ir_x64_condition(op, ir_x64_unsigned(ty)))
+    }
+    if ir_x64_bit_test_fuse(e, m, f, al, at) {
+        return
     }
     k: ir_x64_power_of_two(al, f.b[at])
     division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
@@ -4394,6 +4443,58 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     e.end_of[branch] = e.code.bytes.len()
     e.pads.push(IRX64Pad{at: branch, end: f.c[branch], site: site, open: e.open, heads: e.heads})
     f.c[branch]
+}
+
+// Outlines a cold dead-end If arm (no Else, ends in Unreachable, no Loop,
+// no outward branch, and any Return only inside a stop-poll If) into e.pads
+// past the function epilogue, leaving a single conditional jump on the hot path.
+ir_x64_cold_if: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, turn: Int) -> Int Never! {
+    if e.absorbed[at] || e.select >= 0 || e.picks[at] >= 0 -> return -1
+    if f.op[at] != .If || f.b[at] >= 0 -> return -1
+    end: f.c[at]
+    if end <= at + 1 || end >= f.op.len() || f.op[end - 1] != .Unreachable -> return -1
+    // Verify the arm is safe to lay out past epilogue with stop-exit Returns.
+    depth := 0
+    stop_depth := 0
+    stop_stack := [Bool]{}
+    loop k in (at + 1)..<end {
+        if ir_x64_zone_bound(e, m, k) >= 0 -> return -1
+        op: f.op[k]
+        if op == .Loop -> return -1
+        if op == .Block {
+            depth += 1
+            stop_stack.push(false)
+        } else if op == .If {
+            is_stop: k > at + 1 && f.op[k - 1] == .Call && (f.a[k - 1] == poll || f.a[k - 1] == trap || f.a[k - 1] == turn) && f.dst[k - 1] == f.a[k] && f.b[k] < 0
+            depth += 1
+            if is_stop -> stop_depth += 1
+            stop_stack.push(is_stop)
+        } else if op == .End {
+            if depth <= 0 -> return -1
+            depth -= 1
+            was_stop: stop_stack.pop() ?? false
+            if was_stop -> stop_depth -= 1
+        } else if op == .Br && f.a[k] >= depth {
+            // An inlined stop edge branches out of its inlined Block to the
+            // caller's stop exit (never back to a Loop).
+            if stop_depth <= 0 -> return -1
+            outer: f.a[k] - depth
+            // outer == 0 targets `at` itself; outer >= 1 targets e.open[e.open.len() - outer].
+            if outer == 0 -> return -1
+            row: e.open.len() - outer
+            if row < 0 || e.heads[row] >= 0 -> return -1
+        } else if op == .BrIf && f.b[k] >= depth {
+            return -1
+        } else if op == .Return {
+            if f.a[k] >= 0 || stop_depth <= 0 -> return -1
+        }
+    }
+    if depth != 0 -> return -1
+    truth: ir_x64_truth(e, m, f, al, f.a[at])
+    site: x64_jcc_rel32(e.code, truth)
+    e.end_of[at] = e.code.bytes.len()
+    e.pads.push(IRX64Pad{at: at, end: end, site: site, open: e.open, heads: e.heads})
+    end
 }
 
 // The armed-word poll of stop point `at` (If `branch`): with `armed`, the
@@ -5939,6 +6040,13 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         if end > at {
             loop _ in (at + 1)..<(end + 1) -> positions.push(e.code.bytes.len())
             at = end + 1
+            next
+        }
+        cold_end: ir_x64_cold_if(e, m, f, al, at, poll, trap, turn)
+        if cold_end > at {
+            traps = e.colds.len()
+            loop _ in (at + 1)..<(cold_end + 1) -> positions.push(e.code.bytes.len())
+            at = cold_end + 1
             next
         }
         ir_x64_select_at(e, m, f, al, tables, at)

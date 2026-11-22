@@ -3,9 +3,11 @@
 # user's and the source its run published. It holds the zones window open
 # and prints each zone, frame mark and plot on stdout as a line, while the
 # program still runs. Ctrl-C ends it with exit 0, and the trace it names
-# holds the zones it read. `--follow` with `--zones=` is refused, and so is
-# an attach that names no pid while two observed programs run. The programs
-# run under the authorizer, so jet may trace them, as an attach needs.
+# holds the zones it read; its run window is the zones window it followed,
+# from its opening to its close, with the program's CPU in it. `--follow`
+# with `--zones=` is refused, and so is an attach that names no pid while
+# two observed programs run. The programs run under the authorizer, so jet
+# may trace them, as an attach needs.
 requires: os-name:linux
 requires: tool:cc
 fixture: AttachTurnsZonesOn.fixture
@@ -33,6 +35,13 @@ stderr: ~ "Trace: " # and names its trace
 step: jet perf view follow.jettrace
 exit: 0
 stdout: ~ "zone tick count=" # the trace holds the zones it read
+stdout: ~ " window=live run_wall=" # the header's window is the followed zones window
+stdout: !~ " run_cpu=0ns" # with the program's CPU in it
+json: file follow.jettrace doc $.content.profile.window_status = "live" # the program's own window, from its opening to its close
+json: file follow.jettrace doc $.content.profile.window_reason ~ "the zones window process " # not the attach's reads
+json: file follow.jettrace doc $.content.profile.window_wall_ns > 0 # it stood open while a tick ran
+json: file follow.jettrace doc $.content.profile.window_cpu_ns > 0 # and the tick's CPU is in it
+json: file follow.jettrace doc $.content.receipt_sections[?name="window"][0].value.cpu_clock = "process" # counted by the program's process CPU-time clock
 step: jet perf attach {pid:live} --source live.jet --follow --zones=500ms
 exit: 2
 stdout: = ""

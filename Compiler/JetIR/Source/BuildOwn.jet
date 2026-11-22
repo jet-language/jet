@@ -287,6 +287,17 @@ ir_box_payload: fn(m: IRModule, row: Int, offset: Int) -> [IRMember] Never! {
     members
 }
 
+// The end of the last of `members`' bytes, by `m`'s rows (a boxed member, or
+// one without a row, is a word).
+ir_members_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
+    end := 0
+    loop member in members {
+        size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
+        if member.offset + size > end -> end = member.offset + size
+    }
+    end
+}
+
 // The variants of every enum, union, Option and Result row of `m` not
 // described yet (IRModule.debug_variants), for their DWARF types. A part's
 // build runs it once its functions are built and before their drop glue,
@@ -317,8 +328,9 @@ ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariant
         if m.types[payload].kind != .Unit {
             members.push(IRMember{name: "", offset: 0, ty: payload})
         }
-        absent: IRDebugVariant{name: "None", selector: ir_option_none_word(m, row), members: [IRMember]{}}
-        present: IRDebugVariant{name: "", selector: -1, members: members}
+        absent: IRDebugVariant{name: "None", selector: ir_option_none_word(m, row), members: [IRMember]{}, end: 0}
+        end: ir_members_end(m, members)
+        present: IRDebugVariant{name: "", selector: -1, members: members, end: end}
         // An inline Option's word or a nullable one's pointer is its value;
         // a boxed one's value lies in its box.
         inline: ir_option_inline(m, row) || m.types[row].option_null
@@ -333,7 +345,8 @@ ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariant
             members := shape.members.move()
             loop at in 0..<members.len() -> members[at].name = ""
             name: if shape.selector == 1 -> "Ok" else -> "Err"
-            variants.push(IRDebugVariant{name: name, selector: shape.selector, members: members.move()})
+            end: ir_members_end(m, members)
+            variants.push(IRDebugVariant{name: name, selector: shape.selector, members: members.move(), end: end})
         }
         return IRDebugVariants{selector: IRDebugSelector.Box, variants: variants}
     }
@@ -345,7 +358,7 @@ ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariant
         if m.types[row].kind == .Word {
             // A payload-free enum: its word is the variant index.
             loop (index, variant) in declared {
-                variants.push(IRDebugVariant{name: "{owner}.{variant.name}", selector: index, members: [IRMember]{}})
+                variants.push(IRDebugVariant{name: "{owner}.{variant.name}", selector: index, members: [IRMember]{}, end: 0})
             }
             return IRDebugVariants{selector: IRDebugSelector.Word, variants: variants}
         }
@@ -361,7 +374,8 @@ ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariant
                 loop at in 0..<members.len() -> members[at].name = ""
             }
             name: if union -> "" else -> "{owner}.{declared[index].name}"
-            variants.push(IRDebugVariant{name: name, selector: index, members: members.move()})
+            end: ir_members_end(m, members)
+            variants.push(IRDebugVariant{name: name, selector: index, members: members.move(), end: end})
             index += 1
         }
         return IRDebugVariants{selector: IRDebugSelector.Box, variants: variants}

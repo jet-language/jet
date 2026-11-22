@@ -1,0 +1,381 @@
+// Loop-invariant code motion (O1, O2, pass "licm"): hoists loop-invariant
+// loads and pure non-trapping computations out of loops to immediately before
+// the Loop header, working innermost-first to a fixed point.
+//
+// Soundness rules:
+// - Only a non-owning scalar/pointer slot (`ty.drop == ""`, not dropped or
+//   closed anywhere) written once in the entire function (`writes[dst] == 1`)
+//   is hoisted, so the move extends its single definition past the Loop entry
+//   without disturbing ownership or aliasing any other write.
+// - A Load is hoisted only when the loop is memory-pure (no Store, StreamStore,
+//   CopyBytes, CallIndirect, mutating Call/CallRuntime, or non-Int Drop/Close)
+//   and either the Load runs unconditionally before the loop's first exit/branch
+//   or its base is known dereferenceable at `[offset .. offset + size)` (an
+//   Aggregate parameter or StackAddress whose size covers the access, or a base
+//   already loaded unconditionally at the loop header).
+// - Only instructions at top level of the loop (not inside an If or inner Loop)
+//   are hoisted, so cold error/bounds-stop paths never move into hot preheaders.
+use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+
+// Whether `op` is a pure non-trapping operation whose value depends only on
+// its operands (never traps, never reads memory, never has side effects).
+ir_licm_pure_op: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op: f.op[at]
+    if op == .Offset -> return true
+    dst: f.dst[at]
+    if dst < 0 -> return false
+    ty: m.types[f.slot_type[dst]]
+    if op == .Add || op == .Sub || op == .Mul {
+        return ty.kind == .Word && f.c[at] == IR_OVERFLOW_WRAP
+    }
+    if op == .BitAnd || op == .BitOr || op == .BitXor {
+        return ty.kind == .Word || ty.kind == .Bool
+    }
+    if op == .Neg || op == .Not {
+        return ty.kind == .Word || ty.kind == .Bool || ty.kind == .Float || ty.kind == .Float32
+    }
+    if op == .Convert -> return true
+    false
+}
+
+// Runtime route ids known not to mutate user struct/list headers.
+ir_licm_safe_routes: fn(m: IRModule) -> [Int] Never! {
+    names: [String]{
+        "jet_int_owned_to_i64",
+        "jet_rt_int_clone",
+        "jet_int_checked_fixed",
+        "jet_int_native_i64_at",
+        "jet_int_checked_widen",
+        "jet_int_add",
+        "jet_int_sub",
+        "jet_int_mul",
+        "jet_int_compare",
+        "jet_rt_int_drop",
+        "jet_rt_list_bounds_stop",
+        "jet_rt_cleanup_enter",
+        "jet_rt_cleanup_leave",
+        "jet_char_len",
+        "jet_string_bytes",
+    }
+    ids := [Int]{}
+    loop name in names {
+        id: name_rows_value(m.name_rows, name) ?? -2
+        if id >= 0 -> ids.push(id)
+    }
+    ids
+}
+
+ir_licm_route_safe: fn(safe: [Int], id: Int) -> Bool Never! {
+    loop known in safe {
+        if known == id -> return true
+    }
+    false
+}
+
+// Whether loop `(loop_at + 1)..<loop_end` writes no user memory that an
+// invariant Load could observe.
+ir_licm_memory_pure: fn(m: IRModule, stop_keys: [Bool], f: IRFunction, safe_routes: [Int], loop_at: Int, loop_end: Int) -> Bool Never! {
+    loop k in (loop_at + 1)..<loop_end {
+        op: f.op[k]
+        if op == .Store || op == .StreamStore || op == .CopyBytes || op == .CallIndirect || op == .Close {
+            return false
+        }
+        if op == .Drop {
+            slot: f.a[k]
+            if slot < 0 || slot >= f.slot_type.len() -> return false
+            kind: m.types[f.slot_type[slot]].kind
+            if kind != .Int && kind != .Word -> return false
+        }
+        if op == .Call {
+            callee: f.a[k]
+            if callee < 0 || callee >= stop_keys.len() || !stop_keys[callee] -> return false
+        }
+        if op == .CallRuntime {
+            if !ir_licm_route_safe(safe_routes, f.a[k]) -> return false
+        }
+    }
+    true
+}
+
+// Known dereferenceable byte size of pointer/aggregate slot `slot` (0 if unknown).
+ir_licm_base_size: fn(m: IRModule, f: IRFunction, write_at: [Int], slot: Int) -> Int Never! {
+    if slot < 0 || slot >= f.slot_type.len() -> return 0
+    ty: m.types[f.slot_type[slot]]
+    if slot < f.param_count && ty.kind == .Aggregate && ty.size > 0 -> return ty.size
+    def: write_at[slot]
+    if def >= 0 && f.op[def] == .StackAddress && f.a[def] > 0 -> return f.a[def]
+    0
+}
+
+// Hoists loop-invariant Loads and pure ops out of loops in `f`, innermost first.
+// Returns the number of instructions hoisted.
+ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    if count < 4 -> return 0
+    has_loop := false
+    loop at in 0..<count {
+        if f.op[at] == .Loop {
+            has_loop = true
+            break
+        }
+    }
+    if !has_loop -> return 0
+
+    slots: f.slot_type.len()
+    writes := loop _ in 0..<slots -> 0
+    write_at := loop _ in 0..<slots -> -1
+    dropped := loop _ in 0..<slots -> false
+    loop at in 0..<count {
+        w: ir_x64_write(f, at)
+        if w >= 0 {
+            writes[w] = writes[w] + 1
+            write_at[w] = at
+        }
+        if f.op[at] == .Drop || f.op[at] == .Close {
+            s: f.a[at]
+            if s >= 0 && s < slots -> dropped[s] = true
+        }
+    }
+
+    safe_routes: ir_licm_safe_routes(m)
+    // Collect loops innermost-first (reverse order of Loop opener index).
+    loops := [Int]{}
+    idx := count - 1
+    loop idx >= 0 {
+        if f.op[idx] == .Loop -> loops.push(idx)
+        idx -= 1
+    }
+
+    // For each instruction, which Loop header it is hoisted before (-1: stays).
+    hoist_to := loop _ in 0..<count -> -1
+    total_hoisted := 0
+    reads := [Int]{}
+
+    loop loop_at in loops {
+        loop_end: f.a[loop_at]
+        if loop_end <= loop_at + 1 || loop_end >= count -> next
+        mem_pure: ir_licm_memory_pure(m, stop_keys, f, safe_routes, loop_at, loop_end)
+
+        // Track which slots are currently written inside this loop (and not yet hoisted out).
+        in_loop := loop _ in 0..<slots -> false
+        loop k in (loop_at + 1)..<loop_end {
+            if hoist_to[k] >= 0 && hoist_to[k] <= loop_at -> next
+            w: ir_x64_write(f, k)
+            if w >= 0 -> in_loop[w] = true
+        }
+
+        // Compute top-level positions (not inside any If or nested Loop) and
+        // unconditional prefix before the first branch/exit/call.
+        top_level := loop _ in 0..<(loop_end - loop_at) -> false
+        always_runs := loop _ in 0..<(loop_end - loop_at) -> false
+        if_or_loop_depth := 0
+        prefix_open := true
+        loop k in (loop_at + 1)..<loop_end {
+            op: f.op[k]
+            if op == .End {
+                opener: f.a[k]
+                if opener > loop_at && (f.op[opener] == .If || f.op[opener] == .Loop) {
+                    if_or_loop_depth -= 1
+                }
+                next
+            }
+            if op == .Else -> next
+            if if_or_loop_depth == 0 {
+                if op == .If || op == .Loop {
+                    prefix_open = false
+                    if_or_loop_depth += 1
+                    next
+                }
+                if op == .Br || op == .BrIf || op == .Return || op == .Unreachable || op == .Call || op == .CallRuntime || op == .CallIndirect {
+                    prefix_open = false
+                }
+                if op != .Block {
+                    top_level[k - loop_at] = true
+                    always_runs[k - loop_at] = prefix_open
+                }
+            } else if op == .If || op == .Loop {
+                if_or_loop_depth += 1
+            }
+        }
+
+        // Fixed-point hoisting for this loop (up to 4 rounds).
+        round := 0
+        loop round < 4 {
+            gained := 0
+            loop k in (loop_at + 1)..<loop_end {
+                if !top_level[k - loop_at] -> next
+                // If already hoisted to an inner loop inside this loop, we can hoist it
+                // further out to this enclosing loop if its operands are invariant here.
+                if hoist_to[k] >= 0 && hoist_to[k] <= loop_at -> next
+                op: f.op[k]
+                if op != .Load && !ir_licm_pure_op(m, f, k) -> next
+                dst: ir_x64_write(f, k)
+                if dst < f.param_count || writes[dst] != 1 || dropped[dst] -> next
+                dst_ty: m.types[f.slot_type[dst]]
+                if dst_ty.drop != "" -> next
+
+                // Check all slot operands are invariant in this loop.
+                ir_x64_reads_into(f, k, reads)
+                invariant := true
+                loop r in reads {
+                    if r >= 0 && in_loop[r] {
+                        invariant = false
+                        break
+                    }
+                }
+                if !invariant -> next
+
+                if op == .Load {
+                    if !mem_pure -> next
+                    if !always_runs[k - loop_at] {
+                        base: f.a[k]
+                        offset: f.b[k]
+                        base_size: ir_licm_base_size(m, f, write_at, base)
+                        if base_size <= 0 || offset < 0 || offset + dst_ty.size > base_size -> next
+                    }
+                }
+
+                if hoist_to[k] < 0 -> total_hoisted += 1
+                hoist_to[k] = loop_at
+                in_loop[dst] = false
+                gained += 1
+            }
+            if gained == 0 -> break
+            round += 1
+        }
+    }
+
+    if total_hoisted == 0 -> return 0
+
+    // Bucket hoisted instructions by their target loop header, preserving original order.
+    buckets := [Int:[Int]]{}
+    loop k in 0..<count {
+        target: hoist_to[k]
+        if target < 0 -> next
+        list := buckets.get(target) ?? [Int]{}
+        list.push(k)
+        buckets[target] = list.move()
+    }
+
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop at in 0..<count {
+        if buckets.get(at) == .Val(items) {
+            loop k in items {
+                ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+            }
+        }
+        if hoist_to[at] >= 0 -> next
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+    }
+
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
+    total_hoisted
+}
+
+#Test("LICM hoists loop-invariant aggregate field loads before the loop") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    agg: ir_intern_type(m, "test Pair", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Pair"}, 16, 8, IRClass.Memory, false, 64, ""))
+    g := ir_function_new("scan", "test:licm.jet.scan", "", "licm.jet", 1)
+    p: ir_slot(g, agg, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+    g.result = word
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    acc: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "acc"), 2)
+    n: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    v: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, acc, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Load, n, p, 0, IR_LOAD_LENGTH, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Load, v, p, 8, -1, 4)
+    _ := ir_emit(g, IROp.Add, acc, acc, v, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, acc, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    loop_at := -1
+    loads_before := 0
+    loads_inside := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
+    }
+    assert(loop_at >= 0)
+    loop at in 0..<loop_at {
+        if f.op[at] == .Load -> loads_before += 1
+    }
+    loop at in (loop_at + 1)..<f.a[loop_at] {
+        if f.op[at] == .Load -> loads_inside += 1
+    }
+    assert_eq(loads_before, 2)
+    assert_eq(loads_inside, 0)
+}
+
+#Test("LICM does not hoist loads out of a loop that stores to memory") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    agg: ir_intern_type(m, "test Cell", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Cell"}, 8, 8, IRClass.Memory, false, 64, ""))
+    g := ir_function_new("mut_scan", "test:licm.jet.mut_scan", "", "licm.jet", 1)
+    p: ir_slot(g, agg, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+    g.result = word
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    ten: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    v: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, ten, 10, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, ten, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Load, v, p, 0, -1, 4)
+    _ := ir_emit(g, IROp.Add, v, v, one, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Store, -1, p, 0, v, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    loop_at := -1
+    loads_inside := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Loop && loop_at < 0 -> loop_at = at
+    }
+    assert(loop_at >= 0)
+    loop at in (loop_at + 1)..<f.a[loop_at] {
+        if f.op[at] == .Load -> loads_inside += 1
+    }
+    assert_eq(loads_inside, 1)
+}

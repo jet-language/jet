@@ -18,6 +18,7 @@ exit: 3 # the command's own exit code
 stderr: ~ "syscalls calls=" # the trace's line
 stderr: ~ " processes=" # with its processes
 stderr: ~ "Trace: " # then the trace
+capture: took = elapsed
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].type_name = "JetPerfSyscalls"
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.status = "traced" # the kernel let jet trace it
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.processes >= 4 # the shell, its subshell, mkdir and ls
@@ -30,8 +31,13 @@ json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].va
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.calls[?name="exit_group"][?result="?"] #>= 1 # a call that never returned
 json: file calls.jettrace doc $.content.receipt_sections[?name="syscalls"][0].value.syscalls[?name="execve"] #>= 2 # summed per process
 json: file calls.jettrace doc $.content.profile.window_status = "exit" # the run window is the command's whole run
+json: file calls.jettrace doc $.content.profile.window_wall_ns > 0 # its wall time, from its start to its reap
+json: file calls.jettrace doc $.content.profile.window_wall_ns <= {cap:took}+0 # inside the attach, as this case timed it
+json: file calls.jettrace doc $.content.profile.window_cpu_ns > 0 # the CPU its processes ran, which its reap reported
 step: jet perf view calls.jettrace
 exit: 0
+stdout: ~ " window=exit run_wall=" # the header's window is the command's run
+stdout: !~ " run_cpu=0ns" # with its CPU in it
 stdout: ~ "syscalls calls=" # the view prints the same line
 stdout: ~ "0700) = 0" # then each call, as strace shows it
 stdout: ~ " = -1 ENOENT" # a failure by its error's name

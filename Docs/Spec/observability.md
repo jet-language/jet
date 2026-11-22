@@ -1074,7 +1074,9 @@ it with. The window ends early when the process exits: the section's
 the 3000 ms window` after the `functions` line. `--for=` reads nothing a
 program publishes, so with `--source`, or on a devserver browser session,
 it is refused (`Jet.InvalidCommandInput`, exit 2); `--zones=` is that path's
-window.
+window. On a program run with `--observe`, `--for=` without `--source`
+samples it from outside the same way, for that window, and the trace's run
+window is the samplers' own.
 Tests/Cases/Perf/attach_samples_a_plain_jet_process.case is the worked
 example, and Tests/Cases/Perf/attach_gives_the_jetcprofile_facts.case
 attaches to a busy `jet check` for 3 seconds.
@@ -1192,8 +1194,12 @@ utime and stime at each end, in clock ticks, and `jet perf view` names that
 resolution after it (`run_cpu=30000000ns run_cpu_resolution=10ms`). The
 trace's `window` receipt section (type `JetPerfAttachWindow`) records the
 CPU's clock (`schedstat`, `ticks` or `process`), its resolution in
-nanoseconds and the threads that exited. The `native` row `process_cpu`
-keeps the program's CPU since its run started. A window whose samples the
+nanoseconds and the threads that exited. The trace's `wall` and `cpu`
+samples and its `native` row `process_cpu` are the window's too, the row
+observed at the window's close: the live snapshot's figures are the
+program's latest publication, which can be its first, before its entry, so
+they would time the program up to then. Where the window has no CPU, the
+`cpu` sample goes and the row is `unavailable`. A window whose samples the
 trace holds is their own, so the run window is the CPU they stand for. An
 outside sample's window is its samplers': it opens once the kernel's
 samplers are open and closes before they are closed, and its CPU is the

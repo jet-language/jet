@@ -284,10 +284,15 @@ IRDebugSelector: enum {
 // that picks it (-1: every value no other variant's selector names), and
 // `members` its payload where its layout puts it (in the box for a Box
 // selector, else in the value); a positional payload member is named "".
+// `end` is where its payload's last byte ends, as the layout of the module
+// that described it placed it: a module that merges the variant in may not
+// reach a member's row (BuildMerge.jet ir_merge_reached_type), and can't
+// size that member itself.
 IRDebugVariant: struct {
     name: String,
     selector: Int,
     members: [IRMember],
+    end: Int,
 }
 
 // The variants of one row, and where its values keep their selector.
