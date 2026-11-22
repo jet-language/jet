@@ -671,6 +671,8 @@ IRModule: struct {
     helper_messages: [String],
     stop_points: Bool{false},
     quiet_routes: NameTable{name_table_sized(2)},
+    quiet_exports: [U8]{[U8]{}},
+    quiet_stops: [U8]{[U8]{}},
     owned_main: Bool{false},
     owned_attach: Bool{false},
     owned_observe: Bool{false},
@@ -701,6 +703,9 @@ IRModule: struct {
     // DWARF unit names (JetBackend Image/Dwarf.jet): a debugger compiles an
     // expression at the level the program was built at.
     debug_level: Int{0},
+    // Fast O0 selection path: single-pass register/home allocation without
+    // linear-scan, cmov selection, wrap prefix, or branch relaxation.
+    fast_o0: Bool{false},
     // The sources the module was compiled from, which its image records
     // (JetBackend Image/Dwarf.jet dwarf_sources) for a debugger to prove
     // the code it binds to is theirs.

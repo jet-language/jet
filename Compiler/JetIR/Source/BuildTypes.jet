@@ -2,17 +2,17 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_carrier_identity_grouped, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameRows, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
 // A rendered type's identity: its declaration key when it names one (every
 // instance of a generic declaration shares it).
-ir_render_type_key: fn(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> String Never! {
+ir_render_type_key: fn(type_rows: NameRows, types: [TTypeDef], ty: Type) -> String Never! {
     plain: ir_untag(ty)
     name: ir_nominal_name(plain) ?? return type_carrier_identity(plain)
-    if type_rows.get(name) == .Val(row) -> return "decl:{types[row].key}"
+    if name_rows_value(type_rows, name) == .Val(row) -> return "decl:{types[row].key}"
     type_carrier_identity(plain)
 }
 
@@ -1789,7 +1789,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         // unit type, not the slot's row.
         if ir_kind_of(m, b, slot) == .Float {
             trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
-            if p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, ty)}") == .Val(row) {
+            if name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, ty)}") == .Val(row) {
                 return ir_render_impl_call(m, p, b, slot, row, trait_short)
             }
             text: ir_unit_text(m, p, b, ty, slot)
@@ -1887,21 +1887,21 @@ ir_render_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: I
 // implementation makes of `slot` (Debug never uses one), or -1 when none is
 // selected.
 ir_render_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
-    if mode == .Debug || p.render_impls.len() == 0 -> return -1
+    if mode == .Debug || p.render_impls.rows.len() == 0 -> return -1
     trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
     receiver_ty: m.types[b.f.slot_type[slot]].ty
-    row: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
+    row: name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
     ir_render_impl_call(m, p, b, slot, row, trait_short)
 }
 
 // Whether a Display implementation is selected for `slot`'s type, or for its
 // checked type `ty` (a unit type lays out as its Float magnitude).
 ir_render_has_display: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slot: Int) -> Bool Never! {
-    if slot < 0 || p.render_impls.len() == 0 -> return false
-    if p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None {
+    if slot < 0 || p.render_impls.rows.len() == 0 -> return false
+    if name_rows_value(p.render_impls, "Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None {
         return true
     }
-    p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, ty)}") != None
+    name_rows_value(p.render_impls, "Display|{ir_render_type_key(p.type_rows, p.types, ty)}") != None
 }
 
 // The owned String the user Debug implementation makes of `slot`, -1 when its
@@ -2569,8 +2569,8 @@ ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, l
             return -1
         }
     }
-    if p.render_impls.len() == 0 -> return -1
-    index: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows, p.types, right_ty)}") ?? return -1
+    if p.render_impls.rows.len() == 0 -> return -1
+    index: name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows, p.types, right_ty)}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic {trait_short} implementation {function.name}")
@@ -2853,8 +2853,8 @@ ir_order_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int
 // The Ordering a selected user Comparable implementation (`compare`) gives
 // `left` against `right` of type row `row`, or -1 when none is selected.
 ir_compare_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, span: Span) -> Int Never! {
-    if p.render_impls.len() == 0 -> return -1
-    index: p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
+    if p.render_impls.rows.len() == 0 -> return -1
+    index: name_rows_value(p.render_impls, "Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic Comparable implementation {function.name}")
@@ -2872,8 +2872,8 @@ ir_compare_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: I
 // The key a selected KeyBy implementation (`key`) gives `value` of type row
 // `row`, as a fresh temporary, or -1 when the type has none.
 ir_key_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
-    if p.render_impls.len() == 0 -> return -1
-    index: p.render_impls.get("KeyBy|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
+    if p.render_impls.rows.len() == 0 -> return -1
+    index: name_rows_value(p.render_impls, "KeyBy|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic KeyBy implementation {function.name}")
@@ -3398,19 +3398,26 @@ ir_add_union_types: fn(types: &[TTypeDef], functions: [FnBody]) Never! {
     // A found union is added unless a type of its key exists or an earlier
     // one of the same key was added.
     keys := [String]{}
-    pending := [String:Bool]{}
+    pending_names := name_table_sized(found.len() + 1)
+    pending_keep := [Bool]{}
     loop ty in found {
         key: ir_union_key(ty)
-        pending[key.copy()] = true
+        id: name_index(name_intern(pending_names, key))
+        loop pending_keep.len() <= id -> pending_keep.push(false)
+        pending_keep[id] = true
         keys.push(key)
     }
     loop definition in types {
-        if pending.get(definition.key) != None -> pending[definition.key.copy()] = false
+        if name_find(pending_names, definition.key) == .Val(found_id) {
+            pending_keep[name_index(found_id)] = false
+        }
     }
     module_identity: types[0].module_identity.copy()
     loop index in 0..<found.len() {
-        if !(pending.get(keys[index]) ?? false) -> next
-        pending[keys[index].copy()] = false
+        found_id: name_find(pending_names, keys[index]) ?? next
+        id: name_index(found_id)
+        if !pending_keep[id] -> next
+        pending_keep[id] = false
         if found[index] == .Union(members) {
             types.push(ir_union_def(module_identity, keys[index], members))
         }
@@ -3420,7 +3427,7 @@ ir_add_union_types: fn(types: &[TTypeDef], functions: [FnBody]) Never! {
 // Adds the structural enum of each union type `functions`' signatures name
 // that `types` lacks (`type_rows`: its rows by key and name, which the
 // added ones join; a union's key is its name).
-ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows: &[String:Int], functions: [FnBody]) Never! {
+ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows: &NameRows, functions: [FnBody]) Never! {
     if types.len() == 0 {
         return
     }
@@ -3429,9 +3436,9 @@ ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows: &[String:Int], f
     module_identity: types[0].module_identity.copy()
     loop ty in found {
         key: ir_union_key(ty)
-        if type_rows.get(key) != None -> next
+        if name_rows_value(type_rows, key) != None -> next
         if ty == .Union(members) {
-            type_rows[key.copy()] = types.len()
+            name_rows_set(type_rows, key, types.len())
             types.push(ir_union_def(module_identity, key, members))
         }
     }

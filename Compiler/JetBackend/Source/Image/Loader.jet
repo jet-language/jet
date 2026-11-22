@@ -891,11 +891,57 @@ X64ImagePart: struct {
 x64_image_part_file: fn(name: String) -> X64ImagePart? {
     before: loader_file_stamp(X64_SELF_EXECUTABLE)
     if before.len() == 0 -> return None
+    label: name.bytes()
+    // Fast path: consult the cached PT_NOTE part directory of this running
+    // executable when its identity still matches `before`.
+    if label.len() <= 112 {
+        cached := loader_self_part_lookup(label, before)
+        if cached.checked -> return cached.found
+        header: x64_self_read(0, 64) ?? return None
+        phoff: loader_u64(header, 32)
+        phnum: loader_u16(header, 56)
+        table: x64_self_read(phoff, phnum * 56) ?? return None
+        labels := [[U8]]{}
+        ats := [Int]{}
+        sizes := [Int]{}
+        loop k in 0..<phnum {
+            if loader_u32(table, k * 56) != 4 -> next
+            at: loader_u64(table, k * 56 + 8)
+            size: loader_u64(table, k * 56 + 32)
+            if size < 24 || at + size > before[2] -> next
+            want: if size < 144 -> size else -> 144
+            note: x64_self_read(at, want) ?? return None
+            if loader_u32(note, 0) != 4 || loader_u32(note, 8) != ELF64_JET_PART_NOTE || loader_u32(note, 12) != 0x0074654a {
+                next
+            }
+            length: loader_u32(note, 4)
+            if 16 + length > size -> next
+            limit: if 16 + length < note.len() -> 16 + length else -> note.len()
+            nul := -1
+            loop p in 16..<limit {
+                if note[p] == 0 {
+                    nul = p
+                    break
+                }
+            }
+            if nul < 16 -> next
+            name_len: nul - 16
+            descriptor: (name_len + 8) /% 8 * 8
+            if length < descriptor -> next
+            labels.push(note[16..<nul])
+            ats.push(at + 16 + descriptor)
+            sizes.push(length - descriptor)
+        }
+        if !loader_same_stamp(loader_file_stamp(X64_SELF_EXECUTABLE), before) -> return None
+        loader_self_parts_store(before, labels, ats, sizes)
+        again := loader_self_part_lookup(label, before)
+        if again.checked -> return again.found
+        return None
+    }
     header: x64_self_read(0, 64) ?? return None
     phoff: loader_u64(header, 32)
     phnum: loader_u16(header, 56)
     table: x64_self_read(phoff, phnum * 56) ?? return None
-    label: name.bytes()
     descriptor: (label.len() + 8) /% 8 * 8
     loop k in 0..<phnum {
         if loader_u32(table, k * 56) != 4 -> next
@@ -920,13 +966,54 @@ x64_image_part_file: fn(name: String) -> X64ImagePart? {
 X64_SELF_EXECUTABLE: "/proc/self/exe"
 
 // The process's descriptor of X64_SELF_EXECUTABLE: unopened, then the
-// descriptor or -errno from its one open.
+// descriptor or -errno from its one open, plus the cached ELF PT_NOTE part
+// directory for the validated file identity.
 LoaderSelf: struct {
     opened: Bool,
     fd: Int,
+    parts_loaded: Bool{false},
+    part_stamp: [Int]{[Int]{}},
+    part_labels: [[U8]]{[[U8]]{}},
+    part_ats: [Int]{[Int]{}},
+    part_sizes: [Int]{[Int]{}},
 }
 
 LOADER_SELF: Shared{LoaderSelf{opened: false, fd: -1}}
+
+LoaderPartLookup: struct {
+    checked: Bool,
+    found: X64ImagePart?,
+}
+
+loader_self_part_lookup: fn(label: [U8], stamp: [Int]) -> LoaderPartLookup {
+    guard: LOADER_SELF.guard_read()
+    if !guard.value.parts_loaded || !loader_same_stamp(guard.value.part_stamp, stamp) {
+        return LoaderPartLookup{checked: false, found: None}
+    }
+    loop i in 0..<guard.value.part_labels.len() {
+        if guard.value.part_labels[i].len() != label.len() -> next
+        same := true
+        loop k in 0..<label.len() {
+            if guard.value.part_labels[i][k] != label[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            return LoaderPartLookup{checked: true, found: Val(X64ImagePart{at: guard.value.part_ats[i], size: guard.value.part_sizes[i], stamp: stamp})}
+        }
+    }
+    LoaderPartLookup{checked: true, found: None}
+}
+
+loader_self_parts_store: fn(stamp: [Int], labels: &&[[U8]], ats: &&[Int], sizes: &&[Int]) {
+    guard := LOADER_SELF.guard_edit()
+    guard.value.part_stamp = stamp
+    guard.value.part_labels = labels.move()
+    guard.value.part_ats = ats.move()
+    guard.value.part_sizes = sizes.move()
+    guard.value.parts_loaded = true
+}
 
 // The descriptor of X64_SELF_EXECUTABLE, opened read-only and close-on-exec
 // at its first use and held until the process ends; -errno when it can't be

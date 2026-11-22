@@ -1534,9 +1534,9 @@ jet_driver_reach_reached_items: fn(reach: JetDriverReach, count: Int) -> [[Bool]
 // admitted threads and join in `held` order: a parse reads nothing but its
 // own blanked source, so the programs and diagnostics are those of parsing
 // each in turn.
-jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriverReach, reached: [[Bool]], held: [JetDriverReachHeldModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> JetDriverReachHeldParse {
+jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriverReach, reached: [[Bool]], held: [JetDriverReachHeldModule], modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic], window: &JetDriverCoreInterfaceWindow) -> JetDriverReachHeldParse {
     done := JetDriverReachHeldParse{count: 0, fragments: 0, fragment_bytes: 0, fragment_reads: 0, problem: None}
-    window := jet_driver_core_interface_window()
+    reads_before: window.reads
     // The held modules with a declaration to parse, in `held` order: each
     // one's place in the load's modules, the program.items positions its
     // parse fills, and its blanked source.
@@ -1583,7 +1583,7 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
         sources.push(JetDriverReachSource{bytes: source, hold: None})
     }
     parts := jet_driver_core_ready_programs(request.core_interface, window, ready_places, request.compiler_threads)
-    done.fragment_reads = window.reads
+    done.fragment_reads = window.reads - reads_before
     parts.reverse()
     loop (at, loaded) in ready_loaded {
         popped: parts.pop() ?? panic("a held declaration lost its ready parse")

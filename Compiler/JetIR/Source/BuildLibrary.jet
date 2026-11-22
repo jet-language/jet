@@ -225,7 +225,7 @@ ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
 // whose function does not satisfy the C export law is not an export.
 // `lifecycle_rows` are the lines of the lifecycle list (ir_lifecycle_rows).
 ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
-    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants, threads)
     ir_foreign_index(p, foreign, decls)
     p.stop_points = false
     p.zone_table = true

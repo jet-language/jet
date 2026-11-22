@@ -165,13 +165,6 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     released: task &&checked_rest { checked_rest.modules.len() }
     released.detach()
     if issues.len() == 0 {
-        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
-        loop finding in ir_lint_module(library.program, "ir.build", threads) {
-            issues.push(jet_cli_runtime_lint_issue(finding))
-        }
-        if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
-    }
-    if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
         _ := ir_optimize_module(library.program, ir_opt_options(2), threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())

@@ -217,6 +217,7 @@ use {
         ir_opt_marked_calls,
         ir_opt_module_start,
         ir_opt_o0_bodies,
+        ir_opt_o0_fast,
         ir_optimize_module,
         ir_x64_compile_module_logged,
         ir_x64_hot_order,
@@ -1870,7 +1871,8 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    jet_cli_native_optimize(built.program, jet_cli_opt_options(level, options), threads, census, trace_sink)
+    opt_options: jet_cli_opt_options(level, options)
+    jet_cli_native_optimize(built.program, opt_options, threads, census, trace_sink)
     // The census of the marked calls this tier's passes left (JetIR
     // OptInline.jet ir_opt_marked_calls): Compiler/test.jet's `inline_census`
     // suite holds every build of Examples, Core and the compiler to 0.
@@ -1880,6 +1882,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source, cli_files.cwd() ?? "")
     built.program.debug_level = level
+    built.program.fast_o0 = level <= 0 && !opt_options.verify && !opt_options.stress
     // A field move shares the module's rows with `built`, which would keep
     // them until the caller's object is written and free them all there; a
     // fresh module in its place leaves the route their one owner
@@ -1906,7 +1909,10 @@ jet_cli_native_checks: fn(result: JetDriverCompileResult, checked: JetDriverLowe
     // A program bound to the runtime image calls the Core code there
     // (jet_cli_native_executable): its Core calls build as calls of it.
     checks.core = runtime.core
-    checks.quiet_routes = jet_cli_runtime_quiet_routes(runtime)
+    if runtime.stops == .Val(stops) {
+        checks.quiet_exports = runtime.exports
+        checks.quiet_stops = stops
+    }
     checks
 }
 
@@ -1940,14 +1946,19 @@ jet_cli_native_optimize: fn(program: &IRModule, opt: IROptOptions, threads: Comp
     if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
 }
 
-// O0's IR before selection (JetIR Opt.jet ir_opt_o0_bodies): the return
-// slots (`ir.opt`), IR Lint's type rows and context (`ir.lint`), then one
-// pass over the bodies that runs each one's inline Int facts, IR Lint after
-// `ir.build` and early Drops on the thread that claims it (`ir.opt` again),
-// so no thread waits for a whole pass to end. Each finding is an ICE row and
-// traps its function: `--opt-verify`'s first, then IR Lint's.
+// O0's IR before selection: runs return-slot rewriting and `#Inline(Always)`
+// inlining (`ir_opt_module_start`), then on the fast unverified path runs
+// single-round loop-only inline Int facts fused with early Drops and skips IR
+// Lint. Under verify/stress/dump it runs the full ir_opt_o0_bodies pass.
 jet_cli_native_o0: fn(program: &IRModule, options: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Time]> Never! {
     count: program.functions.len()
+    if !options.verify && !options.stress && options.dump == "" {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O0", -1, -1)
+        report := ir_opt_module_start(program, options, threads)
+        ir_opt_o0_fast(program, options, threads, report)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", count)
+        return
+    }
     if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O0", -1, -1)
     report := ir_opt_module_start(program, options, threads)
     if trace_sink == .Val(sink) {

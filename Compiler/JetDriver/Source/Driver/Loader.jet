@@ -6918,7 +6918,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     // parse of the Core interface missing or unreadable is an internal
     // problem: the interface is part of the compiler.
     reached: jet_driver_reach_reached_items(reach, modules.len())
-    held_parsed := jet_driver_reach_parse_held(request, reach, reached, held_modules, modules, source_units, diagnostics)
+    core_window := jet_driver_core_interface_window()
+    held_parsed := jet_driver_reach_parse_held(request, reach, reached, held_modules, modules, source_units, diagnostics, core_window)
     if held_parsed.count < 0 || held_parsed.problem != None {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
@@ -6936,7 +6937,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     if reach.enabled && internal_problem == None {
         jet_driver_reach_strip(reach, modules)
-        restore: jet_driver_core_restore_bodies(request, lazy_modules, modules)
+        restore: jet_driver_core_restore_bodies(request, lazy_modules, modules, core_window)
         restored: restore.bodies
         if restore.problem == .Val(_) {
             failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)

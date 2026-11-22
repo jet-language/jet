@@ -54,9 +54,12 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     trace_sink: jet_cli_trace_sink()
     if trace_sink == .Val(sink) -> sink.begin("runtime.embed", "", -1, -1)
     image: embed_files.read_bytes(image_file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the executable `{image_file}`: {jet_cli_io_error_text(err)}", None, color, json)
-    // The image's digest is taken on a task of its own while the runtime
-    // files are read.
+    // The image's digest and DWARF split run on tasks of their own while the
+    // runtime files are read.
+    side_file: "{out}.debug"
+    threads: CompilerThreads{cap: None, cores: embed_sys.cpu_count(), memory_available: jet_cli_memory_available()}
     hashing: task jet_cli_image_digest(image)
+    splitting: task x64_executable_debug_apart(image, embed_files.basename(side_file), threads)
     names := [String]{}
     payloads := [[U8]]{}
     packer := ""
@@ -72,7 +75,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
             core_exports = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core export list `{path}` is not UTF-8", None, color, json)
         }
         if name == JET_CLI_CORE_FACTS_FILE {
-            core_facts = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core facts `{path}` are not UTF-8", None, color, json)
+            core_facts = String.from_bytes(payload) ?? return jet_cli_maintenance_error("E2105", "the Core facts `{path}` is not UTF-8", None, color, json)
         }
         names.push("{JET_CLI_RUNTIME_PART_PREFIX}{name}")
         payloads.push(payload)
@@ -90,9 +93,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     }
     // The DWARF moves to the side file, written on a task of its own while
     // the parts are added.
-    side_file: "{out}.debug"
-    threads: CompilerThreads{cap: None, cores: embed_sys.cpu_count(), memory_available: jet_cli_memory_available()}
-    apart: x64_executable_debug_apart(image, embed_files.basename(side_file), threads) ?? return jet_cli_maintenance_error("E2105", "couldn't move the debug information of `{image_file}` to `{side_file}`: {err:Debug}", None, color, json)
+    apart: splitting.join() ?? return jet_cli_maintenance_error("E2105", "couldn't move the debug information of `{image_file}` to `{side_file}`: {compiler_threads_failure_text(err)}", None, color, json)
     side_writing: task jet_cli_embed_write(side_file, apart.debug_file)
     // The identity part is the file's last bytes: zeros while the digest is
     // taken, then the identity it names. The file is written, zeros and
