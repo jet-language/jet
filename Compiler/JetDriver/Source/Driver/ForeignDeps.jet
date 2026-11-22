@@ -1,6 +1,7 @@
 // Host foreign-library declarations use the same inline/package parser as
 // source loading. C dependencies are not Jet source roots.
 use {
+    core.collections.[Rows]
     jet_lexer.[lex_config, token_decoded, TOKEN_STRING, TOKEN_RAW_STRING]
     jet_foundation.[AccessConvention, Diagnostic, SourceFile, Type, stable_id]
     jet_sema.[SemaGraphModuleResult]
@@ -223,15 +224,19 @@ jet_driver_foreign_line: fn(lines: &JetDriverForeignLines, source_files: [Source
 
 // The foreign link facts of the checked modules `modules`; inline bodies
 // read their declaration span in `source_files`.
+JetDriverForeignEntry: struct {
+    id: U64,
+    key: String,
+    row: Int,
+    module: Int,
+}
+
 jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
     facts := jet_driver_foreign_link_empty()
     direct := [String]{}
     transitive := [String]{}
-    // Foreign identity order: (identity, key) of every checked foreign row.
-    ids := [U64]{}
-    keys := [String]{}
-    rows := [Int]{}
-    modules_of := [Int]{}
+    // Foreign identity order: (identity, key) of every checked foreign row, stored columnarly.
+    entries := Rows<JetDriverForeignEntry>{}
     loop (module_index, semantic_module) in modules {
         loop provider in semantic_module.foreign_providers {
             jet_driver_foreign_push_unique(facts.libraries, provider.library)
@@ -244,10 +249,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
         loop (row_index, row) in semantic_module.foreign_functions {
             head: jet_driver_foreign_language_head(row.language)
             if head == "c" || head == "rust" -> facts.c_or_rust_rows = true
-            ids.push(stable_id("foreign", row.key))
-            keys.push(row.key)
-            rows.push(row_index)
-            modules_of.push(module_index)
+            _ := entries.add(JetDriverForeignEntry{id: stable_id("foreign", row.key), key: row.key, row: row_index, module: module_index})
         }
     }
     facts.libraries.sort()
@@ -257,6 +259,10 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
         if !direct.contains(library) -> facts.transitive_links.push(library)
     }
     facts.direct_links = direct
+    ids: entries.id
+    keys: entries.key
+    rows: entries.row
+    modules_of: entries.module
     order := [Int]{}
     loop position in 0..<ids.len() -> order.push(position)
     order.sort_by(fn(left: Int, right: Int) { if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right] })

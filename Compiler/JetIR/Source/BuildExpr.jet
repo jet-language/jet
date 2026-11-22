@@ -241,6 +241,9 @@ ir_window_cells: fn(m: &IRModule, p: IRProgram, b: IRBuilder, captured: [String]
 ir_window_cells_in: fn(m: &IRModule, p: IRProgram, b: IRBuilder, nodes: [BodyNode], names: &[String]) Never! {
     loop node in nodes {
         if node.kind == .Borrow(inner, access) {
+            if ir_link_inner(ir_ty(p, b, node.id)) != None && ir_body_node(p, b, inner).kind == .Local(local) {
+                if !names.contains(local.name) -> names.push(local.name)
+            }
             if access == .Write && ir_body_node(p, b, inner).kind == .Local(local) {
                 if ir_value_type(m, p, ir_ty(p, b, inner)) == .Val(row) {
                     if ir_option_inline(m, row) && !names.contains(local.name) {
@@ -1673,27 +1676,36 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
                 return
             }
         }
-        base: ir_write_base(m, p, b, receiver, span)
+        write_backs := [IRWriteBack]{}
+        base: ir_write_base_with(m, p, b, receiver, write_backs, span)
         if ir_failed(b) {
+            ir_write_backs(m, p, b, write_backs, span)
             return
         }
         receiver_ty: ir_ty(p, b, receiver)
         if base < 0 || ir_kind_of(m, b, base) != .Aggregate {
+            ir_write_backs(m, p, b, write_backs, span)
             return ir_fail(b, span, "assignment to a field of {ir_type_name(receiver_ty)}")
         }
-        member: ir_member_of(m, p, b, base, field.name) ?? return ir_fail(b, span, "assignment to field {field.name}")
+        member: ir_member_of(m, p, b, base, field.name) ?? {
+            ir_write_backs(m, p, b, write_backs, span)
+            return ir_fail(b, span, "assignment to field {field.name}")
+        }
         if emptying {
             if ir_clear_member(m, p, b, base, member, span) {
+                ir_write_backs(m, p, b, write_backs, span)
                 return
             }
             right = ir_expr(m, p, b, value)
             if ir_failed(b) {
+                ir_write_backs(m, p, b, write_backs, span)
                 return
             }
         }
         result := right
         if op == None -> result = ir_union_assigned(m, p, b, right, member.ty, span)
         if ir_failed(b) {
+            ir_write_backs(m, p, b, write_backs, span)
             return
         }
         if op == .Val(binary) {
@@ -1703,6 +1715,7 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
             result = ir_binary(m, p, b, binary, ir_assign_overflow(binary), site, field_ty, current, right, value_ty, span)
             ir_release(m, b, right)
             if ir_failed(b) {
+                ir_write_backs(m, p, b, write_backs, span)
                 return
             }
         }
@@ -1720,6 +1733,7 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
         }
         ir_member_write(m, p, b, base, member, result, base)
         ir_move_member_stored(m, p, b, base, member)
+        ir_write_backs(m, p, b, write_backs, span)
         return
     }
     if ir_body_node(p, b, place).kind == .Index(base, index, kind, _, _, _) {
@@ -1752,6 +1766,23 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
             return
         }
         return ir_assign_at(m, p, b, payload, row, op, slot, value_ty, false, span)
+    }
+    if ir_body_node(p, b, place).kind == .Deref(_) {
+        place_ty: ir_ty(p, b, place)
+        row: ir_value_type(m, p, place_ty) ?? return ir_fail(b, span, "assignment to deref of {ir_type_name(place_ty)}")
+        slot: ir_value_as(m, p, b, value, row, span)
+        if ir_failed(b) {
+            return
+        }
+        write_backs := [IRWriteBack]{}
+        target: ir_place_address(m, p, b, place, write_backs, span)
+        if ir_failed(b) || target < 0 || slot < 0 {
+            ir_write_backs(m, p, b, write_backs, span)
+            return
+        }
+        ir_assign_at(m, p, b, target, row, op, slot, value_ty, false, span)
+        ir_write_backs(m, p, b, write_backs, span)
+        return
     }
     place_kind: ir_expr_kind_name(ir_body_node(p, b, place).kind)
     ir_fail(b, span, "assignment to {place_kind} place")
@@ -2251,6 +2282,7 @@ ir_expr_slot_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, 
             self_slot: if {
                 receiver_access == "write" -> ir_place_address(m, p, b, receiver, backs, span)
                 receiver_access == "move" -> ir_move_receiver(m, p, b, receiver, span)
+                ir_body_node(p, b, receiver).kind == .Deref(ptr) && ir_link_inner(ir_ty(p, b, ptr)) != None -> ir_link_read_deref_scoped(m, p, b, receiver_ty, ptr, backs, span)
                 else -> ir_expr(m, p, b, receiver)
             }
             if ir_failed(b) -> return -1
@@ -2884,6 +2916,9 @@ ir_option_unwrap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Int, span
 // it; the pointee's owner keeps it, so a consumer takes its own copy.
 ir_raw_deref: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if ir_link_inner(ir_ty(p, b, value)) != None {
+        return ir_link_deref_read(m, p, b, row, value, span)
+    }
     if ir_allocator_view_type(ir_ty(p, b, value)) {
         storage: ir_view_address(m, p, b, value, span)
         if ir_failed(b) || storage < 0 -> return -1
@@ -3791,6 +3826,9 @@ ir_copy_word: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never!
 // instance's concrete owner has; a Prelude owner's crosses its runtime route
 // `<path>.<member>` with the arguments' borrow mask.
 ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
+    if owner == .User(owner_name) && owner_name == "__jet_link" {
+        return ir_link_static_call(m, p, b, ty, method.name, type_args, args, span)
+    }
     if owner == .Prelude(rooted, path, _) {
         if method.trait_owner != None {
             return ir_fail_slot(b, span, "trait-qualified Prelude static call {path}.{method.name}")
@@ -4468,6 +4506,9 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         } else if lend && ir_lent_carrier_arg(p, b, arg.value) && (ir_value_type(m, p, ir_ty(p, b, arg.value)) ?? -1) == param_row {
             carrier_ty: ir_ty(p, b, arg.value)
             slot = ir_carrier_lent(m, p, b, carrier_ty, arg.value, lends, span)
+        } else if lend && ir_body_node(p, b, arg.value).kind == .Deref(ptr) && ir_link_inner(ir_ty(p, b, ptr)) != None && (ir_value_type(m, p, ir_ty(p, b, arg.value)) ?? -1) == param_row {
+            deref_ty: ir_ty(p, b, arg.value)
+            slot = ir_link_read_deref_scoped(m, p, b, deref_ty, ptr, backs, span)
         } else { slot = ir_value_as(m, p, b, arg.value, param_row, span) }
         if ir_failed(b) -> return -1
         // A call whose result is a view (`-> T from x`) may borrow from a
@@ -4839,9 +4880,15 @@ ir_precise_division: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fun
 // copies would both drop its old member). A scalar or box place's value is then
 // read from its address. Any other place is its value.
 ir_write_base: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
+    backs := [IRWriteBack]{}
+    result: ir_write_base_with(m, p, b, place, backs, span)
+    ir_write_backs(m, p, b, backs, span)
+    result
+}
+
+ir_write_base_with: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs: &[IRWriteBack], span: Span) -> Int Never! {
     if ir_pin_target(p, ir_ty(p, b, place)) != None -> return ir_pin_window(m, p, b, place, span)
     if !ir_place_needs_address(m, p, b, place) -> return ir_expr(m, p, b, place)
-    backs := [IRWriteBack]{}
     address: ir_place_address(m, p, b, place, backs, span)
     if ir_failed(b) || address < 0 || ir_kind_of(m, b, address) == .Aggregate -> return address
     place_ty: ir_ty(p, b, place)
@@ -4866,6 +4913,7 @@ ir_place_needs_address_in: fn(m: &IRModule, p: IRProgram, b: IRBuilder, node: Bo
         if call == .TupleIndex(receiver, _) -> return ir_place_needs_address(m, p, b, receiver)
         return false
     }
+    if node.kind == .Deref(pointer) -> return ir_link_inner(ir_ty(p, b, pointer)) != None
     if node.kind == {
         .Borrow(inner, _) -> return ir_place_needs_address(m, p, b, inner)
         .Move(inner) -> return ir_place_needs_address(m, p, b, inner)
@@ -5011,6 +5059,9 @@ ir_place_address_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, n
     // pointee's own storage at the pointer, once the sentry passes the write.
     if node.kind == .Deref(pointer) {
         row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
+        if ir_link_inner(ir_ty(p, b, pointer)) != None {
+            return ir_link_write_deref_address(m, p, b, row, pointer, backs, span)
+        }
         target := -1
         if ir_allocator_view_type(ir_ty(p, b, pointer)) {
             target = ir_view_address(m, p, b, pointer, span)
@@ -7719,16 +7770,20 @@ ir_list_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, i
     if ir_failed(b) {
         return
     }
-    list: ir_write_base(m, p, b, base, span)
+    write_backs := [IRWriteBack]{}
+    list: ir_write_base_with(m, p, b, base, write_backs, span)
     ir_make_unique(m, p, b, list)
     if ir_failed(b) || list < 0 {
+        ir_write_backs(m, p, b, write_backs, span)
         return
     }
     address: ir_checked_element(m, p, b, list, index, row, span)
     if ir_failed(b) || slot < 0 {
+        ir_write_backs(m, p, b, write_backs, span)
         return
     }
     ir_assign_at(m, p, b, address, row, op, slot, value_ty, initializing, span)
+    ir_write_backs(m, p, b, write_backs, span)
 }
 
 // `place (op)= slot` into the storage of type row `row` at `address`: the
@@ -8355,6 +8410,7 @@ ir_range_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, start: I
 // `Pin<T>` (`mem.pin(place)`) holds as a pointer.
 ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, access: AccessConvention, span: Span) -> Int Never! {
     if ir_pin_target(p, ty) != None -> return ir_pin_address(m, p, b, ty, value, span)
+    if ir_link_inner(ty) != None -> return ir_link_brief(m, p, b, ty, value, span)
     value_ty: ir_ty(p, b, value)
     if access == .Read {
         if ir_body_node(p, b, value).kind == .Slice(base, start, end, range, location) {

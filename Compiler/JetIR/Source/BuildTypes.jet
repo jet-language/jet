@@ -267,6 +267,7 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         return Val(ir_intern_type(m, "{drop}:{type_carrier_identity(ty)}", ir_owned_layout(IRTypeKind.Pointer, ty, drop, "")))
     }
     if ty == .Apply(name, args) {
+        if name == "@" && args.len() == 1 -> return ir_link_row_for(m, p, ty, args[0], laying)
         // A `Pool<T>` and its `ID<T>`s as BuildPools.jet lays them out.
         if name == "Pool" && args.len() == 1 {
             return ir_value_type_in(m, p, ir_pool_carrier(args[0].copy()), laying)

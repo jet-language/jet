@@ -722,6 +722,7 @@ ir_box_hand_over: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, payl
 // more owner of the same box (a null box stays null).
 ir_clone: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
     symbol: m.types[row].clone
+    if ir_link_row(m, row) -> return ir_link_retain(m, b, slot, row)
     if !ir_clone_shares(symbol) -> return ir_runtime(m, b, symbol, [Int]{slot}, row)
     shared: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.Move, shared, slot, -1, -1, b.line)
@@ -735,7 +736,7 @@ ir_clone: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
 // Whether a clone key copies by sharing: the copy is the same box with one
 // more owner (its IR Copy aliases).
 ir_clone_shares: fn(symbol: String) -> Bool Never! {
-    symbol == ir_box_share() || symbol == ir_trait_share() || symbol == ir_closure_share()
+    symbol == ir_box_share() || symbol == ir_trait_share() || symbol == ir_closure_share() || symbol == ir_link_share()
 }
 
 // Builds the glue of every aggregate row whose drop names one and that has
@@ -765,7 +766,7 @@ ir_drop_glue: fn(m: &IRModule, p: IRProgram, row: Int) Never! {
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if ir_box_row(m, row) -> ir_box_drop_body(m, p, a, row, at) else if ir_trait_row(m, row) {
         ir_trait_drop_body(m, p, a, row, at)
-    } else if ir_atomic_scalar(m.types[row].ty) != None {
+    } else if ir_link_row(m, row) { ir_link_drop_body(m, p, a, row, at) } else if ir_atomic_scalar(m.types[row].ty) != None {
         // An Atomic<Int> releases the exact Int its word owns.
         _: ir_runtime(m, a, "jet_rt_atomic_int_drop", [Int]{at}, -1)
     } else if ir_counted_entry(m, p, row) == .Val(entry) {
