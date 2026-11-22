@@ -558,15 +558,11 @@ ir_x64_home_xmm: fn(al: IRX64Allocation, slot: Int, scratch: Int) -> Int Never! 
 }
 
 // Whether a call from instruction `at` keeps xmm (or routed) slot `slot`:
-// a call instruction reads its arguments before and writes its result
-// after the call itself; within any other instruction every slot whose
-// range holds it is kept.
+// a call reads its operands before and writes its result after the call
+// itself (and covered operand drops run at their own IR indices `at + 1..`),
+// so only slots strictly live across `at` need to be preserved.
 ir_x64_keeps_xmm: fn(f: IRFunction, al: IRX64Allocation, at: Int, slot: Int) -> Bool Never! {
-    op: f.op[at]
-    if op == .Call || op == .CallRuntime || op == .CallIndirect {
-        return al.starts[slot] < at && al.ends[slot] > at
-    }
-    al.starts[slot] <= at && al.ends[slot] >= at
+    al.starts[slot] < at && al.ends[slot] > at
 }
 
 // Whether a call from instruction e.at keeps any xmm slot.
@@ -580,16 +576,22 @@ ir_x64_keeps_xmms: fn(e: IRX64Emitter, f: IRFunction, al: IRX64Allocation) -> Bo
 
 // Before (`out`) or after a call from instruction e.at, stores to their
 // homes or loads back the Float slots in xmm registers that live across it
-// (ir_x64_keeps_xmm), which the C ABI lets the callee clobber.
+// (ir_x64_keeps_xmm), which the C ABI lets the callee clobber. Each physical
+// xmm register is saved and restored at most once per call site.
 ir_x64_keep_xmms: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: Bool) Never! {
     at: e.at
     if at < 0 {
         return
     }
+    seen := 0
     loop slot in al.xmm_slots {
         if !ir_x64_keeps_xmm(f, al, at, slot) -> next
-        if out -> x64_float_store(e.code, false, X64_RBP, al.homes[slot], al.xmms[slot]) else {
-            x64_float_load(e.code, false, al.xmms[slot], X64_RBP, al.homes[slot])
+        reg: al.xmms[slot]
+        bit: 1 << reg
+        if (seen & bit) != 0 -> next
+        seen = seen | bit
+        if out -> x64_float_store(e.code, false, X64_RBP, al.homes[slot], reg) else {
+            x64_float_load(e.code, false, reg, X64_RBP, al.homes[slot])
         }
     }
 }
@@ -597,16 +599,27 @@ ir_x64_keep_xmms: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: 
 // ir_x64_keep_xmms for the routed slots (IRX64Allocation.routed), in r8
 // or r9, whose ranges hold only the exact Int routes' calls (X64Alloc.jet
 // ir_x64_int_calls): those set no argument in r8 or r9, so before the call
-// the register still holds the slot.
+// the register still holds the slot. Each physical register (r8, r9) is
+// saved and restored at most once per call site.
 ir_x64_keep_routed: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: Bool) Never! {
     at: e.at
     if at < 0 {
         return
     }
+    seen_r8 := false
+    seen_r9 := false
     loop slot in al.routed {
         if !ir_x64_keeps_xmm(f, al, at, slot) -> next
-        if out -> x64_store(e.code, X64_RBP, al.homes[slot], al.regs[slot]) else {
-            x64_load(e.code, al.regs[slot], X64_RBP, al.homes[slot])
+        reg: al.regs[slot]
+        if reg == X64_R8 {
+            if seen_r8 -> next
+            seen_r8 = true
+        } else if reg == X64_R9 {
+            if seen_r9 -> next
+            seen_r9 = true
+        }
+        if out -> x64_store(e.code, X64_RBP, al.homes[slot], reg) else {
+            x64_load(e.code, reg, X64_RBP, al.homes[slot])
         }
     }
 }
@@ -1020,12 +1033,29 @@ ir_x64_operand_drops: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, at: Int) 
     drops
 }
 
-// A slow path's covered operand drops (ir_x64_operand_drops).
+// A slow path's covered operand drops (ir_x64_operand_drops). Each drop
+// corresponds to the absorbed Drop instruction at `base + 1 + idx`, so
+// stepping `e.at` gives exact liveness (keeping `dst` across drops while
+// never preserving the operand being dropped or one already dropped).
 ir_x64_cold_drops: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, drops: [Int]) Never! {
-    loop slot in drops {
+    base: e.at
+    loop (idx, slot) in drops {
+        if base >= 0 -> e.at = base + 1 + idx
         reg: ir_x64_use(e, m, f, al, slot, X64_RAX)
         ir_x64_int_route(e, m, f, al, m.types[f.slot_type[slot]].drop, reg)
     }
+    e.at = base
+}
+
+// Whether a LocatedRoute slow path can publish a stop: division or modulo by
+// a non-zero constant never divides by zero and never stops.
+ir_x64_located_stops: fn(f: IRFunction, al: IRX64Allocation, cold: IRX64Cold) -> Bool Never! {
+    if cold.at < 0 || cold.right < 0 || !al.consts[cold.right] -> return true
+    op: f.op[cold.at]
+    if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && al.values[cold.right] != 0 {
+        return false
+    }
+    true
 }
 
 // A branch on `cond` to a numeric stop with `message` at instruction `at`'s line.
@@ -1132,7 +1162,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 x64_mov_ri(e.code, X64_RCX, ir_x64_use_length(tables, path))
                 x64_mov_ri(e.code, X64_R8, cold.line)
                 ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, false)
-                if m.stop_points {
+                if m.stop_points && ir_x64_located_stops(f, al, cold) {
                     // A division by zero or a negative shift count publishes
                     // its stop and returns. Two pushes keep the stack aligned
                     // and the result across the status call; pops keep the
@@ -4454,7 +4484,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     if f.a[at] == trap {
         loop index in traps..<e.colds.len() {
             kind: e.colds[index].kind
-            if kind == .Stop || kind == .ShiftStop || kind == .LocatedRoute {
+            if kind == .Stop || kind == .ShiftStop || (kind == .LocatedRoute && ir_x64_located_stops(f, al, e.colds[index])) {
                 e.colds[index].pad = branch
                 wired = true
             }
@@ -6171,7 +6201,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     exit := epilogue
     stops := m.stop_points && e.pads.len() > 0
     loop cold in e.colds {
-        if m.stop_points && (cold.kind == .Stop || cold.kind == .ShiftStop || cold.kind == .LocatedRoute) {
+        if m.stop_points && (cold.kind == .Stop || cold.kind == .ShiftStop || (cold.kind == .LocatedRoute && ir_x64_located_stops(f, al, cold))) {
             stops = true
         }
     }
@@ -8448,3 +8478,66 @@ ir_x64_test_stop_edge: fn(f: &IRFunction, flag: Int, callee: Int, exit: IROp, li
     _ := ir_emit(f, exit, -1, if exit == .Br -> 1 else -> -1, -1, -1, line)
     ir_end(f, line)
 }
+
+#Test("A dying r8 operand of an exact Int route needs no routed frame home") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    word_row: ir_word_row(m)
+    f := ir_function_new("dying_r8", "test:route.jet.dying_r8", "", "route.jet", 1)
+    ptr: ir_slot(f, word_row, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
+    a: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
+    b: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "b"), 1)
+    c: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
+    d: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "d"), 1)
+    f.result = int_row
+    x: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    s1: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    s2: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    s3: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    s4: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    y: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Load, x, ptr, 0, -1, 2)
+    _ := ir_emit(f, IROp.Add, s1, a, x, IR_OVERFLOW_TRAP, 2)
+    _ := ir_emit(f, IROp.Load, y, ptr, 8, -1, 3)
+    _ := ir_emit(f, IROp.Add, s2, s1, y, IR_OVERFLOW_TRAP, 3)
+    _ := ir_emit(f, IROp.Add, s3, s2, b, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(f, IROp.Add, s4, s3, c, IR_OVERFLOW_TRAP, 5)
+    _ := ir_emit(f, IROp.Add, s4, s4, d, IR_OVERFLOW_TRAP, 6)
+    _ := ir_emit(f, IROp.Return, -1, s4, -1, -1, 7)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    assert_eq(al.regs[x], X64_R8)
+    assert(!al.routed.contains(x))
+    assert_eq(al.homes[x], 0)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+}
+
+#Test("Exact Int Mod and FloorDiv by a non-zero constant skip session propagate") {
+    m := ir_module_new()
+    m.stop_points = true
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    f := ir_function_new("div2", "test:div2.jet.div2", "", "div2.jet", 1)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    f.result = int_row
+    two: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    q: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    r: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    out: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, two, 2, -1, -1, 2)
+    _ := ir_emit(f, IROp.FloorDiv, q, x, two, IR_OVERFLOW_TRAP, 2)
+    _ := ir_emit(f, IROp.Mod, r, x, two, IR_OVERFLOW_TRAP, 3)
+    _ := ir_emit(f, IROp.Add, out, q, r, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(f, IROp.Return, -1, out, -1, -1, 5)
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    propagate := 0
+    loop reloc in compiled.function.relocs {
+        if reloc.target == .Runtime(symbol) && symbol == "jet_rt_session_propagate" {
+            propagate += 1
+        }
+    }
+    assert_eq(propagate, 0)
+}
+
