@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[CompilerThreads, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -95,6 +95,9 @@ IRX64Tables: struct {
     // Per data row, whether code that goes on reads it (ir_x64_tables_heat);
     // rows past its end are not.
     hot: [Bool]{[Bool]{}},
+    last_file: String{""},
+    last_text: String{""},
+    last_text_row: Int{-1},
 }
 
 // The data rows a function's selection names besides the IR data rows, a
@@ -178,13 +181,20 @@ IRX64Result: struct {
 }
 
 ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
+    if tables.last_text_row >= 0 && text == tables.last_text -> return tables.last_text_row
     found: ir_x64_text_rows_get(tables.texts, text)
-    if found >= 0 -> return found
+    if found >= 0 {
+        tables.last_text = text
+        tables.last_text_row = found
+        return found
+    }
     id: tables.data.len()
     bytes: text.bytes()
     tables.lengths.push(bytes.len())
     tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}, read_only: true})
     ir_x64_text_rows_set(tables.texts, text, id)
+    tables.last_text = text
+    tables.last_text_row = id
     id
 }
 
@@ -508,9 +518,12 @@ ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
 // rows, adding its source file and the rows no function before it named;
 // returns the row of each use, for ir_x64_resolve.
 ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
-    if f.source_file != "" && ir_x64_text_rows_get(tables.file_rows, f.source_file) < 0 {
-        ir_x64_text_rows_set(tables.file_rows, f.source_file, tables.files.len())
-        tables.files.push(f.source_file)
+    if f.source_file != "" && f.source_file != tables.last_file {
+        tables.last_file = f.source_file
+        if ir_x64_text_rows_get(tables.file_rows, f.source_file) < 0 {
+            ir_x64_text_rows_set(tables.file_rows, f.source_file, tables.files.len())
+            tables.files.push(f.source_file)
+        }
     }
     rows := [Int]{}
     loop (at, kind) in uses.kinds {
@@ -600,6 +613,16 @@ ir_x64_tables_heat: fn(tables: &IRX64Tables, rows: [Int], hot: [Int], cold: [Int
 // IR_X64_LOCAL_DATA + k) at `rows[k]`, the module's row of that use.
 ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
     loop at in 0..<function.relocs.len() {
+        if function.relocs[at].target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
+            function.relocs[at].target = X64RelocTarget.Data{id: X64DataID{value: rows[id.value - IR_X64_LOCAL_DATA]}}
+        }
+    }
+}
+
+// Same as ir_x64_resolve, visiting only the local-data relocation indices
+// precomputed on the selecting worker thread.
+ir_x64_resolve_at: fn(function: &X64CompiledFunction, rows: [Int], local_relocs: [Int]) Never! {
+    loop at in local_relocs {
         if function.relocs[at].target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
             function.relocs[at].target = X64RelocTarget.Data{id: X64DataID{value: rows[id.value - IR_X64_LOCAL_DATA]}}
         }
@@ -872,7 +895,11 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         }
     }
     count: m.functions.len()
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     weights := [Int]{}
+    weights.try_reserve(count) ?? panic("reserve failed")
     total := 0
     loop f in m.functions {
         weight: 1 + f.op.len()
@@ -887,9 +914,11 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     if workers <= 1 {
         tables := ir_x64_tables_start(m)
         loop row in 0..<count {
-            compiled := ir_x64_select_function(m, row, names)
+            compiled := ir_x64_select_function(m, row, names, poll, trap, turn)
             rows: ir_x64_tables_add(tables, m.functions[row], compiled.uses)
-            ir_x64_resolve(compiled.function, rows)
+            if compiled.local_relocs.len() > 0 {
+                ir_x64_resolve_at(compiled.function, rows, compiled.local_relocs)
+            }
             ir_x64_tables_heat(tables, rows, compiled.hot, compiled.cold)
             errors.extend(compiler_take_rows<String>(compiled.errors))
             log.extend(compiler_take_rows<String>(compiled.log))
@@ -902,7 +931,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
-    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn}}
     outputs := [IRX64FunctionResult?]{}
     stops := [String]{}
     outputs.try_reserve(count) ?? panic("reserve failed")
@@ -920,32 +949,37 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     row_uses := [IRX64Uses]{}
     row_hot := [[Int]]{}
     row_cold := [[Int]]{}
+    row_locals := [[Int]]{}
     functions.try_reserve(count) ?? panic("reserve failed")
     debug.try_reserve(count) ?? panic("reserve failed")
     variables.try_reserve(count) ?? panic("reserve failed")
     row_uses.try_reserve(count) ?? panic("reserve failed")
     row_hot.try_reserve(count) ?? panic("reserve failed")
     row_cold.try_reserve(count) ?? panic("reserve failed")
+    row_locals.try_reserve(count) ?? panic("reserve failed")
     row := count - 1
     loop row >= 0 {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
         stop: stops.pop() ?? ""
         if taken.move() == .Val(compiled) {
             selected := compiled.move()
-            row_errors.push(compiler_take_rows<String>(selected.errors))
-            row_logs.push(compiler_take_rows<String>(selected.log))
+            if selected.errors.len() > 0 {
+                row_errors.push(compiler_take_rows<String>(selected.errors))
+            }
+            if selected.log.len() > 0 -> row_logs.push(compiler_take_rows<String>(selected.log))
             row_uses.push(selected.uses.move())
             row_hot.push(compiler_take_rows<Int>(selected.hot))
             row_cold.push(compiler_take_rows<Int>(selected.cold))
+            row_locals.push(compiler_take_rows<Int>(selected.local_relocs))
             functions.push(selected.function.move())
             debug.push(selected.debug.move())
             variables.push(selected.variables.move())
         } else {
             row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
-            row_logs.push([String]{})
             row_uses.push(IRX64Uses{})
             row_hot.push([Int]{})
             row_cold.push([Int]{})
+            row_locals.push([Int]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             variables.push([X64DebugVariable]{})
@@ -958,6 +992,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     row_uses.reverse()
     row_hot.reverse()
     row_cold.reverse()
+    row_locals.reverse()
     loop row_errors.len() > 0 {
         listed := row_errors.pop() ?? {
             break
@@ -974,7 +1009,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     tables := ir_x64_tables_start(program_back)
     loop (at, uses) in row_uses {
         rows: ir_x64_tables_add(tables, program_back.functions[at], uses)
-        ir_x64_resolve(functions[at], rows)
+        if row_locals[at].len() > 0 -> ir_x64_resolve_at(functions[at], rows, row_locals[at])
         ir_x64_tables_heat(tables, rows, row_hot[at], row_cold[at])
     }
     ir_x64_tables_finish(program_back, tables)
@@ -992,6 +1027,9 @@ IRX64Inputs: struct {
     order: [Int],
     next: Atomic<Int>,
     seats: [IRX64Seat],
+    poll: Int{-1},
+    trap: Int{-1},
+    turn: Int{-1},
 }
 
 IRX64Seat: struct {
@@ -1066,12 +1104,15 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
     selected := [IRX64Selected]{}
     est: reads.value.order.len().div_euclid(reads.value.seats.len() + 1) + 16
     selected.try_reserve(est) ?? panic("reserve failed")
+    poll: reads.value.poll
+    trap: reads.value.trap
+    turn: reads.value.turn
     loop {
         rank: reads.value.next.add(1)
         if rank >= reads.value.order.len() -> break
         row: reads.value.order[rank]
         reads.value.seats[seat].row.store(row)
-        compiled := ir_x64_select_function(reads.value.programs[0], row, reads.value.names)
+        compiled := ir_x64_select_function(reads.value.programs[0], row, reads.value.names, poll, trap, turn)
         selected.push(IRX64Selected{row: row, compiled: compiled.move()})
     }
     reads.value.seats[seat].row.store(-1)
@@ -1213,6 +1254,9 @@ ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], deb
         return [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}
     }
     main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach, owned.program.owned_observe)
+    need: owned.functions.len() + 1
+    debug.try_reserve(need) ?? panic("reserve failed")
+    functions.try_reserve(need) ?? panic("reserve failed")
     debug.push(x64_object_main_debug(main))
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())
@@ -1278,7 +1322,10 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
     // Per function id + 1 its rows, and whether it is reached.
     id_rows := [[Int]]{}
     reached := [Bool]{}
-    loop _ in 0..<(max_id + 2) {
+    span: max_id + 2
+    id_rows.try_reserve(span) ?? panic("reserve failed")
+    reached.try_reserve(span) ?? panic("reserve failed")
+    loop _ in 0..<span {
         id_rows.push([Int]{})
         reached.push(false)
     }
@@ -1313,6 +1360,17 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
                 }
             }
         }
+    }
+    all_kept := true
+    loop function in functions {
+        at: function.id.value + 1
+        if at < 0 || !reached[at] {
+            all_kept = false
+            break
+        }
+    }
+    if all_kept {
+        return
     }
     kept := [X64CompiledFunction]{}
     kept_debug := [X64FunctionDebug]{}
@@ -1360,27 +1418,39 @@ ir_x64_release_ways: fn(program: IRModule, threads: CompilerThreads) -> Int Neve
     if admitted > IR_X64_RELEASE_WAYS -> IR_X64_RELEASE_WAYS else -> admitted
 }
 
-// Moves `compiled` into `released`: its IR functions in `ways` runs
-// (ir_x64_release_ways), then the rest.
+// Moves `compiled` into `released` in O(1): its IR functions list moves
+// whole, and `ir_x64_release_runs` splits it into `ways` chunks off the main
+// thread so x64_object_functions_threads starts immediately.
 ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: &&IRX64Result, ways: Int) Never! {
     owned := compiled.move()
-    share: owned.program.functions.len() /% ways + 1
+    all := compiler_take_rows<IRFunction>(owned.program.functions)
     permit: released.guard_edit()
-    loop owned.program.functions.len() > 0 {
-        run := [IRFunction]{}
-        loop run.len() < share && owned.program.functions.len() > 0 {
-            row := owned.program.functions.pop() ?? panic("a nonempty IR function list failed to pop")
-            run.push(row)
-        }
-        permit.value.runs.push(run)
-    }
+    if all.len() > 0 -> permit.value.runs.push(all.move())
     permit.value.rest.push(owned)
 }
 
-// Drops `runs` runs of `released` (-1: all of them), each on a thread of its
-// own and the last on this one; returns how many IR functions they held.
+// Splits the queued IR function list into up to IR_X64_RELEASE_WAYS runs off
+// the main thread and drops each run on a thread of its own.
 ir_x64_release_runs: fn(released: Shared<IRX64Released>, runs: Int) -> Int Never! {
-    if runs < 0 -> return ir_x64_release_runs(released, ir_x64_release_count(released))
+    if runs < 0 {
+        all := ir_x64_release_pop_run(released)
+        if all.len() == 0 -> return 0
+        ways: if IR_X64_RELEASE_WAYS > 1 -> IR_X64_RELEASE_WAYS else -> 1
+        share: all.len() /% ways + 1
+        chunks := [[IRFunction]]{}
+        loop all.len() > 0 {
+            run := [IRFunction]{}
+            run.try_reserve(share) ?? panic("reserve failed")
+            loop run.len() < share && all.len() > 0 {
+                row := all.pop() ?? break
+                run.push(row)
+            }
+            chunks.push(run)
+        }
+        count: chunks.len()
+        ir_x64_release_push_runs(released, chunks)
+        return ir_x64_release_runs(released, count)
+    }
     if runs == 0 -> return 0
     if runs == 1 -> return ir_x64_release_run(released)
     count := 0
@@ -1404,9 +1474,12 @@ ir_x64_release_pop_run: fn(released: Shared<IRX64Released>) -> [IRFunction] Neve
     permit.value.runs.pop() ?? [IRFunction]{}
 }
 
-ir_x64_release_count: fn(released: Shared<IRX64Released>) -> Int Never! {
-    permit: released.guard_read()
-    permit.value.runs.len()
+ir_x64_release_push_runs: fn(released: Shared<IRX64Released>, chunks: &[[IRFunction]]) Never! {
+    permit: released.guard_edit()
+    loop chunks.len() > 0 {
+        chunk := chunks.pop() ?? break
+        permit.value.runs.push(chunk)
+    }
 }
 
 // Pops the rest of the compile off `released` and drops it here, outside the
@@ -1589,8 +1662,15 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
     variables.reverse()
     sources := [X64FunctionSource]{}
+    sources.try_reserve(owned.program.functions.len()) ?? panic("reserve failed")
+    last_file := ""
+    last_file_row := -1
     loop f in owned.program.functions {
-        file: ir_x64_text_rows_get(owned.tables.file_rows, f.source_file)
+        file: if f.source_file == last_file -> last_file_row else -> {
+            last_file = f.source_file
+            last_file_row = ir_x64_text_rows_get(owned.tables.file_rows, f.source_file)
+            last_file_row
+        }
         listed := variables.pop() ?? [X64DebugVariable]{}
         inlines := [X64InlineSite]{}
         loop site in 1..<(f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1) {
@@ -1621,6 +1701,7 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
 // so a debugger's frames, `break small.bump` and a profile's functions read
 // it as written. None for any other name, which is already as written.
 ir_x64_member_name: fn(name: String) -> String? Never! {
+    if !name.starts_with("__jet_") -> return None
     parts: name.partition(".")
     path: sema_inline_member_module(parts.head)
     if path == "" -> return None

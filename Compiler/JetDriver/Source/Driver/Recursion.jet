@@ -9,6 +9,7 @@ use jet_foundation.[
     BodyOrFallback,
     BodyRequireKind,
     BodyTree,
+    CompilerThreads,
     DeclTable,
     Diagnostic,
     FnBody,
@@ -18,6 +19,10 @@ use jet_foundation.[
     body_each_expr_child,
     body_node,
     body_stmt,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_single,
+    compiler_transfer_rows,
     decl_table_find_symbol,
 ]
 
@@ -59,28 +64,89 @@ jet_driver_recursion_calls_range: fn(functions: [FnBody], bodies: [Int?], decls:
     calls
 }
 
-// Finishes L0305 recursion lints from a precomputed `calls` adjacency list.
-jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable, calls: [[Int]]) -> [Diagnostic] {
-    groups: jet_driver_recursion_components(calls)
-    must := [[Int]]{}
-    spans := [[Span]]{}
-    loop (position, function) in functions {
+JetDriverRecursionMustPart: struct {
+    positions: [Int],
+    targets: [[Int]],
+    spans: [[Span]],
+}
+
+jet_driver_recursion_must_range: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, groups: [Int], cyclic: [Int], start: Int, end: Int) -> JetDriverRecursionMustPart Never! {
+    positions := [Int]{}
+    out_targets := [[Int]]{}
+    out_spans := [[Span]]{}
+    loop k in start..<end {
+        position: cyclic[k]
+        function: functions[position]
+        hits := [Int:Int]{}
+        loop node in function.tree.nodes {
+            target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
+            if groups[target] == groups[position] -> hits[node.id] = target
+        }
+        leaving: jet_driver_recursion_leaving(jet_driver_recursion_statements(function.tree, hits, function.body))
         targets := [Int]{}
         at := [Span]{}
-        if jet_driver_recursion_cyclic(calls, groups, position) {
-            hits := [Int:Int]{}
-            loop node in function.tree.nodes {
-                target: jet_driver_recursion_target(node.kind, bodies, decls) ?? next
-                if groups[target] == groups[position] -> hits[node.id] = target
-            }
-            leaving: jet_driver_recursion_leaving(jet_driver_recursion_statements(function.tree, hits, function.body))
-            loop call in leaving {
-                targets.push(call.target)
-                at.push(call.span)
+        loop call in leaving {
+            targets.push(call.target)
+            at.push(call.span)
+        }
+        positions.push(position)
+        out_targets.push(targets.move())
+        out_spans.push(at.move())
+    }
+    JetDriverRecursionMustPart{positions: positions.move(), targets: out_targets.move(), spans: out_spans.move()}
+}
+
+jet_driver_recursion_must_threads: fn(functions: [FnBody], bodies: [Int?], decls: DeclTable, groups: [Int], cyclic: [Int], starts: [Int], ends: [Int], at: Int) -> [JetDriverRecursionMustPart] {
+    if at >= starts.len() -> return [JetDriverRecursionMustPart]{}
+    if at + 1 == starts.len() {
+        return [JetDriverRecursionMustPart]{jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, starts[at], ends[at])}
+    }
+    out := [JetDriverRecursionMustPart]{}
+    task.group driver_recursion_must {
+        head: task jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, starts[at], ends[at])
+        rest := jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, at + 1)
+        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        compiler_transfer_rows<JetDriverRecursionMustPart>(out, rest)
+    }
+    out
+}
+
+// Finishes L0305 recursion lints from a precomputed `calls` adjacency list.
+jet_driver_recursion_lints_from_calls: fn(load: JetDriverLoadResult, functions: [FnBody], bodies: [Int?], decls: DeclTable, calls: [[Int]], threads: CompilerThreads{compiler_threads_single()}) -> [Diagnostic] {
+    groups: jet_driver_recursion_components(calls)
+    cyclic := [Int]{}
+    must := (loop _ in functions -> [Int]{})
+    spans := (loop _ in functions -> [Span]{})
+    loop position in 0..<functions.len() {
+        if jet_driver_recursion_cyclic(calls, groups, position) -> cyclic.push(position)
+    }
+    workers: compiler_threads_admit(threads, cyclic.len(), cyclic.len(), 16, 0, 0)
+    if workers <= 1 {
+        part := jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, 0, cyclic.len())
+        loop i in 0..<part.positions.len() {
+            pos: part.positions[i]
+            must[pos] = part.targets[i]
+            spans[pos] = part.spans[i]
+        }
+    } else {
+        starts := [Int]{}
+        ends := [Int]{}
+        loop w in 0..<workers {
+            s: (w * cyclic.len()) /% workers
+            e: ((w + 1) * cyclic.len()) /% workers
+            if s < e {
+                starts.push(s)
+                ends.push(e)
             }
         }
-        must.push(targets)
-        spans.push(at)
+        parts := jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, 0)
+        loop part in parts.move() {
+            loop i in 0..<part.positions.len() {
+                pos: part.positions[i]
+                must[pos] = part.targets[i]
+                spans[pos] = part.spans[i]
+            }
+        }
     }
     cycles: jet_driver_recursion_components(must)
     lints := [Diagnostic]{}

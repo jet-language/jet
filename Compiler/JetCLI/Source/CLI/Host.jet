@@ -217,6 +217,7 @@ use {
         ir_opt_marked_calls,
         ir_opt_module_start,
         ir_opt_o0_bodies,
+        ir_opt_runtime_called,
         ir_optimize_module,
         ir_x64_compile_module_logged,
         ir_x64_hot_order,
@@ -1232,8 +1233,10 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         if !needs_live_query {
             declared_syms := name_table_sized(64)
             loop decl in foreign_link.declarations -> _ := name_intern(declared_syms, decl.symbol)
+            // Only symbols not already provided by the embedded runtime image
+            // require a live undefined-symbol query against the object file.
             loop symbol in built.imports {
-                if name_find(declared_syms, symbol) != None {
+                if name_find(declared_syms, symbol) != None && !jet_cli_runtime_exports_search(runtime_exports.exports, symbol.bytes()) {
                     needs_live_query = true
                     break
                 }
@@ -1858,13 +1861,10 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // exports name it: one walk over the thousands of exports looks up only
     // the few names the program calls. The calls are read by name row, so
     // each called name is looked up once, not once per call.
-    called := [Bool]{}
-    loop _ in 0..<built.program.names.len() -> called.push(false)
-    loop index in 0..<built.program.functions.len() {
-        loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime -> called[built.program.functions[index].a[at]] = true
-        }
-    }
+    // Scan `CallRuntime` ops across the module's functions in parallel on the
+    // compiler threads so large programs do not walk tens of thousands of IR
+    // bodies serially on the main thread before optimizer dispatch.
+    called: ir_opt_runtime_called(built.program, result.compiler_threads)
     // A Core call bound to the image names a symbol the builder found among
     // the image's Core exports (JetIR BuildCore.jet ir_core_bound); `--trace`
     // counts the distinct ones (`ir.build.core_calls`).

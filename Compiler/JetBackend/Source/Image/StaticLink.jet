@@ -982,11 +982,25 @@ link_reloc_text: fn(c: LinkContext, s: Int, off: Int, message: String) -> String
 // Unwind tables: split each `.eh_frame` into its CIE and FDE records.
 
 link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
-    b: c.obj_buffer[obj].copy()
+    b: c.obj_buffer[obj]
     base: link_sec_offset(c, obj, s)
     size: link_sec_size(c, obj, s)
     count: link_rel_count(c, obj, s)
     table: link_rel_table(c, obj, s)
+    if size > 4096 {
+        want: c.ep_sec.len() + size.div_euclid(24) + 16
+        c.ep_sec.try_reserve(want) ?? panic("reserve failed")
+        c.ep_obj.try_reserve(want) ?? panic("reserve failed")
+        c.ep_start.try_reserve(want) ?? panic("reserve failed")
+        c.ep_len.try_reserve(want) ?? panic("reserve failed")
+        c.ep_cie.try_reserve(want) ?? panic("reserve failed")
+        c.ep_target.try_reserve(want) ?? panic("reserve failed")
+        c.ep_first_reloc.try_reserve(want) ?? panic("reserve failed")
+        c.ep_reloc_count.try_reserve(want) ?? panic("reserve failed")
+        c.ep_next.try_reserve(want) ?? panic("reserve failed")
+        c.ep_keep.try_reserve(want) ?? panic("reserve failed")
+        c.ep_out.try_reserve(want) ?? panic("reserve failed")
+    }
     starts := [Int:Int]{}
     k := 0
     off := 0
@@ -1748,6 +1762,10 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
     }
     last: c.obj_first_section.len() - 1
     sections: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
+    if sections > 0 {
+        c.live.try_reserve(sections) ?? panic("reserve failed")
+        c.sec_fde.try_reserve(sections) ?? panic("reserve failed")
+    }
     loop _ in 0..<sections {
         c.live.push(-1)
         c.sec_fde.push(-1)
@@ -1755,7 +1773,7 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
     // Index the FDEs by the section they describe.
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_target[piece] < 0 -> next
-        obj: c.ep_obj[piece].copy()
+        obj: c.ep_obj[piece]
         t: link_target_section(c, obj, c.ep_target[piece])
         c.ep_target[piece] = t
         if t < 0 -> next
@@ -1766,7 +1784,7 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
     loop entry in entries -> link_mark(c, work, entry)
     // Init/fini arrays and SHF_GNU_RETAIN sections of every object are roots.
     loop index in 0..<c.roots.len() {
-        root: c.roots[index].copy()
+        root: c.roots[index]
         link_mark(c, work, root)
     }
     // Personality routines named by the CIEs.
@@ -1779,15 +1797,18 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
     phase := 0
     loop {
         loop head < work.len() {
-            s: work[head].copy()
+            s: work[head]
             head += 1
             obj: link_obj_of(c, s)
-            b: c.obj_buffer[obj].copy()
+            b: c.obj_buffer[obj]
             r: link_rela_of(c, obj, s)
             // Rows are scanned in the order they were marked.
             c.rel_base.push(c.rel_slot.len())
             if r >= 0 {
                 count: link_sec_size(c, obj, r).div_euclid(24)
+                if count > 256 {
+                    c.rel_slot.try_reserve(c.rel_slot.len() + count) ?? panic("reserve failed")
+                }
                 table: link_sec_offset(c, obj, r)
                 loop k in 0..<count {
                     at: table + 24 * k
@@ -1801,7 +1822,7 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
                     c.rel_slot.push(slot)
                 }
             }
-            fde := c.sec_fde[s].copy()
+            fde := c.sec_fde[s]
             loop fde >= 0 {
                 link_mark_piece(c, work, fde, true)
                 fde = c.ep_next[fde]
@@ -3453,7 +3474,51 @@ link_image_symbol_from_buf: fn(bufs: [[U8]], b: Int, name_at: Int, symtab: &[U8]
 // debug file's `out` (`side`, link_debug_file) is its ELF header and the
 // image's build-id note: its headers name that note and the loaded
 // sections, whose bytes stay in the image (SHT_NOBITS), at their addresses.
-link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool) Never! {
+LinkLocalSymPart: struct {
+    symtab: [U8],
+    strtab: [U8],
+}
+
+link_local_syms_range: fn(c: LinkContext, class_headers: [Int], obj: Int, start: Int, end: Int) -> LinkLocalSymPart Never! {
+    b: c.obj_buffer[obj]
+    symtab := [U8]{}
+    strtab := [U8]{}
+    span: end - start
+    if span > 64 {
+        symtab.try_reserve(span * 24) ?? panic("reserve failed")
+        strtab.try_reserve(span * 24) ?? panic("reserve failed")
+    }
+    loop k in start..<end {
+        at: link_sym_at(c, obj, k)
+        info: link_u8(c.bufs, b, at + 4)
+        if (info & 15) != 1 && (info & 15) != 2 -> next
+        name_offset: link_u32(c.bufs, b, at)
+        if name_offset == 0 -> next
+        s: link_sym_shndx(c, obj, k)
+        header: link_symbol_header(c, class_headers, s)
+        if header < 0 -> next
+        link_image_symbol_from_buf(c.bufs, b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+    }
+    LinkLocalSymPart{symtab: symtab.move(), strtab: strtab.move()}
+}
+
+link_local_syms_parts: fn(c: LinkContext, class_headers: [Int], obj: Int, bounds: [Int], at: Int) -> [LinkLocalSymPart] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [LinkLocalSymPart]{}
+    if at == last {
+        return [LinkLocalSymPart]{link_local_syms_range(c, class_headers, obj, bounds[at], bounds[at + 1])}
+    }
+    done := [LinkLocalSymPart]{}
+    task.group link_local_sym_threads {
+        head: task link_local_syms_range(c, class_headers, obj, bounds[at], bounds[at + 1])
+        rest: link_local_syms_parts(c, class_headers, obj, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest.move() -> done.push(item)
+    }
+    done
+}
+
+link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool, threads: CompilerThreads{compiler_threads_single()}) Never! {
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
@@ -3508,8 +3573,28 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     strtab.push(U8{0})
     loop _ in 0..<24 -> symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
+        local_end: c.obj_first_global[obj]
+        sym_workers: if local_end >= 8192 -> compiler_threads_admit(threads, local_end - 1, local_end - 1, 4096, 0, 0) else -> 1
+        if sym_workers > 1 {
+            capped: if sym_workers > 8 -> 8 else -> sym_workers
+            bounds := [Int]{}
+            loop p in 0..<(capped + 1) -> bounds.push(1 + ((local_end - 1) * p).div_euclid(capped))
+            parts := link_local_syms_parts(c, class_headers, obj, bounds, 0)
+            loop part in parts.move() {
+                base: strtab.len()
+                chunk_sym := part.symtab.move()
+                loop row in 0..<(chunk_sym.len() /% 24) {
+                    at: row * 24
+                    name: Int{chunk_sym[at]} + (Int{chunk_sym[at + 1]} << 8) + (Int{chunk_sym[at + 2]} << 16) + (Int{chunk_sym[at + 3]} << 24)
+                    dwarf_patch_u32(chunk_sym, at, base + name)
+                }
+                symtab.extend(chunk_sym.move())
+                strtab.extend(part.strtab.move())
+            }
+            next
+        }
         b: c.obj_buffer[obj]
-        loop k in 1..<c.obj_first_global[obj] {
+        loop k in 1..<local_end {
             at: link_sym_at(c, obj, k)
             info: link_u8(c.bufs, b, at + 4)
             if (info & 15) != 1 && (info & 15) != 2 -> next
@@ -3782,13 +3867,13 @@ link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
 // The side debug file of the image `image`, laid out as `l` (whose build-id
 // note holds a zero id): its ELF header with no program headers, the note,
 // the debug sections, symbol table and section headers (link_write_sections).
-link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) -> [U8] Never! {
+link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, threads: CompilerThreads{compiler_threads_single()}) -> [U8] Never! {
     note: l.note_at - c.base
     out := image[0..<LINK_EHDR_SIZE]
     link_put64(out, 32, 0)
     loop at in 54..<58 -> out[at] = U8{0}
     out.extend(image[note..<note + LINK_BUILD_ID_NOTE_SIZE])
-    link_write_sections(c, out, l, debug, pieces, true)
+    link_write_sections(c, out, l, debug, pieces, true, threads)
     out
 }
 
@@ -4526,7 +4611,7 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     build_id := [U8]{}
     if debug_link == .Val(name) {
         lines := link_trace_lines(c, debug, emitted.pieces, layout)
-        debug_file = link_debug_file(c, image, layout, debug, emitted.pieces)
+        debug_file = link_debug_file(c, image, layout, debug, emitted.pieces, threads)
         crc: link_image_note_section(image, layout, c.base, lines.move(), name)
         link_write_code(c, image, layout, emitted.pieces)
         build_id = link_build_id(image, debug_file, layout.note_at - c.base)
@@ -4541,7 +4626,7 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
             full_est: image.len() + debug_total + sym_est * 64 + text_est + 65536
             if full_est > image.len() -> image.try_reserve(full_est) ?? panic("reserve failed")
         }
-        link_write_sections(c, image, layout, debug, emitted.pieces, false)
+        link_write_sections(c, image, layout, debug, emitted.pieces, false, threads)
         link_write_code(c, image, layout, emitted.pieces)
     }
     if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())

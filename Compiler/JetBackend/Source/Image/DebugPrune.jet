@@ -75,6 +75,9 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
         }
     }
     if info < 0 || abbrev < 0 -> return groups
+    if link_debug_all_live(c, debug, info, line, addr, groups, text_start, text_end) {
+        return groups
+    }
     planned: if addr >= 0 -> link_info_plan(groups[info], groups[abbrev], groups[addr], text_start, text_end) else -> link_info_plan(groups[info], groups[abbrev], [U8]{}, text_start, text_end)
     plan: planned ?? return groups
     line_offsets := [Int:Int]{}
@@ -85,6 +88,54 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
     if ranges >= 0 -> link_lists_prune(groups[ranges], plan.range_refs, range_tables, ranges: true)
     link_info_rewrite(groups[info], plan, line_offsets, list_tables, range_tables)
     groups
+}
+
+// Whether every DWARF unit in `debug` comes from a Jet object whose executable
+// sections are all live and every `.debug_addr` slot falls within
+// `[text_start, text_end)`. In that case no subprogram, line sequence, or
+// location/range list is dropped, so pruning is an exact identity no-op.
+link_debug_all_live: fn(c: LinkContext, debug: LinkDebug, info: Int, line: Int, addr: Int, groups: [[U8]], text_start: Int, text_end: Int) -> Bool Never! {
+    if addr < 0 || groups[addr].len() == 0 -> return false
+    info_rows: debug.rows[info]
+    addr_rows: debug.rows[addr]
+    if info_rows.len() == 0 || info_rows.len() != addr_rows.len() -> return false
+    if line >= 0 && debug.rows[line].len() != info_rows.len() -> return false
+    // Every contributing object must match across info/addr/line and have zero
+    // dropped executable sections.
+    loop k in 0..<info_rows.len() {
+        obj: link_obj_of(c, c.live_secs[info_rows[k]])
+        if link_obj_of(c, c.live_secs[addr_rows[k]]) != obj -> return false
+        if line >= 0 && link_obj_of(c, c.live_secs[debug.rows[line][k]]) != obj -> return false
+        first: c.obj_first_section[obj]
+        loop sec_idx in 1..<c.obj_count[obj] {
+            s: first + sec_idx
+            if (link_sec_flags(c, obj, s) & 4) != 0 && link_sec_size(c, obj, s) > 0 && link_live_row(c, s) < 0 {
+                return false
+            }
+        }
+    }
+    // Verify every DWARF 5 `.debug_addr` unit is well-formed and every 8-byte
+    // function address slot lies inside `[text_start, text_end)`.
+    addr_bytes: groups[addr]
+    at := 0
+    loop at < addr_bytes.len() {
+        length: link_debug_le(addr_bytes, at, 4)
+        if length < 4 || length >= 0xfffffff0 || at + 4 + length > addr_bytes.len() -> return false
+        if link_debug_le(addr_bytes, at + 4, 2) != 5 || (Int{addr_bytes[at + 6]}) != 8 || (Int{addr_bytes[at + 7]}) != 0 {
+            return false
+        }
+        payload: length - 4
+        if payload % 8 != 0 -> return false
+        slot := at + 8
+        end: at + 4 + length
+        loop slot < end {
+            pc: link_debug_addr(addr_bytes, slot)
+            if pc < text_start || pc >= text_end -> return false
+            slot += 8
+        }
+        at = end
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -678,21 +729,31 @@ link_jetline_link: fn(table: &[U8], text_start: Int, text_end: Int) -> Bool Neve
 link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, strings: Int, rows: Int, end: Int, text_start: Int, text_end: Int) -> Bool Never! {
     live := [Int]{}
     starts := [Int]{}
+    if count > 64 {
+        live.try_reserve(count) ?? panic("reserve failed")
+        starts.try_reserve(count) ?? panic("reserve failed")
+    }
+    sorted := true
+    prev_start := -1
     loop k in 0..<count {
         record: records + 32 * k
         start: link_debug_addr(table, record)
         if start >= text_start && start < text_end {
+            if live.len() > 0 && start < prev_start -> sorted = false
+            prev_start = start
             live.push(record)
             starts.push(start)
         }
     }
     if live.len() == 0 -> return true
-    order: link_sort_by(live, starts)
+    order: if sorted -> live.move() else -> link_sort_by(live, starts)
     texts := [U8]{}
+    if rows > strings -> texts.try_reserve(rows - strings) ?? panic("reserve failed")
     // The string offsets, old to new: each string is kept once.
     moved := [Int:Int]{}
     if !link_jetline_string(texts, moved, table, strings, rows) -> return false
     body := [U8]{}
+    if end > rows -> body.try_reserve(end - rows + order.len() * 16) ?? panic("reserve failed")
     base: link_debug_addr(table, order[0])
     previous := base
     loop record in order {
@@ -719,7 +780,7 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
     }
     block: linked.len()
     elf64_u32(linked, 0)
-    elf64_u32(linked, live.len())
+    elf64_u32(linked, order.len())
     elf64_u32(linked, 20 + body.len())
     elf64_u64(linked, base)
     linked.extend(body)

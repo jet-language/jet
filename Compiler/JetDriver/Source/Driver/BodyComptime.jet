@@ -7,6 +7,7 @@ use {
         Diagnostic,
         FnBody,
         ModuleTable,
+        compiler_take_rows,
         module_text,
     ]
     jet_sema.[
@@ -650,6 +651,7 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
 // landing runs.
 JetDriverLanding: struct {
     stopped: Bool,
+    staging: [JetDriverComptimeStaging]{[JetDriverComptimeStaging]{}},
 }
 
 // Lands each body comptime pass whose pending sites are all local values in
@@ -755,9 +757,18 @@ jet_driver_land_local_values: fn(
         lent := jet_driver_carried_lend(bodies.carried)
         graph_facts: lent.graph_facts.move()
         lent.graph_facts = None
-        run := jet_driver_run_comptime(
+        body_types := 0
+        body_impls := 0
+        loop checked in bodies.modules {
+            body_types += checked.declarations.type_defs.len()
+            body_impls += checked.declarations.impls.len()
+        }
+        reuse_staging: landing.staging.len() > 0 && landing.staging[0].staged && landing.staging[0].module_count == bodies.modules.len() && landing.staging[0].type_count == body_types && landing.staging[0].impl_count == body_impls && values.len() >= landing.staging[0].landed
+        lent_declared := if reuse_staging -> [SemaGraphModuleResult]{} else -> compiler_take_rows<SemaGraphModuleResult>(bodies.modules)
+        if !reuse_staging -> landing.staging = [JetDriverComptimeStaging]{}
+        run := jet_driver_run_comptime_carried(
             registration,
-            [SemaGraphModuleResult]{},
+            lent_declared,
             graph_facts,
             run_sources,
             values,
@@ -765,7 +776,9 @@ jet_driver_land_local_values: fn(
             request,
             run_diagnostics,
             lent.memory_plan,
+            landing.staging,
         )
+        if !reuse_staging -> bodies.modules = run.declared.move()
         returned: run.graph_facts.move()
         run.graph_facts = None
         jet_driver_carried_return(bodies.carried, lent, returned)
@@ -779,6 +792,7 @@ jet_driver_land_local_values: fn(
             sema_graph_trail_undo(registration, run.trail)
             break
         }
+        landing.staging = run.carried_staging.move()
         run.values.extend(ahead.values.move())
         jet_driver_trace_step_begin(request.trace_sink, "comptime.land.splice")
         splice := sema_local_value_land(registration, run.trail, bodies.modules, into, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies.carried)
