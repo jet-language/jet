@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113193,
+    "rev": 113195,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30129,6 +30129,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-22T14:57:30.698Z"
+        },
+        {
+          "n": 21,
+          "text": "Non-storing collection lookups (Map.get, Map.has_key, Map.remove, Map.pop, Map index read, Set.has, Set.remove, Set.discard, Set.pop, Set.take) accept a zero-copy string view without E2307 or MaterializeView copy, and String.trim_start()/trim_end() lower to zero-copy views alongside trim()/after()/before() (per Docs/Spec/spec.md:2210,2322).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-22T16:43:43.389Z"
         }
       ],
       "refs": [
@@ -30147,9 +30156,9 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-22T15:11:25.103Z",
+      "updated": "2026-11-22T16:43:43.389Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 20
+      "criteriaLastN": 21
     },
     {
       "id": "c0441rvj",
@@ -131271,148 +131280,6 @@
       "created": "2026-11-21T12:58:45.557Z"
     },
     {
-      "id": "D-MAP-VIEWKEY1",
-      "cardId": "c00rqc09",
-      "group": "language",
-      "title": "Read-only map and set lookups with a string view",
-      "situation": "A string view points straight into text you already hold, without copying bytes onto the heap. Today, looking up a string view in a text-keyed map copies the view into a brand-new string on every read, or fails when explicit copies are on. That hurts hot loops in parsers, log scanners, and compilers that check thousands of trimmed words against a map. This vote decides whether read-only map and set lookups accept a string view in place; we recommend accepting views directly on reads while keeping inserts owned.",
-      "gist": "Should read-only map and set lookups accept a string view without copying?",
-      "lesson": "A string view borrows text from an owner string without copying bytes. Looking up a key only reads it and never keeps it. Every option still copies when inserting a new key into the map.",
-      "explainer": "",
-      "story": "Maya writes a log counter that trims each line and checks a map of known routes. She expects a lookup to only read the trimmed slice, not allocate a new string for every log line.",
-      "inWild": "let key: &str = line.trim();\nlet count = counts.get(key).copied().unwrap_or(0);\n// Rust std::collections::HashMap::get (https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get)",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Borrow view on reads",
-          "detail": "Read-only lookup operations on `[String: V]` (`m[k]`, `m.get(k)`, `m.contains_key(k)`, `m.remove(k)`) and `Set<String>` (`s.contains(k)`, `s.remove(k)`) accept a local zero-copy string view or `View<str>` directly without materializing an owned `String`. Writing a new key (`m[k] = v`, `m.insert(k, v)`, `s.insert(k)`) still needs an owned `String`, so it materializes as today (or asks for `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust `HashMap::get<Q: Borrow<K>>` and C++20 transparent lookup (`std::unordered_map::find(std::string_view)`) both solved this exact allocation hotspot; C++'s mistake was requiring an opt-in transparent comparator per map, whereas Rust makes `&str` work automatically for every `String`-keyed map. Jet gets Rust's zero-ceremony default with no trait boilerplate because `String` and `View<str>` share one UTF-8 byte-slice representation.",
-          "technical": "In `Compiler/JetSema/Source/Sema/Ownership/StringViews.jet`, exempt the key argument of read-only `Map<String, V>` and `Set<String>` operations (`Index`, `GetMap`, `ContainsKey`, `RemoveMap`, `SetContains`, `SetRemove`) from `sema_string_view_check_read` and `MaterializeView`. In `JetIR` and `JetRuntime`, pass `(ptr, len)` to the shared byte-slice lookup routine. Probe on `bfea516e21` confirmed `counts.get(key)` currently fails with `E2307` (`Jet.StringViewOutlivesOwner`) under `#Policy(copies: .Explicit)` and inserts `MaterializeView` otherwise.",
-          "code": "key: line.trim()\ncount: counts.get(key) ?? 0\nhas: seen.contains(key)"
-        },
-        {
-          "key": "B",
-          "name": "Keep owned key on reads",
-          "detail": "Every map and set lookup continues to take an owned `String`, copying a string view implicitly by default or requiring `key.copy()` under `#Policy(copies: .Explicit)`. This keeps every key slot uniform but leaves a permanent allocation tax on every lookup of a trimmed or sliced string, pushing performance-sensitive code toward custom tables.",
-          "technical": "Keep `sema_string_view_check_read` rejecting string views in map/set lookup key slots under `copies: .Explicit` and inserting `MaterializeView` otherwise.",
-          "code": "key: line.trim()\ncount: counts.get(key.copy()) ?? 0\nhas: seen.contains(key.copy())"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "HashMap<String, V>::get accepts &str automatically through Borrow<str>; https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get.",
-          "code": "let count = counts.get(line.trim()).copied().unwrap_or(0);"
-        },
-        {
-          "lang": "C++20",
-          "note": "Transparent lookup lets unordered_map<string, V> accept string_view, but only when the caller writes a custom transparent hash and equal_to; https://en.cppreference.com/w/cpp/container/unordered_map/find.",
-          "code": "auto it = counts.find(std::string_view(line));"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Reads never store the key, so borrowing a string view avoids wasted heap copies with zero new syntax.",
-        "gains": [
-          "Eliminates per-lookup copies in parsers, CSV readers, and compiler tables.",
-          "Matches proven zero-copy lookup ergonomics in Rust and C++."
-        ],
-        "losses": [
-          {
-            "loss": "Hash and equality must stay identical for owned strings and views.",
-            "mitigation": "Both share one byte-slice hash and comparison function in the runtime."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B forces a heap copy on every lookup of a trimmed or sliced key."
-          }
-        ],
-        "tradeoff": "The runtime shares one hash and equality routine across owned strings and string views."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should read-only map and set lookups accept a string view without copying?",
-        "lesson": "A string view borrows text from an owner string without copying bytes. Looking up a key only reads it and never keeps it. Every option still copies when inserting a new key into the map.",
-        "trio": {
-          "current": {
-            "note": "Today a read-only lookup copies the view, or fails under explicit copies.",
-            "code": "key: line.trim()\ncount: counts.get(key) ?? 0\n// Error under explicit copies: write key.copy()"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust's HashMap::get accepts &str for HashMap<String, V> via Borrow. See https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get.",
-            "code": "let key: &str = line.trim();\nlet count = counts.get(key).copied().unwrap_or(0);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Borrow view on reads",
-            "gist": "Accept string views in read-only map and set lookups with zero copy.",
-            "gains": [
-              "Zero allocation on map and set reads.",
-              "Same plain lookup spelling for beginners and experts.",
-              "Inserts still require an owned string key."
-            ],
-            "losses": [
-              "Key hash and equality must match between owned strings and views."
-            ],
-            "proposed": {
-              "code": "key: line.trim()\ncount: counts.get(key) ?? 0\nhas: seen.contains(key)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep owned key on reads",
-            "gist": "Require an owned string on every map and set lookup.",
-            "gains": [
-              "One key type across every map and set method."
-            ],
-            "losses": [
-              "Every lookup on a view copies text onto the heap.",
-              "Hot code drops to byte arrays or custom tables."
-            ],
-            "proposed": {
-              "code": "key: line.trim()\ncount: counts.get(key.copy()) ?? 0\nhas: seen.contains(key.copy())"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Reads never store the key, so borrowing a string view avoids wasted heap copies with zero new syntax.",
-          "gains": [
-            "Eliminates per-lookup copies in parsers, CSV readers, and compiler tables.",
-            "Matches proven zero-copy lookup ergonomics in Rust and C++."
-          ],
-          "losses": [
-            {
-              "loss": "Hash and equality must stay identical for owned strings and views.",
-              "mitigation": "Both share one byte-slice hash and comparison function in the runtime."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B forces a heap copy on every lookup of a trimmed or sliced key."
-            }
-          ],
-          "tradeoff": "The runtime shares one hash and equality routine across owned strings and string views."
-        }
-      },
-      "draftedBy": "Orchestrator",
-      "reviewedBy": null,
-      "draft": true,
-      "status": "open",
-      "created": "2026-11-22T15:10:42.746Z"
-    },
-    {
       "id": "D-STR-VIEW-SPLIT1",
       "cardId": "c00rqc09",
       "group": "language",
@@ -133921,6 +133788,28 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T16:43:43.389Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00rqc09",
+      "note": "20 criteria, soft limit 6: Real compiler bug verified by fresh review against spec.md:2210,2322 (not a ballot)"
+    },
+    {
+      "at": "2026-11-22T16:43:43.389Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#21 Non-storing collection lookups (Map.get, Map.has_key, Map.re"
+    },
+    {
+      "at": "2026-11-22T16:43:42.541Z",
+      "by": "Orchestrator",
+      "action": "decision.delete",
+      "ref": "D-MAP-VIEWKEY1",
+      "note": "Read-only map and set lookups with a string view",
+      "draft": true
+    },
     {
       "at": "2026-11-22T16:42:14.440Z",
       "by": "Orchestrator",
