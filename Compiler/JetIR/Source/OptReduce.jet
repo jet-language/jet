@@ -403,7 +403,104 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, report: &IROptReport) -> [I
             report.reductions.push("{what} reduction {f.name}: declined ({found.reason})")
         }
     }
+    ir_reduce_collapse_versioned(f, latest, taken)
     taken
+}
+
+// When OptVersion duplicated a reducible loop into a versioned fast copy
+// followed by its fallback loop (`block { block { ... fast ... br 1 } fallback }`)
+// and OptReduce accepted both copies for the same reduction, the single SIMD
+// leaf before the fallback loop already handles the entire inline-Int fast path.
+// Drop the redundant fast copy (replacing it with Nops until rewrite compacts)
+// and keep only the fallback loop's single leaf.
+ir_reduce_collapse_versioned: fn(f: &IRFunction, latest: [Int], taken: &[IRReduceLoop]) Never! {
+    if taken.len() < 2 -> return
+    keep := loop _ in 0..<taken.len() -> true
+    i := 0
+    loop i + 1 < taken.len() {
+        p1: taken[i]
+        p2: taken[i + 1]
+        at1: p1.at
+        at2: p2.at
+        if f.b[at1] != IR_LOOP_VERSIONED || f.b[at2] != IR_LOOP_VERSIONED {
+            i += 1
+            next
+        }
+        if p1.kind != p2.kind || p1.total != p2.total || p1.index != p2.index {
+            i += 1
+            next
+        }
+        // Locate the fast-copy Block (`fast_blk .. fast_end`) right before `at2`
+        // (or right before a Block directly wrapping `at2`).
+        fb_start: if at2 > 0 && f.op[at2 - 1] == .Block && f.a[at2 - 1] == f.a[at2] + 1 -> at2 - 1 else -> at2
+        fast_end: fb_start - 1
+        if fast_end <= f.a[at1] || f.op[fast_end] != .End {
+            i += 1
+            next
+        }
+        fast_blk: f.a[fast_end]
+        if fast_blk <= 0 || fast_blk >= at1 || f.op[fast_blk] != .Block {
+            i += 1
+            next
+        }
+        // Must sit inside the outer versioned Block whose End follows the fallback.
+        outer: fast_blk - 1
+        fb_end: if fb_start == at2 - 1 -> f.a[fb_start] else -> f.a[at2]
+        if f.op[outer] != .Block || f.a[outer] != fb_end + 1 {
+            i += 1
+            next
+        }
+        if f.op[fast_end - 1] != .Br || f.a[fast_end - 1] != 1 {
+            i += 1
+            next
+        }
+        // Verify nothing in the fast wrapper before `at1` or after `f.a[at1]`
+        // has side effects, and nothing written inside `fast_blk..=fast_end`
+        // (other than total/index) is read after `fast_end`.
+        safe := true
+        loop k in (fast_blk + 1)..<at1 {
+            op: f.op[k]
+            if op == .Store || op == .StreamStore || op == .CopyBytes || op == .Call || op == .CallRuntime || op == .CallIndirect || op == .Drop || op == .Close || op == .Return || op == .Unreachable {
+                safe = false
+                break
+            }
+        }
+        if safe {
+            loop k in (f.a[at1] + 1)..<(fast_end - 1) {
+                op: f.op[k]
+                if op != .End && op != .Nop {
+                    safe = false
+                    break
+                }
+            }
+        }
+        if safe {
+            loop k in (fast_blk + 1)..<fast_end {
+                w: ir_x64_write(f, k)
+                if w >= 0 && w != p2.total && w != p2.index && latest[w] > fast_end {
+                    safe = false
+                    break
+                }
+            }
+        }
+        if !safe {
+            i += 1
+            next
+        }
+        loop k in fast_blk..<(fast_end + 1) -> ir_opt_kill(f, k)
+        keep[i] = false
+        i += 2
+    }
+    // Compact taken in place without copying.
+    out := [IRReduceLoop]{}
+    idx := taken.len() - 1
+    loop idx >= 0 {
+        item: taken.pop() ?? break
+        if keep[idx] -> out.push(item)
+        idx -= 1
+    }
+    out.reverse()
+    taken = out.move()
 }
 
 // Puts the leaf call (`leaves`, by kind) in front of each Loop of `f` in
@@ -487,19 +584,19 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     // The Ifs of stop points (a stop or turn poll's call, then an If with no
     // Else on what it returned), whose bodies are left out too.
     polls := [Int]{}
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -2
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -2
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
     loop k := at + 1, k < end - 1 {
         if f.op[k] == .Loop -> return ir_reduce_declined(IR_REDUCE_SUM, "-")
         body.push(k)
         if f.op[k] == .If && f.b[k] < 0 && f.c[k] > k + 1 && f.op[f.c[k] - 1] == .Unreachable {
             faults.push(k)
             k = f.c[k] + 1
-        } else if f.op[k] == .If && f.b[k] < 0 && ir_reduce_leaves(f, k) {
-            guards.push(k)
-            k = f.c[k] + 1
         } else if f.op[k] == .If && f.b[k] < 0 && k > at + 1 && f.op[k - 1] == .Call && (f.a[k - 1] == poll || f.a[k - 1] == turn) && f.dst[k - 1] >= 0 && f.a[k] == f.dst[k - 1] {
             polls.push(k)
+            k = f.c[k] + 1
+        } else if f.op[k] == .If && f.b[k] < 0 && ir_reduce_leaves(f, k) {
+            guards.push(k)
             k = f.c[k] + 1
         } else { k += 1 }
     }

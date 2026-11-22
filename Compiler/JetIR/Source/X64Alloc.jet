@@ -432,19 +432,148 @@ ir_x64_covered_drop: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> 
     true
 }
 
+// Returns for each cold dead-end If arm (no Else, ends in Unreachable, no Loop,
+// and any outward Br leaving past every open Loop into a non-Loop Block, as an
+// inlined stop edge does) its [start, end, escape_end] triple, and per
+// instruction the index of its enclosing cold arm (-1 if hot).
+ir_x64_cold_arms: fn(f: IRFunction, arm_starts: &[Int], arm_ends: &[Int], arm_escapes: &[Int]) -> [Int] Never! {
+    count: f.op.len()
+    owner := loop _ in 0..<count -> -1
+    open_is_loop := [Bool]{}
+    open_end := [Int]{}
+    at := 0
+    loop at < count {
+        op_at: f.op[at]
+        if op_at == .Block || op_at == .Loop {
+            open_is_loop.push(op_at == .Loop)
+            open_end.push(f.a[at])
+            at += 1
+            next
+        }
+        if op_at == .End {
+            if open_is_loop.len() > 0 {
+                _ := open_is_loop.pop()
+                _ := open_end.pop()
+            }
+            at += 1
+            next
+        }
+        if op_at != .If || f.b[at] >= 0 {
+            if op_at == .If {
+                open_is_loop.push(false)
+                open_end.push(f.c[at])
+            }
+            at += 1
+            next
+        }
+        end: f.c[at]
+        if end <= at + 1 || end >= count || f.op[end - 1] != .Unreachable {
+            open_is_loop.push(false)
+            open_end.push(end)
+            at += 1
+            next
+        }
+        depth := 0
+        ok := true
+        min_escape := count
+        loop k in (at + 1)..<end {
+            op: f.op[k]
+            if op == .Loop {
+                ok = false
+                break
+            }
+            if op == .Block || op == .If -> depth += 1
+            else if op == .End -> depth -= 1
+            else if op == .Br && f.a[k] >= depth {
+                outer: f.a[k] - depth
+                row: open_is_loop.len() - outer
+                if outer == 0 || row < 0 || open_is_loop[row] {
+                    ok = false
+                    break
+                }
+                loop r in 0..<row {
+                    if open_is_loop[r] {
+                        ok = false
+                        break
+                    }
+                }
+                if !ok -> break
+                if open_end[row] < min_escape -> min_escape = open_end[row]
+            } else if op == .BrIf && f.b[k] >= depth {
+                ok = false
+                break
+            }
+        }
+        if !ok || depth != 0 {
+            open_is_loop.push(false)
+            open_end.push(end)
+            at += 1
+            next
+        }
+        id: arm_starts.len()
+        arm_starts.push(at)
+        arm_ends.push(end)
+        arm_escapes.push(min_escape)
+        loop k in (at + 1)..<end -> owner[k] = id
+        at = end + 1
+    }
+    owner
+}
+
 // Per slot: whether it is a `general` slot other than a parameter whose
 // range (`starts`..`ends`) holds only silent instructions (ir_x64_silent),
 // with `routes` exact Int routes too (ir_x64_int_calls), so r8 and r9 may
-// hold it.
+// hold it. A noisy instruction inside a dead-end Unreachable If arm does not
+// disqualify a slot whose range starts before that If, is never read inside
+// the arm, and dies before any outward Br target of the arm.
 ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int], routes: Bool) -> [Bool] Never! {
-    // Per instruction, how many before it may call (but in a route's slow
-    // path).
+    arm_starts := [Int]{}
+    arm_ends := [Int]{}
+    arm_escapes := [Int]{}
+    cold_owner: ir_x64_cold_arms(f, arm_starts, arm_ends, arm_escapes)
+    arm_noisy := loop _ in 0..<arm_starts.len() -> false
+
+    // Per instruction, how many hot instructions before it may call.
     noisy := [Int]{0}
     loop at in 0..<f.op.len() {
         calm: ir_x64_silent(m, f, consts, values, at) || (routes && ir_x64_int_calls(m, f, consts, at))
-        noisy.push(noisy[at] + (if calm -> 0 else -> 1))
+        owner: cold_owner[at]
+        if owner >= 0 {
+            if !calm -> arm_noisy[owner] = true
+            noisy.push(noisy[at])
+        } else {
+            noisy.push(noisy[at] + (if calm -> 0 else -> 1))
+        }
     }
-    loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && noisy[ends[slot] + 1] == noisy[starts[slot]]
+    silent := loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && noisy[ends[slot] + 1] == noisy[starts[slot]]
+    if arm_starts.len() == 0 -> return silent
+
+    reads := [Int]{}
+    loop id in 0..<arm_starts.len() {
+        if !arm_noisy[id] -> next
+        if_at: arm_starts[id]
+        if_end: arm_ends[id]
+        escape: arm_escapes[id]
+        // Any slot read inside a noisy cold arm, or born inside it, cannot use r8/r9.
+        loop k in (if_at + 1)..<if_end {
+            w: ir_x64_write(f, k)
+            if w >= 0 && w < silent.len() -> silent[w] = false
+            ir_x64_reads_into(f, k, reads)
+            if f.op[k] == .If || f.op[k] == .BrIf -> reads.push(f.a[k])
+            loop r in reads {
+                if r >= 0 && r < silent.len() -> silent[r] = false
+            }
+        }
+        // Any slot live past an outward Br target of the noisy cold arm cannot use r8/r9.
+        if escape < f.op.len() {
+            loop slot in 0..<silent.len() {
+                if silent[slot] && starts[slot] < if_end && ends[slot] >= escape {
+                    silent[slot] = false
+                }
+            }
+        }
+    }
+    silent
 }
 
 // Per slot of a leaf: whether it is a `general` slot other than a parameter
