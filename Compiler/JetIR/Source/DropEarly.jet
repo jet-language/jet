@@ -134,8 +134,8 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
         if f.op[at] == .Drop {
             slot: f.a[at]
             if slot >= 0 && slot < count {
-                row: m.types[f.slot_type[slot]]
-                if row.kind == .String && row.drop != "" {
+                type_row: f.slot_type[slot]
+                if m.types[type_row].kind == .String && m.types[type_row].drop != "" {
                     has_string_drop = true
                     break
                 }
@@ -155,8 +155,8 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) ->
     eligible := [Bool]{}
     dropped := [Bool]{}
     loop slot in 0..<count {
-        row: m.types[f.slot_type[slot]]
-        eligible.push(row.kind == .String && row.drop != "")
+        type_row: f.slot_type[slot]
+        eligible.push(m.types[type_row].kind == .String && m.types[type_row].drop != "")
         dropped.push(false)
     }
     reads := [Int]{}

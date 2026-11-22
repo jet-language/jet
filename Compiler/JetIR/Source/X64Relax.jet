@@ -67,9 +67,22 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 // instruction starts, in any order, no loop inside another), each loop
 // ending at `ends` (the same index), and returns the layout map.
 ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
-    ordered := sites.copy()
-    ordered.sort()
     r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
+    if sites.len() == 0 && heads.len() == 0 -> return r
+    sorted := true
+    loop i in 1..<sites.len() {
+        if sites[i] < sites[i - 1] {
+            sorted = false
+            break
+        }
+    }
+    ordered := if sorted -> sites else -> {
+        tmp := [Int]{}
+        loop s in sites -> tmp.push(s)
+        tmp.sort()
+        tmp
+    }
+    has_pinned: pinned.len() > 0
     targets := [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
@@ -78,7 +91,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
         r.starts.push(if jump -> site - 1 else -> site - 2)
         r.lengths.push(if jump -> 5 else -> 6)
         r.short.push(false)
-        r.stays_long.push(pinned.contains(site))
+        r.stays_long.push(has_pinned && pinned.contains(site))
         r.gone.push(false)
         r.shrunk.push(0)
         targets.push(site + 4 + ir_x64_rel32_at(code, site))
@@ -102,49 +115,52 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
     }
     ir_x64_relax_fuse(code, r, targets)
     ir_x64_relax_shrink(r)
-    // Starts, lengths, heads and targets stay put from here on, so which
-    // branches and heads lie before each branch's end and each target is
-    // found once; each pass then reads the shrinking and the no-ops so far
-    // at those counts instead of searching for them again.
-    end_branches := [Int]{}
+    has_heads: r.heads.len() > 0
+    site_count: r.sites.len()
     end_heads := [Int]{}
     target_branches := [Int]{}
     target_heads := [Int]{}
-    loop index in 0..<r.sites.len() {
-        end: r.starts[index] + r.lengths[index]
-        end_branches.push(ir_x64_relax_branches_to(r, end))
-        end_heads.push(ir_x64_relax_heads_to(r, end, false))
+    loop index in 0..<site_count {
         target_branches.push(ir_x64_relax_branches_to(r, targets[index]))
-        target_heads.push(ir_x64_relax_heads_to(r, targets[index], true))
+        if has_heads {
+            end: r.starts[index] + r.lengths[index]
+            end_heads.push(ir_x64_relax_heads_to(r, end, false))
+            target_heads.push(ir_x64_relax_heads_to(r, targets[index], true))
+        }
     }
     changed := true
+    shorten := [Int]{}
     loop changed {
         changed = false
-        ir_x64_relax_pad(r)
-        // A short branch the padding pushed out of reach goes back to long.
-        loop index in 0..<r.sites.len() {
-            if !r.short[index] -> next
-            end: r.starts[index] + r.lengths[index]
-            reach: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index]) - ir_x64_relax_moved(r, end, end_branches[index], end_heads[index])
-            if reach < -128 || reach > 127 {
-                r.short[index] = false
-                r.stays_long[index] = true
-                changed = true
+        if has_heads {
+            ir_x64_relax_pad(r)
+            // A short branch the padding pushed out of reach goes back to long.
+            loop index in 0..<site_count {
+                if !r.short[index] -> next
+                end: r.starts[index] + r.lengths[index]
+                reach: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index]) - ir_x64_relax_moved(r, end, index + 1, end_heads[index])
+                if reach < -128 || reach > 127 {
+                    r.short[index] = false
+                    r.stays_long[index] = true
+                    changed = true
+                }
+            }
+            if changed {
+                ir_x64_relax_shrink(r)
+                next
             }
         }
-        if changed {
-            ir_x64_relax_shrink(r)
-            next
-        }
-        shorten := [Int]{}
-        loop index in 0..<r.sites.len() {
+        shorten.clear()
+        loop index in 0..<site_count {
             if r.short[index] || r.stays_long[index] || r.gone[index] -> next
             end: r.starts[index] + r.lengths[index]
             saving: r.lengths[index] - 2
             // Where this branch would end, and its target would be, were it
             // short too.
-            from: ir_x64_relax_moved(r, end, end_branches[index], end_heads[index]) - saving
-            to: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index]) - (if targets[index] >= end -> saving else -> 0)
+            eh: if has_heads -> end_heads[index] else -> 0
+            th: if has_heads -> target_heads[index] else -> 0
+            from: ir_x64_relax_moved(r, end, index + 1, eh) - saving
+            to: ir_x64_relax_moved(r, targets[index], target_branches[index], th) - (if targets[index] >= end -> saving else -> 0)
             reach: to - from
             if reach >= -128 && reach <= 127 -> shorten.push(index)
         }
@@ -155,12 +171,13 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
         }
     }
     out := [U8]{}
+    if out.try_reserve(code.len()) == .Err(_) {}
     copied := 0
     branch := 0
     head := 0
-    loop branch < r.sites.len() || head < r.heads.len() {
+    loop branch < site_count || head < r.heads.len() {
         // A head's no-ops go before a branch that starts there.
-        if head < r.heads.len() && (branch >= r.sites.len() || r.heads[head] <= r.starts[branch]) {
+        if head < r.heads.len() && (branch >= site_count || r.heads[head] <= r.starts[branch]) {
             loop at in copied..<r.heads[head] -> out.push(code[at])
             copied = r.heads[head]
             x64_nops(out, r.pads[head])
@@ -176,7 +193,8 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], pinned: [Int], heads: [Int], ends: [
             copied = end
             next
         }
-        target: ir_x64_relax_moved(r, targets[index], target_branches[index], target_heads[index])
+        th: if has_heads -> target_heads[index] else -> 0
+        target: ir_x64_relax_moved(r, targets[index], target_branches[index], th)
         jump: r.lengths[index] == 5
         if r.short[index] {
             out.push(if jump -> (U8{0xeb}) else -> (U8{0x70 + (Int{code[start + 1]} - 0x80)}))
@@ -218,6 +236,7 @@ ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
 // jmp or a loop head starts there, as that code would no longer exist. A
 // tail jump is a relocation, not a listed branch, so it never fuses.
 ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
+    if r.sites.len() < 2 -> return
     landed := targets.copy()
     landed.sort()
     seen := 0
@@ -324,26 +343,26 @@ ir_x64_relax_shrunk: fn(r: IRX64Relax, at: Int) -> Int Never! {
 
 // How many branches end at or before `at`.
 ir_x64_relax_branches_to: fn(r: IRX64Relax, at: Int) -> Int Never! {
-    low := 0
-    high := r.sites.len()
+    low := I64{0}
+    high := I64{r.sites.len()}
     loop low < high {
-        middle: (low + high) /% 2
-        if r.starts[middle] + r.lengths[middle] <= at -> low = middle + 1 else -> high = middle
+        middle: Int{(low + high) >> I64{1}}
+        if r.starts[middle] + r.lengths[middle] <= at -> low = I64{middle} + I64{1} else -> high = I64{middle}
     }
-    low
+    Int{low}
 }
 
 // How many heads lie before `at` (and at it, when `inclusive`).
 ir_x64_relax_heads_to: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
-    low := 0
-    high := r.heads.len()
+    low := I64{0}
+    high := I64{r.heads.len()}
     loop low < high {
-        middle: (low + high) /% 2
-        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) -> low = middle + 1 else {
-            high = middle
+        middle: Int{(low + high) >> I64{1}}
+        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) -> low = I64{middle} + I64{1} else {
+            high = I64{middle}
         }
     }
-    low
+    Int{low}
 }
 
 // A forward jmp over three filler bytes and a loop of 20 bytes and a jmp

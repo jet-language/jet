@@ -510,32 +510,47 @@ sema_taint_catalog_init: fn() -> SemaTaintCatalog Never! {
 sema_taint_edit_distance: fn(left: String, right: String) -> Int Never! {
     a := left.bytes()
     b := right.bytes()
+    a_len: a.len()
+    b_len: b.len()
+    if a_len == 0 -> return b_len
+    if b_len == 0 -> return a_len
     previous := [Int]{}
-    index := 0
-    loop index <= b.len() {
-        previous.push(index)
-        index += 1
+    current := [Int]{}
+    index := I64{0}
+    b_end: I64{b_len}
+    loop index <= b_end {
+        previous.push(Int{index})
+        current.push(0)
+        index += I64{1}
     }
-    i := 0
-    loop i < a.len() {
-        current := [Int]{i + 1}
-        j := 0
-        loop j < b.len() {
-            cost := 0
-            if a[i] != b[j] -> cost = 1
-            deletion := previous[j + 1] + 1
-            insertion := current[j] + 1
-            substitution := previous[j] + cost
-            best := deletion
-            if insertion < best -> best = insertion
+    i := I64{0}
+    a_end: I64{a_len}
+    loop i < a_end {
+        i_int: Int{i}
+        ai: a[i_int]
+        current[0] = i_int + 1
+        j := I64{0}
+        loop j < b_end {
+            j_int: Int{j}
+            j1: Int{j + I64{1}}
+            cost: if ai == b[j_int] -> 0 else -> 1
+            deletion: previous[j1] + 1
+            insertion: current[j_int] + 1
+            substitution: previous[j_int] + cost
+            best := if insertion < deletion -> insertion else -> deletion
             if substitution < best -> best = substitution
-            current.push(best)
-            j += 1
+            current[j1] = best
+            j += I64{1}
         }
-        previous = current
-        i += 1
+        j = I64{0}
+        loop j <= b_end {
+            j_int: Int{j}
+            previous[j_int] = current[j_int]
+            j += I64{1}
+        }
+        i += I64{1}
     }
-    previous[b.len()]
+    previous[b_len]
 }
 
 // Whether two names are the same kind of word: both start with an ASCII upper
@@ -551,9 +566,15 @@ sema_taint_closest: fn(name: String, candidates: [String]) -> String? {
     best := ""
     best_distance := 4
     ambiguous := false
+    name_len: name.count_bytes()
+    name_upper: sema_checked_module_uppercase(name)
     loop candidate in candidates {
+        if candidate == name || sema_checked_module_uppercase(candidate) != name_upper -> next
+        max_d: if best_distance < 3 -> best_distance else -> 3
+        diff: candidate.count_bytes() - name_len
+        if diff > max_d || diff < -max_d -> next
         distance := sema_taint_edit_distance(name, candidate)
-        if distance == 0 || distance > 3 || distance >= name.count_bytes() || !sema_taint_same_word_kind(name, candidate) {
+        if distance == 0 || distance > 3 || distance >= name_len {
             next
         }
         if {

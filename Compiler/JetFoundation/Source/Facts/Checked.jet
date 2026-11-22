@@ -967,20 +967,25 @@ TCostState: enum {
 // (BodyTree.expr_types) file for node id `id`. The row as far from the end as
 // `id` is from the last id is tried first, as body_node does.
 checked_expr_type_id: fn(rows: [TExprType], id: Int) -> Int? Never! {
-    count: rows.len()
-    if count > 0 {
-        guess: count - 1 - (rows[count - 1].id - id)
-        if guess >= 0 && guess < count && rows[guess].id == id {
-            if guess == 0 || rows[guess - 1].id < id -> return Val(rows[guess].ty)
+    count: I64{rows.len()}
+    if (count > I64{0}) {
+        last_idx: Int{wrapping(count - I64{1})}
+        guess: wrapping(wrapping(count - I64{1}) - wrapping(I64{rows[last_idx].id} - I64{id}))
+        if (guess >= I64{0} && guess < count) {
+            g: Int{guess}
+            if rows[g].id == id {
+                if (guess == I64{0}) || rows[Int{wrapping(guess - I64{1})}].id < id -> return Val(rows[g].ty)
+            }
         }
     }
-    low := 0
+    low := I64{0}
     high := count
     loop low < high {
-        middle: (low + high) /% 2
-        if rows[middle].id < id -> low = middle + 1 else -> high = middle
+        middle: (low + high) >> I64{1}
+        if rows[Int{middle}].id < id -> low = wrapping(middle + I64{1}) else -> high = middle
     }
-    if low < count && rows[low].id == id -> return Val(rows[low].ty)
+    at: Int{low}
+    if low < count && rows[at].id == id -> return Val(rows[at].ty)
     None
 }
 

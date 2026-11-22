@@ -424,8 +424,8 @@ ir_x64_covered_drop: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> 
         if (slot != f.a[owner] && slot != f.b[owner]) || slot == f.dst[owner] || (drops.len() == 1 && drops[0] == slot) {
             return false
         }
-        row: m.types[f.slot_type[slot]]
-        if row.kind != .Int || row.drop == "" -> return false
+        type_row: f.slot_type[slot]
+        if m.types[type_row].kind != .Int || m.types[type_row].drop == "" -> return false
         drops.push(slot)
     }
     true
@@ -573,6 +573,87 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
         }
     }
     silent
+}
+
+// Computes both `silent` (routes=false) and `open` (routes=true) in a single
+// pass over `f`, avoiding duplicate cold-arm discovery and `ir_x64_silent` walks.
+ir_x64_silent_both: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int], silent: &[Bool], open: &[Bool]) Never! {
+    arm_starts := [Int]{}
+    arm_ends := [Int]{}
+    arm_escapes := [Int]{}
+    cold_owner: ir_x64_cold_arms(f, arm_starts, arm_ends, arm_escapes)
+    arm_count: arm_starts.len()
+    arm_noisy_plain := [Bool]{}
+    arm_noisy_routes := [Bool]{}
+    loop _ in 0..<arm_count {
+        arm_noisy_plain.push(false)
+        arm_noisy_routes.push(false)
+    }
+    op_count: f.op.len()
+    noisy_plain := [Int]{0}
+    noisy_routes := [Int]{0}
+    plain_so_far := 0
+    routes_so_far := 0
+    loop at in 0..<op_count {
+        calm_plain: ir_x64_silent(m, f, consts, values, at)
+        calm_routes: calm_plain || ir_x64_int_calls(m, f, consts, at)
+        owner: cold_owner[at]
+        if owner >= 0 {
+            if !calm_plain -> arm_noisy_plain[owner] = true
+            if !calm_routes -> arm_noisy_routes[owner] = true
+        } else {
+            if !calm_plain -> plain_so_far += 1
+            if !calm_routes -> routes_so_far += 1
+        }
+        noisy_plain.push(plain_so_far)
+        noisy_routes.push(routes_so_far)
+    }
+    count: starts.len()
+    loop slot in 0..<count {
+        base: general[slot] && slot >= f.param_count && starts[slot] >= 0
+        if base {
+            s: starts[slot]
+            e: ends[slot]
+            silent.push(s + 1 >= e || noisy_plain[e] == noisy_plain[s + 1])
+            open.push(noisy_routes[e + 1] == noisy_routes[s])
+        } else {
+            silent.push(false)
+            open.push(false)
+        }
+    }
+    if arm_count == 0 -> return
+    reads := [Int]{}
+    loop id in 0..<arm_count {
+        np: arm_noisy_plain[id]
+        nr: arm_noisy_routes[id]
+        if !np && !nr -> next
+        if_at: arm_starts[id]
+        if_end: arm_ends[id]
+        escape: arm_escapes[id]
+        loop k in (if_at + 1)..<if_end {
+            w: ir_x64_write(f, k)
+            if w >= 0 && w < count {
+                if np -> silent[w] = false
+                if nr -> open[w] = false
+            }
+            ir_x64_reads_into(f, k, reads)
+            if f.op[k] == .If || f.op[k] == .BrIf -> reads.push(f.a[k])
+            loop r in reads {
+                if r >= 0 && r < count {
+                    if np -> silent[r] = false
+                    if nr -> open[r] = false
+                }
+            }
+        }
+        if escape < op_count {
+            loop slot in 0..<count {
+                if starts[slot] < if_end && ends[slot] >= escape {
+                    if np && silent[slot] -> silent[slot] = false
+                    if nr && open[slot] -> open[slot] = false
+                }
+            }
+        }
+    }
 }
 
 // Per slot of a leaf: whether it is a `general` slot other than a parameter
@@ -1184,8 +1265,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
                 source: f.a[at]
                 if source < 0 || source >= count || roots[source] < 0 -> next
                 // A Copy that clones (ir_x64_transfer) makes a value of its own.
-                row: m.types[f.slot_type[source]]
-                if op == .Copy && row.drop != "" && row.kind != .Aggregate -> next
+                type_row: f.slot_type[source]
+                if op == .Copy && m.types[type_row].drop != "" && m.types[type_row].kind != .Aggregate -> next
                 root: roots[source]
                 shift: shifts[source] + (if op == .Offset -> f.b[at] else -> 0)
                 // Only inside the storage: a displacement of 0 would be no frame.
@@ -1282,7 +1363,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     phis: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
     leaf: ir_x64_leaf(m, f, classes, consts, values)
-    silent: if leaf -> [Bool]{} else -> ir_x64_silent_slots(m, f, consts, values, general, starts, ends, false)
+    silent := [Bool]{}
+    open_quiet := [Bool]{}
+    if !leaf -> ir_x64_silent_both(m, f, consts, values, general, starts, ends, silent, open_quiet)
     regs: if {
         leaf -> {
             masks: ir_x64_scratches(m, f, consts, values)
@@ -1291,7 +1374,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             ir_x64_leaf_scratch(f, masks, general, starts, ends, scanned)
             scanned
         }
-        else -> ir_x64_scan(starts, ends, weights, general, ir_x64_silent_slots(m, f, consts, values, general, starts, ends, true), silent, IR_X64_SLOT_REGISTERS.len(), IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_QUIET_REGISTERS)
+        else -> ir_x64_scan(starts, ends, weights, general, open_quiet, silent, IR_X64_SLOT_REGISTERS.len(), IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_QUIET_REGISTERS)
     }
     // The slots in r8 or r9 whose ranges hold a route call (all but the
     // silent ones), each kept in its frame home across those calls.
@@ -1466,8 +1549,8 @@ ir_x64_aliases: fn(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_
         if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] {
             next
         }
-        row: m.types[f.slot_type[source]]
-        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) {
+        type_row: f.slot_type[source]
+        if m.types[type_row].size != 8 || (op == .Copy && m.types[type_row].drop != "" && m.types[type_row].kind != .Aggregate && !ir_clone_shares(m.types[type_row].clone)) {
             next
         }
         if starts[source] > at || ends[source] < ends[slot] -> next
@@ -1512,8 +1595,8 @@ ir_x64_phis: fn(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_wri
         if source < 0 || source >= count || source == slot || classes[source] != classes[slot] || consts[source] || addressed[source] {
             next
         }
-        row: m.types[f.slot_type[source]]
-        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) {
+        type_row: f.slot_type[source]
+        if m.types[type_row].size != 8 || (op == .Copy && m.types[type_row].drop != "" && m.types[type_row].kind != .Aggregate && !ir_clone_shares(m.types[type_row].clone)) {
             next
         }
         branch: around[at]
@@ -1595,21 +1678,33 @@ ir_x64_storage_size: fn(f: IRFunction, at: Int) -> Int Never! {
 // slot: its register, -1 for none.
 ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, fresh: [Bool], partners: [Int], phis: [Int], aliases: [Int], pool: [Int]) -> [Int] Never! {
     count: starts.len()
+    pool_len: pool.len()
     regs := [Int]{}
     loop _ in 0..<count -> regs.push(-1)
+    use_shift: count <= 16777216
     keys := [Int]{}
-    loop slot in 0..<count {
-        if eligible[slot] -> keys.push((starts[slot] + 1) * count + slot)
+    if use_shift {
+        loop slot in 0..<count {
+            if eligible[slot] -> keys.push(Int{(I64{starts[slot] + 1} << I64{24}) | I64{slot}})
+        }
+    } else {
+        loop slot in 0..<count {
+            if eligible[slot] -> keys.push((starts[slot] + 1) * count + slot)
+        }
     }
     keys.sort()
     owners := [Int]{}
-    loop _ in 0..<pool.len() -> owners.push(-1)
+    held := [Int]{}
+    loop _ in 0..<pool_len {
+        owners.push(-1)
+        held.push(0)
+    }
     riders := [Int]{}
     loop key in keys {
-        slot: key %% count
+        slot: if use_shift -> Int{I64{key} & I64{16777215}} else -> key %% count
         start: starts[slot]
         // Expire ranges that ended before this one starts.
-        loop row in 0..<pool.len() {
+        loop row in 0..<pool_len {
             owner: owners[row]
             if owner >= 0 && ends[owner] < start -> owners[row] = -1
         }
@@ -1619,7 +1714,7 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
             riders.push(slot)
             next
         }
-        rows: if open[slot] -> pool.len() else -> wide
+        rows: if open[slot] -> pool_len else -> wide
         // A fresh range may also take a register whose range ends where it
         // starts, its partner's first.
         shares: fresh[slot] && start >= 0
@@ -1628,19 +1723,32 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
         phi: phis[slot]
         if shares && phi >= 0 {
             loop row in 0..<rows {
-                if owners[row] == phi -> free = row
+                if owners[row] == phi {
+                    free = row
+                    break
+                }
             }
             if free >= 0 && ends[phi] > start -> riders.push(phi)
         }
         if free < 0 && shares && partner >= 0 && ends[partner] == start {
             loop row in 0..<rows {
-                if owners[row] == partner -> free = row
+                if owners[row] == partner {
+                    free = row
+                    break
+                }
             }
         }
-        first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
-        loop step in 0..<rows {
-            row: (step + first) %% rows
-            if free < 0 && (owners[row] < 0 || (shares && ends[owners[row]] == start)) -> free = row
+        if free < 0 {
+            first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
+            row := first
+            loop _ in 0..<rows {
+                if owners[row] < 0 || (shares && ends[owners[row]] == start) {
+                    free = row
+                    break
+                }
+                row += 1
+                if row == rows -> row = 0
+            }
         }
         if free >= 0 {
             owners[free] = slot
@@ -1651,16 +1759,24 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
         // riding on it that are still live: evicting the owner evicts them
         // too. Riders that ended are dropped here, so the list stays the
         // live ones. Every row up to `rows` has an owner here.
-        live := [Int]{}
-        held := loop row in 0..<pool.len() -> if owners[row] >= 0 -> weights[owners[row]] else -> 0
-        loop rider in riders {
-            if ends[rider] < start -> next
-            live.push(rider)
-            loop row in 0..<pool.len() {
-                if regs[rider] == pool[row] -> held[row] = held[row] + weights[rider]
-            }
+        loop row in 0..<pool_len {
+            held[row] = if owners[row] >= 0 -> weights[owners[row]] else -> 0
         }
-        riders = live.move()
+        if riders.len() > 0 {
+            live := [Int]{}
+            loop rider in riders {
+                if ends[rider] < start -> next
+                live.push(rider)
+                rider_reg: regs[rider]
+                loop row in 0..<pool_len {
+                    if rider_reg == pool[row] {
+                        held[row] = held[row] + weights[rider]
+                        break
+                    }
+                }
+            }
+            riders = live.move()
+        }
         victim := 0
         loop row in 1..<rows {
             if ir_x64_lighter(held[row], ends[owners[row]], held[victim], ends[owners[victim]]) {
@@ -1670,15 +1786,18 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
         loser: owners[victim]
         if ir_x64_lighter(held[victim], ends[loser], weights[slot], ends[slot]) {
             regs[loser] = -1
-            kept := [Int]{}
-            loop rider in riders {
-                if regs[rider] == pool[victim] {
-                    regs[rider] = -1
-                    next
+            if riders.len() > 0 {
+                kept := [Int]{}
+                victim_reg: pool[victim]
+                loop rider in riders {
+                    if regs[rider] == victim_reg {
+                        regs[rider] = -1
+                        next
+                    }
+                    kept.push(rider)
                 }
-                kept.push(rider)
+                riders = kept.move()
             }
-            riders = kept.move()
             owners[victim] = slot
             regs[slot] = pool[victim]
         }
@@ -1701,6 +1820,7 @@ IR_X64_FILL_WORK: 64
 // it. Bounded by IR_X64_FILL_WORK.
 ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, pool: [Int], regs: &[Int]) Never! {
     count: starts.len()
+    pool_len: pool.len()
     heaviest := 0
     span := 0
     spilled := false
@@ -1713,9 +1833,16 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
         }
     }
     if !spilled -> return
+    use_shift: count <= 16777216 && heaviest <= 1000000000
     keys := [Int]{}
-    loop slot in 0..<count {
-        if eligible[slot] && regs[slot] < 0 -> keys.push((heaviest - weights[slot]) * count + slot)
+    if use_shift {
+        loop slot in 0..<count {
+            if eligible[slot] && regs[slot] < 0 -> keys.push(Int{(I64{heaviest - weights[slot]} << I64{24}) | I64{slot}})
+        }
+    } else {
+        loop slot in 0..<count {
+            if eligible[slot] && regs[slot] < 0 -> keys.push((heaviest - weights[slot]) * count + slot)
+        }
     }
     keys.sort()
     // Per instruction (from -1, a parameter's start): the pool rows whose
@@ -1724,28 +1851,42 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
     loop slot in 0..<count {
         if !eligible[slot] || regs[slot] < 0 -> next
         bit := I64{0}
-        loop row in 0..<pool.len() {
-            if pool[row] == regs[slot] -> bit = I64{1} << I64{row}
+        slot_reg: regs[slot]
+        loop row in 0..<pool_len {
+            if pool[row] == slot_reg {
+                bit = I64{1} << I64{row}
+                break
+            }
         }
         loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at] | bit
     }
     work := IR_X64_FILL_WORK * (span + count)
     loop key in keys {
-        slot: key %% count
+        slot: if use_shift -> Int{I64{key} & I64{16777215}} else -> key %% count
         lo: starts[slot] + 1
         hi: ends[slot] + 1
         work -= hi - lo + 1
         if work < 0 {
             return
         }
+        rows: if open[slot] -> pool_len else -> wide
+        allowed: (I64{1} << I64{rows}) - I64{1}
         taken := I64{0}
-        loop at in lo..<(hi + 1) -> taken |= held[at]
-        rows: if open[slot] -> pool.len() else -> wide
+        loop at in lo..<(hi + 1) {
+            taken |= held[at]
+            if (taken & allowed) == allowed -> break
+        }
+        if (taken & allowed) == allowed -> next
         first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
         free := -1
-        loop step in 0..<rows {
-            row: (step + first) %% rows
-            if free < 0 && (taken & (I64{1} << I64{row})) == (I64{0}) -> free = row
+        row := first
+        loop _ in 0..<rows {
+            if (taken & (I64{1} << I64{row})) == (I64{0}) {
+                free = row
+                break
+            }
+            row += 1
+            if row == rows -> row = 0
         }
         if free < 0 -> next
         regs[slot] = pool[free]

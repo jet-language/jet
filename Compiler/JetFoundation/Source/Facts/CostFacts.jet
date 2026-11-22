@@ -104,7 +104,10 @@ checked_cost_fits_inline: fn(bounds: TIntegerBounds) -> Bool Never! {
 // a negation or arithmetic of bounded operands, a `??` of bounded sides; else
 // the bounds of the node's type.
 body_cost_integer_bounds: fn(tree: BodyTree, id: Int) -> TIntegerBounds? Never! {
-    node: body_node(tree, id)
+    body_cost_integer_bounds_in(tree, id, tree.nodes[body_node_index(tree, id)])
+}
+
+body_cost_integer_bounds_in: fn(tree: BodyTree, id: Int, node: BodyNode) -> TIntegerBounds? Never! {
     bounds := TIntegerBounds?{None}
     if node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value)) else if node.kind == .CtLit(value) {
         if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
@@ -207,7 +210,7 @@ checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) 
 body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
     ty: body_cost_type(tree, node.id) ?? return None
     if node.kind == .MaterializeView(value) {
-        view: body_node(tree, value).span
+        view: tree.nodes[body_node_index(tree, value)].span
         if view.start != node.span.start || view.end != node.span.end -> return None
         return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder})
     }
@@ -250,7 +253,7 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
         }
     }
     if node.kind == .Ok(value) {
-        payload: body_node(tree, value).span
+        payload: tree.nodes[body_node_index(tree, value)].span
         if payload.start == node.span.start && payload.end == node.span.end -> return None
     }
     if body_cost_builds_outcome(node.kind) {

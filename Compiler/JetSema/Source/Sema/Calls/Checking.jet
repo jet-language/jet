@@ -639,11 +639,11 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // Rust CallBinder `rewrite` + `register_binder_refs`: a default names
         // earlier parameters through their declaration-slot temporaries, so
         // they shadow any caller binding of the same name.
-        binder_refs: args[index].flags.binder_refs
+        has_binder_refs: args[index].flags.binder_refs.len() > 0
         binder_start: context.name_references.len()
         // A default written in another module checks in its declaring module's
         // names (sema_default_owner_scope), as a fresh value of its own.
-        owner_scope := sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes)
+        owner_scope := if binding.sources[index] == .Default(_) -> sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes) else -> None
         default_in_owner: if owner_scope == {
             .Val(_) -> true
             .None -> false
@@ -655,7 +655,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
-        binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
+        binder_keys := if has_binder_refs && !default_in_owner -> sema_call_enter_binder_refs(args[index].flags.binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
         self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required, environment, program, scopes)
@@ -668,7 +668,11 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         borrowed_trait: trait_parameter && parameter.convention != AccessConvention.Move
         // A unit parameter checks its argument on its own, so another unit of
         // its family can convert into it below.
-        unit_parameter: sema_expr_unit_fact(required, environment, program) != None
+        may_be_unit: if required == {
+            .Named(_) | .Apply(_, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> true
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) -> false
+        }
+        unit_parameter: may_be_unit && sema_expr_unit_fact(required, environment, program) != None
         // A variadic bounded by a compiler-owned trait has the trait's name as
         // its type; like a trait parameter's, its argument is checked on its
         // own and then against the bound (E1313 below).
@@ -701,7 +705,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, program, scopes, state, tail_store, context, lambda_escapes, diagnostics)
             else -> sema_check_expression(args[index].expr, argument_expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        if binder_refs.len() > 0 {
+        if has_binder_refs {
             if !default_in_owner -> sema_scope_leave(scopes, state)
             if sema_call_binder_refs_read(binder_keys, binder_start, context) {
                 pin_arguments = true
@@ -709,7 +713,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             }
         }
         checked_value: checked_argument ?? {
-            if !default_in_owner && binder_refs.len() == 0 {
+            if !default_in_owner && !has_binder_refs {
                 if sema_call_parameter_type_undeclared(required, environment, program) {
                     sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, diagnostics)
                 } else {
@@ -836,7 +840,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
         noted_take := false
-        if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner {
+        if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && !has_binder_refs && !default_in_owner {
             if sema_ownership_note_implicit_take(state, args[index].expr, value.ty, required, environment, program, context.generic_params, scopes) == .Val(key) {
                 take_indices.push(index)
                 take_keys.push(key)
@@ -846,7 +850,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // Any other unmarked name a take parameter
         // receives is that parameter's take, as `name.move()` was. It moves out of
         // its owner here, so a later use reports the move into this call.
-        if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], scopes) {
+        if !noted_take && decision == SemaCallConventionDecision.NeedsImplicitClone && !has_binder_refs && !default_in_owner && !parameter.variadic && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(args[index], scopes) {
             args[index].convention = AccessConvention.Move
             if !sema_pin_check_move(state, args[index].expr, scopes, diagnostics) {
                 complete = false

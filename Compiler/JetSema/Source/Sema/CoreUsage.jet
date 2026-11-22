@@ -1124,18 +1124,20 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                     sema_core_note_usage(used, spans, sema_core_import_usage(imported, call.name), Val(call.name_span))
                 }
             }
-            loop ty in call.type_args {
-                sema_core_collect_type(ty, registered, used, spans, Val(call.name_span))
+            loop i in 0..<call.type_args.len() {
+                sema_core_collect_type(call.type_args[i], registered, used, spans, Val(call.name_span))
             }
-            loop arg in call.args {
-                sema_core_note_callback(callbacks, arg.flags.c_callback_function_key)
-                sema_core_collect_expr(arg.expr, tables, imports, registered, used, spans, callbacks)
+            loop i in 0..<call.args.len() {
+                sema_core_note_callback(callbacks, call.args[i].flags.c_callback_function_key)
+                sema_core_collect_expr(call.args[i].expr, tables, imports, registered, used, spans, callbacks)
             }
         }
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
-            constructor_name := sema_core_generated_receiver_key(receiver)
-            if method == "new" && !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) {
-                sema_core_note_usage(used, spans, "core.mem.pool_shared", None)
+            if method == "new" {
+                constructor_name: sema_core_generated_receiver_key(receiver)
+                if !sema_core_generated_shadowed(registered, constructor_name) && sema_core_generated_constructor_marked(registered, constructor_name) {
+                    sema_core_note_usage(used, spans, "core.mem.pool_shared", None)
+                }
             }
             if receiver == {
                 .Ident(name, _, _) -> {

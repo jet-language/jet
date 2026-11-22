@@ -996,20 +996,23 @@ sema_checked_foreign_type: fn(graph: SemaRegistrationGraph, ty: Type, caller_mod
 sema_checked_foreign_by_reference_struct: fn(graph: SemaRegistrationGraph, ty: Type, caller_module: ModuleID, seen: [SymbolID]) -> Bool Never! {
     qualified: sema_checked_qualify_type(graph, ty, caller_module)
     nominal_row: sema_type_resolve_nominal_row(graph, qualified, caller_module) ?? return false
+    if graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind != SemaRegistrationNominalKind.Struct -> return false
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     key: nominal.symbol.id
     if sema_checked_foreign_seen(seen, key) -> return false
     next_seen := seen
     next_seen.push(key.copy())
-    if nominal.source == .SourceAST(.Struct(definition)) {
-        if definition.type_params.len() > 0 -> return false
-        loop field in definition.fields {
-            if field.computed != None -> next
-            if !sema_checked_foreign_by_reference_field(graph, field.ty, nominal.symbol.module_identity, next_seen) {
-                return false
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            if definition.type_params.len() > 0 -> return false
+            loop field in definition.fields {
+                if field.computed != None -> next
+                if !sema_checked_foreign_by_reference_field(graph, field.ty, nominal.symbol.module_identity, next_seen) {
+                    return false
+                }
             }
+            return true
         }
-        return true
     }
     false
 }

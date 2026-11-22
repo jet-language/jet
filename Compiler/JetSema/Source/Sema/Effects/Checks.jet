@@ -90,6 +90,7 @@ use jet_foundation.[
     diagnostic_with_label,
     diagnostic_with_rights,
     body_node,
+    body_node_index,
     body_type,
     diagnostic_with_source_derived_suggestion,
     jet_frame_types,
@@ -7196,7 +7197,10 @@ SemaEffectWalk: enum {
 // its call facts hold, charged to the enclosing node.
 
 sema_effect_walk_visit: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
-    node: body_node(tree, expression)
+    sema_effect_walk_visit_in(walk, nodes, facts, diagnostics, caller, tree, expression, tree.nodes[body_node_index(tree, expression)])
+}
+
+sema_effect_walk_visit_in: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) {
     next: sema_effect_walk_enter(walk, nodes, facts, diagnostics, caller, tree, expression, node) ?? return
     sema_effect_walk_expr_children(next, nodes, facts, diagnostics, caller, tree, node)
 }
@@ -7271,9 +7275,9 @@ sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], fact
     current := walk
     operand := lhs
     loop {
-        node: body_node(tree, operand)
-        if node.kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
-            if sema_effect_walk_enter(current, nodes, facts, diagnostics, caller, tree, operand, node) == .Val(next) {
+        idx: body_node_index(tree, operand)
+        if tree.nodes[idx].kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
+            if sema_effect_walk_enter(current, nodes, facts, diagnostics, caller, tree, operand, tree.nodes[idx]) == .Val(next) {
                 rights.push(inner_rhs)
                 walks.push(next.copy())
                 current = next

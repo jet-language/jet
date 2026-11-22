@@ -2581,10 +2581,39 @@ sema_scope_build_time: fn(table: SemaScopeTable, function_name: String) -> Bool 
 
 sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
     slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    pos_len: table.name_positions[slot].len()
+    if table.lookup_counters == None {
+        if pos_len == 0 -> return None
+        if pos_len == 1 {
+            index: table.name_positions[slot][0]
+            b_frame: table.bindings[index].frame
+            if b_frame == table.current -> return Val(index)
+            if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
+            frame := table.frames[table.current].parent
+            loop frame >= 0 {
+                if frame == b_frame -> return Val(index)
+                frame = table.frames[frame].parent
+            }
+            return None
+        }
+        last_index: table.name_positions[slot][pos_len - 1]
+        if table.bindings[last_index].frame == table.current -> return Val(last_index)
+        frame := table.current
+        loop frame >= 0 {
+            cursor := pos_len - 1
+            loop cursor >= 0 {
+                index: table.name_positions[slot][cursor]
+                if table.bindings[index].frame == frame -> return Val(index)
+                cursor -= 1
+            }
+            frame = table.frames[frame].parent
+        }
+        return None
+    }
     compares := 0
     frame := table.current
     loop frame >= 0 {
-        cursor := table.name_positions[slot].len() - 1
+        cursor := pos_len - 1
         loop cursor >= 0 {
             compares += 1
             index: table.name_positions[slot][cursor]
@@ -2602,7 +2631,8 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
 // three within two edits (one edit for a name of one or two bytes), the
 // nearest first and, among equals, nearer frames first.
 sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [String] {
-    limit: if name.count_bytes() <= 2 -> 1 else -> 2
+    name_len: name.count_bytes()
+    limit: if name_len <= 2 -> 1 else -> 2
     found := [String]{}
     distances := [Int]{}
     frame := table.current
@@ -2611,12 +2641,16 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
             if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin {
                 next
             }
+            max_dist: if found.len() == 3 -> distances[2] - 1 else -> limit
+            if max_dist < 1 -> return found
             candidate: table.bindings[index].symbol.name
+            diff: candidate.count_bytes() - name_len
+            if diff > max_dist || diff < -max_dist -> next
             if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || found.contains(candidate) {
                 next
             }
             distance: sema_taint_edit_distance(name, candidate)
-            if distance > limit -> next
+            if distance > max_dist -> next
             at := found.len()
             loop at > 0 && distances[at - 1] > distance -> at -= 1
             if at == 3 -> next
@@ -2641,11 +2675,48 @@ sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [Strin
 // hides them.
 sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
     slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    pos_len: table.name_positions[slot].len()
+    if table.lookup_counters == None {
+        if pos_len == 0 -> return None
+        if pos_len == 1 {
+            index: table.name_positions[slot][0]
+            b_frame: table.bindings[index].frame
+            if b_frame == 0 && table.current >= 0 && table.frames[0].parent < 0 -> return Val(index)
+            if !table.position_free && table.bindings[index].symbol.span.start > use_span.start {
+                if table.frames[b_frame].parent >= 0 -> return None
+            }
+            if b_frame == table.current -> return Val(index)
+            frame := table.frames[table.current].parent
+            loop frame >= 0 {
+                if frame == b_frame -> return Val(index)
+                frame = table.frames[frame].parent
+            }
+            return None
+        }
+        last_index: table.name_positions[slot][pos_len - 1]
+        if table.bindings[last_index].frame == table.current && (table.frames[table.current].parent < 0 || table.position_free || table.bindings[last_index].symbol.span.start <= use_span.start) {
+            return Val(last_index)
+        }
+        frame := table.current
+        loop frame >= 0 {
+            module_frame: table.frames[frame].parent < 0
+            cursor := pos_len - 1
+            loop cursor >= 0 {
+                index: table.name_positions[slot][cursor]
+                if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) {
+                    return Val(index)
+                }
+                cursor -= 1
+            }
+            frame = table.frames[frame].parent
+        }
+        return None
+    }
     compares := 0
     frame := table.current
     loop frame >= 0 {
         module_frame: table.frames[frame].parent < 0
-        cursor := table.name_positions[slot].len() - 1
+        cursor := pos_len - 1
         loop cursor >= 0 {
             compares += 1
             index: table.name_positions[slot][cursor]
@@ -2686,36 +2757,46 @@ sema_scope_resolve_key: fn(table: SemaScopeTable, name: String) -> String? {
 // reads the signature reads it through the accessors. Body threads never edit
 // a module row's type, so the copy and the source agree for the whole pass.
 sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
+    count: source.bindings.len()
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
-    light_type: sema_scope_light_function_type()
-    loop binding in source.bindings {
-        function_type := false
-        if binding.symbol.ty == .Val(ty) {
-            if ty == .Fn(_, _, _, _, _, _) -> function_type = true
-        }
+    loop i in 0..<count {
+        function_type: source.bindings[i].symbol.ty == .Val(.Fn(_, _, _, _, _, _))
         if function_type {
             bindings.push(
                 SemaScopeBinding{
-                    frame: binding.frame,
-                    // Every light row shares the one empty function type.
-                    symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type.copy()), visibility: binding.symbol.visibility},
-                    key: binding.key,
-                    mutable: binding.mutable,
-                    access: binding.access,
-                    integer_bounds: binding.integer_bounds,
-                    string_view: binding.string_view,
-                    compiler_builtin: binding.compiler_builtin,
-                    prepared: binding.prepared,
-                    pending_prepared: binding.pending_prepared,
-                    origin: binding.origin,
-                    place_alias: binding.place_alias,
+                    frame: source.bindings[i].frame,
+                    // Every light row gets the empty function type without copying the real signature.
+                    symbol: Symbol{id: source.bindings[i].symbol.id, kind: source.bindings[i].symbol.kind, name: source.bindings[i].symbol.name, module_identity: source.bindings[i].symbol.module_identity, owner: source.bindings[i].symbol.owner, span: source.bindings[i].symbol.span, ty: Val(sema_scope_light_function_type()), visibility: source.bindings[i].symbol.visibility},
+                    key: source.bindings[i].key,
+                    mutable: source.bindings[i].mutable,
+                    access: source.bindings[i].access,
+                    integer_bounds: source.bindings[i].integer_bounds,
+                    string_view: source.bindings[i].string_view,
+                    compiler_builtin: source.bindings[i].compiler_builtin,
+                    prepared: source.bindings[i].prepared,
+                    pending_prepared: source.bindings[i].pending_prepared,
+                    origin: source.bindings[i].origin,
+                    place_alias: source.bindings[i].place_alias,
                 },
             )
         } else {
-            // copy: sema_scope_light_copy returns an independent scope table (a snapshot for a
-            // deferred check), while `source` keeps its bindings and keeps changing.
-            bindings.push(binding.copy())
+            bindings.push(
+                SemaScopeBinding{
+                    frame: source.bindings[i].frame,
+                    symbol: source.bindings[i].symbol,
+                    key: source.bindings[i].key,
+                    mutable: source.bindings[i].mutable,
+                    access: source.bindings[i].access,
+                    integer_bounds: source.bindings[i].integer_bounds,
+                    string_view: source.bindings[i].string_view,
+                    compiler_builtin: source.bindings[i].compiler_builtin,
+                    prepared: source.bindings[i].prepared,
+                    pending_prepared: source.bindings[i].pending_prepared,
+                    origin: source.bindings[i].origin,
+                    place_alias: source.bindings[i].place_alias,
+                },
+            )
         }
         light.push(function_type)
     }

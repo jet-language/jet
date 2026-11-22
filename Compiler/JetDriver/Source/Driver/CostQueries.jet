@@ -28,6 +28,7 @@ use {
         body_cost_integer_bounds,
         body_cost_type,
         body_each_expr_child,
+        body_node_index,
         body_each_stmt_child,
         body_node,
         body_stmt,
@@ -449,13 +450,13 @@ jet_driver_cost_type_suffix: fn(type_args: [Type]) -> String Never! {
 // entered, in pre-order onto `found`.
 jet_driver_cost_reach: fn(tree: BodyTree, expression: Int, found: &[Int]) Never! {
     found.push(expression)
-    body_each_expr_child(tree, body_node(tree, expression), fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
+    body_each_expr_child(tree, tree.nodes[body_node_index(tree, expression)], fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
 }
 
 // Pushes every expression of statement `statement` of `tree` in pre-order
 // onto `found`.
 jet_driver_cost_reach_statement: fn(tree: BodyTree, statement: Int, found: &[Int]) Never! {
-    body_each_stmt_child(tree, body_stmt(tree, statement), fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
+    body_each_stmt_child(tree, tree.stmts[statement - tree.stmt_base], fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
 }
 
 // Pushes onto `found` every expression a loop statement runs once per
@@ -484,9 +485,10 @@ jet_driver_cost_iterated: fn(tree: BodyTree, statement: StmtKind, found: &[Int])
 // run it once per iteration. An expression no loop repeats is absent.
 jet_driver_cost_loop_depths: fn(tree: BodyTree) -> [Int:Int] Never! {
     depths := [Int:Int]{}
-    loop statement in tree.stmts {
-        iterated := [Int]{}
-        jet_driver_cost_iterated(tree, statement, iterated)
+    iterated := [Int]{}
+    loop i in 0..<tree.stmts.len() {
+        iterated.clear()
+        jet_driver_cost_iterated(tree, tree.stmts[i], iterated)
         loop id in iterated -> depths[id] = (depths.get(id) ?? 0) + 1
     }
     depths

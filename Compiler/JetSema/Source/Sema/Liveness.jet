@@ -808,7 +808,7 @@ sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: &NameTable
                         sema_liveness_type_names(payload, types)
                     }
                 }
-                if nominal.source == .SourceAST(item) && item == .TypeAlias(definition) {
+                if nominal.kind == SemaRegistrationNominalKind.TypeAlias && nominal.source == .SourceAST(item) && item == .TypeAlias(definition) {
                     sema_liveness_type_names(definition.target, types)
                 }
             }
@@ -1006,7 +1006,7 @@ sema_liveness_user_markers: fn(graph: SemaRegistrationGraph) -[Mem.Alloc]> NameT
     markers := name_table()
     loop module_row in graph.modules {
         loop nominal in module_row.nominals {
-            if nominal.source == .SourceAST(item) && item == .Struct(definition) && definition.marker != None {
+            if nominal.kind == SemaRegistrationNominalKind.Struct && nominal.source == .SourceAST(item) && item == .Struct(definition) && definition.marker != None {
                 _ := name_intern(markers, sema_call_reflection_leaf_name(sema_inline_member_source_name(nominal.symbol.name)))
             }
         }
