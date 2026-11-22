@@ -18,7 +18,7 @@ run: fn() -> Never Err! {
     bin: "{target}/release/enum_codec_serde_peer"
     if !files.can_execute(bin) {
         // Both of the build's streams go to stderr, keeping stdout the peer's.
-        build: process.cmd([String]{files.join(root, "Tools/Agent/JetEnv.jet"), "cargo", "build", "--release", "--offline", "-q"}).cwd(files.join(here, "serde_peer")).env("CARGO_TARGET_DIR", target).stderr(.Stdout).run()
+        build: process.cmd([String]{files.join(root, "Tools/Agent/JetEnv.jet"), "cargo", "build", "--release", "--offline", "-q"}).cwd(files.join(here, "SerdePeer")).env("CARGO_TARGET_DIR", target).stderr(.Stdout).run()
         errors := term.stderr()
         errors.write(build.output)
         status: process.exit_status(build)

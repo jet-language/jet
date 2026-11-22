@@ -18,7 +18,7 @@ if (existsSync(join(out, 'result.json')) || existsSync(join(out, 'samples.jsonl'
 mkdirSync(out, {recursive: true});
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const pins = {cell: 'runtime-allocator-64B', iterations: 1000000, words: 8, align: 8, cpu, finalE2: process.env.FINAL_E2_SHA, composed: process.env.COMPOSED_SHA,
-    sourceHashes: {driver: hash(join(source, 'allocator.c')), rust: hash(join(source, 'allocator.rs'))},
+    sourceHashes: {driver: hash(join(source, 'Allocator.c')), rust: hash(join(source, 'Allocator.rs'))},
     inputs: Object.fromEntries(Object.entries({o0, o1, remaining}).map(([arm, file]) => [arm, {file, sha256: hash(file)}]))};
 const steps = [];
 function run(name, binary, args) {
@@ -31,8 +31,8 @@ let ready = true;
 ready = run('o0-exports', 'Tools/Agent/JetEnv.jet', ['jet', 'run', 'Tools/Packaging/CheckRuntimeExports.jet', '--', o0, remaining]) && ready;
 ready = run('o1-exports', 'Tools/Agent/JetEnv.jet', ['jet', 'run', 'Tools/Packaging/CheckRuntimeExports.jet', '--', o1, remaining]) && ready;
 const driver = join(out, 'allocator-driver.o'), rust = join(out, 'allocator-rust.a');
-ready = run('driver', 'cc', ['-std=c11', '-O2', '-fno-lto', '-c', join(source, 'allocator.c'), '-o', driver]) && ready;
-ready = run('rust', 'Tools/Agent/JetEnv.jet', ['rustc', '--edition=2024', '-C', 'opt-level=3', '--crate-type=staticlib', join(source, 'allocator.rs'), '-o', rust]) && ready;
+ready = run('driver', 'cc', ['-std=c11', '-O2', '-fno-lto', '-c', join(source, 'Allocator.c'), '-o', driver]) && ready;
+ready = run('rust', 'Tools/Agent/JetEnv.jet', ['rustc', '--edition=2024', '-C', 'opt-level=3', '--crate-type=staticlib', join(source, 'Allocator.rs'), '-o', rust]) && ready;
 const binaries = Object.fromEntries(['O0', 'O1', 'Rust'].map(arm => [arm, join(out, arm)]));
 if (ready) {
     for (const [arm, libraries] of Object.entries({O0: [o0, remaining], O1: [o1, remaining], Rust: [rust]})) {

@@ -61,9 +61,10 @@ SIMD_LANE_TYPE_NAMES: [String]{
     "U64x4",
 }
 
-/// (ratified 2026-06-24): the built-in linear-algebra value types.
-/// Vectors `Vec2`/`Vec3`/`Vec4` and square matrices `Mat3`/`Mat4` (column-major,
-/// `F64` components). Methods `.dot()`/`.cross()` (Vec3 only)/`.matmul()`, plus
+/// (ratified 2026-06-24, extended 2026-11-16): the built-in linear-algebra
+/// value types. Vectors `Vec2`/`Vec3`/`Vec4`, square matrices
+/// `Mat2`/`Mat3`/`Mat4` (column-major, `F64` components), and `Quaternion`.
+/// Methods `.dot()`/`.cross()` (Vec3 only)/`.matmul()`, plus
 /// `.length()`/`.normalize()`; element-wise `+`/`-`, scalar `*`, and `Mat * Vec`.
 /// A closed compiler-provided family — the user-facing aliases over the generic
 /// `Vec<N>`/`Matrix<M,N>` substrate. Plain std math (no `unsafe`).
@@ -73,9 +74,13 @@ LINALG_VEC3_TYPE: "Vec3"
 
 LINALG_VEC4_TYPE: "Vec4"
 
+LINALG_MAT2_TYPE: "Mat2"
+
 LINALG_MAT3_TYPE: "Mat3"
 
 LINALG_MAT4_TYPE: "Mat4"
+
+LINALG_QUATERNION_TYPE: "Quaternion"
 
 /// (ratified 2026-06-28/29) +
 /// (ratified 2026-07-28): the built-in constraint-layout
@@ -246,6 +251,11 @@ TYPE_MEASUREMENT: "Measurement"
 /// (ratified 2026-08-06): the carrier named by imaginary
 /// numeric literals with the `i` suffix.
 TYPE_COMPLEX: "Complex"
+
+/// (ratified 2026-11-17): the F32 specialization of the internal generic
+/// complex implementation, with `Complex.from_complex(s)` widening and
+/// `Complex32.from_complex(z)` fallible narrowing, and `.conj()` on both.
+TYPE_COMPLEX32: "Complex32"
 
 /// Legacy list spelling; `[T]` is canonical.
 TYPE_LIST: "List"

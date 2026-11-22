@@ -1,0 +1,80 @@
+# `jet Tools/Agent/Land.jet batch` builds an s2 compiler from the batch's s1
+# (or reuses one cached for the same compiler source identity) and runs the
+# BackendIce cases and the ProcessExitUnmapped golden against both s1 and s2,
+# recording row counts in batch-land.log and failing the batch naming any
+# s1/s2 split (such as the a0.0.30 / e32b979063 ICE exit 101 -> 1 split).
+requires: tool:bash
+requires: tool:git
+requires: tool:tar
+mkdir: repo/Compiler/JetCLI/Source
+mkdir: repo/Compiler/JetRuntime/Source
+mkdir: repo/Docs
+mkdir: repo/Tools/Agent
+mkdir: seed
+mkdir: scratch
+mkdir: run
+mkdir: state
+mkdir: patches
+write: repo/Compiler/JetCLI/package.jet = "name: \"jet_cli\"\nversion: \"0.1.0\"\n"
+write: repo/Compiler/JetCLI/Source/Main.jet = "run: fn() {}\n"
+write: repo/Compiler/JetRuntime/Source/HostProcess.jet = "exit_ice: fn() -> Int { 101 }\n"
+write: repo/Docs/note.md = "v0\n"
+write: repo/Tools/Agent/JetEnv.jet = "#!/usr/bin/env bash\nexit 0\n"
+write: repo/Tools/Agent/CompilerPackages.jet = "// stand-in\n"
+write: repo/Tools/Agent/RuntimeGenerators.jet = "// stand-in\n"
+write: repo/Tools/Agent/DiagnosticRows.jet = "// stand-in\n"
+write: seed/IDENTITY = "jet@a0.0.46#seed\n"
+write: patches/setup.sh = "#!/usr/bin/env bash\nset -euo pipefail\ncat > seed/jet <<'EOF'\n#!/usr/bin/env bash\nset -euo pipefail\ncase \"$*\" in\n  *CompilerPackages.jet*identity*)\n    root=\"\"; prev=\"\"\n    for a in \"$@\"; do [ \"$prev\" = \"--root\" ] && root=\"$a\"; prev=\"$a\"; done\n    h=$(sha256sum \"$root/Compiler/JetRuntime/Source/HostProcess.jet\" | awk '{print $1}')\n    printf 'jet@a0.0.46#%s\\n' \"${h:0:12}\"\n    exit 0\n    ;;\n  *CompilerPackages.jet*packages*)\n    printf 'jet_cli\\tCompiler/JetCLI\\n'\n    exit 0\n    ;;\n  *Land.jet*precommit*)\n    b=\"$JET_SCRATCH_ROOT/discovery/r14/snap/Compiler/JetCLI/.jet/build\"\n    mkdir -p \"$b/jet-runtime\"\n    printf 'native-v1\\n' > \"$b/jet-runtime/native.key\"\n    cat > \"$b/jet\" <<'S1EOF'\n#!/usr/bin/env bash\nset -euo pipefail\ncase \"$*\" in\n  *\"build -O1\"*)\n    mkdir -p Compiler/JetCLI/.jet/build/jet-runtime\n    printf 'native-v2\\n' > Compiler/JetCLI/.jet/build/jet-runtime/native.key\n    if grep -q 'map_101_to_1' Compiler/JetRuntime/Source/HostProcess.jet; then\n      cat > Compiler/JetCLI/.jet/build/jet <<'S2BAD'\n#!/usr/bin/env bash\nif [[ \"$*\" == *BackendIce* ]]; then\n  printf 'PASS\\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\\t-\\t\\n'\n  printf 'KNOWN-FAILING\\tTests/Cases/BackendIce/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221.case\\t-\\t#6717\\n'\n  printf 'FAIL\\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\\t-\\texit 1, expected 101\\n'\n  exit 1\nfi\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to0\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to1\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to2\\t\\n'\nexit 0\nS2BAD\n    else\n      cat > Compiler/JetCLI/.jet/build/jet <<'S2OK'\n#!/usr/bin/env bash\nif [[ \"$*\" == *BackendIce* ]]; then\n  printf 'PASS\\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\\t-\\t\\n'\n  printf 'KNOWN-FAILING\\tTests/Cases/BackendIce/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221.case\\t-\\t#6717\\n'\n  printf 'PASS\\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\\t-\\t\\n'\n  exit 0\nfi\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to0\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to1\\t\\n'\nprintf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to2\\t\\n'\nexit 0\nS2OK\n    fi\n    chmod +x Compiler/JetCLI/.jet/build/jet\n    exit 0\n    ;;\n  *BackendIce*)\n    printf 'PASS\\tTests/Cases/BackendIce/user_asm_never_reaches_the_runtime_rails.case\\t-\\t\\n'\n    printf 'KNOWN-FAILING\\tTests/Cases/BackendIce/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221.case\\t-\\t#6717\\n'\n    printf 'PASS\\tTests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case\\t-\\t\\n'\n    exit 0\n    ;;\n  *ProcessExitUnmapped*)\n    printf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to0\\t\\n'\n    printf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to1\\t\\n'\n    printf 'PASS\\tExamples/Systems/Process/ProcessExitUnmapped.jet\\to2\\t\\n'\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\nS1EOF\n    chmod +x \"$b/jet\"\n    printf 'check rc=0\\nbuild rc=0\\nPRECOMMIT OK\\n'\n    exit 0\n    ;;\n  *)\n    exit 0\n    ;;\nesac\nEOF\nchmod +x seed/jet\ngit -C repo init --quiet\ngit -C repo config user.email test@jet.test\ngit -C repo config user.name Jet\ngit -C repo config commit.gpgsign false\ngit -C repo add .\ngit -C repo commit --quiet -m base\ncat > patches/ok.patch <<'PEOF'\ndiff --git a/Compiler/JetRuntime/Source/HostProcess.jet b/Compiler/JetRuntime/Source/HostProcess.jet\n--- a/Compiler/JetRuntime/Source/HostProcess.jet\n+++ b/Compiler/JetRuntime/Source/HostProcess.jet\n@@ -1 +1,2 @@\n exit_ice: fn() -> Int { 101 }\n+// clean runtime note\nPEOF\nprintf 'runtime: clean note\\n' > patches/ok.msg\nprintf 'LaneA\\t%s/patches/ok.msg\\t%s/patches/ok.patch\\tok\\n' \"$PWD\" \"$PWD\" > patches/ok.list\ncat > patches/reuse.patch <<'PEOF'\ndiff --git a/Docs/note.md b/Docs/note.md\n--- a/Docs/note.md\n+++ b/Docs/note.md\n@@ -1 +1 @@\n-v0\n+v1\nPEOF\nprintf 'docs: update note\\n' > patches/reuse.msg\nprintf 'LaneA\\t%s/patches/reuse.msg\\t%s/patches/reuse.patch\\treuse\\n' \"$PWD\" \"$PWD\" > patches/reuse.list\ncat > patches/split.patch <<'PEOF'\ndiff --git a/Compiler/JetRuntime/Source/HostProcess.jet b/Compiler/JetRuntime/Source/HostProcess.jet\n--- a/Compiler/JetRuntime/Source/HostProcess.jet\n+++ b/Compiler/JetRuntime/Source/HostProcess.jet\n@@ -1,2 +1,3 @@\n exit_ice: fn() -> Int { 101 }\n // clean runtime note\n+// map_101_to_1 (a0.0.30 e32b979063 ICE exit split)\nPEOF\nprintf 'runtime: map 101 to 1\\n' > patches/split.msg\nprintf 'LaneA\\t%s/patches/split.msg\\t%s/patches/split.patch\\tsplit\\n' \"$PWD\" \"$PWD\" > patches/split.list\n"
+step: bash patches/setup.sh
+exit: 0
+step: jet {root}/Tools/Agent/Land.jet batch {work}/patches/ok.list
+env: JET_DEV_WORKTREE={work}/repo
+env: JET_SEED={work}/seed
+env: JET_SCRATCH_ROOT={work}/scratch
+env: JET_RUN_ROOT={work}/run
+env: JET_STATE_ROOT={work}/state
+env: GIT_CONFIG_GLOBAL=/dev/null
+env: GIT_CONFIG_NOSYSTEM=1
+timeout: 120s
+exit: 0
+file: run/batch-land.log ~ "s2-probe: built s2 from s1 at " # c1: builds s2 from batch s1
+file: run/batch-land.log ~ "s2-probe BackendIce: s1=3 rows (2 PASS, 0 FAIL, 1 other, rc=0) s2=3 rows (2 PASS, 0 FAIL, 1 other, rc=0) splits=0" # c1: BackendIce row counts
+file: run/batch-land.log ~ "s2-probe ProcessExitUnmapped: s1=3 rows (3 PASS, 0 FAIL, 0 other, rc=0) s2=3 rows (3 PASS, 0 FAIL, 0 other, rc=0) splits=0" # c1: process-exit-code golden row counts
+file: run/batch-land.log ~ "s2-probe PASS: 6 rows match between s1 and s2" # c1: s1/s2 agreement summary
+file: run/batch-land.log ~ "| s2-probe |" # c1: s2-probe step in stage table
+step: jet {root}/Tools/Agent/Land.jet batch {work}/patches/reuse.list
+env: JET_DEV_WORKTREE={work}/repo
+env: JET_SEED={work}/seed
+env: JET_SCRATCH_ROOT={work}/scratch
+env: JET_RUN_ROOT={work}/run
+env: JET_STATE_ROOT={work}/state
+env: GIT_CONFIG_GLOBAL=/dev/null
+env: GIT_CONFIG_NOSYSTEM=1
+timeout: 120s
+exit: 0
+file: run/batch-land.log ~ "s2-probe: reused s2 at " # c1: reuses cached s2 at the same compiler source identity
+file: run/batch-land.log ~ "s2-probe PASS: 6 rows match between s1 and s2" # c1: reused s2 still matches s1 on all 6 rows
+step: git -C repo rev-parse HEAD
+exit: 0
+capture: pre_split = text stdout
+step: jet {root}/Tools/Agent/Land.jet batch {work}/patches/split.list
+env: JET_DEV_WORKTREE={work}/repo
+env: JET_SEED={work}/seed
+env: JET_SCRATCH_ROOT={work}/scratch
+env: JET_RUN_ROOT={work}/run
+env: JET_STATE_ROOT={work}/state
+env: GIT_CONFIG_GLOBAL=/dev/null
+env: GIT_CONFIG_NOSYSTEM=1
+timeout: 120s
+exit: 5
+file: run/batch-land.log ~ "s2-probe: built s2 from s1 at " # c2: builds fresh s2 for changed runtime
+file: run/batch-land.log ~ "s2-probe BackendIce: s1=3 rows (2 PASS, 0 FAIL, 1 other, rc=0) s2=3 rows (1 PASS, 1 FAIL, 1 other, rc=1) splits=1" # c2: BackendIce split count
+file: run/batch-land.log ~ "s2-probe s1/s2 split (BackendIce): Tests/Cases/BackendIce/link_failure_is_ice_101_with_a_native_link_row.case (-): s1=PASS s2=FAIL" # c2: names exact s1/s2 split row
+file: run/batch-land.log ~ "S2 PROBE FAILED (s1/s2 split" # c2: batch failure names s1/s2 split
+file: run/batch-land.log ~ "| s2-probe |" # c2: s2-probe stage recorded on failure
+step: git -C repo rev-parse HEAD
+exit: 0
+stdout: = "{cap:pre_split}" # failed batch leaves HEAD unchanged
+step: git -C repo status --porcelain
+exit: 0
+stdout: = "" # failed batch reverts worktree changes cleanly

@@ -88,6 +88,8 @@ SIZE_GATE: Float{2.0}
 
 CYCLES_GATE: Float{1.1}
 
+KERNEL_GATE: Float{1.0}
+
 // A median of fewer runs lets one quiet stretch of the machine decide a row.
 MIN_RUNS: 21
 
@@ -103,7 +105,7 @@ VALUED: [String]{"--jet", "--out", "--runs", "--cpu", "--modes", "--cells", "--p
 
 PATHS: [String]{"--jet", "--out", "--candidate", "--older", "--gains"}
 
-COLUMNS: [String]{"cell", "variant", "args", "bytes", "size_x", "size_gate", "cycles", "instructions", "cycles_x", "instructions_x", "cycles_gate", "output"}
+COLUMNS: [String]{"cell", "variant", "args", "bytes", "size_x", "size_gate", "code_bytes", "code_x", "code_gate", "cycles", "instructions", "cycles_x", "instructions_x", "cycles_gate", "output"}
 
 // The Linux signal names by number, as a stopped binary's row names them.
 SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
@@ -173,6 +175,7 @@ Server: struct {
 #Codable(only: .Decode)
 Bench: struct {
     name: String,
+    dir: String?,
     jet: String,
     args: [String]{[String]{}},
     steps: [[String]]?,
@@ -182,6 +185,7 @@ Bench: struct {
     server: Server?,
     service: Bool{false},
     scriptbench: [String]{[String]{}},
+    kernel: Dyn?,
 }
 
 #Codable(only: .Decode)
@@ -238,6 +242,11 @@ Pace: struct {
     cycles_max: Float,
 }
 
+KernelBytes: struct {
+    ref: Int,
+    jet: Int,
+}
+
 // A table row, written to results.json with the original's keys in its order.
 #Codable(only: .Encode)
 Row: struct {
@@ -255,12 +264,16 @@ Row: struct {
     instructions_x: Float,
     size_gate: String,
     cycles_gate: String,
+    code_bytes: Dyn,
+    code_x: Dyn,
+    code_gate: String,
 }
 
 #Codable(only: .Encode)
 Gates: struct {
     size: Float,
     cycles: Float,
+    kernel: Float,
 }
 
 #Codable(only: .Encode)
@@ -414,9 +427,117 @@ build_jet: fn(o: Options, jet: String, cell: Bench, mode: String, dir: String, l
     src: files.join(dir, if label == "jet" -> "src-{mode}" else -> "src-{label}-{mode}")
     files.remove_all(src).drop("a first build has no copy to remove")
     copy_tree(resolve_in(o.here, cell.jet), src)
-    release: if mode == "release" -> ["--release"] else -> [String]{}
+    release: if mode == "release" -> (if cell.kernel != None -> ["--release", "--debug-info=split"] else -> ["--release"]) else -> [String]{}
     must([jet, "build"].concat(release).concat(["."]), src)
     Ok(files.join_all([src, ".jet", "build", "run"]))
+}
+
+HEX: "0123456789abcdef"
+
+parse_hex: fn(text: String) -> Int Err! {
+    clean: text.removeprefix("0x").removeprefix("0X").to_lower()
+    if clean == "" -> return Err("invalid hex integer: {text}")
+    value := 0
+    loop i in 0..<clean.len() {
+        digit: HEX.find(clean.slice(i, i + 1))
+        if digit < 0 -> return Err("invalid hex integer: {text}")
+        value = value * 16 + digit
+    }
+    Ok(value)
+}
+
+split_ws: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    loop piece in text.replace("\t", " ").split(" ") {
+        if piece != "" -> out.push(piece.copy())
+    }
+    out
+}
+
+side_text: fn(side: Dyn, key: String) -> String Err! {
+    if side.get(key) == .Val(.Text(text)) -> return Ok(text.copy())
+    Err("kernel.{key} is not a string")
+}
+
+side_routines: fn(side: Dyn) -> [String] Err! {
+    if side.get("routines") == .Val(.Array(items)) {
+        out := [String]{}
+        loop item in items {
+            if item == .Text(text) -> out.push(text.copy()) else -> return Err("kernel.routines entry is not a string")
+        }
+        return Ok(out)
+    }
+    Err("kernel.routines is not a list")
+}
+
+side_data: fn(side: Dyn) -> Int Never! {
+    if side.get("data") == .Val(.Int(n)) -> return n
+    0
+}
+
+// A memory kernel cell's code bytes: the sizes `nm -S` gives the primitive's
+// routines, plus every byte the DWARF decoded line table gives a source line
+// of `source` containing `use`, plus `data`.
+code_bytes_of: fn(side: Dyn, object: String, root: String) -[Exec, FS, Time.Wait]> Int Err! {
+    symbols := [String:Int]{}
+    loop line in must(["nm", "-S", object], ".").output.lines() {
+        fields: split_ws(line.trim())
+        if fields.len() == 4 {
+            if parse_hex(fields[1]) == .Ok(size) -> symbols[fields[3]] = size
+        }
+    }
+    bytes := side_data(side)
+    loop name in side_routines(side) {
+        size: symbols.get(name) ?? return Err("{object} has no symbol {name}")
+        bytes += size
+    }
+    source: side_text(side, "source")
+    marker: side_text(side, "use")
+    lines: files.read(files.join(root, source)).split("\n").to_list()
+    uses := [Int:Bool]{}
+    loop (i, text) in lines {
+        if text.contains(marker) -> uses[i + 1] = true
+    }
+    if uses.len() == 0 -> return Err("{source} has no line with {marker}")
+    open := -1
+    sites := 0
+    loop line in must(["objdump", "--dwarf=decodedline", object], ".").output.lines() {
+        if line == "" || line.starts_with(" ") || line.starts_with("\t") -> next
+        fields: split_ws(line)
+        if fields.len() < 3 -> next
+        file_col: fields[0]
+        line_col: fields[1]
+        addr_col: fields[2]
+        line_num: Int.parse(line_col) ?? -1
+        if line_col != "-" && line_num < 0 -> next
+        if addr_col != "0" && !addr_col.starts_with("0x") -> next
+        at: parse_hex(addr_col) ?? next
+        if open > 0 -> bytes += at - open
+        parts: file_col.split("/").to_list()
+        base: parts[parts.len() - 1]
+        if line_col != "-" && base == source && uses.has_key(line_num) {
+            open = at
+            sites += 1
+        } else {
+            open = -1
+        }
+    }
+    if sites == 0 -> return Err("{object}'s line table has no row of {source} at a {marker} line")
+    Ok(bytes)
+}
+
+kernel_code: fn(o: Options, cell: Bench, kernel: Dyn, dir: String, exe: String) -[Exec, FS, Time.Wait]> KernelBytes Err! {
+    ref_side: kernel.get("ref") ?? return Err("{cell.name}: kernel has no ref")
+    jet_side: kernel.get("jet") ?? return Err("{cell.name}: kernel has no jet")
+    cell_dir: cell.dir ?? cell.name
+    object: files.join(dir, "ref-lines.o")
+    must(["as", "-g", "-I", o.here, "-o", object, files.join_all([o.here, cell_dir, "ref.S"])], ".")
+    Ok(
+        KernelBytes{
+            ref: code_bytes_of(ref_side, object, files.join(o.here, cell_dir)),
+            jet: code_bytes_of(jet_side, "{exe}.debug", resolve_in(o.here, cell.jet)),
+        },
+    )
 }
 
 // `from` copied into `to`, every entry whose path holds `/.jet` left out.
@@ -557,7 +678,7 @@ stop_server: fn(server: ProcessChild?) -[Exec, Time.Wait]> {
 // Every cell's `scriptbench` ids are manifest workloads, and a cell's server
 // is the one those workloads use.
 scriptbench_issues: fn(all: [Bench], here: String) -[FS]> [String] Err! {
-    manifest: json.decode<Manifest>(files.read(files.join_all([here, "..", "scriptbench", "manifest.json"])))
+    manifest: json.decode<Manifest>(files.read(files.join_all([here, "..", "Scriptbench", "manifest.json"])))
     issues := [String]{}
     loop cell in all {
         loop id in cell.scriptbench {
@@ -610,8 +731,17 @@ shown: fn(value: Float) -> String Never! {
 
 gate: fn(ratio: Float, limit: Float) -> String Never! { if ratio <= limit -> "ok" else -> "over" }
 
+shown_dyn: fn(value: Dyn) -> String Never! {
+    if value == {
+        .Text(text) -> text.copy()
+        .Int(n) -> "{n}"
+        .Float(f) -> shown(f)
+        .Null | .Bool(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> value.to_text() ?? "-"
+    }
+}
+
 row_cells: fn(row: Row) -> [String] Never! {
-    [row.cell, row.variant, row.args, "{row.bytes}", shown(row.size_x), row.size_gate, shown(row.cycles), shown(row.instructions), shown(row.cycles_x), shown(row.instructions_x), row.cycles_gate, row.output]
+    [row.cell, row.variant, row.args, "{row.bytes}", shown(row.size_x), row.size_gate, shown_dyn(row.code_bytes), shown_dyn(row.code_x), row.code_gate, shown(row.cycles), shown(row.instructions), shown(row.cycles_x), shown(row.instructions_x), row.cycles_gate, row.output]
 }
 
 // The gate: every selected cell's reference and Jet binaries compared.
@@ -619,7 +749,8 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
     rows := [Row]{}
     loop cell in all.filter(fn(cell) { selected(o, cell) }) {
         s: setup(o, cell)
-        variants := [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell.name, "ref.S"]), s.dir, "ref")}}
+        cell_dir: cell.dir ?? cell.name
+        variants := [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell_dir, "ref.S"]), s.dir, "ref")}}
         loop mode in o.modes {
             variants.push(Variant{label: "jet-{mode}", exe: build_jet(o, o.jet, cell, mode, s.dir, "jet")})
         }
@@ -627,12 +758,19 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
         _stop: scope.guard(fn() { stop_server(server) })
         outs: outputs(o, variants, s)
         speeds: measure(o, variants, s)
+        release: variants.find(fn(v) { v.label == "jet-release" })
+        kernel: if cell.kernel == .Val(k) && release == .Val(rel) -> Val(kernel_code(o, cell, k, s.dir, rel.exe)) else -> None
         // The reference is the first variant; every ratio is against it.
         ref_bytes: Float.from_int(files.stat(variants[0].exe).size)
         loop (k, variant) in variants {
             bytes: files.stat(variant.exe).size
             size_x: Float.from_int(bytes) / ref_bytes
             cycles_x: speeds[k].cycles / speeds[0].cycles
+            is_final: kernel != None && variant.label == "jet-release"
+            code_bytes: if kernel == .Val(kb) -> (if variant.label == "asm" -> Dyn.Int(kb.ref) else if is_final -> Dyn.Int(kb.jet) else -> Dyn.Text("-")) else -> Dyn.Text("-")
+            code_ratio: if kernel == .Val(kb) && is_final -> Val(Float.from_int(kb.jet) / Float.from_int(kb.ref)) else -> None
+            code_x: if code_ratio == .Val(r) -> Dyn.Float(r) else -> Dyn.Text("-")
+            code_gate: if code_ratio == .Val(r) -> gate(r, KERNEL_GATE) else -> "-"
             rows.push(
                 Row{
                     cell: cell.name,
@@ -648,18 +786,21 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
                     cycles_x: cycles_x,
                     instructions_x: speeds[k].instructions / speeds[0].instructions,
                     size_gate: gate(size_x, SIZE_GATE),
-                    cycles_gate: gate(cycles_x, CYCLES_GATE),
+                    cycles_gate: gate(cycles_x, if is_final -> KERNEL_GATE else -> CYCLES_GATE),
+                    code_bytes: code_bytes,
+                    code_x: code_x,
+                    code_gate: code_gate,
                 },
             )
         }
     }
     table: [COLUMNS.join("\t")].concat(rows.map(fn(row) { row_cells(row).join("\t") })).join("\n")
-    results: Results{runs: o.runs, interleaved: true, statistic: "median", cpu: o.cpu, gates: Gates{size: SIZE_GATE, cycles: CYCLES_GATE}, rows: rows}
+    results: Results{runs: o.runs, interleaved: true, statistic: "median", cpu: o.cpu, gates: Gates{size: SIZE_GATE, cycles: CYCLES_GATE, kernel: KERNEL_GATE}, rows: rows}
     files.write(files.join(o.out, "results.json"), "{json.stringify(results, 2)}\n")
     files.write(files.join(o.out, "table.tsv"), "{table}\n")
     print(table)
     wrong: rows.count_where(fn(row) { row.output != "same" })
-    gated: if o.gate -> rows.count_where(fn(row) { row.variant != "asm" && (row.size_gate != "ok" || row.cycles_gate != "ok") }) else -> 0
+    gated: if o.gate -> rows.count_where(fn(row) { row.variant != "asm" && (row.size_gate != "ok" || row.cycles_gate != "ok" || row.code_gate == "over") }) else -> 0
     if wrong > 0 -> term.eprint("{wrong} binaries printed the wrong output")
     if gated > 0 -> term.eprint("{gated} Jet rows miss a gate")
     Ok(if wrong + gated > 0 -> 1 else -> 0)
@@ -722,7 +863,8 @@ gains_of: fn(row: GainRow, label: String) -> Measured Never! {
 gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launcher: String) -[Exec, FS, IO, Net, Time, Time.Wait]> GainRow Err! {
     s: setup(o, cell)
     variants := [Variant]{}
-    reference: files.join_all([o.here, cell.name, "ref.S"])
+    cell_dir: cell.dir ?? cell.name
+    reference: files.join_all([o.here, cell_dir, "ref.S"])
     if files.exists(reference) {
         variants.push(Variant{label: "ceiling", exe: assemble(o.here, reference, s.dir, "ref")})
     }
@@ -867,7 +1009,7 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
     }
     files.write(files.join(o.out, "gains.json"), "{json.stringify(report, 2)}\n")
     older_text: o.older.map(fn(path) { " Older: `{path}`." }) ?? ""
-    lines := [String]{"# Codegen gains: base against candidate (#6414)", "", "Base: `{o.jet}`. Candidate: `{candidate}`.{older_text}", "Wall time is the best of {o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU {o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (asm-parity cells only). Change is candidate against base; negative is better.", ""}
+    lines := [String]{"# Codegen gains: base against candidate (#6414)", "", "Base: `{o.jet}`. Candidate: `{candidate}`.{older_text}", "Wall time is the best of {o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU {o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (AsmParity cells only). Change is candidate against base; negative is better.", ""}
     loop mode in o.modes {
         wanted: mode.copy()  // copy: the filter's lambda takes its own
         lines.extend(gains_table(results.filter(fn(row) { row.mode == wanted }), mode, o.older))

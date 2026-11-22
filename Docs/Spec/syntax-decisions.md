@@ -35,6 +35,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `Name: enum { A, B(T) } / .A / Name.A` | enum declaration: its cases are written bare and separated as struct fields are; a value or pattern names a case with its leading dot where the type is known (`.A`) or with the enum's name (`Name.A`); a dotted declaration is not Jet syntax |
+| `state { A -> B; Group: A \| B } / Type.A` | state list inside a struct or enum: lists each state, its legal transitions (`->`), and optional state groups (`Group: A \| B`); `Type.A` is a state type, `Type.A \| Type.B` is a state set, and plain `Type` is any state; struct states erase in codegen, undeclared moves fail E0174, wrong-state calls fail E0150, and `#State`/`#Transition` are retired |
+| `[T#N] / x.xyzw / x.swizzle(i, …)` | numeric fixed arrays `[T#N]` support element-wise `+ - * / %`, bitwise ops, unary `-`, and `==` with another `[T#N]` or scalar; SIMD lane types support element-wise `+ - * /` with their exact element scalar on either side and integer-lane shifts/bit ops; `.xyzw`/`.rgba` swizzles work on every `[T#N]` (`N <= 4`) and vector/lane type, and `.swizzle(i, …)` picks constant numeric slots (invalid lanes fail E3110/E3111) |
 | `#` | attached marker; #[A, B] stacks |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional runtime stop name (`Jet.Panic`) and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
@@ -1500,9 +1502,35 @@ inference; no checked-program node. S76 `[T#N]` fixed-size lists are unaffected.
 **D-FANOUT2** (no `s.[…]` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = {…}` on
-lane/vector types; overlapping writes diagnosed (E3110/E3111).
-**D-VECARITH1**: element-wise `+ - * /` closed to compiler-provided lane and
-linalg types; user structs use methods.
+every `[T#N]` (`N <= 4`) and vector or SIMD lane type; overlapping or invalid
+lanes are diagnosed (`E3110`/`E3111`). **D-ARRAY-SHUFFLE1=B** *(ratified
+2026-11-17, card #6177)*: lanes and fixed arrays pick slots by constant number
+with `.swizzle(i, …)` (for example `rgb.swizzle(2, 1, 0)`,
+`eight.swizzle(7, 6, 5, 4)`); out-of-range or non-constant indexes are a
+registered build error (`E3110`) with no single-instruction promise.
+**D-VECARITH1**: element-wise `+ - * /` on compiler-provided lane and linalg
+types, extended to numeric fixed arrays `[T#N]` (`+ - * / %`, bitwise ops,
+unary `-`, and `==` with another `[T#N]` or scalar) and integer SIMD lanes
+(`<<`, `>>`, `.bit_and`, `.bit_or`, `.bit_xor`, `.bit_not` with a lane or
+scalar right side). **D-ARRAY-LANEBCAST1=A** *(ratified 2026-11-17, card
+#6177)*: `+ - * /` between an exact SIMD lane value and its element scalar on
+either side via owning-package operator hooks. **D-ARRAY-CONVERT1=A**
+*(ratified 2026-11-17, card #6177)*: braces convert whole arrays through the
+existing `From` mechanism. **D-ARRAY-MAT21=A**, **D-ARRAY-QUAT1=A**,
+**D-ARRAY-MATOPS1=A**, and **D-ARRAY-MATRESIZE1=A** *(ratified 2026-11-16/17,
+card #6177)*: `Mat2` and `Quaternion` join the linear-algebra family alongside
+one generic matrix algebra family and direct matrix conversion with explicit
+cropping and defined reshape order. **D-ARRAY-COMPLEXT1=A** and
+**D-ARRAY-CONJ1=A** *(ratified 2026-11-17, card #6177)*: `Complex32` is the
+`F32` specialization of the internal generic complex implementation backing
+`Complex`, with `Complex.from_complex(s)` widening,
+`Complex32.from_complex(z)` narrowing fallibly, and `.conj()` returning the
+conjugate at each value's own precision (no `conjugate` alias). Proof:
+`Examples/LowLevel/FixedArrayArithmetic.jet`, `Examples/LowLevel/Swizzle.jet`,
+`Examples/LowLevel/NumericSwizzle.jet`,
+`Examples/LowLevel/LaneScalarBroadcast.jet`,
+`Examples/LowLevel/IntegerLaneBits.jet`, `Examples/Math/LinearAlgebra.jet`,
+`Examples/Math/Complex32.jet`, and `Examples/Math/ComplexConjugate.jet`.
 
 ### Types
 
@@ -2104,8 +2132,18 @@ state list, and deletes the markers; a marker the edit cannot settle (no owner,
 a generic owner, no state list, or a signature not written with the owner's
 name) is reported without one. A marker in another shape is still E0930. Only
 a spawned task moves in place, through its compiler-owned row. Proof:
-`Examples/Types/StateLists.jet` with `Examples/Types/StateLists.out`, and
+`Examples/Types/StateLists.jet` with `Examples/Types/StateLists.out`,
+`Examples/Types/StateMachine.jet` with `Examples/Types/StateMachine.out`,
+`Tests/UI/Typestate/typestate_parameter_carries_state.jet`, and
 `Tests/Cases/Typestate/state_marker_fix_writes_state_types.case`.
+
+**D-GUARD-LINT1=A** *(ratified 2026-11-18, card #6326)*: single-case enum checks
+stay free, while wider enum decisions (testing two or more distinct cases in a
+table or an `if`/`else if` chain) require complete coverage as a hard build
+error by default, or an explicit post-body `#CatchAll` fallback arm
+(`else -> { … } #CatchAll`) that deliberately accepts future cases; `jet fix`
+defaults to naming the missing cases, and `#CatchAll` is added only when
+selected.
 
 **D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
 `#Invariant("value >= lo && value < hi")` spelling is retired. Use
@@ -9768,14 +9806,21 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-ARCH-IR1` | A | `c022g7qw` |
 | `D-ARRAY-CAPACITY1` | A | `c05gn07n` |
 | `D-ARRAY-COLUMNS1` | A | `c05gn07n` |
+| `D-ARRAY-COMPLEXT1` | A | `c05gn07n` |
+| `D-ARRAY-CONJ1` | A | `c05gn07n` |
+| `D-ARRAY-CONVERT1` | A | `c05gn07n` |
 | `D-ARRAY-ENUMTABLE1` | A | `c05gn07n` |
 | `D-ARRAY-INDEX1` | A | `c05gn07n` |
 | `D-ARRAY-INIT1` | A | `c0s8gang` |
 | `D-ARRAY-INVERSE1` | A | `c05gn07n` |
 | `D-ARRAY-KEYED1` | A | `c05gn07n` |
+| `D-ARRAY-LANEBCAST1` | A | `c05gn07n` |
 | `D-ARRAY-LANESCMP1` | C | `c05gn07n` |
 | `D-ARRAY-MAT21` | A | `c05gn07n` |
+| `D-ARRAY-MATOPS1` | A | `c05gn07n` |
+| `D-ARRAY-MATRESIZE1` | A | `c05gn07n` |
 | `D-ARRAY-QUAT1` | A | `c05gn07n` |
+| `D-ARRAY-SHUFFLE1` | B | `c05gn07n` |
 | `D-ARRAY-WINDOW1` | A | `c05gn07n` |
 | `D-AT-INFIX1` | A | `c0w6dky2` |
 | `D-AUDIT-FOREIGN1` | A | `c0776o2m` |
@@ -9985,6 +10030,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-GPU-INDEXED-RESOURCE1` | A | `c0za6zza` |
 | `D-GPU-SHADER-SURFACE1` | B | `c0ce571w` |
 | `D-GPU-UI1` | A | `c0u5tm84` |
+| `D-GUARD-LINT1` | A | `c06he0ee` |
 | `D-HAS-VERB1` | A | `c0q38sm2` |
 | `D-HOOK-LIFECYCLE1` | A | `c0yfcz0w` |
 | `D-HOOK-ONE1` | A | `c0yfcz0w` |

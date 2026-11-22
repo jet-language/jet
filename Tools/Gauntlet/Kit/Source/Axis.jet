@@ -50,24 +50,53 @@ ToolRun: struct {
 // with the first line its version command prints. Each command runs in
 // `cwd` through Tools/Agent/JetEnv.jet of the repository `repo_dir`, for
 // 10 seconds at most.
+ProbeEnv: struct {
+    loaded: Bool,
+    vars: [String:String],
+    error: String,
+}
+
 probe_axis_tools: fn(repo_dir: String, cwd: String, tools: Dyn, jet_bin: String) -[Env, Exec, FS, Time.Wait]> [Dyn] Err! {
     declared: items_at(tools, "")
     if declared.len() == 0 -> return Err("axis runner declares no tools")
     env_runner: files.join(repo_dir, "Tools/Agent/JetEnv.jet")
+    env := ProbeEnv{loaded: false, vars: [String:String]{}, error: ""}
     probes := [Dyn]{}
-    loop tool in declared -> probes.push(probe_axis_tool(env_runner, cwd, tool, jet_bin))
+    loop tool in declared {
+        if tool == Dyn.Text("jet") {
+            probes.push(probe_jet_binary(jet_bin))
+            next
+        }
+        if !env.loaded {
+            env = load_probe_env(env_runner, cwd)
+        }
+        probes.push(probe_axis_tool(env, cwd, tool))
+    }
     Ok(probes)
 }
 
-probe_axis_tool: fn(env_runner: String, cwd: String, tool: Dyn, jet_bin: String) -> Dyn {
-    if tool == Dyn.Text("jet") -> return probe_jet_binary(jet_bin)
+load_probe_env: fn(env_runner: String, cwd: String) -[Exec, Time.Wait]> ProbeEnv Never! {
+    receipt: process.cmd([env_runner, "env", "-0"]).cwd(cwd).timeout(30s).run() ?? return ProbeEnv{loaded: true, vars: [String:String]{}, error: "{err}"}
+    if receipt.timed_out -> return ProbeEnv{loaded: true, vars: [String:String]{}, error: "timeout after 30s"}
+    if receipt.code != 0 -> return ProbeEnv{loaded: true, vars: [String:String]{}, error: receipt.errors.trim()}
+    vars := [String:String]{}
+    loop line in receipt.output.split("\u{0}") {
+        if line == "" -> next
+        part: line.partition("=")
+        if part.sep == "" -> next
+        vars[part.head.copy()] = part.tail.copy()
+    }
+    ProbeEnv{loaded: true, vars: vars, error: ""}
+}
+
+probe_axis_tool: fn(env: ProbeEnv, cwd: String, tool: Dyn) -> Dyn {
     name: js_text(tool)
     out := Dyn.object()
     out["tool"] = tool
-    found: run_probe_command(env_runner, cwd, ["sh", "-c", "command -v {shell_quoted(name)}"])
+    found: run_probe_command(env, cwd, ["sh", "-c", "command -v {shell_quoted(name)}"])
     output: found.stdout.trim()
     if found.code == 0 && output != "" {
-        version_run: run_probe_command(env_runner, cwd, tool_version_command(name))
+        version_run: run_probe_command(env, cwd, tool_version_command(name))
         printed: version_run.stdout.trim()
         version: limited(first_line(if printed != "" -> printed else -> version_run.stderr.trim()), 300)
         if version_run.code != 0 {
@@ -125,11 +154,14 @@ jet_probe: fn(status: String, reason: String) -> Dyn {
     out
 }
 
-// `command` run in `cwd` through `env_runner` as run.mjs runs a probe: 124
-// with a timeout note once 10 seconds pass, 128 when a signal stopped it
-// and 127 when it could not start.
-run_probe_command: fn(env_runner: String, cwd: String, command: [String]) -> ToolRun {
-    receipt: process.cmd([env_runner].concat(command)).cwd(cwd).timeout(10s).run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
+// `command` run in `cwd` with the dev-shell environment read once from
+// `env_runner`, as run.mjs runs a probe: 124 with a timeout note once 10
+// seconds pass, 128 when a signal stopped it and 127 when it could not start.
+run_probe_command: fn(env: ProbeEnv, cwd: String, command: [String]) -> ToolRun {
+    if env.error != "" -> return ToolRun{code: 127, stdout: "", stderr: env.error.copy()}
+    spec := process.cmd(command).cwd(cwd).timeout(10s)
+    loop (name, value) in env.vars -> spec = spec.env(name, value)
+    receipt: spec.run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
     if receipt.timed_out {
         return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after 10s"}
     }

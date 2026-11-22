@@ -42,8 +42,12 @@ function masked(value, key, measured) {
   if (typeof value === 'number') return KEPT.has(key) ? value : '<measured>';
   if (Array.isArray(value)) return value.map((item) => masked(item, key, measured));
   if (value === null || typeof value !== 'object') return measured && DERIVED.has(key) && typeof value === 'string' ? '<measured>' : value;
+  const numericComparison = measured && typeof value.jet === 'number' && typeof value.peer === 'number';
   const out = {};
-  for (const [name, item] of Object.entries(value)) out[name] = masked(item, key === 'verdicts' ? 'verdict' : name, measured || key === 'comparisons' || name === 'cache_state');
+  for (const [name, item] of Object.entries(value)) {
+    if (numericComparison && (name === 'verdict' || name === 'evidence' || name === 'reason')) out[name] = '<measured>';
+    else out[name] = masked(item, key === 'verdicts' ? 'verdict' : name, measured || key === 'comparisons' || name === 'cache_state');
+  }
   return out;
 }
 

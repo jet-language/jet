@@ -644,10 +644,14 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
 // check, the entry's Jet program at `check`, prints when `jet` runs it in
 // `cwd` with the path of a file holding the program's own output.
 checked: fn(run: Run, check: String, jet: String, case: Case, inherited: [EnvVar], cwd: String) -> Run {
+    checked_cmd(run, [jet, check], case, inherited, cwd)
+}
+
+checked_cmd: fn(run: Run, cmd: [String], case: Case, inherited: [EnvVar], cwd: String) -> Run {
     if run.problem != "" -> return run.copy()
     printed: "{cwd}.stdout"
     files.write(printed, run.output) ?? return not_run("the program's output cannot be kept: {err}")
-    spec := process.cmd([jet, check, printed]).cwd(cwd).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
+    spec := process.cmd(cmd.concat([printed])).cwd(cwd).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
     loop setting in inherited.concat(case.env) -> spec = spec.env(setting.name, setting.value)
     receipt: spec.run() ?? return not_run("its check cannot start: {err}")
     files.remove(printed) ?? ()
@@ -2380,6 +2384,24 @@ case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never!
     files.join(work, "{name}/case-{index + 1}-{SIDES[side]}")
 }
 
+// Builds a Jet source once at -O0 into `out_dir` for untimed parity reuse,
+// unless the source inspects `executable` (so its path stays unchanged) or
+// fails to compile (leaving the case run to report the compile diagnostic).
+build_parity_bin: fn(jet: String, source: String, out_dir: String, inherited: [EnvVar]) -[Exec, FS, Time.Wait]> String? Never! {
+    text: files.read(source) ?? return None
+    if text.contains("executable") -> return None
+    files.create_dir_all(out_dir) ?? return None
+    spec := process.cmd([jet, "build", "-O0", "--allow-all", "--output-dir={out_dir}", source]).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
+    loop setting in inherited -> spec = spec.env(setting.name, setting.value)
+    receipt: spec.run() ?? return None
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return None
+    entries: files.list_dir(out_dir) ?? return None
+    loop item in entries {
+        if !item.is_dir && !item.name.ends_with(".debug") -> return Val(files.join(out_dir, item.name))
+    }
+    None
+}
+
 // Runs only the untimed parity step of tool entry `name` of `repo`, without
 // building the C timing launcher or running timed rounds. Each case runs on
 // both sides in fresh copies of the fixtures and compares exit status and
@@ -2390,11 +2412,25 @@ judge_parity: fn(repo: String, name: String, jet: String, work: String) -[Env, E
         return Bar{name: "parity", pass: false, detail: "the entry cannot be judged: {entry.problems.join("; ")}"}
     }
     inherited: jet_env(jet)
-    programs: [[String]]{original_command(files.join(repo, entry.original)), [String]{jet.copy(), files.join(repo, entry.twin), "--"}}
+    twin_path: files.join(repo, entry.twin)
+    twin_cmd: if entry.cases.len() >= 2 -> {
+        if build_parity_bin(jet, twin_path, files.join(work, "{name}/bin-twin"), inherited) == .Val(bin) -> [String]{bin} else -> [String]{jet.copy(), twin_path.copy(), "--"}
+    } else -> [String]{jet.copy(), twin_path.copy(), "--"}
+    programs: [[String]]{original_command(files.join(repo, entry.original)), twin_cmd}
     fixtures: if entry.fixtures == "" -> "" else -> files.join(repo, "{entry.dir}/{entry.fixtures}")
     expected := [String]{}
+    check_cmds := [String:[String]]{}
+    check_seq := 0
     loop case in entry.cases {
         expected.push(files.read(files.join(repo, "{entry.dir}/{case.expected}")) ?? "")
+        if case.check != "" {
+            check_path: files.join(repo, "{entry.dir}/{case.check}")
+            if !check_cmds.has_key(check_path) {
+                built: build_parity_bin(jet, check_path, files.join(work, "{name}/bin-check-{check_seq}"), inherited)
+                check_seq += 1
+                check_cmds[check_path.copy()] = if built == .Val(bin) -> [String]{bin} else -> [String]{jet.copy(), check_path.copy()}
+            }
+        }
     }
     failures := [String]{}
     identical := 0
@@ -2403,7 +2439,11 @@ judge_parity: fn(repo: String, name: String, jet: String, work: String) -[Env, E
         loop side in 0..<2 {
             raw: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), "")
             check: entry.cases[index].check
-            run: if check == "" -> raw else -> checked(raw, files.join(repo, "{entry.dir}/{check}"), jet, entry.cases[index], inherited, case_dir(work, name, index, side))
+            run: if check == "" -> raw else -> {
+                check_path: files.join(repo, "{entry.dir}/{check}")
+                cmd: check_cmds.get(check_path) ?? [String]{jet.copy(), check_path}
+                checked_cmd(raw, cmd, entry.cases[index], inherited, case_dir(work, name, index, side))
+            }
             why: run_failure(run, entry.cases[index], expected[index])
             if why != "" {
                 same = false
@@ -2604,7 +2644,7 @@ work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
 cannot_run: fn(message: String) -[Exec, IO]> Never { process.fail(64, message) }
 
 usage: fn() -[Exec, IO]> Never {
-    cannot_run("usage: jet Tools/Gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jobs N] [--jet PATH] [--repo DIR] [--measure | --parity]")
+    cannot_run("usage: jet Tools/Gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jobs N] [--shard K/N] [--jet PATH] [--repo DIR] [--measure | --parity]")
 }
 
 run: fn() {
@@ -2613,6 +2653,8 @@ run: fn() {
     only := ""
     runs := DEFAULT_RUNS
     jobs := 4
+    shard_index := 1
+    shard_count := 1
     jet := process.env_get("JET") ?? "jet"
     measure := false
     parity := false
@@ -2635,13 +2677,19 @@ run: fn() {
             args[index] == "--entry" -> only = value.copy()
             args[index] == "--runs" -> runs = value.to_int() ?? usage()
             args[index] == "--jobs" -> jobs = value.to_int() ?? usage()
+            args[index] == "--shard" -> {
+                parts: value.partition("/")
+                if parts.sep == "" -> usage()
+                shard_index = parts.head.to_int() ?? usage()
+                shard_count = parts.tail.to_int() ?? usage()
+            }
             args[index] == "--jet" -> jet = value.copy()
             args[index] == "--repo" -> repo = absolute(value)
             else -> usage()
         }
         index += 2
     }
-    if runs < 1 || jobs < 1 || (measure && parity) -> usage()
+    if runs < 1 || jobs < 1 || shard_count < 1 || shard_index < 1 || shard_index > shard_count || (measure && parity) -> usage()
     if jet.contains("/") -> jet = absolute(jet)
     names := [String]{}
     if only != "" {
@@ -2649,7 +2697,16 @@ run: fn() {
             cannot_run("port-bars: there is no entry `{ENTRIES_ROOT}/{only}`")
         }
         names.push(only.copy())
-    } else { names = tool_entries(repo) ?? return cannot_run(err.message) }
+    } else {
+        discovered: tool_entries(repo) ?? return cannot_run(err.message)
+        if shard_count == 1 {
+            names = discovered
+        } else {
+            loop at in 0..<discovered.len() {
+                if at %% shard_count == shard_index - 1 -> names.push(discovered[at].copy())
+            }
+        }
+    }
     if measure {
         print("entry\tside\ttokens\tbranches\tdepth\tfiles")
         refused := 0
