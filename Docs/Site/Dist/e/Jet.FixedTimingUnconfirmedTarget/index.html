@@ -36,7 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package&#39;s `policy:`.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this diagnostic.</p>
+<p>First UI snapshot mentioning <code>Jet.FixedTimingUnconfirmedTarget</code>: <code>Tests/UI/FixedTimingUnconfirmedTarget/stderr</code>.</p>
+<pre class="diag">Error: Jet.FixedTimingUnconfirmedTarget: This package sets `policy.harden`, and its `timing: .Fixed` values would run on `web`, where no host is confirmed to run them in fixed time.
+ Why: WebAssembly leaves the machine instructions to the engine that compiles the module, and no engine states that its code takes the same time for every value; a hardened package refuses to start on an unconfirmed host, and on this target that is known when it is built.
+ Fix: Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package&#39;s `policy:`.
+More: jet-lang.dev/e/Jet.FixedTimingUnconfirmedTarget
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

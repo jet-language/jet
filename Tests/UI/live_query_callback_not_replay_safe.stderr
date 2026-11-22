@@ -1,0 +1,8 @@
+Error: Jet.LiveQueryNotTrackable: Live query callback `map` is not replay-safe
+  --> Tests/UI/live_query_callback_not_replay_safe.jet:11:29
+    |
+ 11 |     _: data.query(rows).map(pick_x)
+    |                             ^^^^^^
+ Why: A maintained query replays callbacks after each source delta, so the callback must have an explicit empty effect bound
+ Fix: Remove the effectful operation, or declare/use a pure callback over the tracked row
+More: jet-lang.dev/e/Jet.LiveQueryNotTrackable
