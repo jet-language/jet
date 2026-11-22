@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113195,
+    "rev": 113196,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30156,7 +30156,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-22T16:43:43.389Z",
+      "updated": "2026-11-22T16:44:52.080Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 21
     },
@@ -131283,41 +131283,41 @@
       "id": "D-STR-VIEW-SPLIT1",
       "cardId": "c00rqc09",
       "group": "language",
-      "title": "Zero-copy string views for split, lines, and trim edges",
-      "situation": "Splitting text into lines or comma-separated fields is one of the most common loops in scripts, parsers, and data tools. Today, only trim, after, before, and slice borrow straight from the source string; lines, split, split_once, cut_last, trim_start, and trim_end allocate a fresh string on the heap for every piece. That makes idiomatic text loops allocate millions of tiny strings and forces performance code down to raw byte indexes. This vote decides whether these text-splitting methods yield zero-copy string views; we recommend yielding zero-copy views that keep the same plain string spelling and copy only when stored.",
-      "gist": "Should split, lines, split_once, cut_last, trim_start, and trim_end yield zero-copy string views?",
-      "lesson": "A zero-copy string view points into its source string without allocating bytes. Beginners still see plain String values and never write lifetimes. Storing a piece into an owning slot copies it automatically.",
+      "title": "Zero-copy borrowed pieces for String.split and String.rsplit",
+      "situation": "Splitting a line into fields is one of the most common loops in scripts, CSV parsers, and compilers. Today, String.split and String.rsplit return a lazy iterator that still allocates a fresh heap string for every single piece. That adds millions of small allocations to idiomatic text loops and pushes fast code down to manual byte offsets. This vote decides whether split and rsplit yield zero-copy borrowed pieces tied to the source string; we recommend borrowing pieces by default and copying only when stored.",
+      "gist": "Should String.split and String.rsplit yield zero-copy borrowed pieces instead of copying every piece?",
+      "lesson": "Both split and rsplit already return a lazy iterator of String values. Borrowing each piece straight from the source string avoids heap copies while keeping plain String types for beginners. Storing a piece into a list or field still copies it automatically.",
       "explainer": "",
-      "story": "Devon writes a CSV and log analyzer in Jet using text.lines() and line.split(\",\"). He wants the natural high-level loop to run with zero per-field heap allocations rather than rewriting it with manual byte offsets.",
-      "inWild": "for line in text.lines() {\n    for field in line.split(',') {\n        total += field.len();\n    }\n}\n// Rust std::primitive::str::split (https://doc.rust-lang.org/std/primitive.str.html#method.split)",
+      "story": "Devon writes a CSV and log analyzer using line.split(\",\"). He wants the plain high-level loop to run with zero per-field heap allocations rather than rewriting it with manual byte offsets.",
+      "inWild": "for field in line.split(',') {\n    total += field.len();\n}\n// Rust std::primitive::str::split (https://doc.rust-lang.org/std/primitive.str.html#method.split)",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Zero-copy views by default",
-          "detail": "Extend Jet's existing zero-copy string view rule (currently covering `.trim()`, `.after()`, `.before()`, and `.slice()`) to `.trim_start()`, `.trim_end()`, `.split_once()`, `.cut_last()`, `.split()`, and `.lines()`. Each bound or iterated piece borrows from the source string's UTF-8 buffer with zero allocation. Passing a piece into an owning slot (`List.push`, struct field, owned `String` return) materializes an owned copy automatically (or requires `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust (`str::lines`, `str::split`), Zig (`std.mem.splitScalar`), and Go (`strings.SplitSeq` / zero-copy substring slicing) all avoid copying during text splitting; Java's early `String.substring` mistake was silently pinning huge backing buffers across arbitrary escaping references, which Jet avoids because provenance ends at the owner's read loan and escaping slots copy only the small piece.",
-          "technical": "In `Compiler/JetSema/Source/Sema/Ownership/StringViews.jet`, add `.TrimStart`, `.TrimEnd`, `.StringSplitOnce`, `.StringCutLast`, `.Split`, and `.Lines` to `sema_string_view_call_sources` and `sema_string_view_lower_init`, recording a read loan on the receiver across loop iteration and materializing via `MaterializeView` at owning destinations (`Docs/Spec/spec.md:2191,2310`). Probe on `bfea516e21` confirmed `line.split(\",\")` currently allocates owned `String` elements and rejects `View<str>` returns (`Jet.ReturnTypeMismatch`).",
-          "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+          "name": "Zero-copy pieces by default",
+          "detail": "`String.split(sep)` and `String.rsplit(sep)` keep their `Iter<String>` signature and yield zero-copy slices into the source string's UTF-8 buffer while the iterator is live. The source string carries a read loan until the loop or iterator ends (`E0212` on conflicting mutation). Passing a yielded piece to an owning destination (`List.push`, `.to_list()`, struct field, owned `String` return) materializes an owned copy automatically (or requires `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust `str::split`, Zig `std.mem.splitScalar`, and Go 1.24 `strings.SplitSeq` all yield zero-copy slices during splitting. Note: `String.lines()` currently returns eager `[String]` rather than `Iter<String>` and is kept separate so this vote does not bundle a breaking list-to-iterator return-type change.",
+          "technical": "Per `Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet:187-188`, `String.split` (`TBuiltinOp.Split`) and `String.rsplit` (`jet_iter_string_rsplit`) both return `Iter<String>`. In `Compiler/JetSema/Source/Sema/Ownership/`, track iterator provenance from the receiver place onto the `Iter` binding and mark loop-item bindings drawn from a borrowed-string iterator as local string views (`SemaScopeBinding.string_view = true`), emitting `MaterializeView` at owning destinations (`Docs/Spec/spec.md:2210,2322`). In `JetIR` and `JetRuntime`, yield borrowed `(ptr, len)` slices from the iterator cursor rather than calling `rt_text_copy` per item.",
+          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
         },
         {
           "key": "B",
-          "name": "Separate view sibling methods",
-          "detail": "Keep `.split()`, `.lines()`, `.split_once()`, `.cut_last()`, `.trim_start()`, and `.trim_end()` returning newly allocated `String` values, and add six parallel view-returning methods (`.split_views()`, `.line_views()`, etc.). This avoids a read loan on the plain names, but violates Jet's one-mechanism law by duplicating six core methods and leaving beginner code slow.",
-          "technical": "Add six new Core/Prelude string methods returning `View<str>` / view iterators while keeping existing `.Split`/`.Lines` lowering to owned `String` allocations.",
-          "code": "loop line in text.line_views() {\n    loop field in line.split_views(\",\") {\n        total += field.count_bytes()\n    }\n}"
+          "name": "Separate split_views methods",
+          "detail": "Keep `String.split(sep)` and `String.rsplit(sep)` allocating fresh owned `String` pieces on each step, and add `split_views(sep)` and `rsplit_views(sep)` for zero-copy iteration. This lets callers mutate the source string during a plain `split` loop, but duplicates the splitting API and leaves the default spelling allocating on every field.",
+          "technical": "Keep `TBuiltinOp.Split` and `jet_iter_string_rsplit` allocating owned strings; register two new builtin iterator methods returning borrowed-view iterators.",
+          "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes()\n}"
         },
         {
           "key": "C",
-          "name": "Always allocate owned strings",
-          "detail": "Keep `.split()`, `.lines()`, `.split_once()`, `.cut_last()`, `.trim_start()`, and `.trim_end()` returning freshly allocated owned `String` values with no view path. This avoids holding a read loan during iteration, but permanently taxes every text-splitting loop with heap allocations and forces performance-critical code (like CSV parsing and compiler scanners) onto manual byte offsets.",
-          "technical": "Leave `sema_string_view_lower_init` returning `None` for `.TrimStart`, `.TrimEnd`, `.StringSplitOnce`, `.StringCutLast`, `.Split`, and `.Lines`.",
-          "code": "bytes: text.bytes()\n// Manual byte-offset scanner to avoid per-field allocation"
+          "name": "Always allocate owned pieces",
+          "detail": "Keep `String.split(sep)` and `String.rsplit(sep)` allocating an owned `String` for every yielded piece with no borrowed-view iterator. Mutating the source string inside the loop stays allowed, but every yielded field pays a heap allocation (or inline copy), keeping idiomatic split loops slower than byte-offset scanners.",
+          "technical": "Leave `TBuiltinOp.Split` and `jet_iter_string_rsplit` unchanged, calling `rt_text_copy` for each yielded piece.",
+          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "str::lines and str::split yield borrowed &str items with zero heap allocation; https://doc.rust-lang.org/std/primitive.str.html#method.split.",
+          "note": "str::split yields borrowed &str slices with zero heap allocation; https://doc.rust-lang.org/std/primitive.str.html#method.split.",
           "code": "for field in line.split(',') { total += field.len(); }"
         },
         {
@@ -131327,34 +131327,34 @@
         },
         {
           "lang": "Go",
-          "note": "Go 1.24 added strings.SplitSeq returning zero-copy sub-slices without allocating a slice header array; https://pkg.go.dev/strings#SplitSeq.",
+          "note": "Go 1.24 added strings.SplitSeq yielding zero-copy sub-slices without allocating a slice array; https://pkg.go.dev/strings#SplitSeq.",
           "code": "for field := range strings.SplitSeq(line, \",\") { total += len(field) }"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Defaulting split and lines to zero-copy views makes idiomatic Jet fast by default and matches trim, after, and before.",
+        "why": "Borrowing pieces by default makes idiomatic split loops zero-allocation while keeping one small text API.",
         "gains": [
-          "Eliminates millions of allocations in scripts, CSV parsers, and compiler passes.",
-          "Keeps one small text API instead of duplicating every method."
+          "Removes per-field heap copies in parsers, CSV tools, and scripts.",
+          "Matches Jet's existing zero-copy behavior for trim, after, before, and slice."
         ],
         "losses": [
           {
-            "loss": "The source string cannot be mutated while iterating its pieces.",
-            "mitigation": "Call .to_list() or .copy() before mutating, matching Jet's existing read-loan error message."
+            "loss": "The source string cannot be mutated while iterating its split pieces.",
+            "mitigation": "Call line.split(\",\").to_list() before mutating line, matching Jet's existing read-loan error."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B splits the text API in two and leaves the plain spelling slow."
+            "reason": "B duplicates the split API and leaves the default spelling allocating."
           },
           {
             "key": "C",
-            "reason": "C forces fast text tools off String onto manual byte indexing."
+            "reason": "C keeps a heap allocation on every piece and pushes fast code off String."
           }
         ],
-        "tradeoff": "Mutating the source string mid-loop requires copying first, which Jet already explains clearly."
+        "tradeoff": "Mutating the source string mid-loop requires collecting with .to_list() first."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -131363,91 +131363,91 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should split, lines, split_once, cut_last, trim_start, and trim_end yield zero-copy string views?",
-        "lesson": "A zero-copy string view points into its source string without allocating bytes. Beginners still see plain String values and never write lifetimes. Storing a piece into an owning slot copies it automatically.",
+        "gist": "Should String.split and String.rsplit yield zero-copy borrowed pieces instead of copying every piece?",
+        "lesson": "Both split and rsplit already return a lazy iterator of String values. Borrowing each piece straight from the source string avoids heap copies while keeping plain String types for beginners. Storing a piece into a list or field still copies it automatically.",
         "trio": {
           "current": {
-            "note": "Today split and lines allocate a new heap string for every piece, and cannot feed a View<str> return.",
-            "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+            "note": "Today split allocates a brand-new heap string for every field it yields.",
+            "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Rust's str::lines and str::split yield borrowed &str slices with zero heap allocation. See https://doc.rust-lang.org/std/primitive.str.html#method.split.",
-            "code": "for line in text.lines() {\n    for field in line.split(',') {\n        total += field.len();\n    }\n}"
+            "note": "Rust's str::split yields borrowed &str slices with zero heap allocation. See https://doc.rust-lang.org/std/primitive.str.html#method.split.",
+            "code": "for field in line.split(',') {\n    total += field.len();\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Zero-copy views by default",
-            "gist": "Yield zero-copy views from split, lines, split_once, cut_last, trim_start, and trim_end.",
+            "name": "Zero-copy pieces by default",
+            "gist": "Yield borrowed slices from split and rsplit; copy only when stored.",
             "gains": [
-              "Zero heap allocation in line and field loops.",
-              "Matches trim, after, before, and slice with no extra method names.",
-              "Owning slots still copy automatically for beginners."
+              "Zero heap allocation per field in idiomatic loops.",
+              "Same plain String type and method names for every user.",
+              "Storing a piece still copies automatically by default."
             ],
             "losses": [
-              "You cannot mutate the source string while iterating its lines or fields."
+              "You cannot mutate the source string while iterating its split pieces."
             ],
             "proposed": {
-              "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
             }
           },
           {
             "key": "B",
-            "name": "Separate view sibling methods",
-            "gist": "Keep split and lines allocating owned strings; add split_views and line_views.",
+            "name": "Separate split_views methods",
+            "gist": "Keep split and rsplit copying; add split_views and rsplit_views.",
             "gains": [
-              "Mutating the source string inside a plain lines loop stays allowed."
+              "Mutating the source string inside a plain split loop stays allowed."
             ],
             "losses": [
-              "Doubles the text API surface with six extra methods.",
-              "Idiomatic loops stay slow unless users learn the expert names."
+              "Adds parallel method names for one splitting concept.",
+              "The default spelling beginners write stays slower."
             ],
             "proposed": {
-              "code": "loop line in text.line_views() {\n    loop field in line.split_views(\",\") {\n        total += field.count_bytes()\n    }\n}"
+              "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes()\n}"
             }
           },
           {
             "key": "C",
-            "name": "Always allocate owned strings",
-            "gist": "Keep split and lines returning freshly copied strings with no view form.",
+            "name": "Always allocate owned pieces",
+            "gist": "Keep split and rsplit allocating fresh strings with no view iterator.",
             "gains": [
               "No read loan is held on the source string during the loop."
             ],
             "losses": [
-              "Every piece longer than inline storage allocates on the heap.",
-              "Fast parsers and CSV tools must bypass String and index raw bytes."
+              "Every yielded piece allocates on the heap.",
+              "Fast CSV and log loops must bypass split for raw bytes."
             ],
             "proposed": {
-              "code": "bytes: text.bytes()\n// Manual byte-offset scanner to avoid per-field allocation"
+              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Defaulting split and lines to zero-copy views makes idiomatic Jet fast by default and matches trim, after, and before.",
+          "why": "Borrowing pieces by default makes idiomatic split loops zero-allocation while keeping one small text API.",
           "gains": [
-            "Eliminates millions of allocations in scripts, CSV parsers, and compiler passes.",
-            "Keeps one small text API instead of duplicating every method."
+            "Removes per-field heap copies in parsers, CSV tools, and scripts.",
+            "Matches Jet's existing zero-copy behavior for trim, after, before, and slice."
           ],
           "losses": [
             {
-              "loss": "The source string cannot be mutated while iterating its pieces.",
-              "mitigation": "Call .to_list() or .copy() before mutating, matching Jet's existing read-loan error message."
+              "loss": "The source string cannot be mutated while iterating its split pieces.",
+              "mitigation": "Call line.split(\",\").to_list() before mutating line, matching Jet's existing read-loan error."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B splits the text API in two and leaves the plain spelling slow."
+              "reason": "B duplicates the split API and leaves the default spelling allocating."
             },
             {
               "key": "C",
-              "reason": "C forces fast text tools off String onto manual byte indexing."
+              "reason": "C keeps a heap allocation on every piece and pushes fast code off String."
             }
           ],
-          "tradeoff": "Mutating the source string mid-loop requires copying first, which Jet already explains clearly."
+          "tradeoff": "Mutating the source string mid-loop requires collecting with .to_list() first."
         }
       },
       "draftedBy": "Orchestrator",
@@ -133788,6 +133788,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T16:44:52.080Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": ""
+    },
     {
       "at": "2026-11-22T16:43:43.389Z",
       "by": "Orchestrator",
