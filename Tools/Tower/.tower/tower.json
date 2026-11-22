@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113196,
+    "rev": 113200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30156,8 +30156,8 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-22T16:44:52.080Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-22T17:36:15.646Z",
+      "updatedBy": "CodegenOpt",
       "criteriaLastN": 21
     },
     {
@@ -131295,23 +131295,23 @@
         {
           "key": "A",
           "name": "Zero-copy pieces by default",
-          "detail": "`String.split(sep)` and `String.rsplit(sep)` keep their `Iter<String>` signature and yield zero-copy slices into the source string's UTF-8 buffer while the iterator is live. The source string carries a read loan until the loop or iterator ends (`E0212` on conflicting mutation). Passing a yielded piece to an owning destination (`List.push`, `.to_list()`, struct field, owned `String` return) materializes an owned copy automatically (or requires `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust `str::split`, Zig `std.mem.splitScalar`, and Go 1.24 `strings.SplitSeq` all yield zero-copy slices during splitting. Note: `String.lines()` currently returns eager `[String]` rather than `Iter<String>` and is kept separate so this vote does not bundle a breaking list-to-iterator return-type change.",
-          "technical": "Per `Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet:187-188`, `String.split` (`TBuiltinOp.Split`) and `String.rsplit` (`jet_iter_string_rsplit`) both return `Iter<String>`. In `Compiler/JetSema/Source/Sema/Ownership/`, track iterator provenance from the receiver place onto the `Iter` binding and mark loop-item bindings drawn from a borrowed-string iterator as local string views (`SemaScopeBinding.string_view = true`), emitting `MaterializeView` at owning destinations (`Docs/Spec/spec.md:2210,2322`). In `JetIR` and `JetRuntime`, yield borrowed `(ptr, len)` slices from the iterator cursor rather than calling `rt_text_copy` per item.",
-          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
+          "detail": "`String.split(sep)` and `String.rsplit(sep)` keep their `Iter<String>` signature and yield zero-copy slices into the source string while the iterator lives. The source string holds a read loan until the loop ends (`E0212` on conflicting mutation). Storing a piece into an owning slot copies it automatically, or asks for `.copy()` under `#Policy(copies: .Explicit)`.\n\nRust `str::split` and Zig `std.mem.splitScalar` avoided per-piece allocation from day one. Go shipped allocating `strings.Split` first and later added `strings.SplitSeq` in Go 1.24 to cut loop allocations. Jet avoids that two-API split by borrowing on the existing `Iter<String>` methods. `String.lines()` returns `[String]` (`BuiltinMethods.jet:191`) and stays separate so this vote avoids a breaking return-type change.",
+          "technical": "Per `Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet:187-188`, `String.split` (`TBuiltinOp.Split`) and `String.rsplit` (`jet_iter_string_rsplit`) both return `Iter<String>`. In `Compiler/JetSema/Source/Sema/Ownership/`, track iterator provenance from the receiver place onto the `Iter` binding. Mark loop items drawn from a borrowed-string iterator as local string views (`SemaScopeBinding.string_view = true`), emitting `MaterializeView` at owning destinations (`Docs/Spec/spec.md:2210,2310,2322`). In `JetIR` and `JetRuntime`, yield borrowed `(ptr, len)` slices from the iterator cursor instead of calling `rt_text_copy` per item.",
+          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes() // zero-copy view\n    if keep -> saved.push(field) // copies only here\n}"
         },
         {
           "key": "B",
           "name": "Separate split_views methods",
-          "detail": "Keep `String.split(sep)` and `String.rsplit(sep)` allocating fresh owned `String` pieces on each step, and add `split_views(sep)` and `rsplit_views(sep)` for zero-copy iteration. This lets callers mutate the source string during a plain `split` loop, but duplicates the splitting API and leaves the default spelling allocating on every field.",
+          "detail": "Keep `String.split(sep)` and `String.rsplit(sep)` allocating fresh owned `String` pieces on each step, and add `split_views(sep)` and `rsplit_views(sep)` for zero-copy iteration. This lets callers mutate the source string during a plain `split` loop, but repeats Go's two-API split (`strings.Split` vs `strings.SplitSeq`) and leaves the default spelling allocating on every field.",
           "technical": "Keep `TBuiltinOp.Split` and `jet_iter_string_rsplit` allocating owned strings; register two new builtin iterator methods returning borrowed-view iterators.",
-          "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes()\n}"
+          "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes() // opt-in view\n    if keep -> saved.push(field)\n}"
         },
         {
           "key": "C",
           "name": "Always allocate owned pieces",
           "detail": "Keep `String.split(sep)` and `String.rsplit(sep)` allocating an owned `String` for every yielded piece with no borrowed-view iterator. Mutating the source string inside the loop stays allowed, but every yielded field pays a heap allocation (or inline copy), keeping idiomatic split loops slower than byte-offset scanners.",
           "technical": "Leave `TBuiltinOp.Split` and `jet_iter_string_rsplit` unchanged, calling `rt_text_copy` for each yielded piece.",
-          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
+          "code": "loop field in line.split(\",\") {\n    total += field.count_bytes() // allocates every field\n    line = \"\" // mutation inside loop stays legal\n}"
         }
       ],
       "comparisons": [
@@ -131327,7 +131327,7 @@
         },
         {
           "lang": "Go",
-          "note": "Go 1.24 added strings.SplitSeq yielding zero-copy sub-slices without allocating a slice array; https://pkg.go.dev/strings#SplitSeq.",
+          "note": "Go 1.24 added strings.SplitSeq after eager strings.Split proved an allocation bottleneck in hot loops; https://pkg.go.dev/strings#SplitSeq.",
           "code": "for field := range strings.SplitSeq(line, \",\") { total += len(field) }"
         }
       ],
@@ -131336,7 +131336,7 @@
         "why": "Borrowing pieces by default makes idiomatic split loops zero-allocation while keeping one small text API.",
         "gains": [
           "Removes per-field heap copies in parsers, CSV tools, and scripts.",
-          "Matches Jet's existing zero-copy behavior for trim, after, before, and slice."
+          "Matches Jet's existing zero-copy behavior for trim, after, and before."
         ],
         "losses": [
           {
@@ -131368,7 +131368,7 @@
         "trio": {
           "current": {
             "note": "Today split allocates a brand-new heap string for every field it yields.",
-            "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
+            "code": "loop field in line.split(\",\") {\n    total += field.count_bytes() // copies every field\n}"
           },
           "wild": {
             "lang": "Rust",
@@ -131390,7 +131390,7 @@
               "You cannot mutate the source string while iterating its split pieces."
             ],
             "proposed": {
-              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
+              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes() // zero-copy view\n    if keep -> saved.push(field) // copies only here\n}"
             }
           },
           {
@@ -131405,7 +131405,7 @@
               "The default spelling beginners write stays slower."
             ],
             "proposed": {
-              "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes()\n}"
+              "code": "loop field in line.split_views(\",\") {\n    total += field.count_bytes() // opt-in view\n    if keep -> saved.push(field)\n}"
             }
           },
           {
@@ -131420,7 +131420,7 @@
               "Fast CSV and log loops must bypass split for raw bytes."
             ],
             "proposed": {
-              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes()\n}"
+              "code": "loop field in line.split(\",\") {\n    total += field.count_bytes() // allocates every field\n    line = \"\" // mutation inside loop stays legal\n}"
             }
           }
         ],
@@ -131429,7 +131429,7 @@
           "why": "Borrowing pieces by default makes idiomatic split loops zero-allocation while keeping one small text API.",
           "gains": [
             "Removes per-field heap copies in parsers, CSV tools, and scripts.",
-            "Matches Jet's existing zero-copy behavior for trim, after, before, and slice."
+            "Matches Jet's existing zero-copy behavior for trim, after, and before."
           ],
           "losses": [
             {
@@ -131451,7 +131451,7 @@
         }
       },
       "draftedBy": "Orchestrator",
-      "reviewedBy": null,
+      "reviewedBy": "CodegenOpt",
       "draft": true,
       "status": "open",
       "created": "2026-11-22T15:11:25.103Z"
@@ -133788,6 +133788,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T17:36:15.646Z",
+      "by": "CodegenOpt",
+      "action": "decision.review",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-22T17:35:23.561Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": "review cleared by the edit"
+    },
+    {
+      "at": "2026-11-22T17:35:04.865Z",
+      "by": "CodegenOpt",
+      "action": "decision.review",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-22T17:34:02.561Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": ""
+    },
     {
       "at": "2026-11-22T16:44:52.080Z",
       "by": "Orchestrator",
