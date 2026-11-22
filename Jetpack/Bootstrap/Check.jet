@@ -403,7 +403,7 @@ prove_check: fn(proof: Proof, state: String) -> Int {
     memory: process.env_get("JETPACK_CHECK_MEM") ?? "6G"
     secs: int_or(process.env_get("JETPACK_CHECK_SECS") ?? "", 1200)
     held := check_slot(state)
-    status: bounded(proof, "check", memory, secs, "{proof.scratch}/check/project", [String]{proof.jet, "check", "src/jetpack.jet"})
+    status: bounded(proof, "check", memory, secs, "{proof.scratch}/check/project", [String]{proof.jet, "check", "--keep-going", "src/jetpack.jet"})
     held.clear()
     // Per-file error summary mapped back to source paths (advisory type check).
     errors: locate_file("{proof.scratch}/check/jetpack.map.json", "{proof.scratch}/check.log")
