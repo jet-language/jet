@@ -1,0 +1,54 @@
+# `ui.saved` state, such as a half-typed comment in `comment_box`, survives a
+# restart of the Linux app and a reload on the web.
+# On Linux a fake Wayland compositor on $WAYLAND_DISPLAY serves two runs of the
+# app against the same $XDG_DATA_HOME: on the first run the panel starts blue
+# (empty draft), Tab focuses the input and typing "hi" turns the panel green
+# before closing; on the restarted second run the panel is already green on the
+# first frame, showing the saved "hi" draft restored from disk, and pressing
+# Backspace updates the saved draft to "h" (yellow).
+# On the web (`jet build --target web`), the same `comment_box` screen mounts
+# in `page.mjs` with `sessionStorage` backed across reloads: typing "half-typed"
+# persists it, a fresh reload restores "half-typed" into the input and text,
+# appending "!" updates the saved value, and a second reload restores
+# "half-typed!".
+fixture: SavedStateSurvivesARestartOrReload.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: = "saved: h\nsaved: hi\n"
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: = "saved: h\n"
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "run 1: 200x200, panel [51, 102, 255, 255]\nrun 1: typed hi into the input\nrun 1: after typing: panel [51, 153, 51, 255]\nrun 1: closed the window\nrun 2: 200x200, restored panel [51, 153, 51, 255]\nrun 2: pressed Backspace\nrun 2: after Backspace: panel [204, 153, 0, 255]\nrun 2: closed the window\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs first
+cwd: .jet/build
+exit: 0
+stdout: = "first mounted: \"Comment: \", input \"\"\nsaved: half-typed\nfirst typed: \"Comment: half-typed\", input \"half-typed\"\n"
+step: node page.mjs reload
+cwd: .jet/build
+exit: 0
+stdout: = "reload mounted: \"Comment: half-typed\", input \"half-typed\"\nsaved: half-typed!\nreload edited: \"Comment: half-typed!\", input \"half-typed!\"\n"
+step: node page.mjs verify
+cwd: .jet/build
+exit: 0
+stdout: = "verify mounted: \"Comment: half-typed!\", input \"half-typed!\"\n"
+end when

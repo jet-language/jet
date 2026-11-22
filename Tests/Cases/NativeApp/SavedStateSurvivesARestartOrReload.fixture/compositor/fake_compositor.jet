@@ -1,0 +1,427 @@
+// Two-run Wayland compositor for ../main.jet:
+// Run 1 verifies the comment panel starts empty (blue), focuses the text input
+// with Tab, types "hi", waits for the green panel, and closes the window.
+// Run 2 accepts the restarted app process, verifies the panel is ALREADY green
+// on the first frame (showing the saved draft survived the restart), focuses
+// the input, presses Backspace, verifies the panel turns yellow (1 char), and
+// closes the window.
+use {
+    files: core.files
+    net: core.net
+    sys: core.sys
+}
+
+PANEL_X: 150
+PANEL_Y: 10
+FRAMES_PER_STEP: 6
+
+ONE: [U8]{204, 153, 0, 255}
+TWO: [U8]{51, 153, 51, 255}
+
+KEY_TAB: 15
+KEY_H: 35
+KEY_I: 23
+KEY_BACKSPACE: 14
+
+CLOSED: 2
+
+FORMAT_ARGB8888: 0
+FORMAT_XRGB8888: 1
+
+FakeBuffer: struct {
+    id: Int,
+    pool: Int,
+    offset: Int,
+    width: Int,
+    height: Int,
+    format: Int,
+}
+
+Fake: struct {
+    run_number: Int,
+    stream: net.UnixStream,
+    inbox: [U8],
+    out: [U8],
+    registry: Int,
+    compositor: Int,
+    shm: Int,
+    wm_base: Int,
+    seat: Int,
+    keyboard: Int,
+    surface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
+    pools: [Int],
+    fds: [sys.Fd],
+    received: [sys.Fd],
+    buffers: [FakeBuffer],
+    attached: Int,
+    current: Int,
+    callbacks: [Int],
+    serial: Int,
+    configured: Bool,
+    phase: Int,
+    waited: Int,
+    commits: Int,
+    records: [String],
+    failures: [String],
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat"}
+
+fake_put: fn(out: &[U8], value: Int) {
+    v: value & 4294967295
+    out.push(U8{v & 255})
+    out.push(U8{(v >> 8) & 255})
+    out.push(U8{(v >> 16) & 255})
+    out.push(U8{(v >> 24) & 255})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if f.phase < CLOSED -> f.failures.push("run {f.run_number} send failed: {err}")
+        return
+    }
+}
+
+fake_fail: fn(f: &Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push("run {f.run_number} phase {f.phase}: {message}")
+}
+
+fake_buffer: fn(f: Fake, id: Int) -> FakeBuffer? {
+    loop buffer in f.buffers {
+        if buffer.id == id -> return Val(buffer.copy())
+    }
+    None
+}
+
+fake_pool: fn(f: Fake, object: Int) -> Int {
+    loop index in 0..<f.pools.len() {
+        if f.pools[index] == object -> return index
+    }
+    -1
+}
+
+fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+    if buffer.pool >= f.fds.len() || x >= buffer.width || y >= buffer.height {
+        fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
+        return [U8]{}
+    }
+    if buffer.format != FORMAT_ARGB8888 && buffer.format != FORMAT_XRGB8888 {
+        fake_fail(f, "buffer {buffer.id} has format {buffer.format}, which the fake never offered")
+        return [U8]{}
+    }
+    at: Int(0..9223372036854775807).from_int(buffer.offset + (y * buffer.width + x) * 4) ?? {
+        fake_fail(f, "pixel {x},{y} lies before the start of its pool")
+        return [U8]{}
+    }
+    stored: f.fds[buffer.pool].read_at(at, 4) ?? {
+        fake_fail(f, "reading a pool failed: {err}")
+        return [U8]{}
+    }
+    [U8]{stored[2], stored[1], stored[0], stored[3]}
+}
+
+fake_keys: fn(f: &Fake, codes: [Int]) {
+    keyboard: f.keyboard
+    if keyboard == 0 {
+        fake_fail(f, "the window has no keyboard")
+        return
+    }
+    f.serial += 1
+    fake_event(f, keyboard, 1, fake_words([Int]{f.serial, f.surface, 0}))
+    loop code in codes {
+        f.serial += 1
+        fake_event(f, keyboard, 3, fake_words([Int]{f.serial, 0, code, 1}))
+        f.serial += 1
+        fake_event(f, keyboard, 3, fake_words([Int]{f.serial, 0, code, 0}))
+    }
+}
+
+fake_next: fn(f: &Fake, what: String) {
+    f.records.push("run {f.run_number}: {what}")
+    f.phase += 1
+    f.waited = 0
+}
+
+fake_waited_out: fn(f: &Fake, what: String) -> Bool {
+    f.waited += 1
+    if f.waited < FRAMES_PER_STEP -> return false
+    fake_fail(f, "the window never showed {what}")
+    fake_close(f)
+    true
+}
+
+fake_close: fn(f: &Fake) {
+    toplevel: f.toplevel
+    fake_event(f, toplevel, 1, [U8]{})
+    f.records.push("run {f.run_number}: closed the window")
+    f.phase = CLOSED
+}
+
+fake_commit: fn(f: &Fake) {
+    f.commits += 1
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.attached == 0 {
+        return
+    }
+    previous: f.current
+    f.current = f.attached
+    f.attached = 0
+    if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    buffer: fake_buffer(f, f.current) ?? {
+        fake_fail(f, "committed buffer {f.current}, which no pool made")
+        return
+    }
+    panel: fake_pixel(f, buffer, PANEL_X, PANEL_Y)
+    if f.run_number == 1 {
+        if f.phase == 0 {
+            f.records.push("run 1: {buffer.width}x{buffer.height}, panel {panel}")
+            fake_keys(f, [Int]{KEY_TAB, KEY_H, KEY_I})
+            fake_next(f, "typed hi into the input")
+            return
+        }
+        if f.phase == 1 {
+            if panel != TWO {
+                _: fake_waited_out(f, "a comment of two characters")
+                return
+            }
+            f.records.push("run 1: after typing: panel {panel}")
+            fake_close(f)
+        }
+        return
+    }
+    if f.phase == 0 {
+        if panel != TWO {
+            fake_fail(f, "expected restored green panel {TWO} on frame 1, got {panel}")
+            fake_close(f)
+            return
+        }
+        f.records.push("run 2: {buffer.width}x{buffer.height}, restored panel {panel}")
+        fake_keys(f, [Int]{KEY_TAB, KEY_BACKSPACE})
+        fake_next(f, "pressed Backspace")
+        return
+    }
+    if f.phase == 1 {
+        if panel != ONE {
+            _: fake_waited_out(f, "a comment of one character after Backspace")
+            return
+        }
+        f.records.push("run 2: after Backspace: panel {panel}")
+        fake_close(f)
+    }
+}
+
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        loop (index, interface) in GLOBALS {
+            args := fake_words([Int]{index + 1})
+            loop b in fake_text(interface) -> args.push(b)
+            version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else -> 1
+            fake_put(args, version)
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{FORMAT_ARGB8888}))
+            fake_event(f, id, 0, fake_words([Int]{FORMAT_XRGB8888}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        if interface == "wl_seat" {
+            f.seat = id
+            fake_event(f, id, 0, fake_words([Int]{3}))
+        }
+        return
+    }
+    if object == f.compositor && opcode == 0 {
+        if f.surface == 0 -> f.surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        fd: f.received.pop() ?? {
+            fake_fail(f, "create_pool without a descriptor")
+            return
+        }
+        f.pools.push(fake_u32(body, 0))
+        f.fds.push(fd)
+        return
+    }
+    pool: fake_pool(f, object)
+    if pool >= 0 {
+        if opcode == 0 {
+            f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12), format: fake_u32(body, 20)})
+        }
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface && opcode == 1 {
+        f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if f.seat != 0 && object == f.seat {
+        if opcode == 1 -> f.keyboard = fake_u32(body, 0)
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                f.configured = true
+                f.serial += 1
+                toplevel: f.toplevel
+                xdg_surface: f.xdg_surface
+                fake_event(f, toplevel, 0, fake_words([Int]{200, 200, 4, 4}))
+                fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+                return
+            }
+            fake_commit(f)
+        }
+    }
+}
+
+fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word & 65535, body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+fake_serve: fn(listener: net.UnixListener, run_number: Int) -[Env, Net, Time]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept on wl.sock: {err}")
+    f := Fake{
+        run_number: run_number,
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        seat: 0,
+        keyboard: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        pools: [Int]{},
+        fds: [sys.Fd]{},
+        received: [sys.Fd]{},
+        buffers: [FakeBuffer]{},
+        attached: 0,
+        current: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        configured: false,
+        phase: 0,
+        waited: 0,
+        commits: 0,
+        records: [String]{},
+        failures: [String]{},
+    }
+    idle := 0
+    loop idle < 1200 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("run {run_number} wait failed: {err}")
+            return f
+        }
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        message: net.unix_receive(f.stream, 65536) ?? {
+            if f.phase < CLOSED -> f.failures.push("run {run_number} receive failed: {err}")
+            return f
+        }
+        if message.bytes.len() == 0 -> return f
+        loop fd in message.fds.move() -> f.received.insert(0, fd)
+        loop b in message.bytes -> f.inbox.push(b)
+        fake_dispatch(f)
+        fake_flush(f)
+    }
+    f.failures.push("run {run_number}: the window went quiet")
+    f
+}
+
+run: fn() -[Env, FS, IO, Net, Time]> {
+    listener: net.unix_listen("wl.sock") ?? panic("listen on wl.sock: {err}")
+    files.write("compositor.ready", "") ?? panic("write compositor.ready: {err}")
+    loop run_number in 1..<3 {
+        f: fake_serve(listener, run_number)
+        if f.phase != CLOSED -> print("FAIL run {run_number} stopped in phase {f.phase}")
+        loop record in f.records -> print(record)
+        loop failure in f.failures -> print("FAIL {failure}")
+    }
+}

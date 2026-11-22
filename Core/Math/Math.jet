@@ -38268,6 +38268,376 @@ impl F32.Roundable {
     }
 }
 
+// Pure F32 scalbn/ldexp: scales by exact F32 powers of two (2^127 up or
+// 2^-102 down, never entering subnormal range before the final multiply) so
+// there is at most one rounding step.
+priv ldexp_f32: fn(value: F32, exponent: Int) -> F32 Never! {
+    x := value
+    n := exponent
+    if n > 127 {
+        x *= __from_bits_f32(0x7F00_0000)
+        n -= 127
+        if n > 127 {
+            x *= __from_bits_f32(0x7F00_0000)
+            n -= 127
+            if n > 127 -> n = 127
+        }
+    } else if n < -126 {
+        x *= __from_bits_f32(0x0C80_0000)
+        n += 102
+        if n < -126 {
+            x *= __from_bits_f32(0x0C80_0000)
+            n += 102
+            if n < -126 {
+                x *= __from_bits_f32(0x0C80_0000)
+                n += 102
+                if n < -126 -> n = -126
+            }
+        }
+    }
+    x * __from_bits_f32((n + 127) << 23)
+}
+
+// Not exported from Core's public type table: internal scalar abstraction
+// shared by Complex (Float) and Complex32 (F32). Each implementation runs
+// in its own IEEE 754 precision and dynamic range rather than computing in
+// Float and narrowing.
+ComplexScalar: trait {
+    cx_add: fn(self, rhs: Self) -> Self Never!,
+    cx_sub: fn(self, rhs: Self) -> Self Never!,
+    cx_mul: fn(self, rhs: Self) -> Self Never!,
+    cx_div: fn(self, rhs: Self) -> Self Never!,
+    cx_neg: fn(self) -> Self Never!,
+    cx_fma: fn(self, b: Self, c: Self) -> Self Never!,
+    cx_is_zero: fn(self) -> Bool Never!,
+    cx_is_finite: fn(self) -> Bool Never!,
+    cx_is_inf: fn(self) -> Bool Never!,
+    cx_is_nan: fn(self) -> Bool Never!,
+    cx_sign_bit: fn(self) -> Bool Never!,
+    cx_lt: fn(self, rhs: Self) -> Bool Never!,
+    cx_le: fn(self, rhs: Self) -> Bool Never!,
+    cx_gt: fn(self, rhs: Self) -> Bool Never!,
+    cx_ge: fn(self, rhs: Self) -> Bool Never!,
+    cx_fabs: fn(self) -> Self Never!,
+    cx_copysign: fn(self, sign: Self) -> Self Never!,
+    cx_sqrt: fn(self) -> Self Never!,
+    cx_hypot: fn(self, other: Self) -> Self Never!,
+    cx_exp: fn(self) -> Self Never!,
+    cx_ln: fn(self) -> Self Never!,
+    cx_ln_1p: fn(self) -> Self Never!,
+    cx_sin: fn(self) -> Self Never!,
+    cx_cos: fn(self) -> Self Never!,
+    cx_sinh: fn(self) -> Self Never!,
+    cx_cosh: fn(self) -> Self Never!,
+    cx_atan2: fn(self, x: Self) -> Self Never!,
+    cx_asinh: fn(self) -> Self Never!,
+    cx_frexp: fn(self) -> {exp: Int, frac: Self} Never!,
+    cx_ldexp: fn(self, exponent: Int) -> Self Never!,
+    cx_part_text: fn(self) -> String Never!,
+    cx_zero: fn(self) -> Self Never!,
+    cx_one: fn(self) -> Self Never!,
+    cx_two: fn(self) -> Self Never!,
+    cx_four: fn(self) -> Self Never!,
+    cx_half: fn(self) -> Self Never!,
+    cx_quarter: fn(self) -> Self Never!,
+    cx_inf: fn(self) -> Self Never!,
+    cx_nan: fn(self) -> Self Never!,
+    cx_pi: fn(self) -> Self Never!,
+    cx_ln2: fn(self) -> Self Never!,
+    cx_three_quarter_pi: fn(self) -> Self Never!,
+    cx_exp_scale_lo: fn(self) -> Self Never!,
+    cx_exp_scale_hi: fn(self) -> Self Never!,
+    cx_exp_scale_k: fn(self) -> Int Never!,
+    cx_exp_scale_k_ln2: fn(self) -> Self Never!,
+    cx_sinh_small: fn(self) -> Self Never!,
+    cx_sinh_exp_hi: fn(self) -> Self Never!,
+    cx_sinh_scale_hi: fn(self) -> Self Never!,
+    cx_huge_factor: fn(self) -> Self Never!,
+    cx_ln_hi: fn(self) -> Self Never!,
+    cx_ln_lo: fn(self) -> Self Never!,
+    cx_ln_shift: fn(self) -> Int Never!,
+    cx_ln_shift_val: fn(self) -> Self Never!,
+    cx_ln_near_lo: fn(self) -> Self Never!,
+    cx_ln_near_hi: fn(self) -> Self Never!,
+    cx_sqrt_tiny: fn(self) -> Self Never!,
+    cx_sqrt_raise_shift: fn(self) -> Int Never!,
+    cx_sqrt_limit: fn(self) -> Self Never!,
+    cx_atanh_huge: fn(self) -> Self Never!,
+    cx_atanh_near_min: fn(self) -> Self Never!,
+}
+
+priv COMPLEX_LN2: Float{0.693147180559945309417232121458176568}
+
+priv COMPLEX_THREE_QUARTER_PI: Float{2.356194490192344928846982537459627163}
+
+// A part renders in the shortest display spelling: a whole value drops its
+// ".0" (`3 - 0i`, not `3.0 - 0.0i`).
+priv complex_part_text: fn(value: Float) -> String Never! {
+    text: "{value}"
+    if text.ends_with(".0") && text.cut_last(".") == .Val(parts) -> return parts.before
+    text
+}
+
+priv complex_part_text_f32: fn(value: F32) -> String Never! {
+    text: "{value}"
+    if text.ends_with(".0") && text.cut_last(".") == .Val(parts) -> return parts.before
+    text
+}
+
+impl Float.ComplexScalar {
+    cx_add: fn(self, rhs: Float) -> Float Never! { self + rhs }
+
+    cx_sub: fn(self, rhs: Float) -> Float Never! { self - rhs }
+
+    cx_mul: fn(self, rhs: Float) -> Float Never! { self * rhs }
+
+    cx_div: fn(self, rhs: Float) -> Float Never! { self / rhs }
+
+    cx_neg: fn(self) -> Float Never! { -self }
+
+    cx_fma: fn(self, b: Float, c: Float) -> Float Never! { fma(self, b, c) }
+
+    cx_is_zero: fn(self) -> Bool Never! { self == 0.0 }
+
+    cx_is_finite: fn(self) -> Bool Never! { is_finite(self) }
+
+    cx_is_inf: fn(self) -> Bool Never! { is_inf(self) }
+
+    cx_is_nan: fn(self) -> Bool Never! { is_nan(self) }
+
+    cx_sign_bit: fn(self) -> Bool Never! { sign_bit(self) }
+
+    cx_lt: fn(self, rhs: Float) -> Bool Never! { self < rhs }
+
+    cx_le: fn(self, rhs: Float) -> Bool Never! { self <= rhs }
+
+    cx_gt: fn(self, rhs: Float) -> Bool Never! { self > rhs }
+
+    cx_ge: fn(self, rhs: Float) -> Bool Never! { self >= rhs }
+
+    cx_fabs: fn(self) -> Float Never! { fabs(self) }
+
+    cx_copysign: fn(self, sign: Float) -> Float Never! { copysign(self, sign) }
+
+    cx_sqrt: fn(self) -> Float Never! { sqrt(self) }
+
+    cx_hypot: fn(self, other: Float) -> Float Never! { hypot(self, other) }
+
+    cx_exp: fn(self) -> Float Never! { exp(self) }
+
+    cx_ln: fn(self) -> Float Never! { ln(self) }
+
+    cx_ln_1p: fn(self) -> Float Never! { ln_1p(self) }
+
+    cx_sin: fn(self) -> Float Never! { sin(self) }
+
+    cx_cos: fn(self) -> Float Never! { cos(self) }
+
+    cx_sinh: fn(self) -> Float Never! { sinh(self) }
+
+    cx_cosh: fn(self) -> Float Never! { cosh(self) }
+
+    cx_atan2: fn(self, x: Float) -> Float Never! { atan2(self, x) }
+
+    cx_asinh: fn(self) -> Float Never! { asinh(self) }
+
+    cx_frexp: fn(self) -> {exp: Int, frac: Float} Never! { frexp(self) }
+
+    cx_ldexp: fn(self, exponent: Int) -> Float Never! { ldexp(self, exponent) }
+
+    cx_part_text: fn(self) -> String Never! { complex_part_text(self) }
+
+    cx_zero: fn(self) -> Float Never! { 0.0 }
+
+    cx_one: fn(self) -> Float Never! { 1.0 }
+
+    cx_two: fn(self) -> Float Never! { 2.0 }
+
+    cx_four: fn(self) -> Float Never! { 4.0 }
+
+    cx_half: fn(self) -> Float Never! { 0.5 }
+
+    cx_quarter: fn(self) -> Float Never! { 0.25 }
+
+    cx_inf: fn(self) -> Float Never! { INFINITY }
+
+    cx_nan: fn(self) -> Float Never! { NAN }
+
+    cx_pi: fn(self) -> Float Never! { PI }
+
+    cx_ln2: fn(self) -> Float Never! { COMPLEX_LN2 }
+
+    cx_three_quarter_pi: fn(self) -> Float Never! { COMPLEX_THREE_QUARTER_PI }
+
+    cx_exp_scale_lo: fn(self) -> Float Never! { from_bits(0x4086_2E42_0000_0000) }
+
+    cx_exp_scale_hi: fn(self) -> Float Never! { from_bits(0x4096_B8E4_0000_0000) }
+
+    cx_exp_scale_k: fn(self) -> Int Never! { 1799 }
+
+    cx_exp_scale_k_ln2: fn(self) -> Float Never! { 1246.97177782734161156 }
+
+    cx_sinh_small: fn(self) -> Float Never! { 22.0 }
+
+    cx_sinh_exp_hi: fn(self) -> Float Never! { from_bits(0x4086_2E42_0000_0000) }
+
+    cx_sinh_scale_hi: fn(self) -> Float Never! { from_bits(0x4096_BBAA_0000_0000) }
+
+    cx_huge_factor: fn(self) -> Float Never! { from_bits(0x7FE0_0000_0000_0000) }
+
+    cx_ln_hi: fn(self) -> Float Never! { from_bits(0x7E30_0000_0000_0000) }
+
+    cx_ln_lo: fn(self) -> Float Never! { from_bits(0x0390_0000_0000_0000) }
+
+    cx_ln_shift: fn(self) -> Int Never! { 1000 }
+
+    cx_ln_shift_val: fn(self) -> Float Never! { 1000.0 }
+
+    cx_ln_near_lo: fn(self) -> Float Never! { 0.7 }
+
+    cx_ln_near_hi: fn(self) -> Float Never! { 1.4 }
+
+    cx_sqrt_tiny: fn(self) -> Float Never! { from_bits(0x0030_0000_0000_0000) }
+
+    cx_sqrt_raise_shift: fn(self) -> Int Never! { 600 }
+
+    cx_sqrt_limit: fn(self) -> Float Never! { from_bits(0x7FDA_8279_99FC_EF32) }
+
+    cx_atanh_huge: fn(self) -> Float Never! { 1.0e150 }
+
+    cx_atanh_near_min: fn(self) -> Float Never! { from_bits(0x0010_0000_0000_0000) }
+}
+
+impl F32.ComplexScalar {
+    cx_add: fn(self, rhs: F32) -> F32 Never! { self + rhs }
+
+    cx_sub: fn(self, rhs: F32) -> F32 Never! { self - rhs }
+
+    cx_mul: fn(self, rhs: F32) -> F32 Never! { self * rhs }
+
+    cx_div: fn(self, rhs: F32) -> F32 Never! { self / rhs }
+
+    cx_neg: fn(self) -> F32 Never! { -self }
+
+    cx_fma: fn(self, b: F32, c: F32) -> F32 Never! {
+        f32_fma(Float.from_f32(self), Float.from_f32(b), Float.from_f32(c))
+    }
+
+    cx_is_zero: fn(self) -> Bool Never! { self == F32{0.0} }
+
+    cx_is_finite: fn(self) -> Bool Never! { (__to_bits_f32(self) & 0x7F80_0000) != 0x7F80_0000 }
+
+    cx_is_inf: fn(self) -> Bool Never! { (__to_bits_f32(self) & 0x7FFF_FFFF) == 0x7F80_0000 }
+
+    cx_is_nan: fn(self) -> Bool Never! { (__to_bits_f32(self) & 0x7FFF_FFFF) > 0x7F80_0000 }
+
+    cx_sign_bit: fn(self) -> Bool Never! { (__to_bits_f32(self) & 0x8000_0000) != 0 }
+
+    cx_lt: fn(self, rhs: F32) -> Bool Never! { self < rhs }
+
+    cx_le: fn(self, rhs: F32) -> Bool Never! { self <= rhs }
+
+    cx_gt: fn(self, rhs: F32) -> Bool Never! { self > rhs }
+
+    cx_ge: fn(self, rhs: F32) -> Bool Never! { self >= rhs }
+
+    cx_fabs: fn(self) -> F32 Never! { fabs_f32(self) }
+
+    cx_copysign: fn(self, sign: F32) -> F32 Never! { copysign_f32(self, sign) }
+
+    cx_sqrt: fn(self) -> F32 Never! { f32_sqrt(Float.from_f32(self)) }
+
+    cx_hypot: fn(self, other: F32) -> F32 Never! {
+        f32_narrow(hypot_f32(Float.from_f32(self), Float.from_f32(other)))
+    }
+
+    cx_exp: fn(self) -> F32 Never! { f32_narrow(exp(Float.from_f32(self))) }
+
+    cx_ln: fn(self) -> F32 Never! { f32_narrow(__ln_f32(Float.from_f32(self))) }
+
+    cx_ln_1p: fn(self) -> F32 Never! { f32_narrow(__ln_1p_f32(Float.from_f32(self))) }
+
+    cx_sin: fn(self) -> F32 Never! { f32_narrow(__sin_f32(Float.from_f32(self))) }
+
+    cx_cos: fn(self) -> F32 Never! { f32_narrow(__cos_f32(Float.from_f32(self))) }
+
+    cx_sinh: fn(self) -> F32 Never! { f32_narrow(sinh_f32(Float.from_f32(self))) }
+
+    cx_cosh: fn(self) -> F32 Never! { f32_narrow(cosh(Float.from_f32(self))) }
+
+    cx_atan2: fn(self, x: F32) -> F32 Never! {
+        f32_narrow(__atan2_f32(Float.from_f32(self), Float.from_f32(x)))
+    }
+
+    cx_asinh: fn(self) -> F32 Never! { f32_narrow(asinh_f32(Float.from_f32(self))) }
+
+    cx_frexp: fn(self) -> {exp: Int, frac: F32} Never! { frexp_f32(self) }
+
+    cx_ldexp: fn(self, exponent: Int) -> F32 Never! { ldexp_f32(self, exponent) }
+
+    cx_part_text: fn(self) -> String Never! { complex_part_text_f32(self) }
+
+    cx_zero: fn(self) -> F32 Never! { F32{0.0} }
+
+    cx_one: fn(self) -> F32 Never! { F32{1.0} }
+
+    cx_two: fn(self) -> F32 Never! { F32{2.0} }
+
+    cx_four: fn(self) -> F32 Never! { F32{4.0} }
+
+    cx_half: fn(self) -> F32 Never! { F32{0.5} }
+
+    cx_quarter: fn(self) -> F32 Never! { F32{0.25} }
+
+    cx_inf: fn(self) -> F32 Never! { F32.INFINITY }
+
+    cx_nan: fn(self) -> F32 Never! { F32.NAN }
+
+    cx_pi: fn(self) -> F32 Never! { __from_bits_f32(0x4049_0FDB) }
+
+    cx_ln2: fn(self) -> F32 Never! { __from_bits_f32(0x3F31_7218) }
+
+    cx_three_quarter_pi: fn(self) -> F32 Never! { __from_bits_f32(0x4016_CBE4) }
+
+    cx_exp_scale_lo: fn(self) -> F32 Never! { __from_bits_f32(0x42B1_7217) }
+
+    cx_exp_scale_hi: fn(self) -> F32 Never! { __from_bits_f32(0x4340_0074) }
+
+    cx_exp_scale_k: fn(self) -> Int Never! { 235 }
+
+    cx_exp_scale_k_ln2: fn(self) -> F32 Never! { __from_bits_f32(0x4322_E3BC) }
+
+    cx_sinh_small: fn(self) -> F32 Never! { F32{10.0} }
+
+    cx_sinh_exp_hi: fn(self) -> F32 Never! { __from_bits_f32(0x42B1_7217) }
+
+    cx_sinh_scale_hi: fn(self) -> F32 Never! { __from_bits_f32(0x4340_B1E7) }
+
+    cx_huge_factor: fn(self) -> F32 Never! { __from_bits_f32(0x7F00_0000) }
+
+    cx_ln_hi: fn(self) -> F32 Never! { __from_bits_f32(0x7C00_0000) }
+
+    cx_ln_lo: fn(self) -> F32 Never! { __from_bits_f32(0x0400_0000) }
+
+    cx_ln_shift: fn(self) -> Int Never! { 120 }
+
+    cx_ln_shift_val: fn(self) -> F32 Never! { F32{120.0} }
+
+    cx_ln_near_lo: fn(self) -> F32 Never! { F32{0.7} }
+
+    cx_ln_near_hi: fn(self) -> F32 Never! { F32{1.4} }
+
+    cx_sqrt_tiny: fn(self) -> F32 Never! { __from_bits_f32(0x0180_0000) }
+
+    cx_sqrt_raise_shift: fn(self) -> Int Never! { 64 }
+
+    cx_sqrt_limit: fn(self) -> F32 Never! { __from_bits_f32(0x7ED4_13CC) }
+
+    cx_atanh_huge: fn(self) -> F32 Never! { F32{1.0e18} }
+
+    cx_atanh_near_min: fn(self) -> F32 Never! { __from_bits_f32(0x0080_0000) }
+}
+
 impl Int.Roundable {
     rounded: fn(self, mode: Rounding) -> Int Never! { self }
 }
@@ -40580,9 +40950,17 @@ Complex: struct {
     real: Float,
     imaginary: Float,
 
+    /// Losslessly widens a `Complex32` to `Complex`.
+    from_complex: fn(value: Complex32) -> Complex Never! {
+        Complex{real: Float.from_f32(value.real), imaginary: Float.from_f32(value.imaginary)}
+    }
+
     impl Display {
         display: fn(self) -> String { __complex_to_string(self) }
     }
+
+    /// The complex conjugate `a - bi` at `Float` precision.
+    conj: fn(self) -> Complex Never! { complex_from_core(complex_core_conj(complex_to_core(self))) }
 
     // Complex has no order; its arithmetic hooks and its
     // magnitude are source methods like Fraction's and Decimal's.
@@ -40662,7 +41040,189 @@ Complex: struct {
     }
 }
 
-__complex_abs: fn(value: Complex) -> Float Never! { hypot(value.real, value.imaginary) }
+Complex32: struct {
+    real: F32,
+    imaginary: F32,
+
+    /// Fallibly narrows a `Complex` to `Complex32` using `F32.from_float` on each part.
+    from_complex: fn(value: Complex) -> Complex32 Err! {
+        real: F32.from_float(value.real) ?? return Err(err)
+        imaginary: F32.from_float(value.imaginary) ?? return Err(err)
+        Ok(Complex32{real: real, imaginary: imaginary})
+    }
+
+    impl Display {
+        display: fn(self) -> String { complex_core_to_string(complex32_to_core(self)) }
+    }
+
+    /// The complex conjugate `a - bi` at `F32` precision.
+    conj: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_conj(complex32_to_core(self)))
+    }
+
+    abs: fn(self) -> F32 Never! { complex_core_abs(complex32_to_core(self)) }
+
+    /// The angle from the positive real axis, in [-π, π].
+    arg: fn(self) -> F32 Never! { complex_core_arg(complex32_to_core(self)) }
+
+    /// The value itself, or +∞ (keeping the imaginary part's sign on a zero)
+    /// when a part is infinite, as the Riemann sphere's one point at infinity.
+    proj: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_proj(complex32_to_core(self)))
+    }
+
+    /// e raised to this value.
+    exp: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_exp(complex32_to_core(self)))
+    }
+
+    /// The natural logarithm, with imaginary part in [-π, π]; the cut runs
+    /// along the negative real axis.
+    ln: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_ln(complex32_to_core(self)))
+    }
+
+    /// This value raised to `power`, as exp(power * ln(self)).
+    pow: fn(self, power: Complex32) -> Complex32 Never! {
+        complex32_from_core(complex_core_pow(complex32_to_core(self), complex32_to_core(power)))
+    }
+
+    /// The principal square root, with a real part >= 0.
+    sqrt: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_sqrt(complex32_to_core(self)))
+    }
+
+    sin: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_sin(complex32_to_core(self)))
+    }
+
+    cos: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_cos(complex32_to_core(self)))
+    }
+
+    tan: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_tan(complex32_to_core(self)))
+    }
+
+    /// The principal arcsine; the cuts run along the real axis outside [-1, 1].
+    asin: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_asin(complex32_to_core(self)))
+    }
+
+    /// The principal arccosine; the cuts run along the real axis outside [-1, 1].
+    acos: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_acos(complex32_to_core(self)))
+    }
+
+    /// The principal arctangent; the cuts run along the imaginary axis outside [-i, i].
+    atan: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_atan(complex32_to_core(self)))
+    }
+
+    sinh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_sinh(complex32_to_core(self)))
+    }
+
+    cosh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_cosh(complex32_to_core(self)))
+    }
+
+    tanh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_tanh(complex32_to_core(self)))
+    }
+
+    /// The principal inverse hyperbolic sine; the cuts run along the
+    /// imaginary axis outside [-i, i].
+    asinh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_asinh(complex32_to_core(self)))
+    }
+
+    /// The principal inverse hyperbolic cosine; the cut runs along the real
+    /// axis below 1.
+    acosh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_acosh(complex32_to_core(self)))
+    }
+
+    /// The principal inverse hyperbolic tangent; the cuts run along the real
+    /// axis outside [-1, 1].
+    atanh: fn(self) -> Complex32 Never! {
+        complex32_from_core(complex_core_atanh(complex32_to_core(self)))
+    }
+
+    impl Add {
+        add: fn(self, rhs: Complex32) -> Complex32 Never! {
+            complex32_from_core(complex_core_add(complex32_to_core(self), complex32_to_core(rhs)))
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Complex32) -> Complex32 Never! {
+            complex32_from_core(complex_core_sub(complex32_to_core(self), complex32_to_core(rhs)))
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Complex32) -> Complex32 Never! {
+            complex32_from_core(complex_core_mul(complex32_to_core(self), complex32_to_core(rhs)))
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: Complex32) -> Complex32 Never! {
+            complex32_from_core(complex_core_div(complex32_to_core(self), complex32_to_core(rhs)))
+        }
+    }
+
+    impl Add(F32) {
+        add: fn(self, rhs: F32) -> Complex32 Never! {
+            self + Complex32{real: rhs, imaginary: F32{0.0}}
+        }
+    }
+
+    impl Sub(F32) {
+        sub: fn(self, rhs: F32) -> Complex32 Never! {
+            self - Complex32{real: rhs, imaginary: F32{0.0}}
+        }
+    }
+
+    impl Mul(F32) {
+        mul: fn(self, rhs: F32) -> Complex32 Never! {
+            self * Complex32{real: rhs, imaginary: F32{0.0}}
+        }
+    }
+
+    impl Div(F32) {
+        div: fn(self, rhs: F32) -> Complex32 Never! {
+            self / Complex32{real: rhs, imaginary: F32{0.0}}
+        }
+    }
+}
+
+impl F32.Add(Complex32) {
+    add: fn(self, rhs: Complex32) -> Complex32 Never! {
+        Complex32{real: self, imaginary: F32{0.0}} + rhs
+    }
+}
+
+impl F32.Sub(Complex32) {
+    sub: fn(self, rhs: Complex32) -> Complex32 Never! {
+        Complex32{real: self, imaginary: F32{0.0}} - rhs
+    }
+}
+
+impl F32.Mul(Complex32) {
+    mul: fn(self, rhs: Complex32) -> Complex32 Never! {
+        Complex32{real: self, imaginary: F32{0.0}} * rhs
+    }
+}
+
+impl F32.Div(Complex32) {
+    div: fn(self, rhs: Complex32) -> Complex32 Never! {
+        Complex32{real: self, imaginary: F32{0.0}} / rhs
+    }
+}
+
+__complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
 
 // How a SIMD lane reduction combines a vector's lanes into one value.
 ReduceOp: enum {
@@ -44187,377 +44747,588 @@ __fraction_to_string: fn(value: Fraction) -> String Never! {
     "{value.num_value}/{value.den_value}"
 }
 
-__complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
-    Complex{real: real, imaginary: imaginary}
+// The one internal generic complex carrier shared by Complex and Complex32.
+priv ComplexCore: struct<T> {
+    real: T,
+    imaginary: T,
 }
 
-__complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
-    __complex_from_parts(left.real + right.real, left.imaginary + right.imaginary)
+priv complex_to_core: fn(z: Complex) -> ComplexCore<Float> Never! {
+    ComplexCore<Float>{real: z.real, imaginary: z.imaginary}
 }
 
-__complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
-    __complex_from_parts(left.real - right.real, left.imaginary - right.imaginary)
+priv complex_from_core: fn(z: ComplexCore<Float>) -> Complex Never! {
+    Complex{real: z.real, imaginary: z.imaginary}
 }
 
-__complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
-    __complex_from_parts(left.real * right.real - left.imaginary * right.imaginary, left.real * right.imaginary + left.imaginary * right.real)
+priv complex32_to_core: fn(z: Complex32) -> ComplexCore<F32> Never! {
+    ComplexCore<F32>{real: z.real, imaginary: z.imaginary}
 }
 
-__complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
-    denominator: right.real * right.real + right.imaginary * right.imaginary
-    __complex_from_parts((left.real * right.real + left.imaginary * right.imaginary) / denominator, (left.imaginary * right.real - left.real * right.imaginary) / denominator)
+priv complex32_from_core: fn(z: ComplexCore<F32>) -> Complex32 Never! {
+    Complex32{real: z.real, imaginary: z.imaginary}
 }
 
-// A part renders in the shortest display spelling: a whole value drops its
-// ".0" (`3 - 0i`, not `3.0 - 0.0i`).
-priv complex_part_text: fn(value: Float) -> String Never! {
-    text: "{value}"
-    if text.ends_with(".0") && text.cut_last(".") == .Val(parts) -> return parts.before
-    text
+priv complex_core_conj: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    ComplexCore<T>{real: z.real, imaginary: z.imaginary.cx_neg()}
 }
 
-__complex_to_string: fn(value: Complex) -> String Never! {
-    sign: if sign_bit(value.imaginary) -> "-" else -> "+"
-    "{complex_part_text(value.real)} {sign} {complex_part_text(abs_float(value.imaginary))}i"
+priv complex_core_abs: fn<T: ComplexScalar>(z: ComplexCore<T>) -> T Never! {
+    z.real.cx_hypot(z.imaginary)
 }
 
-// The complex elementary functions. Each special value (signed zeros,
-// infinities, NaNs) is the one C23 Annex G lists. The exponential,
-// hyperbolic and square-root bodies follow FreeBSD's msun (as musl carries
-// them); the logarithm sums |z|^2 - 1 exactly near the unit circle; the
-// inverse functions use Kahan's formulas over principal square roots, whose
-// signed zeros pick the side of each branch cut.
-priv COMPLEX_LN2: Float{0.693147180559945309417232121458176568}
+priv complex_core_add: fn<T: ComplexScalar>(left: ComplexCore<T>, right: ComplexCore<T>) -> ComplexCore<T> Never! {
+    ComplexCore<T>{real: left.real.cx_add(right.real), imaginary: left.imaginary.cx_add(right.imaginary)}
+}
 
-priv COMPLEX_THREE_QUARTER_PI: Float{2.356194490192344928846982537459627163}
+priv complex_core_sub: fn<T: ComplexScalar>(left: ComplexCore<T>, right: ComplexCore<T>) -> ComplexCore<T> Never! {
+    ComplexCore<T>{real: left.real.cx_sub(right.real), imaginary: left.imaginary.cx_sub(right.imaginary)}
+}
 
-priv complex_arg: fn(z: Complex) -> Float Never! { atan2(z.imaginary, z.real) }
-
-priv complex_proj: fn(z: Complex) -> Complex Never! {
-    if is_inf(z.real) || is_inf(z.imaginary) {
-        return __complex_from_parts(INFINITY, copysign(0.0, z.imaginary))
+priv complex_core_mul: fn<T: ComplexScalar>(left: ComplexCore<T>, right: ComplexCore<T>) -> ComplexCore<T> Never! {
+    ComplexCore<T>{
+        real: left.real.cx_mul(right.real).cx_sub(left.imaginary.cx_mul(right.imaginary)),
+        imaginary: left.real.cx_mul(right.imaginary).cx_add(left.imaginary.cx_mul(right.real)),
     }
-    __complex_from_parts(z.real, z.imaginary)
 }
 
-// e^x (cos y + i sin y) * 2^extra for an x past ln of the largest Float:
-// e^x is e^(x - k ln 2) * 2^k with k = 1799, and the power of 2 lands in two
-// halves, so a small cos or sin stays finite and a subnormal one keeps its
-// digits.
-priv complex_exp_scaled: fn(x: Float, y: Float, extra: Int) -> Complex Never! {
-    split: frexp(exp(x - 1246.97177782734161156))
-    shift: 1799 + split.exp + extra
-    half: shift /% 2
-    scaled: ldexp(split.frac, half)
-    __complex_from_parts(ldexp(cos(y) * scaled, shift - half), ldexp(sin(y) * scaled, shift - half))
+priv complex_core_div: fn<T: ComplexScalar>(left: ComplexCore<T>, right: ComplexCore<T>) -> ComplexCore<T> Never! {
+    denominator: right.real.cx_mul(right.real).cx_add(right.imaginary.cx_mul(right.imaginary))
+    ComplexCore<T>{
+        real: left.real.cx_mul(right.real).cx_add(left.imaginary.cx_mul(right.imaginary)).cx_div(denominator),
+        imaginary: left.imaginary.cx_mul(right.real).cx_sub(left.real.cx_mul(right.imaginary)).cx_div(denominator),
+    }
 }
 
-priv complex_exp: fn(z: Complex) -> Complex Never! {
+priv complex_core_to_string: fn<T: ComplexScalar>(value: ComplexCore<T>) -> String Never! {
+    sign: if value.imaginary.cx_sign_bit() -> "-" else -> "+"
+    "{value.real.cx_part_text()} {sign} {value.imaginary.cx_fabs().cx_part_text()}i"
+}
+
+// The complex elementary functions, shared generically across Float and F32.
+// Each special value (signed zeros, infinities, NaNs) is the one C23 Annex G
+// lists. The exponential, hyperbolic and square-root bodies follow FreeBSD's
+// msun (as musl carries them); the logarithm sums |z|^2 - 1 exactly near the
+// unit circle; the inverse functions use Kahan's formulas over principal
+// square roots, whose signed zeros pick the side of each branch cut.
+priv complex_core_arg: fn<T: ComplexScalar>(z: ComplexCore<T>) -> T Never! {
+    z.imaginary.cx_atan2(z.real)
+}
+
+priv complex_core_proj: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    if z.real.cx_is_inf() || z.imaginary.cx_is_inf() {
+        return ComplexCore<T>{real: z.real.cx_inf(), imaginary: z.real.cx_zero().cx_copysign(z.imaginary)}
+    }
+    ComplexCore<T>{real: z.real, imaginary: z.imaginary}
+}
+
+// e^x (cos y + i sin y) * 2^extra for an x past ln of the largest T:
+// e^x is e^(x - k ln 2) * 2^k, and the power of 2 lands in three steps, so
+// neither the intermediate scale nor a small cos/sin overflows prematurely.
+priv complex_core_exp_scaled: fn<T: ComplexScalar>(x: T, y: T, extra: Int) -> ComplexCore<T> Never! {
+    split: x.cx_sub(x.cx_exp_scale_k_ln2()).cx_exp().cx_frexp()
+    shift: x.cx_exp_scale_k() + split.exp + extra
+    s1: shift /% 3
+    s2: (shift - s1) /% 2
+    s3: shift - s1 - s2
+    scaled: split.frac.cx_ldexp(s1)
+    ComplexCore<T>{
+        real: y.cx_cos().cx_mul(scaled).cx_ldexp(s2).cx_ldexp(s3),
+        imaginary: y.cx_sin().cx_mul(scaled).cx_ldexp(s2).cx_ldexp(s3),
+    }
+}
+
+priv complex_core_exp: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if y == 0.0 -> return __complex_from_parts(exp(x), y)
-    if x == 0.0 -> return __complex_from_parts(cos(y), sin(y))
-    if !is_finite(y) {
-        if !is_inf(x) -> return __complex_from_parts(y - y, y - y)
-        if x < 0.0 -> return __complex_from_parts(0.0, copysign(0.0, y))
-        return __complex_from_parts(x, y - y)
+    if y.cx_is_zero() -> return ComplexCore<T>{real: x.cx_exp(), imaginary: y}
+    if x.cx_is_zero() -> return ComplexCore<T>{real: y.cx_cos(), imaginary: y.cx_sin()}
+    if !y.cx_is_finite() {
+        if !x.cx_is_inf() -> return ComplexCore<T>{real: y.cx_sub(y), imaginary: y.cx_sub(y)}
+        if x.cx_lt(x.cx_zero()) {
+            return ComplexCore<T>{real: x.cx_zero(), imaginary: x.cx_zero().cx_copysign(y)}
+        }
+        return ComplexCore<T>{real: x, imaginary: y.cx_sub(y)}
     }
-    if x >= from_bits(0x4086_2E42_0000_0000) && x <= from_bits(0x4096_B8E4_0000_0000) {
-        return complex_exp_scaled(x, y, 0)
+    if x.cx_ge(x.cx_exp_scale_lo()) && x.cx_le(x.cx_exp_scale_hi()) {
+        return complex_core_exp_scaled(x, y, 0)
     }
-    scale: exp(x)
-    __complex_from_parts(scale * cos(y), scale * sin(y))
+    scale: x.cx_exp()
+    ComplexCore<T>{real: scale.cx_mul(y.cx_cos()), imaginary: scale.cx_mul(y.cx_sin())}
+}
+
+priv complex_core_two_sum: fn<T: ComplexScalar>(a: T, b: T) -> {hi: T, lo: T} Never! {
+    s: a.cx_add(b)
+    v: s.cx_sub(a)
+    {hi: s, lo: a.cx_sub(s.cx_sub(v)).cx_add(b.cx_sub(v))}
 }
 
 // ln|z| for finite a >= b >= 0 with a > 0. Near the unit circle
 // a^2 + b^2 - 1 is summed exactly, so the logarithm keeps its digits.
-priv complex_ln_abs: fn(a: Float, b: Float) -> Float Never! {
-    if a > from_bits(0x7E30_0000_0000_0000) {
-        return ln(hypot(a * 0.25, b * 0.25)) + Float{2.0} * COMPLEX_LN2
+priv complex_core_ln_abs: fn<T: ComplexScalar>(a: T, b: T) -> T Never! {
+    if a.cx_gt(a.cx_ln_hi()) {
+        q: a.cx_quarter()
+        return a.cx_mul(q).cx_hypot(b.cx_mul(q)).cx_ln().cx_add(a.cx_two().cx_mul(a.cx_ln2()))
     }
-    if a < from_bits(0x0390_0000_0000_0000) {
-        return ln(hypot(ldexp(a, 1000), ldexp(b, 1000))) - Float{1000.0} * COMPLEX_LN2
+    if a.cx_lt(a.cx_ln_lo()) {
+        shift: a.cx_ln_shift()
+        return a.cx_ldexp(shift).cx_hypot(b.cx_ldexp(shift)).cx_ln().cx_sub(a.cx_ln_shift_val().cx_mul(a.cx_ln2()))
     }
-    h: hypot(a, b)
-    if h < 0.7 || h > 1.4 -> return ln(h)
-    a2: a * a
-    b2: b * b
-    first: two_sum(a2, -1.0)
-    second: two_sum(first.hi, b2)
-    0.5 * ln_1p(second.hi + (first.lo + second.lo + fma(a, a, -a2) + fma(b, b, -b2)))
+    h: a.cx_hypot(b)
+    if h.cx_lt(a.cx_ln_near_lo()) || h.cx_gt(a.cx_ln_near_hi()) -> return h.cx_ln()
+    a2: a.cx_mul(a)
+    b2: b.cx_mul(b)
+    first: complex_core_two_sum(a2, a.cx_one().cx_neg())
+    second: complex_core_two_sum(first.hi, b2)
+    err_sum: first.lo.cx_add(second.lo).cx_add(a.cx_fma(a, a2.cx_neg())).cx_add(b.cx_fma(b, b2.cx_neg()))
+    a.cx_half().cx_mul(second.hi.cx_add(err_sum).cx_ln_1p())
 }
 
-priv complex_ln: fn(z: Complex) -> Complex Never! {
-    a: fabs(z.real)
-    b: fabs(z.imaginary)
-    angle: atan2(z.imaginary, z.real)
-    if is_inf(a) || is_inf(b) -> return __complex_from_parts(INFINITY, angle)
-    if is_nan(a) || is_nan(b) -> return __complex_from_parts(NAN, angle)
-    if a == 0.0 && b == 0.0 -> return __complex_from_parts(-INFINITY, angle)
-    magnitude: if a >= b -> complex_ln_abs(a, b) else -> complex_ln_abs(b, a)
-    __complex_from_parts(magnitude, angle)
+priv complex_core_ln: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    a: z.real.cx_fabs()
+    b: z.imaginary.cx_fabs()
+    angle: z.imaginary.cx_atan2(z.real)
+    if a.cx_is_inf() || b.cx_is_inf() -> return ComplexCore<T>{real: a.cx_inf(), imaginary: angle}
+    if a.cx_is_nan() || b.cx_is_nan() -> return ComplexCore<T>{real: a.cx_nan(), imaginary: angle}
+    if a.cx_is_zero() && b.cx_is_zero() {
+        return ComplexCore<T>{real: a.cx_inf().cx_neg(), imaginary: angle}
+    }
+    magnitude: if a.cx_ge(b) -> complex_core_ln_abs(a, b) else -> complex_core_ln_abs(b, a)
+    ComplexCore<T>{real: magnitude, imaginary: angle}
 }
 
-priv complex_pow: fn(base: Complex, power: Complex) -> Complex Never! {
-    complex_exp(__complex_mul(power, complex_ln(base)))
+priv complex_core_pow: fn<T: ComplexScalar>(base: ComplexCore<T>, power: ComplexCore<T>) -> ComplexCore<T> Never! {
+    complex_core_exp(complex_core_mul(power, complex_core_ln(base)))
 }
 
 // Algorithm 312 (CACM, October 1967), with both parts quartered when one
-// is near the largest Float and both raised by 2^600 when they are near
-// the smallest normal one.
-priv complex_sqrt: fn(z: Complex) -> Complex Never! {
+// is near the largest T and both raised when they are near the smallest
+// normal one.
+priv complex_core_sqrt: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     a := z.real
     b := z.imaginary
-    if a == 0.0 && b == 0.0 -> return __complex_from_parts(0.0, b)
-    if is_inf(b) -> return __complex_from_parts(INFINITY, b)
-    if is_nan(a) -> return __complex_from_parts(a, (b - b) / (b - b))
-    if is_inf(a) {
-        if sign_bit(a) -> return __complex_from_parts(fabs(b - b), copysign(a, b))
-        return __complex_from_parts(a, copysign(b - b, b))
+    if a.cx_is_zero() && b.cx_is_zero() -> return ComplexCore<T>{real: a.cx_zero(), imaginary: b}
+    if b.cx_is_inf() -> return ComplexCore<T>{real: a.cx_inf(), imaginary: b}
+    if a.cx_is_nan() {
+        diff: b.cx_sub(b)
+        return ComplexCore<T>{real: a, imaginary: diff.cx_div(diff)}
     }
-    tiny: from_bits(0x0030_0000_0000_0000)
-    if fabs(a) < tiny && fabs(b) < tiny {
-        raised: complex_sqrt(__complex_from_parts(ldexp(a, 600), ldexp(b, 600)))
-        return __complex_from_parts(ldexp(raised.real, -300), ldexp(raised.imaginary, -300))
+    if a.cx_is_inf() {
+        diff: b.cx_sub(b)
+        if a.cx_sign_bit() {
+            return ComplexCore<T>{real: diff.cx_fabs(), imaginary: a.cx_copysign(b)}
+        }
+        return ComplexCore<T>{real: a, imaginary: diff.cx_copysign(b)}
     }
-    limit: from_bits(0x7FDA_8279_99FC_EF32)
-    scaled: fabs(a) >= limit || fabs(b) >= limit
+    tiny: a.cx_sqrt_tiny()
+    if a.cx_fabs().cx_lt(tiny) && b.cx_fabs().cx_lt(tiny) {
+        raise: a.cx_sqrt_raise_shift()
+        lower: -(raise /% 2)
+        raised: complex_core_sqrt(ComplexCore<T>{real: a.cx_ldexp(raise), imaginary: b.cx_ldexp(raise)})
+        return ComplexCore<T>{real: raised.real.cx_ldexp(lower), imaginary: raised.imaginary.cx_ldexp(lower)}
+    }
+    limit: a.cx_sqrt_limit()
+    scaled: a.cx_fabs().cx_ge(limit) || b.cx_fabs().cx_ge(limit)
     if scaled {
-        a *= 0.25
-        b *= 0.25
+        q: a.cx_quarter()
+        a = a.cx_mul(q)
+        b = b.cx_mul(q)
     }
-    root := Float{0.0}
-    other := Float{0.0}
-    if a >= 0.0 {
-        root = sqrt((a + hypot(a, b)) * 0.5)
-        other = b / (root * 2.0)
-        if scaled -> return __complex_from_parts(root * 2.0, other * 2.0)
-        return __complex_from_parts(root, other)
+    two: a.cx_two()
+    half: a.cx_half()
+    if a.cx_ge(a.cx_zero()) {
+        root: a.cx_add(a.cx_hypot(b)).cx_mul(half).cx_sqrt()
+        other: b.cx_div(root.cx_mul(two))
+        if scaled -> return ComplexCore<T>{real: root.cx_mul(two), imaginary: other.cx_mul(two)}
+        return ComplexCore<T>{real: root, imaginary: other}
     }
-    root = sqrt((-a + hypot(a, b)) * 0.5)
-    other = fabs(b) / (root * 2.0)
-    if scaled -> return __complex_from_parts(other * 2.0, copysign(root, b) * 2.0)
-    __complex_from_parts(other, copysign(root, b))
+    root: a.cx_neg().cx_add(a.cx_hypot(b)).cx_mul(half).cx_sqrt()
+    other: b.cx_fabs().cx_div(root.cx_mul(two))
+    if scaled {
+        return ComplexCore<T>{real: other.cx_mul(two), imaginary: root.cx_copysign(b).cx_mul(two)}
+    }
+    ComplexCore<T>{real: other, imaginary: root.cx_copysign(b)}
 }
 
-priv complex_sinh: fn(z: Complex) -> Complex Never! {
+priv complex_core_sinh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if is_finite(x) && is_finite(y) {
-        if y == 0.0 -> return __complex_from_parts(sinh(x), y)
-        ax: fabs(x)
-        if ax < 22.0 -> return __complex_from_parts(sinh(x) * cos(y), cosh(x) * sin(y))
-        if ax < from_bits(0x4086_2E42_0000_0000) {
-            half: exp(ax) * 0.5
-            return __complex_from_parts(copysign(half, x) * cos(y), half * sin(y))
+    if x.cx_is_finite() && y.cx_is_finite() {
+        if y.cx_is_zero() -> return ComplexCore<T>{real: x.cx_sinh(), imaginary: y}
+        ax: x.cx_fabs()
+        if ax.cx_lt(x.cx_sinh_small()) {
+            return ComplexCore<T>{real: x.cx_sinh().cx_mul(y.cx_cos()), imaginary: x.cx_cosh().cx_mul(y.cx_sin())}
         }
-        if ax < from_bits(0x4096_BBAA_0000_0000) {
-            scaled: complex_exp_scaled(ax, y, -1)
-            return __complex_from_parts(scaled.real * copysign(1.0, x), scaled.imaginary)
+        if ax.cx_lt(x.cx_sinh_exp_hi()) {
+            half: ax.cx_exp().cx_mul(x.cx_half())
+            return ComplexCore<T>{real: half.cx_copysign(x).cx_mul(y.cx_cos()), imaginary: half.cx_mul(y.cx_sin())}
         }
-        huge: from_bits(0x7FE0_0000_0000_0000) * x
-        return __complex_from_parts(huge * cos(y), huge * huge * sin(y))
+        if ax.cx_lt(x.cx_sinh_scale_hi()) {
+            scaled: complex_core_exp_scaled(ax, y, -1)
+            return ComplexCore<T>{real: scaled.real.cx_mul(x.cx_one().cx_copysign(x)), imaginary: scaled.imaginary}
+        }
+        huge: x.cx_huge_factor().cx_mul(x)
+        return ComplexCore<T>{real: huge.cx_mul(y.cx_cos()), imaginary: huge.cx_mul(huge).cx_mul(y.cx_sin())}
     }
-    if x == 0.0 -> return __complex_from_parts(x, y - y)
-    if y == 0.0 {
-        if is_inf(x) -> return __complex_from_parts(x, y)
-        return __complex_from_parts(x, copysign(0.0, y))
+    if x.cx_is_zero() -> return ComplexCore<T>{real: x, imaginary: y.cx_sub(y)}
+    if y.cx_is_zero() {
+        if x.cx_is_inf() -> return ComplexCore<T>{real: x, imaginary: y}
+        return ComplexCore<T>{real: x, imaginary: x.cx_zero().cx_copysign(y)}
     }
-    if is_finite(x) -> return __complex_from_parts(y - y, x * (y - y))
-    if is_inf(x) {
-        if !is_finite(y) -> return __complex_from_parts(x * x, x * (y - y))
-        return __complex_from_parts(x * cos(y), INFINITY * sin(y))
+    if x.cx_is_finite() {
+        return ComplexCore<T>{real: y.cx_sub(y), imaginary: x.cx_mul(y.cx_sub(y))}
     }
-    __complex_from_parts((x * x) * (y - y), (x + x) * (y - y))
+    if x.cx_is_inf() {
+        if !y.cx_is_finite() {
+            return ComplexCore<T>{real: x.cx_mul(x), imaginary: x.cx_mul(y.cx_sub(y))}
+        }
+        return ComplexCore<T>{real: x.cx_mul(y.cx_cos()), imaginary: x.cx_inf().cx_mul(y.cx_sin())}
+    }
+    ComplexCore<T>{real: x.cx_mul(x).cx_mul(y.cx_sub(y)), imaginary: x.cx_add(x).cx_mul(y.cx_sub(y))}
 }
 
-priv complex_cosh: fn(z: Complex) -> Complex Never! {
+priv complex_core_cosh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if is_finite(x) && is_finite(y) {
-        if y == 0.0 -> return __complex_from_parts(cosh(x), x * y)
-        ax: fabs(x)
-        if ax < 22.0 -> return __complex_from_parts(cosh(x) * cos(y), sinh(x) * sin(y))
-        if ax < from_bits(0x4086_2E42_0000_0000) {
-            half: exp(ax) * 0.5
-            return __complex_from_parts(half * cos(y), copysign(half, x) * sin(y))
+    if x.cx_is_finite() && y.cx_is_finite() {
+        if y.cx_is_zero() -> return ComplexCore<T>{real: x.cx_cosh(), imaginary: x.cx_mul(y)}
+        ax: x.cx_fabs()
+        if ax.cx_lt(x.cx_sinh_small()) {
+            return ComplexCore<T>{real: x.cx_cosh().cx_mul(y.cx_cos()), imaginary: x.cx_sinh().cx_mul(y.cx_sin())}
         }
-        if ax < from_bits(0x4096_BBAA_0000_0000) {
-            scaled: complex_exp_scaled(ax, y, -1)
-            return __complex_from_parts(scaled.real, scaled.imaginary * copysign(1.0, x))
+        if ax.cx_lt(x.cx_sinh_exp_hi()) {
+            half: ax.cx_exp().cx_mul(x.cx_half())
+            return ComplexCore<T>{real: half.cx_mul(y.cx_cos()), imaginary: half.cx_copysign(x).cx_mul(y.cx_sin())}
         }
-        huge: from_bits(0x7FE0_0000_0000_0000) * x
-        return __complex_from_parts(huge * huge * cos(y), huge * sin(y))
+        if ax.cx_lt(x.cx_sinh_scale_hi()) {
+            scaled: complex_core_exp_scaled(ax, y, -1)
+            return ComplexCore<T>{real: scaled.real, imaginary: scaled.imaginary.cx_mul(x.cx_one().cx_copysign(x))}
+        }
+        huge: x.cx_huge_factor().cx_mul(x)
+        return ComplexCore<T>{real: huge.cx_mul(huge).cx_mul(y.cx_cos()), imaginary: huge.cx_mul(y.cx_sin())}
     }
-    if x == 0.0 -> return __complex_from_parts(y - y, 0.0)
-    if y == 0.0 {
-        if is_inf(x) -> return __complex_from_parts(x * x, copysign(0.0, x) * y)
-        return __complex_from_parts(x * x, y)
+    if x.cx_is_zero() -> return ComplexCore<T>{real: y.cx_sub(y), imaginary: x.cx_zero()}
+    if y.cx_is_zero() {
+        if x.cx_is_inf() {
+            return ComplexCore<T>{real: x.cx_mul(x), imaginary: x.cx_zero().cx_copysign(x).cx_mul(y)}
+        }
+        return ComplexCore<T>{real: x.cx_mul(x), imaginary: y}
     }
-    if is_finite(x) -> return __complex_from_parts(y - y, x * (y - y))
-    if is_inf(x) {
-        if !is_finite(y) -> return __complex_from_parts(x * x, x * (y - y))
-        return __complex_from_parts((x * x) * cos(y), x * sin(y))
+    if x.cx_is_finite() {
+        return ComplexCore<T>{real: y.cx_sub(y), imaginary: x.cx_mul(y.cx_sub(y))}
     }
-    __complex_from_parts((x * x) * (y - y), (x + x) * (y - y))
+    if x.cx_is_inf() {
+        if !y.cx_is_finite() {
+            return ComplexCore<T>{real: x.cx_mul(x), imaginary: x.cx_mul(y.cx_sub(y))}
+        }
+        return ComplexCore<T>{real: x.cx_mul(x).cx_mul(y.cx_cos()), imaginary: x.cx_mul(y.cx_sin())}
+    }
+    ComplexCore<T>{real: x.cx_mul(x).cx_mul(y.cx_sub(y)), imaginary: x.cx_add(x).cx_mul(y.cx_sub(y))}
 }
 
 // tanh(x + iy) is (sinh x cosh x + i sin y cos y) / (sinh^2 x + cos^2 y);
-// past |x| = 22, where tanh x rounds to ±1, the imaginary part is
+// past |x| = sinh_small, where tanh x rounds to ±1, the imaginary part is
 // 4 sin y cos y e^(-2|x|), written so nothing overflows.
-priv complex_tanh: fn(z: Complex) -> Complex Never! {
+priv complex_core_tanh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if !is_finite(x) {
-        if is_nan(x) -> return __complex_from_parts(x, if y == 0.0 -> y else -> x * y)
-        return __complex_from_parts(copysign(1.0, x), copysign(0.0, if is_finite(y) -> sin(y) * cos(y) else -> y))
+    if !x.cx_is_finite() {
+        if x.cx_is_nan() {
+            return ComplexCore<T>{real: x, imaginary: if y.cx_is_zero() -> y else -> x.cx_mul(y)}
+        }
+        return ComplexCore<T>{
+            real: x.cx_one().cx_copysign(x),
+            imaginary: x.cx_zero().cx_copysign(if y.cx_is_finite() -> y.cx_sin().cx_mul(y.cx_cos()) else -> y),
+        }
     }
-    if !is_finite(y) -> return __complex_from_parts(if x != 0.0 -> y - y else -> x, y - y)
-    if fabs(x) >= 22.0 {
-        small: exp(-fabs(x))
-        return __complex_from_parts(copysign(1.0, x), 4.0 * sin(y) * cos(y) * small * small)
+    if !y.cx_is_finite() {
+        return ComplexCore<T>{real: if !x.cx_is_zero() -> y.cx_sub(y) else -> x, imaginary: y.cx_sub(y)}
     }
-    s: sinh(x)
-    c: cos(y)
-    denominator: s * s + c * c
-    __complex_from_parts(s * cosh(x) / denominator, sin(y) * c / denominator)
+    if x.cx_fabs().cx_ge(x.cx_sinh_small()) {
+        small: x.cx_fabs().cx_neg().cx_exp()
+        return ComplexCore<T>{
+            real: x.cx_one().cx_copysign(x),
+            imaginary: x.cx_four().cx_mul(y.cx_sin()).cx_mul(y.cx_cos()).cx_mul(small).cx_mul(small),
+        }
+    }
+    s: x.cx_sinh()
+    c: y.cx_cos()
+    denominator: s.cx_mul(s).cx_add(c.cx_mul(c))
+    ComplexCore<T>{real: s.cx_mul(x.cx_cosh()).cx_div(denominator), imaginary: y.cx_sin().cx_mul(c).cx_div(denominator)}
 }
 
 // sin z = -i sinh(iz), cos z = cosh(iz), tan z = -i tanh(iz). An infinite
 // imaginary part over a non-finite real one gives NaN + i∞, the sign Annex
 // G leaves open taken as +, as glibc takes it.
-priv complex_sin: fn(z: Complex) -> Complex Never! {
-    if is_inf(z.imaginary) && !is_finite(z.real) -> return __complex_from_parts(NAN, INFINITY)
-    w: complex_sinh(__complex_from_parts(-z.imaginary, z.real))
-    __complex_from_parts(w.imaginary, -w.real)
+priv complex_core_sin: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    if z.imaginary.cx_is_inf() && !z.real.cx_is_finite() {
+        return ComplexCore<T>{real: z.real.cx_nan(), imaginary: z.real.cx_inf()}
+    }
+    w: complex_core_sinh(ComplexCore<T>{real: z.imaginary.cx_neg(), imaginary: z.real})
+    ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
-priv complex_cos: fn(z: Complex) -> Complex Never! {
-    complex_cosh(__complex_from_parts(-z.imaginary, z.real))
+priv complex_core_cos: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    complex_core_cosh(ComplexCore<T>{real: z.imaginary.cx_neg(), imaginary: z.real})
 }
 
-priv complex_tan: fn(z: Complex) -> Complex Never! {
-    w: complex_tanh(__complex_from_parts(-z.imaginary, z.real))
-    __complex_from_parts(w.imaginary, -w.real)
+priv complex_core_tan: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    w: complex_core_tanh(ComplexCore<T>{real: z.imaginary.cx_neg(), imaginary: z.real})
+    ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
 // Kahan's arcsine of finite x + iy over the principal roots of 1 - z and
 // 1 + z.
-priv complex_asin_finite: fn(x: Float, y: Float) -> Complex Never! {
-    below: complex_sqrt(__complex_from_parts(1.0 - x, -y))
-    above: complex_sqrt(__complex_from_parts(1.0 + x, y))
-    real: atan2(x, below.real * above.real - below.imaginary * above.imaginary)
-    __complex_from_parts(real, asinh(below.real * above.imaginary - below.imaginary * above.real))
+priv complex_core_asin_finite: fn<T: ComplexScalar>(x: T, y: T) -> ComplexCore<T> Never! {
+    one: x.cx_one()
+    below: complex_core_sqrt(ComplexCore<T>{real: one.cx_sub(x), imaginary: y.cx_neg()})
+    above: complex_core_sqrt(ComplexCore<T>{real: one.cx_add(x), imaginary: y})
+    real: x.cx_atan2(below.real.cx_mul(above.real).cx_sub(below.imaginary.cx_mul(above.imaginary)))
+    ComplexCore<T>{real: real, imaginary: below.real.cx_mul(above.imaginary).cx_sub(below.imaginary.cx_mul(above.real)).cx_asinh()}
 }
 
-priv complex_asinh: fn(z: Complex) -> Complex Never! {
+priv complex_core_asinh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if is_inf(x) {
-        if is_nan(y) -> return __complex_from_parts(x, y)
-        if is_inf(y) -> return __complex_from_parts(x, copysign(PI * 0.25, y))
-        return __complex_from_parts(x, copysign(0.0, y))
+    if x.cx_is_inf() {
+        if y.cx_is_nan() -> return ComplexCore<T>{real: x, imaginary: y}
+        if y.cx_is_inf() {
+            return ComplexCore<T>{real: x, imaginary: x.cx_pi().cx_mul(x.cx_quarter()).cx_copysign(y)}
+        }
+        return ComplexCore<T>{real: x, imaginary: x.cx_zero().cx_copysign(y)}
     }
-    if is_inf(y) {
-        if is_nan(x) -> return __complex_from_parts(copysign(INFINITY, x), x)
-        return __complex_from_parts(copysign(INFINITY, x), copysign(PI * 0.5, y))
+    if y.cx_is_inf() {
+        if x.cx_is_nan() -> return ComplexCore<T>{real: x.cx_inf().cx_copysign(x), imaginary: x}
+        return ComplexCore<T>{real: x.cx_inf().cx_copysign(x), imaginary: x.cx_pi().cx_mul(x.cx_half()).cx_copysign(y)}
     }
-    if is_nan(x) {
-        if y == 0.0 -> return __complex_from_parts(x, y)
-        return __complex_from_parts(x, x)
+    if x.cx_is_nan() {
+        if y.cx_is_zero() -> return ComplexCore<T>{real: x, imaginary: y}
+        return ComplexCore<T>{real: x, imaginary: x}
     }
-    if is_nan(y) -> return __complex_from_parts(y, y)
+    if y.cx_is_nan() -> return ComplexCore<T>{real: y, imaginary: y}
     // asinh z = -i asin(iz)
-    w: complex_asin_finite(-y, x)
-    __complex_from_parts(w.imaginary, -w.real)
+    w: complex_core_asin_finite(y.cx_neg(), x)
+    ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
-priv complex_asin: fn(z: Complex) -> Complex Never! {
-    w: complex_asinh(__complex_from_parts(-z.imaginary, z.real))
-    __complex_from_parts(w.imaginary, -w.real)
+priv complex_core_asin: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    w: complex_core_asinh(ComplexCore<T>{real: z.imaginary.cx_neg(), imaginary: z.real})
+    ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
-priv complex_acos: fn(z: Complex) -> Complex Never! {
+priv complex_core_acos: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if is_inf(x) {
-        if is_nan(y) -> return __complex_from_parts(y, copysign(INFINITY, -y))
-        if is_inf(y) {
-            return __complex_from_parts(if x < 0.0 -> COMPLEX_THREE_QUARTER_PI else -> PI * 0.25, -y)
+    if x.cx_is_inf() {
+        if y.cx_is_nan() {
+            return ComplexCore<T>{real: y, imaginary: x.cx_inf().cx_copysign(y.cx_neg())}
         }
-        return __complex_from_parts(if x < 0.0 -> PI else -> 0.0, copysign(INFINITY, -y))
-    }
-    if is_inf(y) -> return __complex_from_parts(if is_nan(x) -> x else -> PI * 0.5, -y)
-    if is_nan(x) -> return __complex_from_parts(x, x)
-    if is_nan(y) {
-        if x == 0.0 -> return __complex_from_parts(PI * 0.5, y)
-        return __complex_from_parts(y, y)
-    }
-    below: complex_sqrt(__complex_from_parts(1.0 - x, -y))
-    above: complex_sqrt(__complex_from_parts(1.0 + x, y))
-    __complex_from_parts(2.0 * atan2(below.real, above.real), asinh(above.real * below.imaginary - above.imaginary * below.real))
-}
-
-priv complex_acosh: fn(z: Complex) -> Complex Never! {
-    x: z.real
-    y: z.imaginary
-    if is_inf(x) {
-        if is_nan(y) -> return __complex_from_parts(INFINITY, y)
-        if is_inf(y) {
-            return __complex_from_parts(INFINITY, copysign(if x < 0.0 -> COMPLEX_THREE_QUARTER_PI else -> PI * 0.25, y))
+        if y.cx_is_inf() {
+            return ComplexCore<T>{
+                real: if x.cx_lt(x.cx_zero()) -> x.cx_three_quarter_pi() else -> x.cx_pi().cx_mul(x.cx_quarter()),
+                imaginary: y.cx_neg(),
+            }
         }
-        return __complex_from_parts(INFINITY, copysign(if x < 0.0 -> PI else -> 0.0, y))
+        return ComplexCore<T>{
+            real: if x.cx_lt(x.cx_zero()) -> x.cx_pi() else -> x.cx_zero(),
+            imaginary: x.cx_inf().cx_copysign(y.cx_neg()),
+        }
     }
-    if is_inf(y) {
-        return __complex_from_parts(INFINITY, if is_nan(x) -> x else -> copysign(PI * 0.5, y))
+    if y.cx_is_inf() {
+        return ComplexCore<T>{real: if x.cx_is_nan() -> x else -> x.cx_pi().cx_mul(x.cx_half()), imaginary: y.cx_neg()}
     }
-    if is_nan(y) && x == 0.0 -> return __complex_from_parts(y, PI * 0.5)
-    if is_nan(x) || is_nan(y) -> return __complex_from_parts(NAN, NAN)
-    below: complex_sqrt(__complex_from_parts(x - 1.0, y))
-    above: complex_sqrt(__complex_from_parts(x + 1.0, y))
-    __complex_from_parts(asinh(below.real * above.real + below.imaginary * above.imaginary), 2.0 * atan2(below.imaginary, above.real))
+    if x.cx_is_nan() -> return ComplexCore<T>{real: x, imaginary: x}
+    if y.cx_is_nan() {
+        if x.cx_is_zero() {
+            return ComplexCore<T>{real: x.cx_pi().cx_mul(x.cx_half()), imaginary: y}
+        }
+        return ComplexCore<T>{real: y, imaginary: y}
+    }
+    one: x.cx_one()
+    below: complex_core_sqrt(ComplexCore<T>{real: one.cx_sub(x), imaginary: y.cx_neg()})
+    above: complex_core_sqrt(ComplexCore<T>{real: one.cx_add(x), imaginary: y})
+    ComplexCore<T>{
+        real: x.cx_two().cx_mul(below.real.cx_atan2(above.real)),
+        imaginary: above.real.cx_mul(below.imaginary).cx_sub(above.imaginary.cx_mul(below.real)).cx_asinh(),
+    }
 }
 
-priv complex_atanh: fn(z: Complex) -> Complex Never! {
+priv complex_core_acosh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
     x: z.real
     y: z.imaginary
-    if is_inf(y) -> return __complex_from_parts(copysign(0.0, x), copysign(PI * 0.5, y))
-    if is_inf(x) {
-        if is_nan(y) -> return __complex_from_parts(copysign(0.0, x), y)
-        return __complex_from_parts(copysign(0.0, x), copysign(PI * 0.5, y))
+    if x.cx_is_inf() {
+        if y.cx_is_nan() -> return ComplexCore<T>{real: x.cx_inf(), imaginary: y}
+        if y.cx_is_inf() {
+            angle: if x.cx_lt(x.cx_zero()) -> x.cx_three_quarter_pi() else -> x.cx_pi().cx_mul(x.cx_quarter())
+            return ComplexCore<T>{real: x.cx_inf(), imaginary: angle.cx_copysign(y)}
+        }
+        angle: if x.cx_lt(x.cx_zero()) -> x.cx_pi() else -> x.cx_zero()
+        return ComplexCore<T>{real: x.cx_inf(), imaginary: angle.cx_copysign(y)}
     }
-    if is_nan(x) || is_nan(y) {
-        if x == 0.0 -> return __complex_from_parts(x, y)
-        return __complex_from_parts(NAN, NAN)
+    if y.cx_is_inf() {
+        return ComplexCore<T>{
+            real: x.cx_inf(),
+            imaginary: if x.cx_is_nan() -> x else -> x.cx_pi().cx_mul(x.cx_half()).cx_copysign(y),
+        }
     }
-    ax: fabs(x)
-    ay: fabs(y)
-    if ax > 1.0e150 || ay > 1.0e150 {
-        // atanh z is 1/z plus iπ/2 to within rounding.
-        scale: if ax > ay -> ax else -> ay
-        sx: x / scale
-        sy: y / scale
-        return __complex_from_parts(sx / (scale * (sx * sx + sy * sy)), copysign(PI * 0.5, y))
+    if y.cx_is_nan() && x.cx_is_zero() {
+        return ComplexCore<T>{real: y, imaginary: x.cx_pi().cx_mul(x.cx_half())}
     }
-    gap: Float{1.0} - ax
-    near: gap * gap + y * y
-    // Near ±1 with both gaps below 2^-511 the quotient overflows; ln of
-    // 4|x| / |1 - |x| + iy|^2 is then taken as a difference.
-    real: if near >= from_bits(0x0010_0000_0000_0000) -> Float{0.25} * ln_1p(4.0 * ax / near) else -> complex_atanh_near_one(ax, gap, ay)
-    __complex_from_parts(copysign(real, x), 0.5 * atan2(2.0 * y, gap * (ax + 1.0) - y * y))
+    if x.cx_is_nan() || y.cx_is_nan() {
+        return ComplexCore<T>{real: x.cx_nan(), imaginary: x.cx_nan()}
+    }
+    one: x.cx_one()
+    below: complex_core_sqrt(ComplexCore<T>{real: x.cx_sub(one), imaginary: y})
+    above: complex_core_sqrt(ComplexCore<T>{real: x.cx_add(one), imaginary: y})
+    ComplexCore<T>{
+        real: below.real.cx_mul(above.real).cx_add(below.imaginary.cx_mul(above.imaginary)).cx_asinh(),
+        imaginary: x.cx_two().cx_mul(below.imaginary.cx_atan2(above.real)),
+    }
 }
 
 // A quarter of ln(4a / (g^2 + b^2)) for a tiny g and b, not both zero.
-priv complex_atanh_near_one: fn(a: Float, g: Float, b: Float) -> Float Never! {
-    if g == 0.0 && b == 0.0 -> return INFINITY
-    gm: fabs(g)
-    magnitude: if gm >= b -> complex_ln_abs(gm, b) else -> complex_ln_abs(b, gm)
-    0.25 * (ln(4.0 * a) - magnitude * 2.0)
+priv complex_core_atanh_near_one: fn<T: ComplexScalar>(a: T, g: T, b: T) -> T Never! {
+    if g.cx_is_zero() && b.cx_is_zero() -> return a.cx_inf()
+    gm: g.cx_fabs()
+    magnitude: if gm.cx_ge(b) -> complex_core_ln_abs(gm, b) else -> complex_core_ln_abs(b, gm)
+    a.cx_quarter().cx_mul(a.cx_four().cx_mul(a).cx_ln().cx_sub(magnitude.cx_mul(a.cx_two())))
+}
+
+priv complex_core_atanh: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    x: z.real
+    y: z.imaginary
+    half_pi: x.cx_pi().cx_mul(x.cx_half())
+    if y.cx_is_inf() {
+        return ComplexCore<T>{real: x.cx_zero().cx_copysign(x), imaginary: half_pi.cx_copysign(y)}
+    }
+    if x.cx_is_inf() {
+        if y.cx_is_nan() -> return ComplexCore<T>{real: x.cx_zero().cx_copysign(x), imaginary: y}
+        return ComplexCore<T>{real: x.cx_zero().cx_copysign(x), imaginary: half_pi.cx_copysign(y)}
+    }
+    if x.cx_is_nan() || y.cx_is_nan() {
+        if x.cx_is_zero() -> return ComplexCore<T>{real: x, imaginary: y}
+        return ComplexCore<T>{real: x.cx_nan(), imaginary: x.cx_nan()}
+    }
+    ax: x.cx_fabs()
+    ay: y.cx_fabs()
+    huge: x.cx_atanh_huge()
+    if ax.cx_gt(huge) || ay.cx_gt(huge) {
+        // atanh z is 1/z plus iπ/2 to within rounding.
+        scale: if ax.cx_gt(ay) -> ax else -> ay
+        sx: x.cx_div(scale)
+        sy: y.cx_div(scale)
+        return ComplexCore<T>{
+            real: sx.cx_div(scale.cx_mul(sx.cx_mul(sx).cx_add(sy.cx_mul(sy)))),
+            imaginary: half_pi.cx_copysign(y),
+        }
+    }
+    one: x.cx_one()
+    gap: one.cx_sub(ax)
+    near: gap.cx_mul(gap).cx_add(y.cx_mul(y))
+    real: if near.cx_ge(x.cx_atanh_near_min()) -> x.cx_quarter().cx_mul(x.cx_four().cx_mul(ax).cx_div(near).cx_ln_1p()) else -> complex_core_atanh_near_one(ax, gap, ay)
+    ComplexCore<T>{
+        real: real.cx_copysign(x),
+        imaginary: x.cx_half().cx_mul(x.cx_two().cx_mul(y).cx_atan2(gap.cx_mul(ax.cx_add(one)).cx_sub(y.cx_mul(y)))),
+    }
+}
+
+priv complex_core_atan: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T> Never! {
+    w: complex_core_atanh(ComplexCore<T>{real: z.imaginary.cx_neg(), imaginary: z.real})
+    ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
+}
+
+__complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
+    Complex{real: real, imaginary: imaginary}
+}
+
+__complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
+    complex_from_core(complex_core_add(complex_to_core(left), complex_to_core(right)))
+}
+
+__complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
+    complex_from_core(complex_core_sub(complex_to_core(left), complex_to_core(right)))
+}
+
+__complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
+    complex_from_core(complex_core_mul(complex_to_core(left), complex_to_core(right)))
+}
+
+__complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
+    complex_from_core(complex_core_div(complex_to_core(left), complex_to_core(right)))
+}
+
+__complex_to_string: fn(value: Complex) -> String Never! {
+    complex_core_to_string(complex_to_core(value))
+}
+
+priv complex_arg: fn(z: Complex) -> Float Never! { complex_core_arg(complex_to_core(z)) }
+
+priv complex_proj: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_proj(complex_to_core(z)))
+}
+
+priv complex_exp: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_exp(complex_to_core(z)))
+}
+
+priv complex_ln: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_ln(complex_to_core(z)))
+}
+
+priv complex_pow: fn(base: Complex, power: Complex) -> Complex Never! {
+    complex_from_core(complex_core_pow(complex_to_core(base), complex_to_core(power)))
+}
+
+priv complex_sqrt: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_sqrt(complex_to_core(z)))
+}
+
+priv complex_sinh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_sinh(complex_to_core(z)))
+}
+
+priv complex_cosh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_cosh(complex_to_core(z)))
+}
+
+priv complex_tanh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_tanh(complex_to_core(z)))
+}
+
+priv complex_sin: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_sin(complex_to_core(z)))
+}
+
+priv complex_cos: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_cos(complex_to_core(z)))
+}
+
+priv complex_tan: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_tan(complex_to_core(z)))
+}
+
+priv complex_asinh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_asinh(complex_to_core(z)))
+}
+
+priv complex_asin: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_asin(complex_to_core(z)))
+}
+
+priv complex_acos: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_acos(complex_to_core(z)))
+}
+
+priv complex_acosh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_acosh(complex_to_core(z)))
+}
+
+priv complex_atanh: fn(z: Complex) -> Complex Never! {
+    complex_from_core(complex_core_atanh(complex_to_core(z)))
 }
 
 priv complex_atan: fn(z: Complex) -> Complex Never! {
-    w: complex_atanh(__complex_from_parts(-z.imaginary, z.real))
-    __complex_from_parts(w.imaginary, -w.real)
+    complex_from_core(complex_core_atan(complex_to_core(z)))
 }
 
 #Test("Source exact rendering preserves decimal scale and quotient form") {
@@ -44566,4 +45337,66 @@ priv complex_atan: fn(z: Complex) -> Complex Never! {
     assert_eq(__fraction_to_string(__fraction_from_parts(1, 8)), "0.125")
     assert_eq(__fraction_to_string(__fraction_from_parts(1, 3)), "1/3")
     assert_eq(__complex_to_string(__complex_from_parts(3.0, -0.0)), "3 - 0i")
+}
+
+#Test("Complex and Complex32 share precision-preserving conjugate, conversions, and operations") {
+    z: Complex{real: 3.0, imaginary: 4.0}
+    assert_eq("{z.conj()}", "3 - 4i")
+    assert_eq(to_bits(Complex{real: 1.0, imaginary: 0.0}.conj().imaginary), to_bits(-0.0))
+
+    s: Complex32{real: 3.0, imaginary: 4.0}
+    assert_eq("{s.conj()}", "3 - 4i")
+    assert_eq(__to_bits_f32(Complex32{real: 1.0, imaginary: 0.0}.conj().imaginary), __to_bits_f32(F32{-0.0}))
+    assert_eq(s.abs(), F32{5.0})
+    assert_eq((s + Complex32{real: 1.0, imaginary: -2.0}).real, F32{4.0})
+    assert_eq((s + Complex32{real: 1.0, imaginary: -2.0}).imaginary, F32{2.0})
+    assert_eq((s * Complex32{real: 2.0, imaginary: 0.0}).real, F32{6.0})
+    assert_eq((s + F32{2.0}).real, F32{5.0})
+    assert_eq((F32{2.0} * s).imaginary, F32{8.0})
+
+    wide: Complex.from_complex(s)
+    assert_eq(wide.real, 3.0)
+    assert_eq(wide.imaginary, 4.0)
+
+    small: Complex32.from_complex(z) ?? panic("in-range complex must narrow")
+    assert_eq(small.real, F32{3.0})
+    assert_eq(small.imaginary, F32{4.0})
+
+    overflow: Complex{real: 1.0e40, imaginary: 2.0}
+    if Complex32.from_complex(overflow) == {
+        .Ok(_) -> { panic("out-of-range real part must fail narrowing") }
+        .Err(_) -> {}
+    }
+    overflow_imag: Complex{real: 2.0, imaginary: -1.0e40}
+    if Complex32.from_complex(overflow_imag) == {
+        .Ok(_) -> { panic("out-of-range imaginary part must fail narrowing") }
+        .Err(_) -> {}
+    }
+
+    // Complex32 runs in F32 dynamic range: e^100 overflows F32 while staying finite in Float.
+    big32: Complex32{real: 100.0, imaginary: 0.0}.exp()
+    assert_eq(big32.real, F32.INFINITY)
+    assert(is_finite(Complex{real: 100.0, imaginary: 0.0}.exp().real))
+
+    // Elementary functions on Complex32 at exact points.
+    zero32: Complex32{real: 0.0, imaginary: 0.0}
+    one32: Complex32{real: 1.0, imaginary: 0.0}
+    i32: Complex32{real: 0.0, imaginary: 1.0}
+    assert_eq(Complex32{real: -4.0, imaginary: 0.0}.sqrt().imaginary, F32{2.0})
+    assert_eq(zero32.exp().real, F32{1.0})
+    assert_eq(one32.ln().real, F32{0.0})
+    assert_eq(one32.pow(i32).real, F32{1.0})
+    assert_eq(zero32.sin().real, F32{0.0})
+    assert_eq(zero32.cos().real, F32{1.0})
+    assert_eq(zero32.tan().imaginary, F32{0.0})
+    assert_eq(zero32.asin().real, F32{0.0})
+    assert_eq(one32.acos().real, F32{0.0})
+    assert_eq(zero32.atan().imaginary, F32{0.0})
+    assert_eq(zero32.sinh().real, F32{0.0})
+    assert_eq(zero32.cosh().real, F32{1.0})
+    assert_eq(zero32.tanh().imaginary, F32{0.0})
+    assert_eq(zero32.asinh().real, F32{0.0})
+    assert_eq(one32.acosh().real, F32{0.0})
+    assert_eq(zero32.atanh().imaginary, F32{0.0})
+    assert_eq(Complex32{real: 2.0, imaginary: F32.INFINITY}.proj().real, F32.INFINITY)
 }

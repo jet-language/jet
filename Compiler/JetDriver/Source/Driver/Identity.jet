@@ -679,6 +679,9 @@ JetDriverBuildEntry: struct {
     file: Bool,
 }
 
+// Root component of every embedded library module path.
+JET_DRIVER_CORE_SOURCE_ROOT: "<corelib>"
+
 JetDriverSourceUnit: struct {
     root_index: Int,
     file_index: Int,
@@ -693,6 +696,14 @@ JetDriverSourceUnit: struct {
     // namespace. Loose files, one-file (inline Package) packages, embedded
     // Core sources, and synthetic modules have none.
     in_namespace: Bool,
+    embedded: Bool{false},
+    allow_reserved_identifiers: Bool{false},
+}
+
+jet_driver_unit_is_embedded: fn(unit: JetDriverSourceUnit) -> Bool Never! { unit.embedded }
+
+jet_driver_unit_is_core: fn(unit: JetDriverSourceUnit) -> Bool Never! {
+    jet_driver_unit_is_embedded(unit)
 }
 
 // One `deps:` entry. A record entry (`tool: { path: ../tool }`) carries the

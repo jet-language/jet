@@ -1,0 +1,53 @@
+// Comment box on Linux and on the web: `ui.saved("")` keeps the half-typed
+// comment across a Linux restart ($XDG_DATA_HOME) and across a web reload
+// (sessionStorage). A colored panel beside the input reflects the draft's
+// length so the Linux fake compositor can verify the restored draft on frame 1:
+// blue when empty, yellow at one character, green at two or more.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+CommentView: struct {}
+
+comment_box: fn(_view: CommentView) -> UINode Never! {
+    draft: ui.saved("")
+    text: draft.get()
+    length: text.chars().len()
+    color: if {
+        length == 0 -> Color{r: 51, g: 102, b: 255, a: 255}
+        length == 1 -> Color{r: 204, g: 153, b: 0, a: 255}
+        else -> Color{r: 51, g: 153, b: 51, a: 255}
+    }
+    ui.box(
+        [
+            ui.node_color("", 200.0, 30.0, color),
+            ui.text("Comment: {text}"),
+            ui.text_input(
+                text,
+                UIIMEMode.Native,
+                on_change: fn(typed: String) {
+                    print("saved: {typed}")
+                    draft.set(typed)
+                },
+            ),
+        ],
+    )
+}
+
+run: fn() {
+    graph: app.new("Comments").screen("/", comment_box).window(width: 200, height: 200)
+    if !graph.launch() {
+        return
+    }
+    #if #build.target.os == {
+        .Web -> {}
+        .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
+            loop _ in 0..<6000 -> tasks.sleep(10)
+            print("the window stayed open")
+        }
+    }
+}

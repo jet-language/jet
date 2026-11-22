@@ -1,0 +1,16 @@
+// Complex32.from_complex narrows fallibly using F32.from_float on both parts:
+// an out-of-range real or imaginary component returns Err instead of trapping
+// or silently saturating.
+try_narrow: fn(z: Complex) -> String {
+    if Complex32.from_complex(z) == {
+        .Ok(value) -> "ok: {value}"
+        .Err(message) -> "err: {message}"
+    }
+}
+
+run: fn() {
+    print(try_narrow(Complex{real: 3.0, imaginary: 4.0}))
+    print(try_narrow(Complex{real: 1.0e40, imaginary: 4.0}))
+    print(try_narrow(Complex{real: 3.0, imaginary: -1.0e40}))
+    print(try_narrow(Complex{real: -1.0e40, imaginary: 1.0e40}))
+}
