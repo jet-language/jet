@@ -1,0 +1,899 @@
+// Typed Jet config export (`jet os config export <file.jet> [<name>]
+// [--format json|yaml|toml] [--schema]`): evaluates a named config value
+// through the compiler's one comptime path (`JetDriverCompileMode.Comptime`),
+// encodes it with `core.encoding.{json,yaml,toml}` using the checked `#Codable`
+// metadata, and writes the Draft 2020-12 JSON Schema for its checked type from
+// that same metadata. A file or value that fails type-checking is refused and
+// never exported.
+use {
+    config_export_files: core.files
+    config_export_json: core.encoding.json
+    config_export_toml: core.encoding.toml
+    config_export_yaml: core.encoding.yaml
+    jet_driver.[
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JetDriverVerbOutput,
+        jet_driver_report_problems,
+    ]
+    jet_foundation.[
+        CtEnumArg,
+        CtKey,
+        CtValue,
+        DIAGNOSTIC_ERROR,
+        Diagnostic,
+        DistinctDef,
+        EnumDef,
+        Item,
+        NamedCtValue,
+        StructDef,
+        Type,
+        TypeAliasDef,
+        Variant,
+        codable_denies_unknown,
+        codable_flattens,
+        codable_skips,
+        codable_tag_field,
+        codable_untagged,
+        diagnostic_from_registry,
+        jet_config_value_absent,
+        symbol_key_leaf,
+        symbol_key_names,
+    ]
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaComptimeItemKind,
+        sema_checked_field_shape_names,
+        sema_checked_rename_case,
+        sema_checked_variant_wire_name,
+        sema_user_template_ct_value,
+    ]
+}
+
+CONFIG_EXPORT_TYPED_NAME: "CONFIG_EXPORT_TYPED_VALUE"
+
+CONFIG_EXPORT_SCHEMA_URI: "https://json-schema.org/draft/2020-12/schema"
+
+CONFIG_EXPORT_HELP: "Usage: jet os config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]\n\nEvaluate a checked Jet config value at compile time and write it as JSON, YAML, or TOML,\nor write the JSON Schema for its type with `--schema`.\n\nOptions:\n  --format <json|yaml|toml>  Output format (default: json)\n  --value <name>             Named constant or zero-argument function to export\n  --schema                   Write the JSON Schema for the value's checked type\n\nExample:\n  jet os config export app.jet APP_CONFIG --format yaml\n"
+
+JetCLIConfigExportSpec: struct {
+    name: String?,
+    format: String,
+    schema: Bool,
+}
+
+JetConfigExportTarget: enum {
+    Found(name: String, expr: String),
+    Missing(what: String, fix: String),
+}
+
+// Parse `jet os config export ...` arguments and plan host execution.
+jet_cli_config_export: fn(jet_argv: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    usage: "run `jet os config export <file.jet> [<name>] [--format json|yaml|toml] [--schema]`"
+    file := ""
+    name := String?{None}
+    format := "json"
+    format_explicit := false
+    schema := false
+    seen_export := false
+    expect_format := false
+    expect_value := false
+    loop word in jet_argv {
+        if !seen_export {
+            if word == "export" -> seen_export = true
+            next
+        }
+        if expect_format {
+            normalized: word.to_lower()
+            if normalized != "json" && normalized != "yaml" && normalized != "toml" {
+                return jet_cli_fail("E2104", "`--format` accepts `json`, `yaml`, or `toml`, not `{word}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+            }
+            format = normalized
+            format_explicit = true
+            expect_format = false
+            next
+        }
+        if expect_value {
+            if word == "" {
+                return jet_cli_fail("E2104", "`--value` needs a config value name", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+            }
+            name = Val("{word}")
+            expect_value = false
+            next
+        }
+        if word == {
+            "--help" | "-h" -> return jet_cli_done(CONFIG_EXPORT_HELP, "", JET_DRIVER_EXIT_OK)
+            "--schema" -> {
+                schema = true
+                next
+            }
+            "--format" -> {
+                expect_format = true
+                next
+            }
+            "--value" -> {
+                expect_value = true
+                next
+            }
+            "--no-color" | "-q" | "--quiet" -> next
+            else -> {}
+        }
+        if word.starts_with("--format=") {
+            raw_fmt: word.slice(9..<word.len()).to_lower()
+            if raw_fmt != "json" && raw_fmt != "yaml" && raw_fmt != "toml" {
+                return jet_cli_fail("E2104", "`--format` accepts `json`, `yaml`, or `toml`, not `{raw_fmt}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+            }
+            format = raw_fmt
+            format_explicit = true
+            next
+        }
+        if word.starts_with("--value=") {
+            raw_val: word.slice(8..<word.len())
+            if raw_val == "" {
+                return jet_cli_fail("E2104", "`--value` needs a config value name", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+            }
+            name = Val(raw_val)
+            next
+        }
+        if word.starts_with("--color=") -> next
+        if word.starts_with("-") {
+            return jet_cli_fail("E2104", "`jet os config export` takes no `{word}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+        }
+        if file == "" {
+            file = "{word}"
+            next
+        }
+        if name == None {
+            name = Val("{word}")
+            next
+        }
+        return jet_cli_fail("E2104", "unexpected argument `{word}` to `jet os config export`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if expect_format {
+        return jet_cli_fail("E2104", "`--format` needs one of `json`, `yaml`, or `toml`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if expect_value {
+        return jet_cli_fail("E2104", "`--value` needs a config value name", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if file == "" {
+        return jet_cli_fail("E2104", "`jet os config export` needs a `.jet` file", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if schema && format_explicit && format != "json" {
+        return jet_cli_fail("E2104", "`--schema` writes JSON Schema and cannot be combined with `--format {format}`", jet_cli_why("E2104"), "omit `--format` or pass `--format json` with `--schema`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    source: config_export_files.read(file) ?? return jet_cli_fail("E2105", "couldn't read config file `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "pass a readable `.jet` config file", color, JET_DRIVER_EXIT_USER_ERROR)
+    parent: config_export_files.dirname(file)
+    base_dir: if parent == "" -> "." else -> parent
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Env{file: file, source: source, base_dir: base_dir, color: color, json: json, export: Val(JetCLIConfigExportSpec{name: name, format: format, schema: schema})}}
+}
+
+jet_config_export_select: fn(file: String, items: [Item], requested: String?) -> JetConfigExportTarget Never! {
+    if requested == .Val(wanted) {
+        loop item in items {
+            if item == {
+                .Const(definition) -> {
+                    if definition.name == wanted {
+                        return JetConfigExportTarget.Found{name: wanted, expr: wanted}
+                    }
+                }
+                .Func(function) -> {
+                    if function.name == wanted {
+                        if function.params.len() != 0 {
+                            return JetConfigExportTarget.Missing{
+                                what: "`{wanted}` in `{file}` takes parameters and cannot be exported as a config value",
+                                fix: "export a top-level constant or a zero-argument function",
+                            }
+                        }
+                        return JetConfigExportTarget.Found{name: wanted, expr: "{wanted}()"}
+                    }
+                }
+                .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+        return JetConfigExportTarget.Missing{
+            what: "`{file}` declares no config value named `{wanted}`",
+            fix: "pass the name of a top-level constant or zero-argument function in `{file}`",
+        }
+    }
+    candidates := [String]{}
+    candidate_exprs := [String]{}
+    loop item in items {
+        if item == {
+            .Const(definition) -> {
+                if definition.name == "CONFIG" {
+                    return JetConfigExportTarget.Found{name: "CONFIG", expr: "CONFIG"}
+                }
+                candidates.push("{definition.name}")
+                candidate_exprs.push("{definition.name}")
+            }
+            .Func(function) -> {
+                if function.params.len() == 0 && function.name == "config" {
+                    return JetConfigExportTarget.Found{name: "config", expr: "config()"}
+                }
+                if function.params.len() == 0 && function.name != "run" && function.name != "main" && function.return_type != None {
+                    candidates.push("{function.name}")
+                    candidate_exprs.push("{function.name}()")
+                }
+            }
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    if candidates.len() == 1 {
+        return JetConfigExportTarget.Found{name: candidates[0], expr: candidate_exprs[0]}
+    }
+    if candidates.len() == 0 {
+        return JetConfigExportTarget.Missing{
+            what: "`{file}` declares no config value to export",
+            fix: "declare a top-level constant or zero-argument function, or pass its name",
+        }
+    }
+    JetConfigExportTarget.Missing{
+        what: "`{file}` declares multiple config values ({candidates.join(", ")}); specify which one to export",
+        fix: "pass the config value name after `{file}`",
+    }
+}
+
+jet_config_export_failure: fn(code: String, what: String, why: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    report: diagnostic_from_registry(code, None, what, why, fix)
+    JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", [Diagnostic]{report}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Host execution of `jet os config export`: checks and evaluates the config
+// file through `JetDriverCompileMode.Comptime`, refusing any type or check
+// error before writing any output.
+jet_cli_config_export_host: fn(file: String, source: String, base_dir: String, name: String?, format: String, schema: Bool, color: Bool, _json: Bool) -> JetDriverVerbOutput {
+    parsed: parse_source(source.bytes())
+    parse_errors := [Diagnostic]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> parse_errors.push(diagnostic)
+    }
+    if parse_errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, parse_errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    expr := ""
+    if jet_config_export_select(file, parsed.program.items, name) == {
+        .Found(_, found_expr) -> { expr = found_expr }
+        .Missing(what, fix) -> {
+            report: diagnostic_from_registry("E2104", None, what, jet_cli_why("E2104"), fix)
+            return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", [Diagnostic]{report}, color, true), exit_code: JET_DRIVER_EXIT_USAGE}
+        }
+    }
+    core_sources: if jet_cli_core_sources(base_dir) == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> {
+            return jet_config_export_failure("E2105", what, jet_cli_why("E2105"), fix, color)
+        }
+    }
+    wrapped: "{source}\n\n{CONFIG_EXPORT_TYPED_NAME}: #run {{ {expr} }}\n"
+    result: jet_config_compile(wrapped, core_sources, base_dir) ?? return jet_config_export_failure("E2105", "couldn't evaluate config file `{file}`: {err}", jet_cli_why("E2105"), "check that `{file}` is valid pure Jet", color)
+    errors := [Diagnostic]{}
+    source_len: source.bytes().len()
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        kept_span: if diagnostic.span == .Val(span) && span.end <= source_len -> diagnostic.span else -> None
+        errors.push(diagnostic_from_registry(diagnostic.code, kept_span, diagnostic.what, diagnostic.why, diagnostic.fix))
+    }
+    if errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    loop value in result.comptime_values {
+        if value.kind != SemaComptimeItemKind.Constant || !symbol_key_names(value.key, CONFIG_EXPORT_TYPED_NAME) {
+            next
+        }
+        if schema {
+            schema_value: jet_config_export_schema_root(value.ty, parsed.program.items)
+            return JetDriverVerbOutput{stdout: "{jet_config_export_pretty_json(schema_value, 0)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        converted: sema_user_template_ct_value(value.value) ?? return jet_config_export_failure("E2105", "config value in `{file}` has a shape that cannot be exported as data", jet_cli_why("E2105"), "export a value made of structs, enums, lists, maps, options, or primitives", color)
+        encoded: jet_config_export_ct_value(converted, value.ty, parsed.program.items, format) ?? return jet_config_export_failure("E2105", "config value in `{file}` has a shape that cannot be encoded as {format}", jet_cli_why("E2105"), "export a value made of structs, enums, lists, maps, options, or primitives", color)
+        if format == "json" {
+            return JetDriverVerbOutput{stdout: "{jet_config_export_pretty_json(encoded, 0)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        if format == "yaml" {
+            return JetDriverVerbOutput{stdout: "{jet_config_export_yaml(encoded, 0)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        wire_json: jet_cli_status_json(encoded)
+        tree: config_export_json.parse(wire_json) ?? return jet_config_export_failure("E2105", "couldn't encode config value as {format}: {err.reason}", jet_cli_why("E2105"), "check that every value is valid data for {format}", color)
+        rendered: config_export_toml.to_string(tree)
+        return JetDriverVerbOutput{stdout: "{rendered}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    jet_config_export_failure("E2105", "config value in `{file}` produced no build-time value", jet_cli_why("E2105"), "ensure the exported value is pure and evaluable at compile time", color)
+}
+
+// Convert a checked compile-time value into its wire tree using the same
+// `#Codable` / `#Rename` metadata as `core.encoding` and `--schema`.
+jet_config_export_ct_value: fn(value: CtValue, ty: Type, items: [Item], format: String) -> JetCLIStatusValue? Never! {
+    if value == {
+        .Int(n) -> Val(jet_cli_status_int(n))
+        .Float(f) -> {
+            num: if f == {
+                .F32(v) -> v
+                .F64(v) -> v
+            }
+            Val(JetCLIStatusValue.Float{text: "{num}"})
+        }
+        .Bool(b) -> Val(jet_cli_status_bool(b))
+        .Char(c) -> Val(jet_cli_status_text("{c}"))
+        .Str(s) -> Val(jet_cli_status_text("{s}"))
+        .BigInt(s) -> Val(jet_cli_status_text("{s}"))
+        .Bytes(bytes) -> {
+            arr := [JetCLIStatusValue]{}
+            loop b in bytes -> arr.push(jet_cli_status_int(Int{b}))
+            Val(jet_cli_status_array(arr))
+        }
+        .List(values) -> {
+            elem_ty: if ty == .List(inner) -> inner else if ty == .FixedList(inner, _) -> inner else -> Type.String
+            arr := [JetCLIStatusValue]{}
+            loop item in values {
+                encoded: jet_config_export_ct_value(item, elem_ty, items, format) ?? return None
+                arr.push(encoded)
+            }
+            Val(jet_cli_status_array(arr))
+        }
+        .Map(entries) -> {
+            val_ty: if ty == .Map(_, _, v) -> v else -> Type.String
+            fields := [JetCLIStatusField]{}
+            loop entry in entries {
+                key: jet_config_export_ct_key(entry.key) ?? return None
+                encoded: jet_config_export_ct_value(entry.value, val_ty, items, format) ?? return None
+                fields.push(jet_cli_status_field(key, encoded))
+            }
+            Val(jet_cli_status_object(fields))
+        }
+        .Struct(type_name, ct_fields) -> {
+            out_fields := [JetCLIStatusField]{}
+            if jet_config_export_find_struct(items, type_name) == .Val(definition) {
+                if !jet_config_export_ct_struct_fields(definition, ct_fields, items, format, out_fields) {
+                    return None
+                }
+                return Val(jet_cli_status_object(out_fields))
+            }
+            loop field in ct_fields {
+                if jet_config_value_absent(field.value) -> next
+                encoded: jet_config_export_ct_value(field.value, Type.String, items, format) ?? return None
+                out_fields.push(jet_cli_status_field("{field.name}", encoded))
+            }
+            Val(jet_cli_status_object(out_fields))
+        }
+        .Enum(type_name, variant_name, args) -> jet_config_export_ct_enum(type_name, variant_name, args, items, format)
+        .Present(inner) -> {
+            inner_ty: if ty == .Option(t) -> t else -> ty
+            jet_config_export_ct_value(inner, inner_ty, items, format)
+        }
+        .Failed(report) -> if report == {
+            .Clean(_) -> Val(JetCLIStatusValue.Null)
+            .Told(_) -> None
+        }
+        .Unit -> Val(JetCLIStatusValue.Null)
+        .Closure(_) -> None
+    }
+}
+
+jet_config_export_ct_key: fn(key: CtKey) -> String? Never! {
+    if key == {
+        .Str(s) -> Val("{s}")
+        .Int(n) -> Val("{n}")
+        .BigInt(d) -> Val("{d}")
+        .Bool(b) -> Val(if b -> "true" else -> "false")
+        .Char(c) -> Val("{c}")
+        .Enum(_, variant) -> Val("{variant}")
+        .Tuple(_) | .Struct(_, _) -> None
+    }
+}
+
+jet_config_export_find_ct_field: fn(ct_fields: [NamedCtValue], name: String) -> CtValue? Never! {
+    loop field in ct_fields {
+        if field.name == name -> return Val(field.value)
+    }
+    None
+}
+
+jet_config_export_wire_name: fn(definition: StructDef, field_index: Int, format: String) -> String Never! {
+    names: sema_checked_field_shape_names(definition, definition.fields[field_index])
+    if format == {
+        "json" -> names.json ?? names.text
+        "yaml" -> names.yaml ?? names.text
+        "toml" -> names.toml ?? names.text
+        else -> names.text
+    }
+}
+
+jet_config_export_ct_struct_fields: fn(definition: StructDef, ct_fields: [NamedCtValue], items: [Item], format: String, out: &[JetCLIStatusField]) -> Bool Never! {
+    loop index in 0..<definition.fields.len() {
+        field: definition.fields[index]
+        if field.computed != None || codable_skips(field.serde_markers) -> next
+        raw: jet_config_export_find_ct_field(ct_fields, field.name) ?? next
+        if jet_config_value_absent(raw) -> next
+        if codable_flattens(field.serde_markers) {
+            if raw == .Struct(flat_name, flat_fields) && jet_config_export_find_struct(items, flat_name) == .Val(flat_def) {
+                if !jet_config_export_ct_struct_fields(flat_def, flat_fields, items, format, out) {
+                    return false
+                }
+                next
+            }
+        }
+        wire_name: jet_config_export_wire_name(definition, index, format)
+        encoded: jet_config_export_ct_value(raw, field.ty, items, format) ?? return false
+        out.push(jet_cli_status_field(wire_name, encoded))
+    }
+    true
+}
+
+jet_config_export_ct_enum: fn(type_name: String, variant_name: String, args: [CtEnumArg], items: [Item], format: String) -> JetCLIStatusValue? Never! {
+    wire_name := "{variant_name}"
+    tag_field := String?{None}
+    untagged := false
+    variant_def := Variant?{None}
+    if jet_config_export_find_enum(items, type_name) == .Val(definition) {
+        style: sema_checked_rename_case(definition.serde_markers)
+        tag_field = codable_tag_field(definition.type_markers)
+        untagged = codable_untagged(definition.type_markers)
+        loop variant in definition.variants {
+            if variant.name == variant_name {
+                wire_name = sema_checked_variant_wire_name(variant, style)
+                variant_def = Val(variant)
+                break
+            }
+        }
+    }
+    if args.len() == 0 {
+        if tag_field == .Val(tag_key) {
+            return Val(jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("{tag_key}", jet_cli_status_text(wire_name)),
+                },
+            ))
+        }
+        return Val(jet_cli_status_text(wire_name))
+    }
+    if args.len() == 1 && args[0].label == None {
+        single_ty: if variant_def == .Val(v) && v.payload == .Single(t, _) -> t else -> Type.String
+        payload: jet_config_export_ct_value(args[0].value, single_ty, items, format) ?? return None
+        if untagged -> return Val(payload)
+        if tag_field == .Val(tag_key) {
+            return Val(jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("{tag_key}", jet_cli_status_text(wire_name)),
+                    jet_cli_status_field("value", payload),
+                },
+            ))
+        }
+        return Val(jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field(wire_name, payload),
+            },
+        ))
+    }
+    fields := [JetCLIStatusField]{}
+    if tag_field == .Val(tag_key) {
+        fields.push(jet_cli_status_field("{tag_key}", jet_cli_status_text("{wire_name}")))
+    }
+    loop arg in args {
+        if jet_config_value_absent(arg.value) -> next
+        label: arg.label ?? return None
+        encoded: jet_config_export_ct_value(arg.value, Type.String, items, format) ?? return None
+        fields.push(jet_cli_status_field("{label}", encoded))
+    }
+    body: jet_cli_status_object(fields)
+    if untagged || tag_field != None -> return Val(body)
+    Val(jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field(wire_name, body),
+        },
+    ))
+}
+
+// Lookup helpers over the config file's checked declarations.
+jet_config_export_find_struct: fn(items: [Item], name: String) -> StructDef? Never! {
+    leaf: symbol_key_leaf(name)
+    loop item in items {
+        if item == .Struct(definition) && (definition.name == name || definition.name == leaf) {
+            return Val(definition)
+        }
+    }
+    None
+}
+
+jet_config_export_find_enum: fn(items: [Item], name: String) -> EnumDef? Never! {
+    leaf: symbol_key_leaf(name)
+    loop item in items {
+        if item == .Enum(definition) && (definition.name == name || definition.name == leaf) {
+            return Val(definition)
+        }
+    }
+    None
+}
+
+jet_config_export_find_distinct: fn(items: [Item], name: String) -> DistinctDef? Never! {
+    leaf: symbol_key_leaf(name)
+    loop item in items {
+        if item == .Distinct(definition) && (definition.name == name || definition.name == leaf) {
+            return Val(definition)
+        }
+    }
+    None
+}
+
+jet_config_export_find_alias: fn(items: [Item], name: String) -> TypeAliasDef? Never! {
+    leaf: symbol_key_leaf(name)
+    loop item in items {
+        if item == .TypeAlias(definition) && (definition.name == name || definition.name == leaf) {
+            return Val(definition)
+        }
+    }
+    None
+}
+
+jet_config_export_schema_root: fn(ty: Type, items: [Item]) -> JetCLIStatusValue Never! {
+    inner: jet_config_export_schema_type(ty, items, [String]{})
+    fields := [JetCLIStatusField]{
+        jet_cli_status_field("$schema", jet_cli_status_text(CONFIG_EXPORT_SCHEMA_URI)),
+    }
+    if inner == .Object(inner_fields) {
+        loop field in inner_fields { fields.push(field) }
+        return jet_cli_status_object(fields)
+    }
+    inner
+}
+
+jet_config_export_schema_type: fn(ty: Type, items: [Item], active: [String]) -> JetCLIStatusValue Never! {
+    if ty == {
+        .String | .Char -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("string"))})
+        .Int | .IntN(_, _) -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("integer"))})
+        .InlineRange(_, lo, hi) -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text("integer")),
+                jet_cli_status_field("minimum", jet_cli_status_int(lo)),
+                jet_cli_status_field("maximum", jet_cli_status_int(hi)),
+            },
+        )
+        .Float | .Float32 -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("number"))})
+        .Bool -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("boolean"))})
+        .List(element) | .FixedList(element, _) -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text("array")),
+                jet_cli_status_field("items", jet_config_export_schema_type(element, items, active)),
+            },
+        )
+        .Map(_, _, value) -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text("object")),
+                jet_cli_status_field("additionalProperties", jet_config_export_schema_type(value, items, active)),
+            },
+        )
+        .Option(inner) -> jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field(
+                    "anyOf",
+                    jet_cli_status_array(
+                        [JetCLIStatusValue]{
+                            jet_config_export_schema_type(inner, items, active),
+                            jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("null"))}),
+                        },
+                    ),
+                ),
+            },
+        )
+        .Shared(inner) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) | .Result(inner, _) -> jet_config_export_schema_type(inner, items, active)
+        .Tuple(tuple_fields) -> {
+            props := [JetCLIStatusField]{}
+            req := [String]{}
+            loop field in tuple_fields {
+                props.push(jet_cli_status_field("{field.name}", jet_config_export_schema_type(field.ty, items, active)))
+                req.push("{field.name}")
+            }
+            fields := [JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text("object")),
+                jet_cli_status_field("properties", jet_cli_status_object(props)),
+            }
+            if req.len() > 0 {
+                fields.push(jet_cli_status_field("required", jet_cli_status_texts(req)))
+            }
+            jet_cli_status_object(fields)
+        }
+        .Union(members) -> {
+            variants := [JetCLIStatusValue]{}
+            loop member in members {
+                variants.push(jet_config_export_schema_type(member, items, active))
+            }
+            jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("oneOf", jet_cli_status_array(variants))})
+        }
+        .Named(name) | .Apply(name, _) -> jet_config_export_schema_named(name, items, active)
+        .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> jet_cli_status_object([JetCLIStatusField]{})
+    }
+}
+
+jet_config_export_schema_named: fn(name: String, items: [Item], active: [String]) -> JetCLIStatusValue Never! {
+    leaf: symbol_key_leaf(name)
+    if leaf == {
+        "String" | "Char" -> return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("string"))})
+        "Int" | "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" | "ISize" | "USize" -> return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("integer"))})
+        "Float" | "F32" | "F64" -> return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("number"))})
+        "Bool" -> return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text("boolean"))})
+        else -> {}
+    }
+    if active.contains(leaf) {
+        return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("title", jet_cli_status_text(leaf))})
+    }
+    next_active := [String]{}
+    loop seen in active -> next_active.push("{seen}")
+    next_active.push("{leaf}")
+    if jet_config_export_find_struct(items, name) == .Val(definition) {
+        return jet_config_export_schema_struct(definition, items, next_active)
+    }
+    if jet_config_export_find_enum(items, name) == .Val(definition) {
+        return jet_config_export_schema_enum(definition, items, next_active)
+    }
+    if jet_config_export_find_distinct(items, name) == .Val(definition) {
+        base_schema: jet_config_export_schema_type(definition.base, items, next_active)
+        if definition.range == .Val(range) && base_schema == .Object(base_fields) {
+            bounded := [JetCLIStatusField]{}
+            loop field in base_fields -> bounded.push(field)
+            bounded.push(jet_cli_status_field("minimum", jet_cli_status_int(range.lo)))
+            bounded.push(jet_cli_status_field("maximum", jet_cli_status_int(range.hi)))
+            return jet_cli_status_object(bounded)
+        }
+        return base_schema
+    }
+    if jet_config_export_find_alias(items, name) == .Val(definition) {
+        return jet_config_export_schema_type(definition.target, items, next_active)
+    }
+    jet_cli_status_object([JetCLIStatusField]{})
+}
+
+jet_config_export_append_struct_fields: fn(definition: StructDef, items: [Item], active: [String], props: &[JetCLIStatusField], required: &[String]) Never! {
+    loop field in definition.fields {
+        if field.computed != None || codable_skips(field.serde_markers) -> next
+        if codable_flattens(field.serde_markers) {
+            if field.ty == .Named(flat_name) && jet_config_export_find_struct(items, flat_name) == .Val(flat_def) {
+                jet_config_export_append_struct_fields(flat_def, items, active, props, required)
+                next
+            }
+        }
+        names: sema_checked_field_shape_names(definition, field)
+        wire_name: names.json ?? names.text
+        field_schema: if field.ty == .Option(inner) -> jet_config_export_schema_type(inner, items, active) else -> jet_config_export_schema_type(field.ty, items, active)
+        props.push(jet_cli_status_field("{wire_name}", field_schema))
+        if !(field.ty == .Option(_)) && field.default == None -> required.push("{wire_name}")
+    }
+}
+
+jet_config_export_schema_struct: fn(definition: StructDef, items: [Item], active: [String]) -> JetCLIStatusValue Never! {
+    props := [JetCLIStatusField]{}
+    required := [String]{}
+    jet_config_export_append_struct_fields(definition, items, active, props, required)
+    fields := [JetCLIStatusField]{
+        jet_cli_status_field("title", jet_cli_status_text("{definition.name}")),
+        jet_cli_status_field("type", jet_cli_status_text("object")),
+        jet_cli_status_field("properties", jet_cli_status_object(props)),
+    }
+    if required.len() > 0 {
+        fields.push(jet_cli_status_field("required", jet_cli_status_texts(required)))
+    }
+    if codable_denies_unknown(definition.type_markers) {
+        fields.push(jet_cli_status_field("additionalProperties", jet_cli_status_bool(false)))
+    }
+    jet_cli_status_object(fields)
+}
+
+jet_config_export_schema_enum: fn(definition: EnumDef, items: [Item], active: [String]) -> JetCLIStatusValue Never! {
+    style: sema_checked_rename_case(definition.serde_markers)
+    all_unit := true
+    loop variant in definition.variants {
+        if !(variant.payload == .Unit) -> all_unit = false
+    }
+    if all_unit {
+        labels := [String]{}
+        loop variant in definition.variants {
+            labels.push(sema_checked_variant_wire_name(variant, style))
+        }
+        return jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("title", jet_cli_status_text("{definition.name}")),
+                jet_cli_status_field("type", jet_cli_status_text("string")),
+                jet_cli_status_field("enum", jet_cli_status_texts(labels)),
+            },
+        )
+    }
+    tag_field: codable_tag_field(definition.type_markers)
+    untagged: codable_untagged(definition.type_markers)
+    branches := [JetCLIStatusValue]{}
+    loop variant in definition.variants {
+        wire_name: sema_checked_variant_wire_name(variant, style)
+        branches.push(jet_config_export_schema_variant(variant, wire_name, tag_field, untagged, items, active))
+    }
+    jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("title", jet_cli_status_text("{definition.name}")),
+            jet_cli_status_field("oneOf", jet_cli_status_array(branches)),
+        },
+    )
+}
+
+jet_config_export_schema_variant: fn(variant: Variant, wire_name: String, tag_field: String?, untagged: Bool, items: [Item], active: [String]) -> JetCLIStatusValue Never! {
+    if variant.payload == {
+        .Unit -> {
+            if tag_field == .Val(tag_key) {
+                return jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("type", jet_cli_status_text("object")),
+                        jet_cli_status_field(
+                            "properties",
+                            jet_cli_status_object(
+                                [JetCLIStatusField]{
+                                    jet_cli_status_field("{tag_key}", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("const", jet_cli_status_text(wire_name))})),
+                                },
+                            ),
+                        ),
+                        jet_cli_status_field("required", jet_cli_status_texts([String]{"{tag_key}"})),
+                    },
+                )
+            }
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("const", jet_cli_status_text(wire_name)),
+                },
+            )
+        }
+        .Single(ty, _) -> {
+            payload_schema: jet_config_export_schema_type(ty, items, active)
+            if untagged -> return payload_schema
+            if tag_field == .Val(tag_key) {
+                return jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("type", jet_cli_status_text("object")),
+                        jet_cli_status_field(
+                            "properties",
+                            jet_cli_status_object(
+                                [JetCLIStatusField]{
+                                    jet_cli_status_field("{tag_key}", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("const", jet_cli_status_text(wire_name))})),
+                                    jet_cli_status_field("value", payload_schema),
+                                },
+                            ),
+                        ),
+                        jet_cli_status_field("required", jet_cli_status_texts([String]{"{tag_key}", "value"})),
+                    },
+                )
+            }
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("type", jet_cli_status_text("object")),
+                    jet_cli_status_field(
+                        "properties",
+                        jet_cli_status_object(
+                            [JetCLIStatusField]{
+                                jet_cli_status_field("{wire_name}", payload_schema),
+                            },
+                        ),
+                    ),
+                    jet_cli_status_field("required", jet_cli_status_texts([String]{"{wire_name}"})),
+                },
+            )
+        }
+        .Named(vfields) -> {
+            props := [JetCLIStatusField]{}
+            req := [String]{}
+            if tag_field == .Val(tag_key) {
+                props.push(jet_cli_status_field("{tag_key}", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("const", jet_cli_status_text("{wire_name}"))})))
+                req.push("{tag_key}")
+            }
+            loop field in vfields {
+                field_schema: if field.ty == .Option(inner) -> jet_config_export_schema_type(inner, items, active) else -> jet_config_export_schema_type(field.ty, items, active)
+                props.push(jet_cli_status_field("{field.name}", field_schema))
+                if !(field.ty == .Option(_)) -> req.push("{field.name}")
+            }
+            body_fields := [JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text("object")),
+                jet_cli_status_field("properties", jet_cli_status_object(props)),
+            }
+            if req.len() > 0 {
+                body_fields.push(jet_cli_status_field("required", jet_cli_status_texts(req)))
+            }
+            body: jet_cli_status_object(body_fields)
+            if untagged || tag_field != None -> return body
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("type", jet_cli_status_text("object")),
+                    jet_cli_status_field(
+                        "properties",
+                        jet_cli_status_object(
+                            [JetCLIStatusField]{
+                                jet_cli_status_field("{wire_name}", body),
+                            },
+                        ),
+                    ),
+                    jet_cli_status_field("required", jet_cli_status_texts([String]{"{wire_name}"})),
+                },
+            )
+        }
+    }
+}
+
+jet_config_export_indent: fn(depth: Int) -> String Never! {
+    out := ""
+    loop _ in 0..<depth -> out = "{out}  "
+    out
+}
+
+jet_config_export_pretty_json: fn(value: JetCLIStatusValue, depth: Int) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(on) -> if on -> "true" else -> "false"
+        .Integer(number) -> "{number}"
+        .Float(text) -> "{text}"
+        .Text(text) -> jet_cli_json_string(text)
+        .Array(items) -> {
+            if items.len() == 0 -> return "[]"
+            pad: jet_config_export_indent(depth + 1)
+            close: jet_config_export_indent(depth)
+            parts := [String]{}
+            loop item in items {
+                parts.push("{pad}{jet_config_export_pretty_json(item, depth + 1)}")
+            }
+            "[\n{parts.join(",\n")}\n{close}]"
+        }
+        .Object(fields) -> {
+            if fields.len() == 0 -> return "{{}}"
+            pad: jet_config_export_indent(depth + 1)
+            close: jet_config_export_indent(depth)
+            parts := [String]{}
+            loop field in fields {
+                parts.push("{pad}{jet_cli_json_string(field.name)}: {jet_config_export_pretty_json(field.value, depth + 1)}")
+            }
+            "{{\n{parts.join(",\n")}\n{close}}}"
+        }
+    }
+}
+
+jet_config_export_yaml_is_scalar: fn(value: JetCLIStatusValue) -> Bool Never! {
+    if value == {
+        .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) -> true
+        .Array(items) -> items.len() == 0
+        .Object(fields) -> fields.len() == 0
+    }
+}
+
+jet_config_export_yaml_scalar: fn(value: JetCLIStatusValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(on) -> if on -> "true" else -> "false"
+        .Integer(number) -> "{number}"
+        .Float(text) -> "{text}"
+        .Text(text) -> config_export_yaml.to_string(text)
+        .Array(_) -> "[]"
+        .Object(_) -> "{{}}"
+    }
+}
+
+jet_config_export_yaml: fn(value: JetCLIStatusValue, depth: Int) -> String Never! {
+    pad: jet_config_export_indent(depth)
+    if jet_config_export_yaml_is_scalar(value) {
+        return "{pad}{jet_config_export_yaml_scalar(value)}"
+    }
+    if value == {
+        .Array(items) -> {
+            lines := [String]{}
+            loop item in items {
+                if jet_config_export_yaml_is_scalar(item) {
+                    lines.push("{pad}- {jet_config_export_yaml_scalar(item)}")
+                } else { lines.push("{pad}-\n{jet_config_export_yaml(item, depth + 1)}") }
+            }
+            lines.join("\n")
+        }
+        .Object(fields) -> {
+            lines := [String]{}
+            loop field in fields {
+                key: config_export_yaml.to_string(field.name)
+                if jet_config_export_yaml_is_scalar(field.value) {
+                    lines.push("{pad}{key}: {jet_config_export_yaml_scalar(field.value)}")
+                } else {
+                    lines.push("{pad}{key}:\n{jet_config_export_yaml(field.value, depth + 1)}")
+                }
+            }
+            lines.join("\n")
+        }
+        .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) -> "{pad}{jet_config_export_yaml_scalar(value)}"
+    }
+}

@@ -3260,7 +3260,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS
     }
 
     owns_flags: JET_CLI_OWNS_FLAGS.contains(command)
-    bespoke_help: command == "bind" || command == "diff" || command == "merge" || command == "perf"
+    bespoke_help: command == "bind" || command == "diff" || command == "merge" || command == "perf" || (command == "config" && args.len() > 1 && args[1] == "export")
     if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) {
         if !jet_cli_form_ported(command) -> return jet_cli_not_ported(command, color)
         return jet_cli_renderable(jet_cli_command_help(command), json)
@@ -3288,6 +3288,11 @@ jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS
     // the engine.
     if command == "env" && args.len() > 1 && args[1] == "vars" {
         return jet_cli_env_vars(jet_argv, passthrough, color, json)
+    }
+    // `jet os config export` evaluates and exports a checked Jet config value
+    // here; `trust` and `sandbox` stay owned by the engine.
+    if command == "config" && args.len() > 1 && args[1] == "export" {
+        return jet_cli_config_export(jet_argv, color, json)
     }
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan
     if command == {

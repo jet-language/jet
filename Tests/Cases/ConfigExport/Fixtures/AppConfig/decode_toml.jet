@@ -1,0 +1,36 @@
+// Decode exported.toml back into the typed AppConfig struct and assert equality.
+use {
+    files: core.files
+    toml: core.encoding.toml
+}
+
+#Codable
+EndpointConfig: struct {
+    path: String,
+    timeout_ms: Int,
+}
+
+#Codable(unknown: .Deny)
+AppConfig: struct {
+    #Rename("listen_port") port: Int,
+    host: String,
+    hosts: [String],
+    tls: Bool,
+    note: String?,
+    endpoint: EndpointConfig,
+    #Codable(.Skip) internal_tag: Int,
+}
+
+run: fn() {
+    raw: files.read("exported.toml") ?? panic("read exported.toml")
+    decoded: toml.decode<AppConfig>(raw) ?? panic("decode TOML")
+    assert_eq(decoded.port, 8080)
+    assert_eq(decoded.host, "0.0.0.0")
+    assert_eq(decoded.hosts, [String]{"a.example.com", "b.example.com"})
+    assert_eq(decoded.tls, true)
+    assert_eq(decoded.note, None)
+    assert_eq(decoded.endpoint.path, "/health")
+    assert_eq(decoded.endpoint.timeout_ms, 2500)
+    assert_eq(decoded.internal_tag, 0)
+    print("round_trip_toml: ok")
+}

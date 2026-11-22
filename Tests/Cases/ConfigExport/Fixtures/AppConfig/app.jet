@@ -1,0 +1,39 @@
+// Typed Jet config fixture for JSON, YAML, TOML, and JSON Schema export.
+#Codable
+EndpointConfig: struct {
+    path: String,
+    timeout_ms: Int,
+}
+
+#Codable(unknown: .Deny)
+AppConfig: struct {
+    #Rename("listen_port") port: Int,
+    host: String,
+    hosts: [String],
+    tls: Bool,
+    note: String?,
+    endpoint: EndpointConfig,
+    #Codable(.Skip) internal_tag: Int,
+}
+
+APP_CONFIG: AppConfig{
+    port: 8080,
+    host: "0.0.0.0",
+    hosts: [String]{"a.example.com", "b.example.com"},
+    tls: true,
+    note: None,
+    endpoint: EndpointConfig{path: "/health", timeout_ms: 2500},
+    internal_tag: 99,
+}
+
+staging_config: fn() -> AppConfig {
+    AppConfig{
+        port: 9090,
+        host: "127.0.0.1",
+        hosts: [String]{"staging.example.com"},
+        tls: false,
+        note: Val("staging"),
+        endpoint: EndpointConfig{path: "/ready", timeout_ms: 1000},
+        internal_tag: 0,
+    }
+}

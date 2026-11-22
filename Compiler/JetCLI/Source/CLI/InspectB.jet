@@ -63,7 +63,7 @@ jet_cli_inspect_b: fn(argv: [String], command: String, jet_argv: [String], args:
 // or evaluate a config surface through the compiler's comptime stage.
 JetCLIInspectBPlan: enum {
     Engine(engine: String, verb: String, argv: [String]),
-    Env(file: String, source: String, base_dir: String, color: Bool, json: Bool),
+    Env(file: String, source: String, base_dir: String, color: Bool, json: Bool, export: JetCLIConfigExportSpec?),
 }
 
 // `dispatch`: run `engine` with `argv` on inherited stdio.
@@ -76,7 +76,12 @@ JetCLIInspectBPlan: enum {
 jet_cli_inspect_b_host: fn(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
     if plan == {
         .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
-        .Env(file, source, base_dir, color, json) -> jet_cli_inspect_env_host(file, source, base_dir, color, json)
+        .Env(file, source, base_dir, color, json, export) -> {
+            if export == .Val(spec) {
+                return jet_cli_config_export_host(file, source, base_dir, spec.name, spec.format, spec.schema, color, json)
+            }
+            jet_cli_inspect_env_host(file, source, base_dir, color, json)
+        }
     }
 }
 
@@ -827,7 +832,7 @@ jet_cli_inspect_env: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
     source: cli_files.read(file) ?? return jet_cli_inspect_b_fail("E2105", "can't read config surface `{file}`: {jet_cli_io_error_text(err)}", "pass a readable `env.jet` or `config.jet` file", color, json, JET_DRIVER_EXIT_USER_ERROR)
     parent: cli_files.dirname(file)
     base_dir: if parent == "" -> "." else -> parent
-    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Env{file: file, source: source, base_dir: base_dir, color: color, json: json}}
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Env{file: file, source: source, base_dir: base_dir, color: color, json: json, export: None}}
 }
 
 jet_cli_inspect_env_output: fn(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {

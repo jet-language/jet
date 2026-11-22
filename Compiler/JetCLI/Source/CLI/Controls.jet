@@ -10,7 +10,7 @@ use {
     controls_process: core.process
     controls_sys: core.sys
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
-    jet_foundation.[JET_CLI_CONTROLS, JetCLIControlSpec, JetCLIFlagValue, jet_cli_control_flag, jet_cli_control_flag_row, jet_cli_control_named, jet_cli_control_of_flag]
+    jet_foundation.[JET_CLI_CONTROLS, JET_ENVIRONMENT_VARIABLES, JetCLIControlSpec, JetCLIFlagValue, JetEnvironmentSection, jet_cli_control_flag, jet_cli_control_flag_row, jet_cli_control_named, jet_cli_control_of_flag]
     jet_ir.[IR_OPT_PASS_NAMES]
 }
 
@@ -216,8 +216,9 @@ jet_cli_control_choices: fn(control: JetCLIControlSpec) -> [String] Never! {
 // remembered for it; without it, every control with no flag or setting. A
 // URL's user and password are never shown.
 jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    usage: "write `jet env vars [--command=COMMAND] [--json] [-- FLAGS]`"
+    usage: "write `jet env vars [--command=COMMAND] [--all] [--json] [-- FLAGS]`"
     command := String?{None}
+    include_all := false
     named := false
     value_next := false
     loop word in jet_argv {
@@ -228,6 +229,10 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
         }
         if !named {
             named = word == "vars"
+            next
+        }
+        if word == "--all" {
+            include_all = true
             next
         }
         if word == "--command" {
@@ -281,10 +286,88 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
         }
         values.push(jet_cli_control_resolve(control, flags, settings, controls_sys.get(control.variable)))
     }
+    registered := if include_all -> jet_cli_env_registered_set() else -> [JetCLIRegisteredEnvValue]{}
     if json {
-        return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, settings_word, values))}\n", "", JET_DRIVER_EXIT_OK)
+        return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, settings_word, values, include_all, registered.move()))}\n", "", JET_DRIVER_EXIT_OK)
     }
-    jet_cli_done(jet_cli_env_vars_table(settings_word, values), "", JET_DRIVER_EXIT_OK)
+    extra: if include_all -> jet_cli_env_vars_registered_table(registered) else -> ""
+    jet_cli_done("{jet_cli_env_vars_table(settings_word, values)}{extra}", "", JET_DRIVER_EXIT_OK)
+}
+
+// One registered environment variable from JET_ENVIRONMENT_VARIABLES that is
+// currently set in the process environment, with secret values redacted.
+JetCLIRegisteredEnvValue: struct {
+    name: String,
+    section: String,
+    value: String,
+    source: String,
+    redacted: Bool,
+}
+
+jet_cli_env_section_name: fn(section: JetEnvironmentSection) -> String Never! {
+    if section == {
+        .User -> "user"
+        .Maintainer -> "maintainer"
+        .Internal -> "internal"
+    }
+}
+
+jet_cli_env_is_control_variable: fn(name: String) -> Bool Never! {
+    loop control in JET_CLI_CONTROLS {
+        if control.variable == name -> return true
+    }
+    false
+}
+
+jet_cli_env_registered_section: fn(name: String) -> JetEnvironmentSection? Never! {
+    loop entry in JET_ENVIRONMENT_VARIABLES {
+        if entry.name == name -> return Val(entry.section)
+        if entry.name.ends_with("*") {
+            prefix: entry.name.slice(0..<(entry.name.len() - 1))
+            if name.starts_with(prefix) -> return Val(entry.section)
+        }
+    }
+    None
+}
+
+// Whether a variable name carries a secret whose value must never be printed.
+jet_cli_env_is_secret_name: fn(name: String) -> Bool Never! {
+    upper: name.to_upper()
+    if upper.contains("TOKEN") || upper.contains("SECRET") || upper.contains("PASSWORD") || upper.contains("PASSWD") || upper.contains("CREDENTIAL") {
+        return true
+    }
+    upper.contains("API_KEY") || upper.contains("PRIVATE_KEY") || upper.contains("AUTH_KEY") || upper.contains("ACCESS_KEY") || upper.contains("SIGNING_KEY")
+}
+
+// Redact a variable's value: secret-named variables become `***`, and URL
+// credentials (`scheme://user:secret@host`) become `scheme://***@host`.
+jet_cli_env_redact_for: fn(name: String, text: String) -> String Never! {
+    if text != "" && jet_cli_env_is_secret_name(name) -> return "***"
+    jet_cli_env_redact(text)
+}
+
+// Every registered environment variable (outside JET_CLI_CONTROLS) that is
+// currently set in the process environment, in sorted key order.
+jet_cli_env_registered_set: fn() -[Env]> [JetCLIRegisteredEnvValue] Never! {
+    out := [JetCLIRegisteredEnvValue]{}
+    names := controls_sys.vars() ?? return out
+    loop name in names.move() {
+        if jet_cli_env_is_control_variable(name) -> next
+        section: jet_cli_env_registered_section(name) ?? next
+        raw: controls_sys.get(name) ?? next
+        shown: jet_cli_env_redact_for(name, raw)
+        redacted: shown != raw
+        out.push(
+            JetCLIRegisteredEnvValue{
+                name: name,
+                section: jet_cli_env_section_name(section),
+                value: shown,
+                source: "environment",
+                redacted: redacted,
+            },
+        )
+    }
+    out
 }
 
 // A control's setting key under the settings of the command `word`
@@ -339,24 +422,47 @@ jet_cli_env_vars_redacted: fn(value: JetCLIStatusValue) -> JetCLIStatusValue Nev
     }
 }
 
-// `text` with a URL's user and password (`scheme://user:secret@host`) shown
-// as `***`; any other text as it is.
+// `text` with a URL's user and password (`scheme://user:secret@host`) and
+// secret query parameters (`?token=secret`) shown as `***`; any other text as
+// it is.
 jet_cli_env_redact: fn(text: String) -> String Never! {
     scheme: text.partition("://")
     if scheme.sep == "" -> return text.copy()  // copy: the caller keeps its text.
     authority: scheme.tail.partition("/")
     user: authority.head.rpartition("@")
-    if user.sep == "" -> return text.copy()  // copy: the caller keeps its text.
-    "{scheme.head}://***@{user.tail}{authority.sep}{authority.tail}"
+    if user.sep == "" && !text.contains("?") -> return text.copy()  // copy: the caller keeps its text.
+    host_and_rest: if user.sep != "" -> "***@{user.tail}{authority.sep}{authority.tail}" else -> "{authority.head}{authority.sep}{authority.tail}"
+    query: host_and_rest.partition("?")
+    if query.sep == "" -> return "{scheme.head}://{host_and_rest}"
+    "{scheme.head}://{query.head}?{jet_cli_env_redact_query(query.tail)}"
 }
 
-// The `env.vars` status fields: the command, and one object per control with
-// its setting key under the settings of `settings_word`.
-jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [JetCLIControlValue]) -> [JetCLIStatusField] Never! {
+jet_cli_env_redact_query: fn(query: String) -> String Never! {
+    fragment: query.partition("#")
+    parts := [String]{}
+    loop pair in fragment.head.split("&") {
+        kv: pair.partition("=")
+        if kv.sep != "" && kv.tail != "" && jet_cli_env_is_secret_query_key(kv.head) {
+            parts.push("{kv.head}=***")
+        } else { parts.push("{pair}") }
+    }
+    "{parts.join("&")}{fragment.sep}{fragment.tail}"
+}
+
+jet_cli_env_is_secret_query_key: fn(key: String) -> Bool Never! {
+    upper: key.to_upper()
+    if upper == "KEY" || upper == "AUTH" -> return true
+    jet_cli_env_is_secret_name(upper)
+}
+
+// The `env.vars` status fields: the command, one object per control with
+// its setting key under the settings of `settings_word`, and when `--all` is
+// requested, one object per set registered environment variable.
+jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [JetCLIControlValue], include_all: Bool, registered: &&[JetCLIRegisteredEnvValue]) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop resolved in values {
         control: resolved.control
-        input: if resolved.variable == .Val(text) -> jet_cli_status_text(jet_cli_env_redact(text)) else -> JetCLIStatusValue.Null
+        input: if resolved.variable == .Val(text) -> jet_cli_status_text(jet_cli_env_redact_for(control.variable, text)) else -> JetCLIStatusValue.Null
         rows.push(
             jet_cli_status_object(
                 [JetCLIStatusField]{
@@ -374,10 +480,28 @@ jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [J
             ),
         )
     }
-    [JetCLIStatusField]{
+    fields := [JetCLIStatusField]{
         jet_cli_status_field("command", jet_cli_status_optional_text(command)),
         jet_cli_status_field("controls", jet_cli_status_array(rows)),
     }
+    if include_all {
+        var_rows := [JetCLIStatusValue]{}
+        loop entry in registered.move() {
+            var_rows.push(
+                jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("name", jet_cli_status_text(entry.name)),
+                        jet_cli_status_field("section", jet_cli_status_text(entry.section)),
+                        jet_cli_status_field("value", jet_cli_status_text(entry.value)),
+                        jet_cli_status_field("source", jet_cli_status_text(entry.source)),
+                        jet_cli_status_field("redacted", jet_cli_status_bool(entry.redacted)),
+                    },
+                ),
+            )
+        }
+        fields.push(jet_cli_status_field("variables", jet_cli_status_array(var_rows)))
+    }
+    fields
 }
 
 // The `jet env vars` table: one row per control, its columns aligned, its
@@ -388,7 +512,7 @@ jet_cli_env_vars_table: fn(settings_word: String?, values: [JetCLIControlValue])
     loop resolved in values {
         source := jet_cli_env_vars_source(resolved.source)
         if resolved.shadowed && resolved.variable == .Val(input) {
-            source = "{source} (hides {resolved.control.variable}={jet_cli_env_redact(input)})"
+            source = "{source} (hides {resolved.control.variable}={jet_cli_env_redact_for(resolved.control.variable, input)})"
         }
         rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable.copy(), jet_cli_env_vars_setting(settings_word, resolved.control), jet_cli_env_vars_cell(resolved.value), source})  // copy: the row keeps its control.
     }
@@ -403,6 +527,23 @@ jet_cli_env_vars_table: fn(settings_word: String?, values: [JetCLIControlValue])
         line := ""
         loop index in 0..<widths.len() -> line = "{line}{jet_cli_pad(row[index], widths[index])}  "
         out = "{out}{line}{row[4]}\n"
+    }
+    out
+}
+
+// The registered environment variables currently set in the process
+// environment, rendered below the controls table when any are set.
+jet_cli_env_vars_registered_table: fn(registered: [JetCLIRegisteredEnvValue]) -> String Never! {
+    if registered.len() == 0 -> return ""
+    name_width := "VARIABLE".len()
+    value_width := "VALUE".len()
+    loop entry in registered {
+        if entry.name.len() > name_width -> name_width = entry.name.len()
+        if entry.value.len() > value_width -> value_width = entry.value.len()
+    }
+    out := "\n{jet_cli_pad("VARIABLE", name_width)}  {jet_cli_pad("VALUE", value_width)}  SOURCE\n"
+    loop entry in registered {
+        out = "{out}{jet_cli_pad(entry.name, name_width)}  {jet_cli_pad(entry.value, value_width)}  {entry.source}\n"
     }
     out
 }

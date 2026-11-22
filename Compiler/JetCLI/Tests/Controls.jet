@@ -143,4 +143,6 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     resolved: jet_cli_control_resolve(report, [String]{"--keep-going-report=s3://key:secret@bucket/r.tsv"}, [String]{}, None)
     table: jet_cli_env_vars_table(None, [JetCLIControlValue]{resolved})
     assert(!table.contains("secret") && table.contains("s3://***@bucket/r.tsv"), "the table hides the password: {table}")
+    assert_eq(jet_cli_env_redact("https://user:secret@example.com/r.tsv?token=tok123&mode=fast"), "https://***@example.com/r.tsv?token=***&mode=fast")
+    assert_eq(jet_cli_env_redact("https://example.com/r.tsv?api_key=abc&ok=1"), "https://example.com/r.tsv?api_key=***&ok=1")
 }
