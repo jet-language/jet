@@ -758,7 +758,8 @@ sema_ownership_type_is_copy: fn(ty: Type) -> Bool Never! {
         .FixedList(inner, _) -> sema_ownership_type_is_copy(inner)
         .InlineRange(_, _, _) -> true
         .Named(name) -> name == "Unit" || name == "Never" || name == "IOOperation"
-        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Union(_) | .Case(_, _) -> false
+        .Apply(name, args) -> name == "@" && args.len() == 1
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) -> false
     }
 }
 
@@ -4821,13 +4822,41 @@ sema_ownership_receiver_consumer: fn(callee: String) -> String Never! {
     if callee.contains(".") -> "`{callee}`" else -> ""
 }
 
-sema_ownership_check_method_call_as: fn(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+// Calls still count as touching the whole receiver until the native emitter
+// keeps disjoint field borrows of one local across statements (spec.md); flip
+// to `true` when JetIR lowers disjoint field borrows across method calls.
+SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT: false
+
+// Expand `receiver_places` into per-field projected accesses when disjoint
+// method footprints are enabled and the callee has a bounded field footprint;
+// otherwise record whole-receiver accesses.
+sema_ownership_method_receiver_accesses: fn(receiver_places: [SemaOwnershipPlace], receiver_convention: AccessConvention, receiver_footprint: [String]?, disjoint_enabled: Bool, span: Span, reserved: Bool) -> [SemaOwnershipCallAccess] Never! {
+    retained: !reserved && receiver_convention != AccessConvention.Move
+    if disjoint_enabled && receiver_footprint == .Val(fields) {
+        accesses := [SemaOwnershipCallAccess]{}
+        loop receiver_place in receiver_places {
+            loop field in fields {
+                projected := sema_ownership_place_snapshot(receiver_place)
+                projected.projections.push(".{field}")
+                projected.typed_projections.push(SemaOwnershipProjection.Field{name: "{field}", span: span})
+                accesses.push(SemaOwnershipCallAccess{place: projected, access: receiver_convention, span: span, reserved: reserved, retained: retained})
+            }
+        }
+        return accesses
+    }
+    loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span, reserved: reserved, retained: retained}
+}
+
+sema_ownership_check_method_call_with_footprint: fn(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, receiver_footprint: [String]?, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
     accepted: sema_ownership_check_call_receiver_as(state, receiver, receiver_convention, capability, sema_window_plain_name(callee), consumer, params, scopes, span, change_span, diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: receiver_convention, reserved: reserved}
     receiver_places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
-    // Rust `record_call_receiver_access` keeps no loan for a consuming receiver.
-    accesses: loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span, reserved: reserved, retained: !reserved && receiver_convention != AccessConvention.Move}
+    accesses: sema_ownership_method_receiver_accesses(receiver_places, receiver_convention, receiver_footprint, SEMA_OWNERSHIP_DISJOINT_METHOD_FOOTPRINT, span, reserved)
     sema_ownership_check_call_arguments_with_accesses(state, callee, params, Val(receiver_convention), args, scopes, diagnostics, accesses, accepted, true, borrowed_read, false)
+}
+
+sema_ownership_check_method_call_as: fn(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    sema_ownership_check_method_call_with_footprint(state, callee, consumer, receiver, receiver_convention, None, capability, reserved, borrowed_read, params, args, scopes, span, change_span, diagnostics)
 }
 
 // A Read receiver the call materializes into its own value before any

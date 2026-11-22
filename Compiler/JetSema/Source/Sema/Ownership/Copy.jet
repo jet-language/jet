@@ -352,7 +352,7 @@ sema_copy_copyable_scalar: fn(ty: Type) -> Bool Never! {
         .Quantity(_, _) -> true
         .Tagged(_, inner) -> sema_copy_copyable_scalar(inner)
         .InlineRange(base, _, _) -> sema_copy_copyable_scalar(base)
-        .Apply(name, args) -> name == "Ptr" && args.len() == 1
+        .Apply(name, args) -> (name == "Ptr" || name == "@") && args.len() == 1
         .Named(name) -> name == "Complex" || name == "Complex32" || name == "Range" || name == "IOOperation"
         .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) -> false
     }

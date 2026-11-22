@@ -871,6 +871,11 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                 jfmt_fmt_type(f, args[0])
                 return
             }
+            if name == "@" && args.len() == 1 {
+                jfmt_write(f, "@")
+                jfmt_fmt_type(f, args[0])
+                return
+            }
             jfmt_write(f, name)
             jfmt_write(f, "<")
             type_source: jfmt_source_list_at(f, source, JFMT_DELIM_ANGLE)
@@ -1584,11 +1589,16 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, if pipe_value_is_name(name) || f.pipe_names.contains(name) -> "<>" else -> name)
         }
         .Call(call, _) -> {
-            // The index of `m[key, or: start]` (expr_map_slot_or).
+            // The index of `m[key, or: start]` (expr_map_slot_or) and live links `@expr`.
             if expr_is_map_slot_or(call) {
                 jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_OR_FALLBACK)
                 jfmt_write(f, ", or: ")
                 jfmt_fmt_expr(f, call.args[1].expr, JFMT_PREC_OR_FALLBACK)
+            } else if call.name == "__jet_link" && call.args.len() == 1 {
+                if prec > JFMT_PREC_UNARY -> jfmt_write(f, "(")
+                jfmt_write(f, "@")
+                jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_UNARY)
+                if prec > JFMT_PREC_UNARY -> jfmt_write(f, ")")
             } else { jfmt_fmt_call(f, call) }
         }
         .Unary(op, inner, _, _) -> {

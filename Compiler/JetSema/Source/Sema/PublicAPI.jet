@@ -384,6 +384,26 @@ sema_public_api_solved_effects: fn(function: Func, functions: [FnBody]) -> Strin
     " -[*]>"
 }
 
+// The receiver footprint published for a public method (`; footprint = self.[a, b]`):
+// uses the solved/stated footprint on its checked FnBody, falling back to any
+// stated receiver footprint on the AST declaration when no body is attached.
+sema_public_api_method_footprint: fn(function: Func, functions: [FnBody]) -> String Never! {
+    if !sema_footprint_has_receiver(function) -> return ""
+    loop body in functions {
+        if body.source_span == function.span {
+            if body.receiver_footprint == .Val(fields) {
+                return "; footprint = {sema_footprint_format(fields)}"
+            }
+            return ""
+        }
+    }
+    if function.params[0].declared_footprint == .Val(declared) {
+        names := (loop entry in declared -> entry.name)
+        return "; footprint = {sema_footprint_format(sema_footprint_sorted_unique(names))}"
+    }
+    ""
+}
+
 sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody], units: SemaPublicAPISpellings) -> PublicAPIItem Never! {
     ret: if function.return_type == .Val(ty) -> " {sema_public_api_type(ty, units)}" else -> ""
     PublicAPIItem{kind: "fn", name: name.copy(), signature: "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){sema_public_api_solved_effects(function, functions)}{ret}"}
@@ -392,7 +412,10 @@ sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody], units:
 sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
     loop method in methods {
         if method.is_pub && sema_public_api_named(method.name) && !method.compiler_generated {
-            rows.push(sema_public_api_fn("{owner}.{method.name}", method, functions, units))
+            item := sema_public_api_fn("{owner}.{method.name}", method, functions, units)
+            footprint: sema_public_api_method_footprint(method, functions)
+            if footprint != "" -> item.signature = "{item.signature}{footprint}"
+            rows.push(item)
         }
     }
 }

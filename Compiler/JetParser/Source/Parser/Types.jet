@@ -22,11 +22,13 @@ use {
         diagnostic_with_edit,
         type_name,
         type_union_sort,
+        foundation_link_type,
         foundation_named_type,
     ]
     jet_lexer.[
         TOKEN_AMP,
         TOKEN_AND_AND,
+        TOKEN_AT,
         TOKEN_BANG,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -366,6 +368,11 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             elem: parser_parse_type_atom(state, depth + 1)
             ParsedType{ty: Type.Apply{name: "Ptr", args: [Type]{elem.ty}}, span: parser_cover(start.span, elem.span)}
         }
+        TOKEN_AT -> {
+            parser_bump(state)
+            elem: parser_parse_type_atom(state, depth + 1)
+            ParsedType{ty: foundation_link_type(elem.ty), span: parser_cover(start.span, elem.span)}
+        }
         TOKEN_KW_FN -> parser_parse_function_type(state, depth + 1)
         TOKEN_LBRACKET -> parser_parse_collection_type(state, depth + 1)
         TOKEN_LPAREN -> parser_parse_tuple_type(state, depth + 1)
@@ -387,7 +394,13 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
             parser_bump(state)
-            name := parser_value(state, start)
+            raw_name: parser_value(state, start)
+            is_link := false
+            name := raw_name
+            if kind == TOKEN_IDENT && !site_value && state.derive_template_depth == 0 && raw_name.starts_with("@") && raw_name.len() > 1 {
+                is_link = true
+                name = String.from_bytes(raw_name.bytes()[1..<raw_name.bytes().len()]) ?? ""
+            }
             end := start.span
             head := start.span
             if site_value {
@@ -403,7 +416,9 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 end = member.span
             }
             if parser_current_kind(state) == TOKEN_LT {
-                return parser_parse_applied_type(state, name, parser_cover(start.span, end), depth + 1)
+                applied: parser_parse_applied_type(state, name, parser_cover(start.span, end), depth + 1)
+                if is_link -> return ParsedType{ty: foundation_link_type(applied.ty), span: applied.span}
+                return applied
             }
             // `Box<>`: `<>` is one token, the value a pipe step receives, so
             // an empty type-argument list is read and refused here.
@@ -411,7 +426,8 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 empty: parser_bump(state)
                 diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{name}<>` has an empty type-argument list", "A type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{name}<Int>`, or drop the `<>`")
                 state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
-                return ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, empty.span)}
+                base_ty: foundation_named_type(name)
+                return ParsedType{ty: if is_link -> foundation_link_type(base_ty) else -> base_ty, span: parser_cover(start.span, empty.span)}
             }
             // E0119: a fact read `T.reflect().fact`, a build fact such as
             // `#build.target.os` or a `$fact` segment reads a compile-time
@@ -428,7 +444,8 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             if name.starts_with("$") || name.contains(".$") || parser_build_fact_type_path(name) {
                 parser_add_error_code(state, "E0119", head, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
             }
-            ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
+            base_ty: foundation_named_type(name)
+            ParsedType{ty: if is_link -> foundation_link_type(base_ty) else -> base_ty, span: parser_cover(start.span, end)}
         }
     }
 }

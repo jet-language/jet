@@ -1,0 +1,163 @@
+// Counted live-link (`@T`) storage and dynamic exclusivity helpers.
+//
+// A kept `@T` link allocates one 8-aligned block with a 24-byte header before
+// the inline `T` payload:
+// - `+0`: reference count (non-atomic for local links, atomic via `Refcount.jet`
+//   for task-crossing / `#Shared` links; starts at 1);
+// - `+8`: dynamic exclusivity state (`0` idle, `> 0` active reader count,
+//   `-1` active exclusive writer);
+// - `+16`: payload byte size (so release frees `payload_bytes + 24` cleanly);
+// - `+24`: inline `T` payload (`jet_rt_link_data(handle) == handle + 24`).
+//
+// Zero `#Unsafe` blocks: built directly on `Alloc.jet`, `Refcount.jet`,
+// `Text.jet` word helpers, and `Trap.jet`.
+
+RT_LINK_HEADER: I64{24}
+
+rt_link_conflict_stop: fn(writing: Bool) {
+    msg: if writing -> rt_static_text("simultaneous write access to live link") else -> rt_static_text("simultaneous read and write access to live link")
+    trap_host_fault(rt_text_data(msg), rt_text_len(msg))
+}
+
+#Export(c) jet_rt_link_alloc_local: fn(payload_bytes: I64) -> I64 {
+    if (payload_bytes < I64{0} || payload_bytes > I64{9223372036854775807} - RT_LINK_HEADER) {
+        rt_seq_capacity_overflow_stop()
+        return I64{0}
+    }
+    total: wrapping(payload_bytes + RT_LINK_HEADER)
+    block: jet_rt_alloc_8(total)
+    if (block == I64{0}) { return I64{0} }
+    rt_text_store(block, I64{1})
+    rt_text_store(wrapping(block + I64{8}), I64{0})
+    rt_text_store(wrapping(block + I64{16}), payload_bytes)
+    block
+}
+
+#Export(c) jet_rt_link_retain_local: fn(handle: I64) -> I64 {
+    if (handle == I64{0}) { return I64{0} }
+    count: rt_text_word(handle)
+    if (count >= I64{0}) {
+        if (count == I64{9223372036854775807}) { rt_seq_capacity_overflow_stop() }
+        rt_text_store(handle, wrapping(count + I64{1}))
+    }
+    handle
+}
+
+// Decrements a local link's count and returns true when the last owner leaves
+// (the caller drops the payload at `handle + 24` and calls `jet_rt_link_free_local`).
+#Export(c) jet_rt_link_release_local: fn(handle: I64) -> Bool {
+    if (handle == I64{0} || main_process_ending != I64{0}) { return false }
+    count: rt_text_word(handle)
+    if (count < I64{0}) { return false }
+    next_count: wrapping(count - I64{1})
+    rt_text_store(handle, next_count)
+    next_count == I64{0}
+}
+
+#Export(c) jet_rt_link_free_local: fn(handle: I64) {
+    if (handle == I64{0}) { return }
+    payload_bytes: rt_text_word(wrapping(handle + I64{16}))
+    jet_rt_free_8(handle, wrapping(payload_bytes + RT_LINK_HEADER))
+}
+
+#Export(c) jet_rt_link_alloc_shared: fn(payload_bytes: I64) -> I64 {
+    if (payload_bytes < I64{0} || payload_bytes > I64{9223372036854775807} - RT_LINK_HEADER) {
+        rt_seq_capacity_overflow_stop()
+        return I64{0}
+    }
+    total: wrapping(payload_bytes + RT_LINK_HEADER)
+    block: jet_rt_alloc_8(total)
+    if (block == I64{0}) { return I64{0} }
+    rc_init(block)
+    sync_store(wrapping(block + I64{8}), I64{0})
+    rt_text_store(wrapping(block + I64{16}), payload_bytes)
+    block
+}
+
+#Export(c) jet_rt_link_retain_shared: fn(handle: I64) -> I64 {
+    if (handle == I64{0}) { return I64{0} }
+    jet_rt_rc_retain(handle)
+    handle
+}
+
+#Export(c) jet_rt_link_release_shared: fn(handle: I64) -> Bool {
+    if (handle == I64{0}) { return false }
+    jet_rt_rc_release(handle)
+}
+
+#Export(c) jet_rt_link_free_shared: fn(handle: I64) {
+    jet_rt_link_free_local(handle)
+}
+
+// Local dynamic exclusivity checks: fail closed if an active writer overlaps
+// a reader or a second writer.
+#Export(c) jet_rt_link_read_enter_local: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    state: rt_text_word(slot)
+    if (state < I64{0}) {
+        rt_link_conflict_stop(false)
+        return
+    }
+    rt_text_store(slot, wrapping(state + I64{1}))
+}
+
+#Export(c) jet_rt_link_read_leave_local: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    state: rt_text_word(slot)
+    if (state > I64{0}) {
+        rt_text_store(slot, wrapping(state - I64{1}))
+    }
+}
+
+#Export(c) jet_rt_link_write_enter_local: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    state: rt_text_word(slot)
+    if (state != I64{0}) {
+        rt_link_conflict_stop(true)
+        return
+    }
+    rt_text_store(slot, I64{-1})
+}
+
+#Export(c) jet_rt_link_write_leave_local: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    rt_text_store(slot, I64{0})
+}
+
+// Atomic exclusivity checks for task-crossing `#Shared` links.
+#Export(c) jet_rt_link_read_enter_shared: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    loop {
+        state: sync_load(slot)
+        if (state < I64{0}) {
+            rt_link_conflict_stop(false)
+            return
+        }
+        if (sync_cas(slot, state, wrapping(state + I64{1})) == state) { return }
+    }
+}
+
+#Export(c) jet_rt_link_read_leave_shared: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    _ := sync_add(slot, I64{-1})
+}
+
+#Export(c) jet_rt_link_write_enter_shared: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    if (sync_cas(slot, I64{0}, I64{-1}) != I64{0}) {
+        rt_link_conflict_stop(true)
+    }
+}
+
+#Export(c) jet_rt_link_write_leave_shared: fn(handle: I64) {
+    slot: wrapping(handle + I64{8})
+    sync_store(slot, I64{0})
+}
+
+#Export(c) jet_rt_link_data: fn(handle: I64) -> I64 {
+    wrapping(handle + RT_LINK_HEADER)
+}
+
+#Export(c) jet_rt_link_same: fn(left: I64, right: I64) -> Bool {
+    left == right
+}

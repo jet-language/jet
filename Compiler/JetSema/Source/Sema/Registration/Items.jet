@@ -512,6 +512,9 @@ SemaRegistrationFunction: struct {
     // A method of a conditional impl (`impl Pair<T: Priced>.Describe`): the
     // owner's parameters with the bounds the impl applies under.
     impl_conditions: [TypeParam]{[TypeParam]{}},
+    // Solved or stated receiver field footprint (sorted stored field names);
+    // None when the method touches whole `self` or has no non-consuming receiver.
+    receiver_footprint: [String]?{None},
 }
 
 SemaRegistrationField: struct {
@@ -5484,6 +5487,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() {
         sema_registration_note_root_functions(graph, module_index)
+        sema_footprint_populate_module(graph.modules[module_index])
     }
     sema_serde_index_codec_methods(graph)
     sema_derive_index_methods(graph)

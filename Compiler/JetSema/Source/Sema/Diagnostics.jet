@@ -657,6 +657,7 @@ sema_type_show: fn(ty: Type) -> String Never! {
         .Measure(measure) -> "{measure_expression(measure)} (a compile-time measure)"
         .Apply(name, args) -> {
             if name == "Ptr" && args.len() == 1 -> return "`*{type_name(args[0])}`"
+            if name == "@" && args.len() == 1 -> return "`@{type_name(args[0])}`"
             names: loop arg in args -> type_name(arg)
             "`{name}`<{names.join(", ")}>"
         }
