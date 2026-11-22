@@ -1,0 +1,24 @@
+# Freestanding witness 2/5 (`allocator_firmware`): runs with target-selected
+# marshalling on `board.sensor_v1` and native tiers around the one shared
+# Prelude using core.mem.Fixed, with no second Prelude, and refuses host OS APIs.
+fixture: Fixtures/AllocatorFirmware
+env: NO_COLOR=1
+step: jet inspect target board.sensor_v1
+exit: 0
+stdout: ~ "Triple: thumbv7em-none-eabihf" # board target triple
+stdout: ~ "Environment: no-os" # no-OS board environment
+stdout: ~ "Provides: Target.Memory, Target.MMIO, Target.Hardware," # target-selected firmware providers
+stdout: ~ "Lacks: Target.Allocator," # no heap allocator; witness supplies Fixed allocator
+step: jet check --target=board.sensor_v1 main.jet
+exit: 0
+stderr: ~ "has no problems" # firmware witness checks with Fixed allocator and the one Prelude
+stderr: !~ "Jet.MissingAllocatorFact" # no allocator fact error
+step: jet check --target=board.sensor_v1 host_os.jet
+exit: nonzero
+stderr: ~ "Jet.OsApiOnNoOsTarget" # hosted OS API is refused on board.sensor_v1
+step: jet run -O0 main.jet
+exit: 0
+step: jet build -O2 main.jet
+exit: 0
+step: built
+exit: 0

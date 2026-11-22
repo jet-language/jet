@@ -1,0 +1,22 @@
+# Freestanding witness 1/5 (`heap_free_core`): runs with target-selected
+# marshalling on `wasm.no-os` and native tiers around the one shared Prelude,
+# with no second Prelude, and refuses OS APIs on `wasm.no-os`.
+fixture: Fixtures/HeapFreeCore
+env: NO_COLOR=1
+step: jet inspect target wasm.no-os
+exit: 0
+stdout: ~ "Environment: no-os" # target selects no-OS environment
+stdout: ~ "Provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup" # target-selected marshalling
+stdout: ~ "Lacks: Target.Allocator," # no heap allocator on wasm.no-os
+step: jet check --target=wasm.no-os main.jet
+exit: 0
+stderr: ~ "has no problems" # heap-free witness checks with the one shared Prelude
+step: jet check --target=wasm.no-os host_os.jet
+exit: nonzero
+stderr: ~ "Jet.OsApiOnNoOsTarget" # OS API is refused on wasm.no-os
+step: jet run -O0 main.jet
+exit: 0
+step: jet build -O2 main.jet
+exit: 0
+step: built
+exit: 0

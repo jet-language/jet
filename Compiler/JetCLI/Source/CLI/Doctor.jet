@@ -203,12 +203,21 @@ jet_cli_doctor_io_kind: fn(error: IOError) -> String Never! {
     }
 }
 
+jet_cli_doctor_first_line: fn(output: String?) -> String? Never! {
+    text: output ?? return None
+    trimmed: text.trim()
+    if trimmed == "" -> return None
+    first: trimmed.partition("\n").head.trim()
+    if first == "" -> None else -> Val(first)
+}
+
 jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
     out.push(jet_cli_doctor_check_c_compiler())
     // pkg-config discovers C libraries that are not in the hangar.
-    if jet_cli_doctor_command_ok([String]{"pkg-config", "--version"}) {
-        out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", "found"))
+    if jet_cli_doctor_stdout([String]{"pkg-config", "--version"}) == .Val(raw_pkg) {
+        detail: if jet_cli_doctor_first_line(Val(raw_pkg)) == .Val(ver) -> "found ({ver})" else -> "found"
+        out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", detail))
     } else {
         out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
     }
@@ -239,8 +248,9 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
         }
     }
     // cargo builds the bridge crate of an `extern rust` import.
-    if jet_cli_doctor_command_ok([String]{"cargo", "--version"}) {
-        out.push(jet_cli_doctor_ok("rust-ffi", "cargo", "found (builds `extern rust` bridge crates)"))
+    if jet_cli_doctor_stdout([String]{"cargo", "--version"}) == .Val(raw_cargo) {
+        detail: if jet_cli_doctor_first_line(Val(raw_cargo)) == .Val(ver) -> "found ({ver}; builds `extern rust` bridge crates)" else -> "found (builds `extern rust` bridge crates)"
+        out.push(jet_cli_doctor_ok("rust-ffi", "cargo", detail))
     } else {
         out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
     }
