@@ -202,13 +202,13 @@ contract.
 ### Data-graph model
 
 [`GraphProjection.jet`](../../../Compiler/JetDevServer/Source/Canvas/GraphProjection.jet)
-and [`GraphJson.jet`](../../../Compiler/JetDevServer/Source/Canvas/GraphJson.jet) map
+and [`GraphJSON.jet`](../../../Compiler/JetCanvas/Source/Projection/GraphJSON.jet) map
 source to graph facts. A stable `node_descriptor_id` lets the render layer use
 descriptor metadata instead of re-deriving style from `kind` string matching.
 
 ### Semantic node descriptors
 
-[`NodeCatalog.jet`](../../../Compiler/JetDevServer/Source/Canvas/NodeCatalog.jet) owns
+[`NodeCatalog.jet`](../../../Compiler/JetCanvas/Source/Projection/NodeCatalog.jet) owns
 presentation, palette, transaction, and default-editor metadata for each node
 kind. The descriptor shape is conceptually:
 

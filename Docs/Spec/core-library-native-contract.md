@@ -84,10 +84,10 @@ a panic during unwinding: its own Stop report goes to stderr, no further
 cleanup runs, and the process exits 70. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 Gated rows prove these rules on every tier:
-- the goldens `Tests/Run/Ownership/ReleaseDeferPanic` and `ReleaseDeferLifo` and
+- the goldens `Tests/Run/Ownership/ReleaseDeferPanic.jet` and `ReleaseDeferLifo.jet` and
   the case `resource_close/cleanup_runs_once_in_lifo_order_on_all_scope_exits`
   prove that the registered closes run once, in LIFO order, on every exit;
-- the golden `Tests/Run/Ownership/ReleaseDeferClosePanic` proves that a panic
+- the golden `Tests/Run/Ownership/ReleaseDeferClosePanic.jet` proves that a panic
   inside a close is process-fatal;
 - the case `task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier`
   proves that a cancel arriving at cleanup entry waits until the close

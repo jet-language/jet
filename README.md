@@ -228,7 +228,7 @@ read [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues through
 | [`Core/`](Core/) | The core library |
 | [`Jetpack/`](Jetpack/) | The package manager |
 | [`Examples/`](Examples/README.md) | Runnable examples, each with checked output |
-| [`tests/`](tests/) | Language, diagnostic and regression tests |
+| [`Tests/`](Tests/) | Language, diagnostic and regression tests |
 | [`Docs/`](Docs/README.md) | The spec, guides and the website |
 | [`Tools/`](Tools/) | Contributor tooling and the project board |
 

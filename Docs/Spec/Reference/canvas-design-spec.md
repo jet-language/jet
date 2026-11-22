@@ -6,7 +6,7 @@ source-backed editing. It is for Canvas UI contributors and clients that render
 the graph protocol. Executable projection facts come from
 [`GraphProjection.jet`](../../../Compiler/JetDevServer/Source/Canvas/GraphProjection.jet),
 node metadata from
-[`NodeCatalog.jet`](../../../Compiler/JetDevServer/Source/Canvas/NodeCatalog.jet),
+[`NodeCatalog.jet`](../../../Compiler/JetCanvas/Source/Projection/NodeCatalog.jet),
 and browser behavior from the Canvas JavaScript under
 [`Compiler/JetCanvas/Source/CanvasAssets/JS`](../../../Compiler/JetCanvas/Source/CanvasAssets/JS). The wire fields and
 transaction rules are in [`canvas-protocol.md`](canvas-protocol.md).

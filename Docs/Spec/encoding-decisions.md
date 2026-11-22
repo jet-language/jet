@@ -19,8 +19,8 @@ Source handle protocol methods preserve the shipped `IO` effect. They do not
 acquire ambient `FS` authority; native file constructors retain their existing
 `FS` effect until the holder cutover.
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
-lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
-[`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
+lives in [`Tests/Cases/EncodingCorpus/`](../../Tests/Cases/EncodingCorpus/),
+[`Tests/Cases/EncodingParity/`](../../Tests/Cases/EncodingParity/), and the
 encoding examples under [`Examples/Data`](../../Examples/Data/).
 
 The rules below describe durable contracts and their reasons. Decision IDs are
@@ -758,9 +758,9 @@ run: fn() (XMLError | [FieldError])! {
     }
     catalog: xml.decode<Catalog>(source) ?? return
     wire: xml.to_bytes(document, xml.XMLRenderOptions.safe()) ?? return
-    copy: xml.decode_bytes<Catalog>(wire) ?? return
+    decoded: xml.decode_bytes<Catalog>(wire) ?? return
     print(catalog.book.len())
-    print(copy.book[0].title)
+    print(decoded.book[0].title)
 }
 ```
 
@@ -890,13 +890,10 @@ Compiler and runtime code remain std-only; new compiler diagnostics remain
 I4-gated, while runtime `EncodingError` text follows the shared law.
 
 ```jet
-use {
-    encoding: core.encoding
-    json: core.encoding.json
-}
+use json: core.encoding.json
 
 run: fn() {
-    data: json.parse("{\"b\":-0.0,\"a\":1e30}") ?? panic("parse")
+    data: json.parse(`{"b":-0.0,"a":1e30}`) ?? panic("parse")
     canonical: json.canonical(data) ?? panic("canonical")
 
     print(canonical)
@@ -1074,10 +1071,7 @@ misuse. Terminal clone/equality follows the shared reader/writer law.
 
 
 ```jet
-use {
-    encoding: core.encoding
-    cbor: core.encoding.cbor
-}
+use cbor: core.encoding.cbor
 
 #Codable
 Packet: struct { id: Int, payload: [U8] }
@@ -1085,16 +1079,16 @@ Packet: struct { id: Int, payload: [U8] }
 Header: struct { id: Int }
 
 run: fn() {
-    packet: Packet{ id: 7, payload: [222, 173] }
+    packet: Packet{ id: 7, payload: [U8]{222, 173} }
     bytes: cbor.to_bytes(packet) ?? panic("encode")
-    copy: cbor.decode<Packet>(bytes) ?? panic("decode")
+    decoded: cbor.decode<Packet>(bytes) ?? panic("decode")
     stable: cbor.to_bytes_canonical(packet) ?? panic("canonical")
     data: cbor.parse(cbor.to_bytes(Header{ id: 7 }) ?? panic("header"), cbor.CBOROptions.safe()) ?? panic("parse")
-    _: copy
+    _: decoded
     _: stable
     _: data
 
-    malformed: [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
+    malformed: [U8]{0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE}
     failed: cbor.decode<Packet>(malformed) ?? panic("expected failure")
     _: failed
 }
@@ -1279,7 +1273,7 @@ path always round-trips encoder output and rejects ambiguous text at the exact
 byte; the expert path has narrow named interoperability controls on the same
 mechanical decoder, not a second permissive codec. (D-ENCBASE-STRICT1=A)
 
-```jet
+```jet ignore
 use {
     base64: core.encoding.base64
     base32: core.encoding.base32
@@ -1326,7 +1320,7 @@ the observable rejection text. (D-BYTESDECODE1=A)
 
 Use external encoding corpora under [`Tests/Fixtures/Encoding`](../../Tests/Fixtures/Encoding/)
 and their `MANIFEST.tsv` rows for URL, license, and SHA-256 metadata.
-[`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs) verifies each
+[`Tests/Cases/EncodingCorpus/`](../../Tests/Cases/EncodingCorpus/) verifies each
 manifest before use. Label local hostile oracles `local`; they are not
 independent RFC corpora. Checked examples cover whole-value breadth, base
 allowances, reader/writer lifecycle, and shared types; their goldens are under
@@ -1335,7 +1329,7 @@ The matched Python fixture is
 [`EncodingJSONStream.py`](../../Examples/Data/JSON/EncodingJSONStream.py).
 It uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and
 `json.load` for the same canonical file round trip. The parity test must
-exercise the Jet fixture on AOT, resident JIT, and the forced interpreter;
+exercise the Jet fixture on `O0`, `O1`, and `O2`;
 E0956 and E0953 are tier failures, not accepted parity results.
 
 
@@ -1343,8 +1337,8 @@ Static migration diagnostics `L2001` and `E2002` for `cbor.encode` use
 [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet), the
 diagnostic registry, snapshots in
 [`Tests/UI/CBOREncodeDeprecated`](../../Tests/UI/CBOREncodeDeprecated/) and
-[`Tests/UI/cbor_encode_removed`](../../Tests/UI/cbor_encode_removed/), and
-[`tests/encoding_edition.rs`](../../tests/encoding_edition.rs). Runtime
+[`Tests/UI/EncodingEdition`](../../Tests/UI/EncodingEdition/), and
+[`Tests/Cases/EncodingEdition/`](../../Tests/Cases/EncodingEdition/). Runtime
 parse/decode failures remain typed Core values, not compiler diagnostics.
 
 ## Encoding provider ownership

@@ -1,0 +1,222 @@
+// Guard: Examples grant only the permissions they use.
+// Runs `jet explain effects --json` across every Examples/ program and package
+// with an `authority: { allow: [...] }` block and fails if any grant is unused.
+use {
+    ex_grants_files: core.files
+    ex_grants_process: core.process
+}
+
+// Examples that intentionally keep an extra grant in `allow:` to demonstrate
+// upper-bound authority or `build: fn(b: Build)` build-time rights (which
+// `jet explain effects` on `run.jet` does not inspect).
+EX_GRANTS_EXEMPT: [String]{
+    "Examples/ErrorsAndEffects/Effects/AuthorityPackageGrant.jet",
+    "Examples/Modules/Packages/GrantLine/package.jet",
+    "Examples/Modules/Packages/PluginFailure/package.jet",
+    "Examples/Metaprogramming/BuildTime/BuildEntryDiscovery/package.jet",
+    "Examples/Metaprogramming/BuildTime/CompilerAPI/package.jet",
+    "Examples/Metaprogramming/BuildTime/ProgrammableBuild/package.jet",
+    "Examples/Metaprogramming/BuildTime/TwoTargets/package.jet",
+    "Examples/Tooling/Performance/InstrumentEveryFunction/package.jet",
+}
+
+ExGrantTarget: struct {
+    manifest: String,
+    entries: [String],
+    grants: [String],
+}
+
+ex_grants_is_exempt: fn(path: String) -> Bool {
+    loop item in EX_GRANTS_EXEMPT {
+        if item == path -> return true
+    }
+    false
+}
+
+ex_grants_strip_comments: fn(text: String) -> String {
+    kept := [String]{}
+    loop line in text.lines() {
+        trimmed: line.trim()
+        if trimmed.starts_with("//") -> next
+        kept.push(line)
+    }
+    kept.join("\n")
+}
+
+ex_grants_parse_allow: fn(text: String) -> [String] {
+    cleaned: ex_grants_strip_comments(text)
+    raw: cleaned.bytes()
+    if s3_truth_find_bytes(raw, "authority:".bytes(), 0) < 0 -> return [String]{}
+    allow_pos: s3_truth_find_bytes(raw, "allow:".bytes(), 0)
+    if allow_pos < 0 -> return [String]{}
+    open_pos: s3_truth_find_bytes(raw, "[".bytes(), allow_pos)
+    if open_pos < 0 -> return [String]{}
+    close_pos: s3_truth_find_bytes(raw, "]".bytes(), open_pos + 1)
+    if close_pos < 0 -> return [String]{}
+    inner: policy_slice_raw(raw, open_pos + 1, close_pos)
+    items := [String]{}
+    loop part in inner.split(",") {
+        trimmed: part.trim()
+        if trimmed != "" -> items.push(trimmed)
+    }
+    items
+}
+
+ex_grants_extract_reaches: fn(json_text: String) -> [String] {
+    raw: json_text.bytes()
+    start: s3_truth_find_bytes(raw, `"reaches":[`.bytes(), 0)
+    if start < 0 -> return [String]{}
+    needle: `"effect":"`.bytes()
+    effects := [String]{}
+    at := start
+    loop {
+        pos: s3_truth_find_bytes(raw, needle, at)
+        if pos < 0 -> break
+        val_start: pos + needle.len()
+        end := val_start
+        escaped := false
+        loop end < raw.len() {
+            b: raw[end]
+            if escaped {
+                escaped = false
+                end += 1
+                next
+            }
+            if b == (U8{92}) {
+                escaped = true
+                end += 1
+                next
+            }
+            if b == (U8{34}) -> break
+            end += 1
+        }
+        if end > val_start {
+            effects.push(policy_slice_raw(raw, val_start, end).replace("\\\"", "\""))
+        }
+        at = end + 1
+    }
+    effects
+}
+
+ex_grants_grant_base: fn(grant: String) -> String { grant.split("(").to_list()[0].trim() }
+
+ex_grants_is_used: fn(grant: String, reaches: [String]) -> Bool {
+    base: ex_grants_grant_base(grant)
+    loop eff in reaches {
+        if eff == grant || eff == base -> return true
+        if eff.starts_with("{base}.") || eff.starts_with("{base}(") -> return true
+        if base.starts_with("{eff}.") -> return true
+    }
+    false
+}
+
+ex_grants_collect_pkg_jet_files: fn(dir: String) -> [String] {
+    entries: ex_grants_files.list_dir(dir) ?? return [String]{}
+    paths := [String]{}
+    loop entry in entries -> paths.push(entry.path.copy())
+    paths.sort()
+    out := [String]{}
+    loop path in paths {
+        if ex_grants_files.is_dir(path) {
+            if path.ends_with("/.jet") || path.ends_with("/fixture-state") -> next
+            loop nested in ex_grants_collect_pkg_jet_files(path) -> out.push(nested)
+        } else if path.ends_with(".jet") && !path.ends_with("/package.jet") && !path.ends_with("/workspace.jet") {
+            out.push(path)
+        }
+    }
+    out
+}
+
+ex_grants_collect_targets: fn(dir: String, out: &[ExGrantTarget]) {
+    entries: ex_grants_files.list_dir(dir) ?? return
+    paths := [String]{}
+    loop entry in entries -> paths.push(entry.path.copy())
+    paths.sort()
+    pkg_path: "{dir}/package.jet"
+    if ex_grants_files.exists(pkg_path) && !ex_grants_is_exempt(pkg_path) {
+        text: ex_grants_files.read(pkg_path) ?? ""
+        grants: ex_grants_parse_allow(text)
+        if grants.len() > 0 {
+            pkg_files: ex_grants_collect_pkg_jet_files(dir)
+            if pkg_files.len() > 0 {
+                out.push(ExGrantTarget{manifest: pkg_path, entries: pkg_files, grants: grants})
+            }
+        }
+    }
+    loop path in paths {
+        if ex_grants_files.is_dir(path) {
+            if path.ends_with("/.jet") || path.ends_with("/fixture-state") -> next
+            ex_grants_collect_targets(path, out)
+        } else if path.ends_with(".jet") && !path.ends_with("/package.jet") && !path.ends_with("/workspace.jet") && !path.ends_with("/build.jet") {
+            if ex_grants_is_exempt(path) -> next
+            text: ex_grants_files.read(path) ?? ""
+            grants: ex_grants_parse_allow(text)
+            if grants.len() > 0 {
+                out.push(ExGrantTarget{manifest: path, entries: [String]{path}, grants: grants})
+            }
+        }
+    }
+}
+
+#Test("example_grants") {
+    guards_enter_root()
+    jet: md_jet()
+    targets := [ExGrantTarget]{}
+    ex_grants_collect_targets("Examples", targets)
+    assert(targets.len() > 0, "no Examples targets with authority.allow found")
+
+    // Build one flat command list for bounded parallel execution.
+    specs := [ProcessSpec]{}
+    owner_idx := [Int]{}
+    loop ti in 0..<targets.len() {
+        loop entry in targets[ti].entries {
+            specs.push(ex_grants_process.cmd([String]{jet, "explain", "effects", "--json", entry}).stdout(.Capture).stderr(.Capture))
+            owner_idx.push(ti)
+        }
+    }
+    results: ex_grants_process.run_all(specs, 8) ?? panic("run_all explain effects: {err}")
+
+    ok_flags := [Bool]{}
+    reaches_by_target := [[String]]{}
+    loop _ in 0..<targets.len() {
+        ok_flags.push(false)
+        reaches_by_target.push([String]{})
+    }
+    loop i in 0..<results.len() {
+        ti: owner_idx[i]
+        if results[i] == {
+            .Ok(receipt) -> {
+                if receipt.code == 0 {
+                    ok_flags[ti] = true
+                    loop eff in ex_grants_extract_reaches(receipt.output) {
+                        reaches_by_target[ti].push(eff)
+                    }
+                }
+            }
+            .Err(_) -> {}
+        }
+    }
+
+    unused_reports := [String]{}
+    loop ti in 0..<targets.len() {
+        if !ok_flags[ti] -> next
+        unused := [String]{}
+        loop grant in targets[ti].grants {
+            if !ex_grants_is_used(grant, reaches_by_target[ti]) -> unused.push(grant)
+        }
+        if unused.len() > 0 {
+            unused_reports.push("{targets[ti].manifest}: unused [{unused.join(", ")}]")
+        }
+    }
+    assert(unused_reports.len() == 0, "unused permission grants in Examples/ ({unused_reports.len()} files):\n{unused_reports.join("\n")}")
+}
+
+#Test("example_grants_detects_unused_grant") {
+    reaches: [String]{"IO", "FS.Read(\"/etc/passwd\")", "Mem"}
+    assert(ex_grants_is_used("IO", reaches))
+    assert(ex_grants_is_used("FS", reaches))
+    assert(ex_grants_is_used("FS.Read", reaches))
+    assert(ex_grants_is_used("Mem.Alloc", reaches))
+    assert(!ex_grants_is_used("Net", reaches))
+    assert(!ex_grants_is_used("Exec", reaches))
+}

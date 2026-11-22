@@ -205,7 +205,7 @@ after
 A program has one entry: either its top-level statements or a `run: fn`.
 Add a `run: fn` between the two statements and check the file:
 
-```jet
+```jet error
 print("before")
 run: fn() { print("middle") }
 print("after")

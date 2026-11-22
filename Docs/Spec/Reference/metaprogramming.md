@@ -32,22 +32,22 @@ become part of a program. The boundary is visible in source:
   statements rather than a string macro language.
 
 The feature examples exercise these forms directly. For example, the block in
-[`prep_block.jet`](../../../Examples/Metaprogramming/Comptime/PrepBlock.jet)
-checks `@cells` while compiling and then uses the resulting value in an
+[`PrepBlock.jet`](../../../Examples/Metaprogramming/Comptime/PrepBlock.jet)
+checks `cells` while compiling and then uses the resulting value in an
 ordinary runtime expression:
 
 ```jet
-@WIDTH: 12
-@HEIGHT: 5
+WIDTH: #run 12
+HEIGHT: #run 5
 
 area: fn(width: Int, height: Int) -> Int { width * height }
 
 run: fn() {
+    cells: #run area(WIDTH, HEIGHT)
     #run {
-        @cells: area(@WIDTH, @HEIGHT)
-        if @cells > 100 -> panic("the grid is too large")
+        if cells > 100 -> panic("the grid is too large")
     }
-    print("cells: {@cells}")
+    print("cells: {cells}")
 }
 ```
 
@@ -300,11 +300,16 @@ gate and the expert effect `Meta.Host`, which the package's `package.jet`
 names in its `authority: { allow: [Meta.Host] }` row:
 
 ```jet
+package: {
+    name: "impure_comptime"
+    authority: { allow: [FS.Read, IO, Meta.Host] }
+}
+
 use fs: core.files
 
 run: fn() {
     #Impure("read an explicitly approved ambient input") {
-        config: #run fs.read("config.txt")
+        config: #run { fs.read("config.txt") ?? "default" }
         print(config.trim())
     }
 }

@@ -6,7 +6,7 @@ guide is for maintainers wiring that repository and for reviewers reading the
 provenance of generated bridges. The executable workflow is in
 [`Tests/Cases/PolyglotSystems/`](../../../Tests/Cases/PolyglotSystems/); native
 Library output is checked by
-[`tests/library_outputs.rs`](../../../tests/library_outputs.rs).
+[`Tests/Cases/LibraryOutputs/`](../../../Tests/Cases/LibraryOutputs/).
 
 ## Repository shape
 

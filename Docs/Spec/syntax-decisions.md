@@ -4273,7 +4273,7 @@ D-ONCE-AT1=D; the `@if` branch is reaffirmed by D-STRUCT-ONCE1=A; ratified
 fold implicitly. Compile time has one mark, `@`, and **the mark belongs to the
 name**, so it is written at every mention:
 
-```jet
+```jet ignore
 @limit: 1000
 
 run: fn() {
@@ -6338,7 +6338,7 @@ query now qualifies by its `-[DB.Read]>` bound alone. `DBConnection` (and
 connection parameter.
 *Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
 `DB.Read`/`DB.Write` leaf inference above, the `-[DB.Read]>` qualification
-proof, the `E0740` hidden-write reject (`Tests/UI/db_read_query_hidden_write`),
+proof, the `E0740` hidden-write reject (`Tests/UI/db_read_query_hidden_write.jet`),
 and `DBConnection`/`DBError` nameability, with a runnable example
 (`Examples/Data/Database/DBReadFootprint.jet`). The #1158 reconciliation now
 ships the local production seam: `DBScope.live` registers a policy-aware
@@ -6371,11 +6371,38 @@ canonical branching form (D-IF1/D-IF3 `if subject == { }` if-table) with the
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
+LinuxBackend: struct {
+    name: String,
+
+    label: fn(self) -> String { self.name }
+}
+
+MacOSBackend: struct {
+    name: String,
+
+    label: fn(self) -> String { self.name }
+}
+
+WinBackend: struct {
+    name: String,
+
+    label: fn(self) -> String { self.name }
+}
+
 run: fn() {
     #if #build.target.os == {
-        .Linux   -> { b: LinuxBackend{ name: "gtk" }    print(b.label()) }
-        .MacOS   -> { b: MacOSBackend{ name: "appkit" } print(b.label()) }
-        .Windows -> { b: WinBackend{ name: "win32" }    print(b.label()) }
+        .Linux -> {
+            b: LinuxBackend{name: "gtk"}
+            print(b.label())
+        }
+        .MacOS -> {
+            b: MacOSBackend{name: "appkit"}
+            print(b.label())
+        }
+        .Windows -> {
+            b: WinBackend{name: "win32"}
+            print(b.label())
+        }
         .Web | .Wasm | .Freestanding -> print("no native backend")
     }
 }
@@ -10629,7 +10656,7 @@ layout.
   inserted terminators share `TokKind::Semi`; the diagnostic dispatches on a
   non-empty source span, and the E0373 row carries `fix_edits`.
   The Jet parser contract fixtures in
-  `Compiler/JetParser/Tests/ContractFixtures.jet` pin both edits and statement
+  `Compiler/JetParser/Tests/ContractFixtures.fixture/ContractFixtures.jet` pin both edits and statement
   recovery through the production parser.
 - **D-MARKERSHAPE1=B —** One bare rule, one list for several, E0999 with the
   rewrite otherwise. The audit found no new evidence; the surface does not

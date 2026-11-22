@@ -12,7 +12,7 @@ The executable schema and transaction paths are in
 [`GraphProjection.jet`](../../../Compiler/JetDevServer/Source/Canvas/GraphProjection.jet),
 and [`EditActions.jet`](../../../Compiler/JetDevServer/Source/Canvas/EditActions.jet).
 The source write seam is covered by
-[`SourceModel.jet`](../../../Compiler/JetDevServer/Source/Canvas/SourceModel.jet) and
+[`SourceModel.jet`](../../../Compiler/JetCanvas/Source/Host/SourceModel.jet) and
 project writes by
 [`ProjectTransactions.jet`](../../../Compiler/JetDevServer/Source/Canvas/ProjectTransactions.jet).
 Vocabulary is in [Jet vocabulary](../vocabulary.md).
