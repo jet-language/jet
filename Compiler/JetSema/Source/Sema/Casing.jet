@@ -292,6 +292,9 @@ sema_casing_item: fn(tables: ASTTables, item: Item, diagnostics: &[Diagnostic]) 
             }
         }
         .UnitFamily(definition) -> {
+            if definition.resolved_owner == Val("core.units") {
+                return
+            }
             sema_casing_pascal(definition.family, definition.family_span, "unit family", diagnostics)
             loop member in definition.members {
                 // SI-accepted `mmHg` keeps its

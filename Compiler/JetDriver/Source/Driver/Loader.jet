@@ -143,6 +143,7 @@ use {
         sema_registration_builtin_unit_facts,
         sema_registration_unit_type_name,
         SEMA_UNITS_CATALOG,
+        sema_units_catalog_scale,
         sema_marker_rules_applied_row,
         sema_comptime_input_named,
         sema_comptime_input_path_law,
@@ -852,15 +853,10 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: &[D
     if dot >= 0 {
         digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
         suffix: String.from_bytes(value_bytes[dot + 1..<value_bytes.len()]) ?? ""
-        if suffix == {
-            "kb" | "kib" -> multiplier = 1024
-            "mb" | "mib" -> multiplier = 1048576
-            "gb" | "gib" -> multiplier = 1073741824
-            "bytes" -> {}
-            else -> {
-                diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
-                return None
-            }
+        scale: if suffix == suffix.to_lower() -> sema_units_catalog_scale("DataSize", suffix) else -> None
+        if scale == .Val(factor) -> multiplier = factor else {
+            diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
+            return None
         }
     }
     digits := digits_text.replace("_", "")

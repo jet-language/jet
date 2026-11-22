@@ -163,6 +163,18 @@ sema_expr_fixed_bind: fn(name: String, value: &&TExpr, span: Span, environment: 
     TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span}
 }
 
+sema_expr_fixed_bind_read: fn(name: String, value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) -> TStmt {
+    owner: sema_scope_local_owner_key(scopes)
+    key: symbol_key_text(SymbolKind.Local, sema_scope_environment_module_text(environment, program), owner, name)
+    id: sema_symbol_id_of(program, context, key)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(value.ty), visibility: 0}
+    _ := sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false)
+    sema_ownership_declare_binding(state, symbol, false)
+    local := checked_symbol_local(name, span, id, value.ty)
+    local.generated = true
+    TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span}
+}
+
 // What a slot reads of one operand's local: its element at `slot` when the
 // operand is an array, its lane at `slot` when it is a lane type, else the
 // operand.
@@ -269,4 +281,197 @@ sema_expr_check_fixed_unary: fn(op: UnOp, value: &&TExpr, span: Span, expected: 
     slots: loop slot in 0..<shape.length -> Expr.Unary{op: op, operand: sema_expr_fixed_slot(name, Val(slot), shape.lanes, span), span: span, id: AST_NODE_GENERATED}
     holder: if shape.lanes -> Val(name) else -> String?{None}
     sema_expr_fixed_slots(slots, shape, holder, body, mark, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The slots `.swizzle(i, ...)` picks from: any fixed array `[T#N]` (N >= 1)
+// or any Core vector/lane type whose declaration has a `lanes` array and
+// `lane` reader.
+sema_expr_numeric_swizzle_slots: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaSwizzleSlots? {
+    if ty == .FixedList(element, measure) {
+        length: measure_literal_value(measure) ?? return None
+        if length < 1 -> return None
+        return Val(SemaSwizzleSlots{shown: type_name(ty), element: element, length: length, reach: length, lanes: false, declared: 0})
+    }
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+        return sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
+    }
+    None
+}
+
+// The legal result lane/vector type name for a numeric `.swizzle` of `count`
+// picks from a Core lane or vector type `shown` with element type `element`.
+sema_expr_numeric_swizzle_lane_target: fn(shown: String, element: Type, count: Int) -> String? Never! {
+    if shown == "Vec2" || shown == "Vec3" || shown == "Vec4" {
+        return if count == {
+            2 -> Val("Vec2")
+            3 -> Val("Vec3")
+            4 -> Val("Vec4")
+            else -> None
+        }
+    }
+    if element == {
+        .Float32 -> if count == 4 -> Val("F32x4") else if count == 8 -> Val("F32x8") else -> None
+        .Float -> if count == 2 -> Val("F64x2") else if count == 4 -> Val("F64x4") else -> None
+        .IntN(signed, bits) -> {
+            prefix: if signed -> "I" else -> "U"
+            if bits == {
+                8 -> if count == 16 || count == 32 -> Val("{prefix}8x{count}") else -> None
+                16 -> if count == 8 || count == 16 -> Val("{prefix}16x{count}") else -> None
+                32 -> if count == 4 || count == 8 -> Val("{prefix}32x{count}") else -> None
+                64 -> if count == 2 || count == 4 -> Val("{prefix}64x{count}") else -> None
+                else -> None
+            }
+        }
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+    }
+}
+
+// Compile-time integer expression for a numeric `.swizzle` index: literals,
+// unary negation, `+`/`-`/`*`, and immutable top-level constants.
+sema_expr_swizzle_const_int: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, depth: Int) -> Int? {
+    if depth <= 0 -> return None
+    if expr == {
+        .Int(value, _, _, _, _) -> Val(value)
+        .Paren(inner, _, _) -> sema_expr_swizzle_const_int(inner, environment, program, scopes, depth - 1)
+        .Unary(op, operand, _, _) -> {
+            if op != UnOp.Neg -> return None
+            number: sema_expr_swizzle_const_int(operand, environment, program, scopes, depth - 1) ?? return None
+            Val(-number)
+        }
+        .Binary(op, left, right, _, _) -> {
+            lhs: sema_expr_swizzle_const_int(left, environment, program, scopes, depth - 1) ?? return None
+            rhs: sema_expr_swizzle_const_int(right, environment, program, scopes, depth - 1) ?? return None
+            if op == {
+                .Add -> Val(lhs + rhs)
+                .Sub -> Val(lhs - rhs)
+                .Mul -> Val(lhs * rhs)
+                .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
+            }
+        }
+        .ComptimeName(_, _, value, _) -> if value == .Val(inner) && inner == .Int(number) -> Val(number) else -> None
+        .Ident(name, _, _) -> {
+            index: sema_scope_resolve_index(scopes, name) ?? return None
+            symbol: scopes.bindings[index].symbol
+            if symbol.kind != SymbolKind.Constant -> return None
+            if sema_scope_resolve_declaration(environment, program, symbol.id) == .Val(declaration) {
+                if declaration == .Const(definition) {
+                    if definition.mutable -> return None
+                    if definition.ct == .Val(inner) && inner == .Int(number) -> return Val(number)
+                    return sema_expr_swizzle_const_int(definition.value, environment, program, scopes, depth - 1)
+                }
+            }
+            if program.registration_graph == .Val(graph) {
+                module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
+                loop row in graph.modules[module_index].constants {
+                    if row.symbol.id != symbol.id -> next
+                    if row.declaration.mutable -> return None
+                    if row.declaration.ct == .Val(inner) && inner == .Int(number) {
+                        return Val(number)
+                    }
+                    return sema_expr_swizzle_const_int(row.declaration.value, environment, program, scopes, depth - 1)
+                }
+            }
+            None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// Numeric swizzle `a.swizzle(i0, i1, ...)` on fixed arrays and exact lanes.
+sema_expr_try_numeric_swizzle: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "swizzle" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    slots: sema_expr_numeric_swizzle_slots(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if type_args.len() != 0 {
+        diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` takes no type arguments", "numeric swizzle keeps the receiver's element type and takes only constant slot indexes", "remove the type arguments from `.swizzle(...)`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if args.len() == 0 {
+        diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` needs at least one constant slot index", "numeric swizzle selects one or more fixed slots from `{slots.shown}` at compile time", "pass constant slot indexes in `0..<{slots.length}`, such as `.swizzle(0)`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    indices := [Int]{}
+    valid := true
+    loop arg in args {
+        if arg.label != None || arg.spread {
+            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot indexes must be positional constant integers", "numeric swizzle takes plain constant `Int` slot numbers without labels or spreads", "write constant slot numbers such as `.swizzle(2, 1, 0)`"))
+            valid = false
+            next
+        }
+        checked_arg: sema_check_expression(arg.expr, Val(Type.Int), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            valid = false
+            next
+        }
+        if checked_arg.ty != Type.Int {
+            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a constant `Int`, got `{type_name(checked_arg.ty)}`", "numeric swizzle indexes slots with compile-time `Int` constants", "pass a constant integer between `0` and `{slots.length - 1}`"))
+            valid = false
+            next
+        }
+        folded := sema_expr_swizzle_const_int(arg.expr, environment, program, scopes, 16)
+        if folded == None {
+            folded = sema_call_memory_compiletime_int(arg.expr, checked_arg, environment, program, scopes, context)
+        }
+        if folded == None -> folded = tree_expr_fold_int(checked_arg)
+        idx: folded ?? {
+            diagnostics.push(sema_error("E3110", arg.span, "swizzle slot index must be a compile-time constant integer", "numeric swizzle selects fixed slots while compiling, so every index must be known at compile time", "pass a constant integer between `0` and `{slots.length - 1}`"))
+            valid = false
+            next
+        }
+        if idx < 0 || idx >= slots.length {
+            diagnostics.push(sema_error("E3110", arg.span, "swizzle index `{idx}` is out of range for `{slots.shown}`", "`{slots.shown}` has {slots.length} slots (`0` through `{slots.length - 1}`)", "use slot indexes between `0` and `{slots.length - 1}`"))
+            valid = false
+            next
+        }
+        indices.push(idx)
+    }
+    if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !slots.lanes {
+        caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, environment.module_identity) else -> -1
+        walk := sema_copy_walk()
+        copy_facts: sema_copy_type_facts(slots.element, program.registration_graph, program.copy_facts, caller, context.generic_params, walk)
+        if !copy_facts.copyable {
+            diagnostics.push(sema_error("E3110", span, "can't swizzle `{slots.shown}` because `{type_name(slots.element)}` is not copyable", "numeric swizzle reads slots by value and may repeat them, so the element type must be copyable", "swizzle a fixed array of a copyable type, or move elements explicitly"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    }
+    target_lane := String?{None}
+    if slots.lanes {
+        lane_name: sema_expr_numeric_swizzle_lane_target(slots.shown, slots.element, indices.len()) ?? {
+            diagnostics.push(sema_error("E3110", span, "`{slots.shown}.swizzle` has no {indices.len()}-lane result type for `{type_name(slots.element)}`", "exact lane swizzles return a legal lane type with the same element type", "pass a supported lane count for `{type_name(slots.element)}`"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        target_lane = Val(lane_name)
+    }
+    at: "{span.start}_{span.end}"
+    src_name: "__jet_swizzle_src_{at}"
+    mark: sema_scope_mark(scopes)
+    sema_scope_enter(scopes, state, "swizzle@{at}")
+    body := [TStmt]{sema_expr_fixed_bind_read(src_name, receiver_value, span, environment, program, scopes, state, context)}
+    picked := [TExpr]{}
+    loop idx in indices {
+        slot_expr: sema_expr_fixed_slot(src_name, Val(idx), slots.lanes, span)
+        checked_slot: sema_check_expression(slot_expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_scope_leave(scopes, state)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        picked.push(checked_slot)
+    }
+    result_measure: Measure.Literal{kind: "length", value: indices.len()}
+    result_expr := sema_tree_node(Type.FixedList{elem: slots.element, len: result_measure}, TExprKind.List{values: picked, trait_coercion: None}, span)
+    if target_lane == .Val(lane_name) {
+        lanes_name: "__jet_swizzle_lanes_{at}"
+        body.push(sema_expr_fixed_bind(lanes_name, result_expr, span, environment, program, scopes, state, context))
+        argument: CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: lanes_name, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+        construct: Expr.MethodCall{receiver: Expr.Ident{name: lane_name, span: span, id: AST_NODE_GENERATED}, method: "from_array", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
+        result_expr = sema_check_expression(construct, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_scope_leave(scopes, state)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    }
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    sema_scope_rollback(scopes, mark)
+    result_ty: result_expr.ty
+    body.push(TStmt.ExprStmt{value: result_expr, span: span})
+    built: sema_expr_expected_owned(sema_tree_node(result_ty, TExprKind.InlineBlock{body: body}, span), expected, environment, program, diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: built}
 }

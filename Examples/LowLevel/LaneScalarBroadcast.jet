@@ -1,0 +1,26 @@
+// D-ARRAY-LANEBCAST1=A: `+`, `-`, `*`, `/` between an exact lane value and
+// its element scalar, on either side, through ordinary owning-package operator
+// hooks in Core/Math.
+run: fn() {
+    pixels: F32x4.new(F32{2.0}, F32{4.0}, F32{8.0}, F32{16.0})
+    gain: F32{0.5}
+    print((pixels * gain).to_array())
+    print((gain * pixels).to_array())
+    print((pixels + F32{1.0}).to_array())
+    print((F32{1.0} - pixels).to_array())
+    print((F32{2.0} / pixels).to_array())
+    print((pixels / F32{2.0}).to_array())
+
+    doubles: F64x4.new(1.0, 2.0, 4.0, 8.0)
+    print((doubles + Float{10.0}).to_array())
+    print((Float{16.0} / doubles).to_array())
+
+    ints: I32x4.new(I32{2}, I32{4}, I32{6}, I32{8})
+    print((ints * I32{3}).to_array())
+    print((I32{10} - ints).to_array())
+    print((I32{24} / ints).to_array())
+
+    bytes: U8x16.from_array([U8#16]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
+    print((bytes + U8{10}).lane(0))
+    print((U8{20} - bytes).lane(15))
+}
