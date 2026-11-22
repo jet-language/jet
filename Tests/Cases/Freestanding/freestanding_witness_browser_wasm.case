@@ -1,0 +1,26 @@
+# Freestanding witness 3/5 (`browser_wasm`): runs with target-selected
+# marshalling on `wasm.browser` around the one shared Prelude, with no second
+# Prelude, and executes the built browser/Wasm bundle when Node is present.
+fixture: Fixtures/BrowserWASM
+env: NO_COLOR=1
+step: jet inspect target wasm.browser
+exit: 0
+stdout: ~ "Triple: wasm32-unknown-unknown" # browser Wasm triple
+stdout: ~ "Environment: browser" # browser target environment
+stdout: ~ "Provides: Target.Allocator," # target-selected allocator and IO providers
+step: jet check --target=wasm.browser main.jet
+exit: 0
+stderr: ~ "has no problems" # browser witness checks with the one shared Prelude
+step: jet build main.jet --target wasm.browser
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"targetMachine\": \"wasm.browser\"" # manifest binds wasm.browser
+file: .jet/build/web.manifest.json ~ "\"wasmTriple\": \"wasm32-unknown-unknown\"" # wasm32 target triple
+file: .jet/build/web.manifest.json ~ "\"providerIdentity\": \"target-providers-v1:" # target-selected provider binding
+file: .jet/build/web.manifest.json ~ "\"targetEnvironment\": \"browser\"" # browser environment
+file: .jet/build/app.js ~ "const JET_TARGET_BINDING" # target marshalling binding emitted
+when tool node
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "42\n" # browser Wasm witness runs and prints 42
+end when

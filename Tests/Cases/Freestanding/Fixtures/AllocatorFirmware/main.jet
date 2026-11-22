@@ -1,0 +1,10 @@
+// Allocator firmware witness for board.sensor_v1 using core.mem.Fixed and the one Prelude.
+use mem: core.mem
+
+run: fn() {
+    fixed: mem.Fixed.new(size: 40)
+    if fixed.try_alloc(7) == {
+        .Ok(value) -> { assert(value == 7, "firmware allocation") }
+        .Err(_error) -> { panic("firmware allocator unavailable") }
+    }
+}

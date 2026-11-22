@@ -1,0 +1,21 @@
+# Freestanding witness 4/5 (`wasi`): checks with target-selected marshalling
+# on `wasm.wasi` and runs on native tiers around the one shared Prelude using
+# `core.term.stdout().write_bytes`, with no second Prelude.
+fixture: Fixtures/WASI
+env: NO_COLOR=1
+step: jet inspect target wasm.wasi
+exit: 0
+stdout: ~ "Triple: wasm32-wasip2" # WASI target triple
+stdout: ~ "Environment: wasi" # WASI target environment
+stdout: ~ "Provides: Target.Allocator," # target-selected allocator and IO providers
+step: jet check --target=wasm.wasi main.jet
+exit: 0
+stderr: ~ "has no problems" # WASI witness checks with the one shared Prelude
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "wasi\n" # WASI witness runs identically at O0
+step: jet build -O2 main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "wasi\n" # WASI witness runs identically at O2

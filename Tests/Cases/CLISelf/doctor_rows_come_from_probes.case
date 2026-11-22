@@ -1,0 +1,61 @@
+# Every `jet self doctor` row comes from running a real probe (spawning
+# `jet self lsp` and sending `initialize`, running `cc`/`pkg-config`/`cargo`
+# `--version` and reading their output, inspecting live store/cache/hangar
+# paths, checking `PATH`, and probing `--online` registry reachability),
+# never static text.
+env: NO_COLOR=1
+mkdir: tools
+mkdir: empty-bin
+mkdir: home/.cache/jet
+mkdir: jp1
+mkdir: jp2/hangar
+mkdir: present-registry
+write: tools/jet = "#!/bin/sh\nexit 0\n"
+chmod: tools/jet 0755
+write: tools/cc = "#!/bin/sh\necho 'probe-cc 1.0'\n"
+chmod: tools/cc 0755
+write: tools/pkg-config = "#!/bin/sh\necho 'probe-pkgconf-9.8.7'\n"
+chmod: tools/pkg-config 0755
+write: tools/cargo = "#!/bin/sh\necho 'probe-cargo-1.2.3'\n"
+chmod: tools/cargo 0755
+write: home/.cache/jet/ffi = "stray file blocking ffi cache\n"
+write: pkg-store = "stray file blocking package store\n"
+symlink: present-registry jp1/hangar
+step: jet self doctor --online
+env: PATH={work}/tools
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/jp1
+env: JET_PACKAGE_STORE_DIR={work}/pkg-store
+env: JET_REGISTRY_URL=file://{work}/missing-registry
+exit: 1
+stdout: ~ "artifact store:" # probes live ArtifactStore status
+stdout: ~ "[warn] ffi cache:" # detects stray file blocking ffi cache dir
+stdout: ~ "exists but is not a directory" # live FS stat detail
+stdout: ~ "[warn] package store:" # detects stray file blocking package store dir
+stdout: ~ "[ok  ] jet: on PATH" # detects jet on live PATH
+stdout: ~ "[ok  ] Language server: `jet self lsp` answered `initialize`" # spawns jet self lsp and sends initialize
+stdout: !~ "built in (" # no static text stands in for the LSP probe
+stdout: ~ "local index is missing" # online probe detects missing local registry
+stdout: ~ "[ok  ] C compiler (cc): {work}/tools/cc" # runs cc --version and reports resolved PATH location
+stdout: ~ "[ok  ] pkg-config: found (probe-pkgconf-9.8.7)" # reads live stdout of pkg-config --version
+stdout: ~ "is a symlink" # hangar probe rejects symlink without following
+stdout: ~ "[ok  ] cargo: found (probe-cargo-1.2.3; builds `extern rust` bridge crates)" # reads live stdout of cargo --version
+stdout: ~ "Warning: Jet.DoctorAdvisory:" # reports advisory when any probe fails
+step: jet self doctor --fix --online
+env: PATH={work}/empty-bin
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/jp2
+env: JET_PACKAGE_STORE_DIR={work}/pkg-store
+env: JET_REGISTRY_URL=file://{work}/present-registry
+exit: 1
+stdout: ~ "Fixed: ffi cache" # --fix removes stray ffi cache file
+stdout: ~ "Fixed: package store" # --fix removes stray package store file
+stdout: ~ "[ok  ] ffi cache:" # ffi cache probe now passes after --fix
+stdout: ~ "[ok  ] package store:" # package store probe now passes after --fix
+stdout: ~ "[warn] jet: `jet` is not on your PATH" # hiding jet from PATH flips row to warn
+stdout: ~ "[ok  ] Language server: `jet self lsp` answered `initialize`" # LSP probe still runs sys.executable() self lsp
+stdout: ~ "local index reachable" # online probe sees present local registry
+stdout: ~ "[note] C compiler (cc): not found on PATH" # hiding cc from PATH flips row to note
+stdout: ~ "[warn] pkg-config: not found" # hiding pkg-config from PATH flips row to warn
+stdout: ~ "[ok  ] hangar: {work}/jp2/hangar" # real hangar directory now passes probe
+stdout: ~ "[note] cargo: not found" # hiding cargo from PATH flips row to note

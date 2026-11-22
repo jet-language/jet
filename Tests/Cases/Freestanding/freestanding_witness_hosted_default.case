@@ -1,0 +1,18 @@
+# Freestanding witness 5/5 (`hosted_default`): runs across all hosted native
+# tiers (O0, O1, O2) around the one shared Prelude, with no second Prelude.
+fixture: Fixtures/HostedDefault
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+stderr: ~ "has no problems" # hosted default witness checks with the one shared Prelude
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "hosted default\n" # hosted O0 tier
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "hosted default\n" # hosted O1 tier
+step: jet build -O2 main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "hosted default\n" # hosted O2 tier
