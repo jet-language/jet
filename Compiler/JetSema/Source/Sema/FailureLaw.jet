@@ -1250,16 +1250,21 @@ sema_failure_alias_target_is_error: fn(target_name: String, module_identity: Mod
 // (`use core.encoding.[HexError]`); other graph modules supply the rest.
 sema_failure_nominal_is_error: fn(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
+        caller_index := -1
         if sema_scope_caller_index(environment, graph) == .Val(module_index) {
-            local: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
-            if local != None -> return local
+            caller_index = module_index
+            if sema_registration_lookup_name(graph, environment.module_identity, leaf) != None {
+                local: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
+                if local != None -> return local
+            }
         }
         named: sema_failure_alias_target_is_error(leaf, environment.module_identity, seen, environment, program)
         if named != None -> return named
-        loop module_row_index in 0..<graph.modules.len() {
-            if graph.modules[module_row_index].module_identity == environment.module_identity {
-                next
-            }
+        last_module := -1
+        loop reference in sema_registration_nominal_rows_named(graph, leaf) {
+            module_row_index: reference.module_index
+            if module_row_index == caller_index || module_row_index == last_module -> next
+            last_module = module_row_index
             imported: sema_failure_items_nominal_is_error(graph.modules[module_row_index].program.items, graph.modules[module_row_index].module_identity, leaf, seen, environment, program)
             if imported != None -> return imported
         }

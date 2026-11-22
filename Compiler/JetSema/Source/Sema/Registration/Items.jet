@@ -348,6 +348,7 @@ sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrat
 // Comparable/Equatable hooks, not the core.units point.
 sema_registration_unit_fact_for_type: fn(graph: SemaRegistrationGraph, ty: Type) -> SemaRegistrationUnitFact? {
     name: sema_registration_unit_leaf_name(ty) ?? return None
+    if graph.unit_facts.len() == 2 && name != "Duration" && name != "Instant" -> return None
     unit_name: name_find(graph.unit_fact_names, name) ?? return None
     slot: Int{unit_name.id}
     qualified: sema_registration_unit_type_is_qualified(ty)

@@ -119,7 +119,9 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
                     break
                 }
                 if prev_digit && !is_digit -> needs_suffix_scan = true
-                if run_byte == (U8{102}) -> needs_suffix_scan = true
+                if run_byte == (U8{102}) && at + 4 < count && bytes[at + 1] == (U8{114}) && bytes[at + 2] == (U8{111}) && bytes[at + 3] == (U8{109}) && bytes[at + 4] == (U8{95}) {
+                    needs_suffix_scan = true
+                }
                 prev_digit = is_digit
                 at += 1
             } else {
@@ -130,7 +132,17 @@ sema_units_source_mentions: fn(source: String, names: SemaUnitsCatalogNames) -> 
                 at = end
             }
         }
-        if name_find_bytes(names.wanted, bytes, start, at) != None {
+        run_len: at - start
+        may_match := false
+        if run_len >= names.wanted_min_len && run_len <= names.wanted_max_len {
+            first: Int{bytes[start]}
+            may_match = if {
+                first < 64 -> (names.wanted_mask_lo & (1 << first)) != 0
+                first < 128 -> (names.wanted_mask_hi & (1 << (first - 64))) != 0
+                else -> names.wanted_non_ascii
+            }
+        }
+        if may_match && name_find_bytes(names.wanted, bytes, start, at) != None {
             id: name_index(name_intern_bytes(identifiers, bytes, start, at))
             if id == spans.len() {
                 spans.push(Span{start: start, end: at})

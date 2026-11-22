@@ -124,6 +124,7 @@ name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> N
 
 // The id of `text` when the table holds it; never interns.
 name_find: fn(table: NameTable, text: String) -> Name? Never! {
+    if table.texts.len() <= 1 -> return if text == "" -> Val(name_empty()) else -> None
     bytes: text.bytes()
     name_find_bytes(table, bytes, 0, bytes.len())
 }

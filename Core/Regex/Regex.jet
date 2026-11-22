@@ -389,6 +389,7 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, false, false, 1)
     if runs.len() == 0 -> return None
+    if text.len() == raw.len() -> return Val(text[runs[0].start..<runs[0].end])
     Val(slice(raw, runs[0].start, runs[0].end))
 }
 
@@ -434,8 +435,14 @@ find_all: fn(pattern: Regex, text: String) -> [String] Never! {
     }
     if needle_absent(pattern, text) -> return out
     raw: text.bytes()
-    loop run in scan(pattern, raw, false, false, false, false, -1) {
-        out.push(slice(raw, run.start, run.end))
+    runs: scan(pattern, raw, false, false, false, false, -1)
+    if runs.len() == 0 -> return out
+    ascii: text.len() == raw.len()
+    out.try_reserve(runs.len()) ?? ()
+    if ascii {
+        loop run in runs -> out.push(text[run.start..<run.end])
+    } else {
+        loop run in runs -> out.push(slice(raw, run.start, run.end))
     }
     out
 }
@@ -470,11 +477,22 @@ split_limit: fn(pattern: Regex, text: String, n: Int) -> [String] Never! {
     if n > 1 -> limit = n - 1
     out := [String]{}
     cur := 0
-    loop run in scan(pattern, raw, false, false, false, false, limit) {
-        out.push(slice(raw, cur, run.start))
-        cur = run.end
+    runs: scan(pattern, raw, false, false, false, false, limit)
+    ascii: text.len() == raw.len()
+    out.try_reserve(runs.len() + 1) ?? ()
+    if ascii {
+        loop run in runs {
+            out.push(text[cur..<run.start])
+            cur = run.end
+        }
+        out.push(text[cur..<raw.len()])
+    } else {
+        loop run in runs {
+            out.push(slice(raw, cur, run.start))
+            cur = run.end
+        }
+        out.push(slice(raw, cur, raw.len()))
     }
-    out.push(slice(raw, cur, raw.len()))
     out
 }
 
@@ -1443,6 +1461,14 @@ Dfa: struct {
     dead: [Bool],
     search: Int,
     pinned: Int,
+    scan_next: [I64],
+    scan_match_now: [Bool],
+    scan_match_end: [Bool],
+    scan_dead: [Bool],
+    scan_start_0: Int,
+    scan_start_line: Int,
+    scan_start_mid: Int,
+    scan_first_byte: [U8],
 }
 
 DFA_MAX_STATES: 256
@@ -1450,7 +1476,23 @@ DFA_MAX_STATES: 256
 DFA_WORK_PER_OP: 400
 
 no_dfa: fn() -> Dfa Never! {
-    Dfa{width: 0, next: [I64]{}, match_now: [Bool]{}, match_end: [Bool]{}, dead: [Bool]{}, search: -1, pinned: -1}
+    Dfa{
+        width: 0,
+        next: [I64]{},
+        match_now: [Bool]{},
+        match_end: [Bool]{},
+        dead: [Bool]{},
+        search: -1,
+        pinned: -1,
+        scan_next: [I64]{},
+        scan_match_now: [Bool]{},
+        scan_match_end: [Bool]{},
+        scan_dead: [Bool]{},
+        scan_start_0: -1,
+        scan_start_line: -1,
+        scan_start_mid: -1,
+        scan_first_byte: [U8]{},
+    }
 }
 
 /// The subset construction's working set: state `s` holds the consuming
@@ -1666,7 +1708,324 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         loop _ in 128..<256 -> table.push(I64{-1})
         s += 1
     }
-    Dfa{width: width, next: table, match_now: builder.match_now, match_end: builder.match_end, dead: dead, search: search, pinned: pinned}
+    dfa := Dfa{
+        width: width,
+        next: table,
+        match_now: builder.match_now,
+        match_end: builder.match_end,
+        dead: dead,
+        search: search,
+        pinned: pinned,
+        scan_next: [I64]{},
+        scan_match_now: [Bool]{},
+        scan_match_end: [Bool]{},
+        scan_dead: [Bool]{},
+        scan_start_0: -1,
+        scan_start_line: -1,
+        scan_start_mid: -1,
+        scan_first_byte: [U8]{},
+    }
+    build_scan_dfa(re, class, reps, width, budget, dfa)
+    dfa
+}
+
+/// Subset construction for a pinned leftmost-first DFA over the same ASCII
+/// byte columns as `Dfa`. Each state keeps its live consuming instructions in
+/// exact PikeVM priority order and stops walking lower-priority threads once
+/// `OP_MATCH` is reached, so greedy/lazy quantifiers and ordered alternations
+/// match the VM's exact end position from any pinned start.
+ScanDfaBuilder: struct {
+    buckets: [Int:Int],
+    chain: [Int],
+    pcs: [Int],
+    los: [Int],
+    his: [Int],
+    match_now: [Bool],
+    match_end: [Bool],
+    mark: [Int],
+    epoch: Int,
+    stack: [Int],
+    seeds: [Int],
+    out: [Int],
+    work: Int,
+    budget: Int,
+    too_big: Bool,
+
+    walk_now: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
+        self.stack.clear()
+        k := self.seeds.len() - 1
+        loop k >= 0 {
+            self.stack.push(self.seeds[k])
+            k -= 1
+        }
+        loop {
+            p: self.stack.pop() ?? break
+            if self.mark[p] == self.epoch -> next
+            self.mark[p] = self.epoch
+            self.work += 1
+            op: re.ops[p]
+            if op == OP_SAVE -> self.stack.push(re.xs[p]) else if op == OP_SPLIT {
+                self.stack.push(re.ys[p])
+                self.stack.push(re.xs[p])
+            } else if op == OP_ASSERT {
+                kind: re.args[p]
+                if (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
+                    self.stack.push(re.xs[p])
+                }
+            } else if op == OP_MATCH -> return true else -> self.out.push(p)
+        }
+        false
+    }
+
+    walk_end: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Bool Never! {
+        self.epoch += 1
+        self.stack.clear()
+        k := self.seeds.len() - 1
+        loop k >= 0 {
+            self.stack.push(self.seeds[k])
+            k -= 1
+        }
+        loop {
+            p: self.stack.pop() ?? break
+            if self.mark[p] == self.epoch -> next
+            self.mark[p] = self.epoch
+            self.work += 1
+            op: re.ops[p]
+            if op == OP_SAVE -> self.stack.push(re.xs[p]) else if op == OP_SPLIT {
+                self.stack.push(re.ys[p])
+                self.stack.push(re.xs[p])
+            } else if op == OP_ASSERT {
+                kind: re.args[p]
+                if kind == A_TEXT_END || (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
+                    self.stack.push(re.xs[p])
+                }
+            } else if op == OP_MATCH -> return true
+        }
+        false
+    }
+
+    state: fn(&self, re: Regex, text_start: Bool, line_start: Bool) -> Int Never! {
+        if self.work > self.budget {
+            self.too_big = true
+            return 0
+        }
+        self.epoch += 1
+        self.out.clear()
+        now: self.walk_now(re, text_start, line_start)
+        end: if now -> true else -> self.walk_end(re, text_start, line_start)
+        hash := 1
+        if now -> hash += 2
+        if end -> hash += 4
+        loop pc in self.out -> hash = (hash * 31 + pc + 1) % 1000000007
+        id := self.buckets.get(hash) ?? -1
+        loop id >= 0 {
+            lo: self.los[id]
+            n: self.his[id] - lo
+            if self.match_now[id] == now && self.match_end[id] == end && n == self.out.len() {
+                k := 0
+                loop k < n && self.pcs[lo + k] == self.out[k] -> k += 1
+                self.work += k
+                if k == n -> return id
+            }
+            id = self.chain[id]
+        }
+        fresh: self.match_now.len()
+        if fresh >= DFA_MAX_STATES || self.work > self.budget {
+            self.too_big = true
+            return 0
+        }
+        self.chain.push(self.buckets.get(hash) ?? -1)
+        self.buckets[hash] = fresh
+        self.los.push(self.pcs.len())
+        loop pc in self.out -> self.pcs.push(pc)
+        self.his.push(self.pcs.len())
+        self.match_now.push(now)
+        self.match_end.push(end)
+        fresh
+    }
+}
+
+build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: &Dfa) Never! {
+    sb := ScanDfaBuilder{
+        buckets: [Int:Int]{},
+        chain: [Int]{},
+        pcs: [Int]{},
+        los: [Int]{},
+        his: [Int]{},
+        match_now: [Bool]{},
+        match_end: [Bool]{},
+        mark: filled(re.ops.len(), -1),
+        epoch: 0,
+        stack: [Int]{},
+        seeds: [Int]{re.start},
+        out: [Int]{},
+        work: 0,
+        budget: budget,
+        too_big: false,
+    }
+    start_0: sb.state(re, true, true)
+    start_line: sb.state(re, false, re.flags.multiline)
+    start_mid: sb.state(re, false, false)
+    next := [Int]{}
+    from := 0
+    loop from < sb.match_now.len() && !sb.too_big {
+        column := 0
+        loop column < width && !sb.too_big {
+            input: reps[column]
+            sb.seeds.clear()
+            k := sb.los[from]
+            loop k < sb.his[from] {
+                live: sb.pcs[k]
+                if consumes(re, live, input) -> sb.seeds.push(re.xs[live])
+                k += 1
+            }
+            sb.work = sb.work + sb.his[from] - sb.los[from]
+            to: sb.state(re, false, re.flags.multiline && input == 10)
+            next.push(to)
+            column += 1
+        }
+        from += 1
+    }
+    if sb.too_big -> return
+    n_states: sb.match_now.len()
+    dead := [Bool]{}
+    s := 0
+    loop s < n_states {
+        dead.push(sb.los[s] == sb.his[s])
+        s += 1
+    }
+    // Packed 256-entry rows per state:
+    // - `>= 0`: live target `(to * 256) | (1 if match_now[to] else 0)`;
+    // - `-1`: non-ASCII byte (hand off to the VM);
+    // - `-2`: dead state with neither `match_now` nor `match_end`;
+    // - `-3 - to`: dead state with `match_now` or `match_end`.
+    table := [I64]{}
+    table.try_reserve(n_states * 256) ?? ()
+    s = 0
+    loop s < n_states {
+        byte := 0
+        loop byte < 128 {
+            to: next[s * width + class[byte]]
+            if !dead[to] {
+                table.push(I64{to * 256 + (if sb.match_now[to] -> 1 else -> 0)})
+            } else if !sb.match_now[to] && !sb.match_end[to] {
+                table.push(I64{-2})
+            } else {
+                table.push(I64{-3 - to})
+            }
+            byte += 1
+        }
+        loop _ in 128..<256 -> table.push(I64{-1})
+        s += 1
+    }
+    first_byte := [U8]{}
+    first_byte.try_reserve(128) ?? ()
+    byte := 0
+    loop byte < 128 {
+        if (re.flags.multiline && byte == 10) || table[start_mid * 256 + byte] != (I64{-2}) {
+            first_byte.push(U8{1})
+        } else {
+            first_byte.push(U8{0})
+        }
+        byte += 1
+    }
+    dfa.scan_next = table
+    dfa.scan_match_now = sb.match_now
+    dfa.scan_match_end = sb.match_end
+    dfa.scan_dead = dead
+    dfa.scan_start_0 = start_0
+    dfa.scan_start_line = start_line
+    dfa.scan_start_mid = start_mid
+    dfa.scan_first_byte = first_byte
+}
+
+/// Leftmost-first uncaptured ASCII scan using `re.dfa`'s pinned leftmost-first
+/// DFA. Appends matches to `out` and returns `text.len() + 1` when finished,
+/// or a byte offset `<= text.len()` where the VM must take over (a non-ASCII
+/// byte or a pattern whose failed starts exceeded the linear work budget).
+dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: &[Run]) -> Int Never! {
+    hi: text.len()
+    multiline: re.flags.multiline
+    start_0: re.dfa.scan_start_0
+    start_line: re.dfa.scan_start_line
+    start_mid: re.dfa.scan_start_mid
+    can_skip_mid: !re.dfa.scan_match_now[start_mid] && !re.dfa.scan_match_end[start_mid]
+    has_prefix: re.prefix.len() > 0 && !single_start
+    pos := 0
+    wasted := 0
+    loop {
+        if has_prefix {
+            found: find_bytes(text, re.prefix, pos)
+            if found < 0 -> return hi + 1
+            pos = found
+        } else if pos > 0 && can_skip_mid && (!multiline || text[pos - 1] != (U8{10})) {
+            loop pos < hi {
+                b: Int{text[pos]}
+                if b >= 128 -> return pos
+                if re.dfa.scan_first_byte[b] != (U8{0}) -> break
+                pos += 1
+            }
+            if pos >= hi -> return hi + 1
+        }
+        state: if pos == 0 -> start_0 else if multiline && text[pos - 1] == (U8{10}) -> start_line else -> start_mid
+        if pos == hi {
+            if re.dfa.scan_match_end[state] {
+                out.push(Run{start: hi, end: hi, caps: [Int]{}})
+            }
+            return hi + 1
+        }
+        has_match := re.dfa.scan_match_now[state]
+        last_end := pos
+        cur := pos
+        if !re.dfa.scan_dead[state] {
+            row := I64{state * 256}
+            ended_live := true
+            loop cur < hi {
+                entry: re.dfa.scan_next[Int{row + I64{text[cur]}}]
+                if entry >= (I64{0}) {
+                    cur += 1
+                    if (entry & I64{1}) != (I64{0}) {
+                        has_match = true
+                        last_end = cur
+                        row = entry - I64{1}
+                    } else {
+                        row = entry
+                    }
+                    next
+                }
+                if entry == (I64{-2}) {
+                    ended_live = false
+                    break
+                }
+                if entry == (I64{-1}) -> return pos
+                cur += 1
+                st: Int{I64{-3} - entry}
+                if re.dfa.scan_match_now[st] || (cur == hi && re.dfa.scan_match_end[st]) {
+                    has_match = true
+                    last_end = cur
+                }
+                ended_live = false
+                break
+            }
+            if ended_live && cur == hi && re.dfa.scan_match_end[Int{row} /% 256] {
+                has_match = true
+                last_end = hi
+            }
+        }
+        if has_match {
+            out.push(Run{start: pos, end: last_end, caps: [Int]{}})
+            if limit >= 0 && out.len() >= limit -> return hi + 1
+            if single_start -> return hi + 1
+            resume: next_search_pos(text, pos, last_end, hi)
+            if resume > hi -> return hi + 1
+            pos = resume
+        } else {
+            if single_start -> return hi + 1
+            wasted += cur - pos
+            pos += 1
+            if wasted > 256 && wasted > pos -> return pos
+        }
+    }
 }
 
 /// 1 when a match exists in `text`, 0 when none does, -1 when the DFA cannot
@@ -2057,22 +2416,28 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
     if !anchored && !full && literal_only(re) {
         return literal_runs(re, text, capture, stop_on_match, limit)
     }
-    // `exists` asks the DFA before it falls back to a stop_on_match scan.
-    verdict: if stop_on_match -> -1 else -> dfa_verdict(re, text, anchored, full)
-    if verdict == 0 -> return out
-    if verdict < 0 && re.needle.len() > 0 && find_bytes(text, re.needle, 0) < 0 -> return out
     hi: text.len()
+    single_start: anchored || re.anchored_start
+    pos := 0
+    if !full && !capture && !stop_on_match && re.dfa.scan_next.len() > 0 {
+        pos = dfa_scan(re, text, single_start, limit, out)
+        if pos > hi -> return out
+    }
+    if out.len() == 0 {
+        // `exists` asks the DFA before it falls back to a stop_on_match scan.
+        verdict: if stop_on_match -> -1 else -> dfa_verdict(re, text, anchored, full)
+        if verdict == 0 -> return out
+        if verdict < 0 && re.needle.len() > 0 && find_bytes(text, re.needle, 0) < 0 -> return out
+    }
     looks: look_tables(re, text)
-    if limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS {
-        return backtrack(re, text, anchored || re.anchored_start, full, capture, looks)
+    if pos == 0 && out.len() == 0 && limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS {
+        return backtrack(re, text, single_start, full, capture, looks)
     }
     vm := new_vm(re.ops.len(), hi, full, looks)
-    pos := 0
     has_last := false
     last_start := 0
     last_end := 0
     last_caps := -1
-    single_start: anchored || re.anchored_start
     loop {
         if vm.m_pc >= 0 {
             has_last = true
@@ -2627,3 +2992,49 @@ subn: fn(pattern: Regex, text: String, replacement: String) -> {text: String, co
         }
     }
 }
+
+#Test("pinned leftmost-first scan DFA matches the VM across greedy, lazy, alternation, anchors, empty matches, and UTF-8 handoff") {
+    cases: [String]{
+        "[a-z]+",
+        "a|ab",
+        "ab|a",
+        "a+?",
+        "a*?",
+        "a*",
+        "a$",
+        "^foo",
+        "\\Afoo",
+        "a+b",
+        "\\d+(?:\\.\\d+)?",
+        "foo|foobar|f",
+        "(?:ab|a)c?",
+        "",
+    }
+    texts: [String]{
+        "",
+        "a",
+        "ab",
+        "aaa",
+        "hello world 123 45.67 foo foobar",
+        "bar\nfoo\nbaz\nfoo",
+        "hello café world 123",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+    }
+    modes: [Bool]{false, true}
+    loop pat in cases {
+        loop multiline in modes {
+            f: flags(false, multiline, false)
+            with_dfa: compile_program(pat, f, true) ?? panic("compile with dfa failed")
+            vm_only: compile_program(pat, f, false) ?? panic("compile without dfa failed")
+            assert(with_dfa.dfa.scan_next.len() > 0)
+            loop text in texts {
+                assert_eq(find_all(with_dfa, text), find_all(vm_only, text))
+                assert_eq(find(with_dfa, text), find(vm_only, text))
+                assert_eq(split(with_dfa, text), split(vm_only, text))
+                assert_eq(split_limit(with_dfa, text, 2), split_limit(vm_only, text, 2))
+            }
+        }
+    }
+}
+

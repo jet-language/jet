@@ -93,6 +93,11 @@ SemaUnitsCatalogNames: struct {
     members: NameTable,
     member_lengths: [Int],
     type_names: [[String]],
+    wanted_mask_lo: Int{0},
+    wanted_mask_hi: Int{0},
+    wanted_non_ascii: Bool{false},
+    wanted_min_len: Int{0},
+    wanted_max_len: Int{0},
 }
 
 sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
@@ -100,21 +105,58 @@ sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames 
     members_named := name_table()
     member_lengths := [Int]{}
     type_names := [[String]]{}
+    mask_lo := 0
+    mask_hi := 0
+    non_ascii := false
+    min_len := 0
+    max_len := 0
     loop family in catalog {
         _ := name_intern(wanted, family.family)
+        fb: family.family.bytes()
+        if fb.len() > 0 {
+            if min_len == 0 || fb.len() < min_len -> min_len = fb.len()
+            if fb.len() > max_len -> max_len = fb.len()
+            first: Int{fb[0]}
+            if {
+                first < 64 -> mask_lo |= 1 << first
+                first < 128 -> mask_hi |= 1 << (first - 64)
+                else -> non_ascii = true
+            }
+        }
         members := [String]{}
         loop member in family.members {
             type_name: sema_registration_unit_type_name(member.name)
             _ := name_intern(wanted, type_name)
+            tb: type_name.bytes()
+            if tb.len() > 0 {
+                if min_len == 0 || tb.len() < min_len -> min_len = tb.len()
+                if tb.len() > max_len -> max_len = tb.len()
+                first: Int{tb[0]}
+                if {
+                    first < 64 -> mask_lo |= 1 << first
+                    first < 128 -> mask_hi |= 1 << (first - 64)
+                    else -> non_ascii = true
+                }
+            }
             _ := name_intern(members_named, member.name)
-            length: member.name.bytes().len()
+            length: member.name.count_bytes()
             if length > 0 && !member_lengths.contains(length) -> member_lengths.push(length)
             members.push(type_name)
         }
         type_names.push(members)
     }
     member_lengths.sort()
-    SemaUnitsCatalogNames{wanted: wanted.move(), members: members_named.move(), member_lengths: member_lengths.move(), type_names: type_names.move()}
+    SemaUnitsCatalogNames{
+        wanted: wanted.move(),
+        members: members_named.move(),
+        member_lengths: member_lengths.move(),
+        type_names: type_names.move(),
+        wanted_mask_lo: mask_lo,
+        wanted_mask_hi: mask_hi,
+        wanted_non_ascii: non_ascii,
+        wanted_min_len: min_len,
+        wanted_max_len: max_len,
+    }
 }
 
 // Whether `mentions` names any catalog family or member, the test

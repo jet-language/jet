@@ -131,10 +131,30 @@ rt_text_cache_store: fn(value: I64, prefix: I64, counted: I64) {
 // is at least RT_TEXT_INLINE, so the test is exact.
 rt_text_immortal: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{16})) == I64{0} }
 
-// A text under 8 bytes is one word: its bytes are read one at a time and
-// gathered (rt_text_short_word), then stored whole (rt_text_from_word).
+// A text of 0 bytes uses the immortal static empty text (no allocation).
+// Texts up to RT_TEXT_INLINE bytes initialize their inline block directly in
+// one step instead of bouncing through builder/from_word helpers.
 rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
-    if (len < I64{8}) { return rt_text_from_word(rt_text_short_word(ptr, len), len) }
+    if (len == I64{0}) { return rt_static_text("") }
+    if (len <= RT_TEXT_INLINE) {
+        block: jet_rt_alloc_8(RT_TEXT_BLOCK)
+        if (block == I64{0}) { return I64{0} }
+        rc_init(block)
+        header: wrapping(block + I64{8})
+        dst: wrapping(header + I64{32})
+        rt_text_store(header, dst)
+        rt_text_store(wrapping(header + I64{8}), len)
+        rt_text_store(wrapping(header + I64{16}), RT_TEXT_INLINE)
+        rt_text_store(wrapping(header + I64{24}), I64{0})
+        if (len < I64{8}) {
+            rt_text_store(dst, rt_text_short_word(ptr, len))
+        } else if (len == I64{8}) {
+            rt_text_store(dst, rt_text_word(ptr))
+        } else {
+            rt_text_bytes_copy(dst, ptr, len)
+        }
+        return header
+    }
     header: rt_text_builder_with_capacity(len)
     if (header == I64{0}) { return I64{0} }
     rt_text_bytes_copy(rt_text_data(header), ptr, len)
@@ -1471,6 +1491,47 @@ rt_text_push_number: fn(target: I64, value: I64) {
 }
 
 #Export(c) jet_rt_string_slice_range: fn(value: I64, start: I64, end: I64, exclusive: U8, file: I64, file_len: I64, line: I64) -> I64 {
+    if (exclusive != U8{0} && start >= I64{0} && start <= end) {
+        len: rt_text_len(value)
+        cap: rt_text_word(wrapping(value + I64{16}))
+        if (cap > I64{0} && len < I64{2147483648}) {
+            prefix: rt_text_word(wrapping(value + I64{24})) & I64{4294967295}
+            if (end <= prefix) {
+                slice_len: end - start
+                if (slice_len == I64{0}) { return rt_static_text("") }
+                src: wrapping(rt_text_data(value) + start)
+                if (slice_len <= RT_TEXT_INLINE) {
+                    block: jet_rt_alloc_8(RT_TEXT_BLOCK)
+                    if (block == I64{0}) { return I64{0} }
+                    rc_init(block)
+                    header: wrapping(block + I64{8})
+                    dst: wrapping(header + I64{32})
+                    rt_text_store(header, dst)
+                    rt_text_store(wrapping(header + I64{8}), slice_len)
+                    rt_text_store(wrapping(header + I64{16}), RT_TEXT_INLINE)
+                    rt_text_store(wrapping(header + I64{24}), (wrapping(slice_len + I64{1}) << I64{32}) | slice_len)
+                    if (slice_len < I64{8}) {
+                        word: if ((src & I64{4095}) <= I64{4088}) -> rt_text_word(src) & wrapping((I64{1} << (slice_len * I64{8})) - I64{1}) else -> rt_text_short_word(src, slice_len)
+                        rt_text_store(dst, word)
+                    } else if (slice_len == I64{8}) {
+                        rt_text_store(dst, rt_text_word(src))
+                    } else {
+                        words: slice_len & I64{-8}
+                        at := I64{0}
+                        loop at < words {
+                            rt_text_store(wrapping(dst + at), rt_text_word(wrapping(src + at)))
+                            at = wrapping(at + I64{8})
+                        }
+                        if (at < slice_len) {
+                            last: wrapping(slice_len - I64{8})
+                            rt_text_store(wrapping(dst + last), rt_text_word(wrapping(src + last)))
+                        }
+                    }
+                    return header
+                }
+            }
+        }
+    }
     rt_text_slice_range(value, start, end, exclusive, file, file_len, line, false)
 }
 

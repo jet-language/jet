@@ -1905,12 +1905,12 @@ ALLOC_ARENA_RECORD_BYTES: I64{40}
 
 ALLOC_ARENA_OWNER: I64{-1}
 
-// A new carrier for `handler` (whose owner moves in) over `outer`, which it
-// holds one reference to, for the block whose code runs below the stack
-// address `mark`, named by one record: the caller's.
+// A new carrier for `handler` (whose owner moves in) over `outer` (1 ref),
+// for the block below stack `mark`, named by one record: the caller's.
 alloc_user_carrier_new: fn(handler: I64, outer: I64, mark: I64) -> I64 {
     carrier: alloc_try_validated(ALLOC_USER_CARRIER_BYTES, I64{8})
     if (carrier == I64{0}) { alloc_out_of_memory(ALLOC_USER_CARRIER_BYTES) }
+    sync_store(wrapping(alloc_root + ALLOC_USER_ANY), I64{1})
     sync_store(carrier, I64{1})
     sync_store(wrapping(carrier + I64{8}), handler)
     sync_store(wrapping(carrier + I64{16}), outer)
@@ -2045,7 +2045,7 @@ alloc_user_slot: fn() -> I64 {
 // the align is above 8, checked mode is on, or the thread has no TCB or
 // record. Only the full allocation paths ask.
 alloc_user_current: fn(align: I64) -> I64 {
-    if (align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
+    if (!alloc_user_used() || align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
     slot: alloc_user_slot()
     if (slot == I64{0}) -> I64{0} else -> sync_load(slot)
 }
@@ -2116,7 +2116,7 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // restores the enclosing carrier; the one replaced keeps the record's
 // reference, so the blocks it served still go back to it.
 #Export(c) jet_rt_move_enter: fn(target: I64) -> I64 {
-    if (alloc_class_limit == I64{0}) { return I64{-1} }
+    if (!alloc_user_used() || alloc_class_limit == I64{0}) { return I64{-1} }
     slot: alloc_user_slot()
     if (slot == I64{0}) { return I64{-1} }
     current: sync_load(slot)
@@ -2129,7 +2129,7 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // jet_rt_move_enter into the allocator owning the destination `address`
 // (alloc_owner).
 #Export(c) jet_rt_move_enter_at: fn(address: I64) -> I64 {
-    if (alloc_class_limit == I64{0}) { return I64{-1} }
+    if (!alloc_user_used() || alloc_class_limit == I64{0}) { return I64{-1} }
     slot: alloc_user_slot()
     if (slot == I64{0} || sync_load(slot) == I64{0}) { return I64{-1} }
     jet_rt_move_enter(alloc_owner(address))
@@ -2152,7 +2152,7 @@ alloc_younger: fn(owner: I64, target: I64) -> Bool {
 // move: a carrier younger than its target, the record's carrier now,
 // served it.
 #Export(c) jet_rt_move_needed: fn(address: I64) -> Bool {
-    slot: alloc_user_slot()
+    slot: if (!alloc_user_used()) -> I64{0} else -> alloc_user_slot()
     if (slot == I64{0}) { return false }
     alloc_younger(alloc_user_owner(address), sync_load(slot))
 }
@@ -2255,7 +2255,7 @@ alloc_user_give: fn(pointer: I64, size: I64, record: I64) {
 // refused: a growth (alloc_grow_carrier names its allocator).
 alloc_grow_try: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
     carrier: alloc_grow_carrier(old, place, align)
-    if (carrier == I64{0}) { return alloc_try(size, align) }
+    if (carrier == I64{0}) { return jet_rt_alloc_try(size, align) }
     if !alloc_layout_valid(size, align) -> return I64{0}
     if jet_fault_should_fail_allocation() -> return I64{0}
     alloc_user_take(carrier, size, align)
@@ -2269,7 +2269,7 @@ alloc_grow_try: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
 // header the growing code's own block made (JetIR BuildRoutes.jet
 // ir_list_grow_place), which the current carrier serves.
 alloc_grow_carrier: fn(old: I64, place: I64, align: I64) -> I64 {
-    if (align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
+    if (!alloc_user_used() || align > I64{8} || alloc_class_limit == I64{0}) { return I64{0} }
     served: if (old == I64{0}) -> I64{0} else -> alloc_user_owner(old)
     if (served != I64{0}) { return served }
     if (place == I64{0}) -> alloc_user_current(align) else -> alloc_owner(place)
@@ -2286,7 +2286,7 @@ alloc_grow: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
 // served grows from that carrier's allocator; text is otherwise the
 // heap's.
 alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
-    carrier: if (old == I64{0} || alloc_class_limit == I64{0}) -> I64{0} else -> alloc_user_owner(old)
+    carrier: if (!alloc_user_used() || old == I64{0} || alloc_class_limit == I64{0}) -> I64{0} else -> alloc_user_owner(old)
     if (carrier == I64{0}) -> alloc_bytes(size) else -> alloc_user_need(carrier, size, I64{1})
 }
 
@@ -3592,4 +3592,13 @@ alloc_abort: fn() {
     loop {
 
     }
+}
+
+// Monotonic flag word in alloc_root (792, between ALLOC_WINDOW_NEXT and
+// ALLOC_WINDOW_STACKS) set when any `#Context(allocator:)` or arena carrier is
+// created, letting growth and move fast paths skip TLS/page-map checks when unused.
+ALLOC_USER_ANY: I64{792}
+
+alloc_user_used: fn() -> Bool {
+    alloc_root != I64{0} && sync_load(wrapping(alloc_root + ALLOC_USER_ANY)) != I64{0}
 }

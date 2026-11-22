@@ -96,6 +96,39 @@ numeric_digit: fn(byte: I64) -> I64 {
 }
 
 numeric_int_parse: fn(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -> I64 {
+    if decimal {
+        len: rt_text_len(text)
+        if (len > I64{0} && len <= I64{19}) {
+            data: rt_text_data(text)
+            at := I64{0}
+            neg := false
+            first: rt_text_byte(data)
+            if (first == I64{45}) {
+                neg = true
+                at = I64{1}
+            } else if (first == I64{43}) {
+                at = I64{1}
+            }
+            digits: len - at
+            if (digits > I64{0} && digits <= I64{18}) {
+                small := I64{0}
+                valid := true
+                loop at < len {
+                    d: rt_text_byte(wrapping(data + at)) - I64{48}
+                    if (d < I64{0} || d > I64{9}) {
+                        valid = false
+                        break
+                    }
+                    small = wrapping(small * I64{10} + d)
+                    at = wrapping(at + I64{1})
+                }
+                if valid {
+                    sync_store(ok, if neg -> -small else -> small)
+                    return I64{1}
+                }
+            }
+        }
+    }
     start: numeric_trim_start(text)
     end: numeric_trim_end(text, start)
     data: rt_text_data(text)
