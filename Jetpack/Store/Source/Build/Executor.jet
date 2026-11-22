@@ -474,7 +474,12 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     if plan.action(handle) == None {
         return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     }
-    inputs: build_snapshot_declared_inputs(project_root, action) ?? return Err(build_io_action(action, err))
+    // Only an action with no ambient effect is reused (build_effects_reusable),
+    // and only from a given store. Store byte limits apply only when the store
+    // is on.
+    reuse: if action.reusable() -> artifact_store else -> None
+    bounded: reuse != None
+    inputs: build_snapshot_declared_inputs(project_root, action, bounded: bounded) ?? return Err(build_io_action(action, err))
     snapshots := loop input in inputs -> input.snapshot
     snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
     // A tool another step makes is a declared input, run from the work
@@ -491,14 +496,11 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     programs: build_found_programs(plan, action, probe_facts) ?? return Err(err)
     program_digests := [ContentDigest]{}
     loop program in programs {
-        bytes: files.read_bytes(program) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        program_digests.push(ContentDigest.from_bytes(bytes))
+        digest: build_stream_host_digest(program) ?? return Err(build_io_action(action, err))
+        program_digests.push(digest)
     }
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
-    // Only an action with no ambient effect is reused (build_effects_reusable),
-    // and only from a given store.
-    reuse: if action.reusable() -> artifact_store else -> None
     if reuse == .Val(store) {
         if build_read_action_record(store, key) == {
             .Val(record) -> {
@@ -538,7 +540,28 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         .Err(_) -> {}
     }
     build_ensure_real_directory(sandbox) ?? return Err(build_io_action(action, err))
-    build_stage_inputs(sandbox, inputs) ?? return Err(build_io_action(action, err))
+    mounts := [NativeSandboxMount]{}
+    if plan.toolchain(action.toolchain) == .Val(toolchain) {
+        loop mount in toolchain.mounts {
+            mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+        }
+    }
+    staged_inputs := [ActionInputCapture]{}
+    if sys.is_linux() {
+        loop input in inputs {
+            if action.outputs.contains(input.snapshot.path) -> staged_inputs.push(input) else {
+                // Bind-mount read-only directly into `/work/<path>` so large
+                // inputs need no RAM copy and keep st_nlink == 1.
+                if build_stage_folder(sandbox, input) == .Val(error) {
+                    return Err(build_io_action(action, error))
+                }
+                mounts.push(NativeSandboxMount{source: input.source, destination: build_folder_mount(input.snapshot.path)})
+            }
+        }
+    } else { staged_inputs = inputs }
+    if staged_inputs.len() > 0 {
+        build_stage_inputs(sandbox, staged_inputs) ?? return Err(build_io_action(action, err))
+    }
     loop output in action.outputs {
         path: build_resolve_under(sandbox, output) ?? return Err(build_io_action(action, err))
         parent: files.dirname(path)
@@ -555,12 +578,6 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         // at BUILD_WORK_MOUNT; Seatbelt runs it where it is.
         work: if sys.is_linux() -> BUILD_WORK_MOUNT else -> sandbox
         runtime_env["JET_TRACE_FILE"] = "{work}/{BUILD_STEP_TRACE_FOLDER}/%p.json"
-    }
-    mounts := [NativeSandboxMount]{}
-    if plan.toolchain(action.toolchain) == .Val(toolchain) {
-        loop mount in toolchain.mounts {
-            mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
-        }
     }
     loop folder in action.folders {
         source: build_folder_source(project_root, folder) ?? return Err(build_io_action(action, err))
@@ -580,9 +597,13 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         }
     }
     if made_tool {
-        executable = build_resolve_under(sandbox, action.argv[0]) ?? return Err(build_io_action(action, err))
-        files.set_mode(executable, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-        mounts.push(NativeSandboxMount{source: files.dirname(executable), destination: BUILD_MADE_TOOL_MOUNT})
+        if sys.is_linux() {
+            mounts.push(NativeSandboxMount{source: executable, destination: "{BUILD_MADE_TOOL_MOUNT}/{files.basename(executable)}"})
+        } else {
+            executable = build_resolve_under(sandbox, action.argv[0]) ?? return Err(build_io_action(action, err))
+            files.set_mode(executable, 493) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+            mounts.push(NativeSandboxMount{source: files.dirname(executable), destination: BUILD_MADE_TOOL_MOUNT})
+        }
     }
     loop index in 0..<programs.len() {
         passed: action.programs[index]
@@ -604,9 +625,8 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
 
 // Writes each captured input into the work tree `sandbox` at its path,
 // runnable where the input is. The folders are made in order first; then
-// the files, each written on a task of its own, at most one per core at once
-// (build_snapshot_declared_inputs): an action's inputs can be hundreds of
-// megabytes. The error is the one writing them in order meets first.
+// the files, each streamed on a task of its own without holding full file
+// bytes in memory. The error is the one writing them in order meets first.
 build_stage_inputs: fn(sandbox: String, inputs: [ActionInputCapture]) -[FS, Env]> BuildIOError! {
     // The inputs before the first whose folder can't be made.
     staged := 0
@@ -638,28 +658,41 @@ build_stage_folder: fn(sandbox: String, input: ActionInputCapture) -[FS]> BuildI
     None
 }
 
-// Writes input `input` under `sandbox`, runnable where the input is; else
-// why it can't be.
+// Streams input `input` into `sandbox` in chunks without holding its bytes
+// in memory and without creating hard links (`st_nlink` stays 1).
 build_stage_input: fn(sandbox: String, input: ActionInputCapture) -[FS]> {written: Bool, error: BuildIOError?} Never! {
     to: build_resolve_under(sandbox, input.snapshot.path) ?? return {written: false, error: Val(err)}
-    files.write_bytes(to, input.bytes) ?? return {written: false, error: Val(BuildIOError.from(err))}
-    if input.snapshot.executable {
-        files.set_mode(to, 493) ?? return {written: false, error: Val(BuildIOError.from(err))}
+    reader := files.open(input.source) ?? return {written: false, error: Val(BuildIOError.from(err))}
+    mode: if input.snapshot.executable -> 0o755 else -> 0o600
+    writer := files.create(to, if_exists: .Replace, mode: Val(mode)) ?? return {written: false, error: Val(BuildIOError.from(err))}
+    loop {
+        chunk: reader.read_bytes(BUILD_READ_CHUNK_BYTES) ?? {
+            close(writer)
+            return {written: false, error: Val(BuildIOError.from(err))}
+        }
+        if chunk.len() == 0 -> break
+        writer.write_bytes(chunk) ?? {
+            close(writer)
+            return {written: false, error: Val(BuildIOError.from(err))}
+        }
     }
+    close(writer)
     {written: true, error: None}
 }
 
 // The digest the action's key holds for its tool at `executable`: a made
 // tool's is its declared input's snapshot digest, which already hashed its
 // bytes (a made jet is over a hundred megabytes), so they are read and hashed
-// once; any other tool's is that of its file's bytes, or of its name when it
-// is no file.
+// once; any other tool's is that of its file's bytes (streamed), or of its
+// name when it is no file.
 build_tool_digest: fn(action: HermeticBuildAction, inputs: [ActionInputCapture], executable: String) -[FS]> ContentDigest BuildExecutionError! {
     loop input in inputs {
         if input.snapshot.path == action.argv[0] -> return Ok(input.snapshot.digest.copy())
     }
-    bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
-    Ok(ContentDigest.from_bytes(bytes))
+    if files.is_file(executable) {
+        return Ok(build_stream_host_digest(executable) ?? return Err(build_io_action(action, err)))
+    }
+    Ok(ContentDigest.from_bytes(action.argv[0].bytes()))
 }
 
 // `action` with each found folder bound from the folder its find_folder
@@ -726,7 +759,7 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         }
         return Err(BuildExecutionError.Reported{report: report})
     }
-    edited: if build_publish_sandbox_outputs(sandbox, project_root, action) == {
+    edited: if build_publish_sandbox_outputs(sandbox, project_root, action, bounded: run.reuse != None) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(build_io_action(action, error))
@@ -748,54 +781,41 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
 
 // Rust `execute_one_action` output publication: every declared output is
 // checked in the work tree through no-follow opens (a FIFO or other special
-// file is refused before any blocking open; the per-file and per-action
-// limits are checked against its size). Only when all of them pass are they
-// published under the project root, so a refused output publishes nothing:
-// an output that isn't kept is renamed into place (build_move_output), and a
-// kept one is read, since its bytes decide whether it publishes. One the
-// action left runnable by its owner is published runnable. A kept output
-// that already holds its bytes is left as it is; when one holds bytes no
-// build wrote (build_output_write), nothing is published and its path is
-// returned.
-build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) -[FS, Rand]> String? BuildIOError! {
-    // The bytes of each kept output and whether it is published runnable;
-    // None for one that is moved, which keeps its own mode's owner bit.
-    contents := [[U8]?]{}
+// file is refused before any blocking open; when `bounded` is true — store
+// on — the per-file and per-action store limits are checked against its
+// size). Only when all of them pass are they published under the project
+// root, so a refused output publishes nothing: each output is renamed into
+// place (build_move_output, with streaming cross-device fallback), and a
+// kept output is stream-hashed first so one that already holds its bytes is
+// left as it is and one holding bytes no build wrote (build_output_write)
+// refuses publication and returns its path.
+build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction, *, bounded: Bool{true}) -[FS, Rand]> String? BuildIOError! {
     writes := [BuildOutputWrite]{}
-    runnable := [Bool]{}
     total := 0
     loop declared in action.outputs {
         from: build_resolve_under(sandbox, declared)
+        limit: if bounded -> build_read_budget(total) else -> BUILD_NO_BYTE_LIMIT
         if build_kept_output(action, declared) == {
             .Val(kept) -> {
-                bytes: build_secure_read_file(sandbox, from, build_read_budget(total))
-                total += bytes.len()
-                runnable.push(build_owner_executable(from) ?? return Err(err))
-                write: build_output_write(project_root, kept, ContentDigest.from_bytes(bytes))
+                streamed: build_stream_file_digest(sandbox, from, limit, shown: declared) ?? return Err(err)
+                total += streamed.byte_len
+                write: build_output_write(project_root, kept, streamed.digest, bounded: bounded) ?? return Err(err)
                 if write == .HandEdited -> return Ok(Val(declared.copy()))
                 writes.push(write)
-                contents.push(Val(bytes))
             }
             .None -> {
-                total += build_work_output_size(sandbox, from, build_read_budget(total))
-                runnable.push(false)
+                total += build_work_output_size(sandbox, from, limit, shown: declared) ?? return Err(err)
                 writes.push(BuildOutputWrite.Write)
-                contents.push(None)
             }
         }
     }
+    move_limit: if bounded -> BUILD_MAX_ACTION_FILE_BYTES else -> BUILD_NO_BYTE_LIMIT
     loop index in 0..<action.outputs.len() {
         if writes[index] == .Unchanged -> next
-        to: build_resolve_under(project_root, action.outputs[index])
+        declared: action.outputs[index]
+        to: build_resolve_under(project_root, declared)
         build_prepare_output_destination(project_root, to)
-        if contents[index] == {
-            .Val(bytes) -> {
-                build_atomic_restore_file(project_root, to, bytes, executable: runnable[index])
-            }
-            .None -> {
-                build_move_output(sandbox, build_resolve_under(sandbox, action.outputs[index]), project_root, to)
-            }
-        }
+        build_move_output(sandbox, build_resolve_under(sandbox, declared), project_root, to, limit: move_limit, shown: declared)
     }
     Ok(None)
 }
@@ -1120,4 +1140,70 @@ build_debug_provenance: fn(provenance: BuildProvenance) -> String Never! {
         .None -> "None"
     }
     "BuildProvenance {{ source: {source}, lock: {lock} }}"
+}
+
+#Test("store off stages and publishes a sparse file over 1 GiB while store on refuses naming action, file and size") {
+    root: files.tmpdir("jet-build-sparse-") ?? panic("create tmpdir: {err}")
+    sandbox: files.join(root, "sandbox")
+    files.create_dir_all(sandbox) ?? panic("create sandbox: {err}")
+    big_size: 1100000000
+    in_path: files.join(root, "big.in")
+    files.write_bytes(in_path, [U8]{}) ?? panic("create big.in: {err}")
+    files.truncate(in_path, big_size) ?? panic("truncate big.in: {err}")
+    out_sandbox: files.join(sandbox, "big.out")
+    files.write_bytes(out_sandbox, [U8]{}) ?? panic("create big.out: {err}")
+    files.truncate(out_sandbox, big_size) ?? panic("truncate big.out: {err}")
+    action: HermeticBuildAction{
+        id: 0,
+        name: "big-step",
+        inputs: [String]{"big.in"},
+        outputs: [String]{"big.out"},
+        kept: [KeptOutput]{},
+        folders: [ActionFolder]{},
+        programs: [ActionProgram]{},
+        argv: [String]{"true"},
+        env: [String:String]{},
+        env_allowlist: [String]{},
+        caps: [BuildEffect]{},
+        kind: ActionKind.Generic,
+        toolchain: ToolchainHandle{id: 0, context: 0},
+        probes: [ProbeHandle]{},
+        signing_identity: None,
+        labels: [String:String]{},
+        helper_versions: [String:String]{},
+        resource_pools: [BuildResourcePool]{},
+        variant_identity: None,
+        timeout_ms: None,
+    }
+    // Store off: staging and publishing a > 1 GiB sparse file succeeds without buffering it in memory.
+    inputs: build_snapshot_declared_inputs(root, action, bounded: false) ?? panic("unbounded snapshot failed: {err.message}")
+    assert_eq(inputs.len(), 1)
+    assert_eq(inputs[0].snapshot.byte_len, big_size)
+    build_stage_inputs(sandbox, inputs) ?? panic("stage sparse input failed: {err.message}")
+    staged: files.stat(files.join(sandbox, "big.in")) ?? panic("stat staged big.in: {err}")
+    assert_eq(staged.size, big_size)
+    if build_publish_sandbox_outputs(sandbox, root, action, bounded: false) == {
+        .Ok(edited) -> { assert(edited == None) }
+        .Err(error) -> panic("unbounded publish failed: {error.message}")
+    }
+    published: files.stat(files.join(root, "big.out")) ?? panic("stat published big.out: {err}")
+    assert_eq(published.size, big_size)
+    // Store on: refusal names the action, the file and its size.
+    if build_snapshot_declared_inputs(root, action, bounded: true) == {
+        .Ok(_) -> { panic("store-bounded snapshot must refuse > 512 MiB file") }
+        .Err(error) -> {
+            wrapped: build_io_action(action, error)
+            if wrapped == {
+                .IO(name, detail) -> {
+                    assert_eq(name, "big-step")
+                    assert(detail.contains("big.in"), detail)
+                    assert(detail.contains("1100000000"), detail)
+                }
+                .MissingGrant(_, _) | .SandboxUnavailable(_) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> {
+                    panic("expected BuildExecutionError.IO")
+                }
+            }
+        }
+    }
+    files.remove_all(root).drop("cleanup sparse test dir")
 }

@@ -431,8 +431,10 @@ pack: fn(args: [String]) {
     root: absolute(".")
     identity: flag(flags, "identity")
     jet: absolute(flag(flags, "jet"))
-    // Seed seam (#6328): remove once an admitted seed's build executor publishes runnable outputs 0755 and the s3 gate passes without this.
-    files.set_mode(jet, 493) ?? fail("cannot make `{jet}` executable: {err}")
+    info: files.stat(jet) ?? fail("cannot inspect `{jet}`: {err}")
+    if (info.mode /% 64) % 2 == 0 {
+        files.set_mode(jet, 493) ?? fail("cannot make `{jet}` executable: {err}")
+    }
     inputs: pack_inputs(root, flags, jet)
     tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{inputs.sources.version}", out: absolute(flag(flags, "out"))}
     source: inputs.sources.source

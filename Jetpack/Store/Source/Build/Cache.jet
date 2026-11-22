@@ -23,19 +23,22 @@ use {
     jet_pkg_model.[pkg_json_array, pkg_json_object, pkg_json_render, pkg_json_text]
     files: core.files
     cli_paths: core.files.path
+    crypto: core.crypto
     json: core.encoding.json
     random: core.crypto.random
     sys: core.sys
     jetpack_artifact_store.[StampTable]
 }
 
-// Host reads of build files (declared inputs, work-tree outputs, published
-// outputs) are bounded: one file at most 512 MiB and one action's files at
-// most 1 GiB together, checked against the opened file's size before any
-// byte is read and enforced again while reading.
+// Store reads of build files (declared inputs, work-tree outputs, published
+// outputs) are bounded when the artifact store is on: one file at most
+// 512 MiB and one action's files at most 1 GiB together. When the store is
+// off (`BUILD_NO_BYTE_LIMIT`), plain build work has no store byte limit.
 BUILD_MAX_ACTION_FILE_BYTES: 536870912
 
 BUILD_MAX_ACTION_TOTAL_BYTES: 1073741824
+
+BUILD_NO_BYTE_LIMIT: -1
 
 BUILD_READ_CHUNK_BYTES: 1048576
 
@@ -84,11 +87,11 @@ ActionInputSnapshot: struct {
 }
 
 // One declared input as it was hashed: the snapshot the action key uses and
-// the exact bytes the work tree receives, so execution never reads the input
-// a second time.
+// the resolved host path staged into the work tree without holding the file
+// bytes in memory.
 ActionInputCapture: struct {
     snapshot: ActionInputSnapshot,
-    bytes: [U8],
+    source: String,
 }
 
 // `executable`: a declared output its action left runnable by its owner,
@@ -141,29 +144,31 @@ ActionResultRecord: struct {
     status: ActionCacheStatus,
 }
 
-// Rust `snapshot_declared_inputs`: every declared input read without
-// following links, bounded, and hashed. The captured bytes are the ones the
-// work tree receives, so they are never published to the CAS. An action's
-// inputs can be hundreds of megabytes (a made jet and the runtime files it
-// embeds), so each is read and hashed on a task of its own, at most one per
-// core at once; they are taken in declared order, where the per-action limit
-// is checked, so the error is the one a read in that order meets first.
-build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputCapture] BuildIOError! {
+// Every declared input hashed by streaming without following links. When
+// `bounded` is true (artifact store on), each file and their sum are bounded
+// by the store byte limits; when false, plain build work has no byte limit.
+// Inputs are hashed on parallel tasks (one per core) and checked in declared
+// order so errors stay deterministic.
+build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction, *, bounded: Bool{true}) -[FS, Env]> [ActionInputCapture] BuildIOError! {
     inputs := [ActionInputCapture]{}
     failure := BuildIOError?{None}
     total := 0
+    file_limit: if bounded -> BUILD_MAX_ACTION_FILE_BYTES else -> BUILD_NO_BYTE_LIMIT
     task.group snapshots(limit: sys.cpu_count()) {
-        reads: loop input in action.inputs -> task build_snapshot_input(base, input)
+        reads: loop input in action.inputs -> task build_snapshot_input(base, input, file_limit)
         loop (index, handle) in reads {
             read: handle.join() ?? {capture: None, error: Val(BuildIOError.new(.Other, "reading `{action.inputs[index]}` stopped"))}
             if failure != None -> next
             if read.capture == {
                 .Val(capture) -> {
-                    if capture.bytes.len() > build_read_budget(total) {
-                        failure = Val(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
-                        next
+                    if bounded {
+                        budget: build_read_budget(total)
+                        if capture.snapshot.byte_len > budget {
+                            failure = Val(BuildIOError.new(.InvalidData, "cache entry `{capture.snapshot.path}` ({capture.snapshot.byte_len} bytes) exceeds its byte limit ({budget} bytes)"))
+                            next
+                        }
                     }
-                    total += capture.bytes.len()
+                    total += capture.snapshot.byte_len
                     inputs.push(capture)
                 }
                 .None -> {
@@ -176,21 +181,19 @@ build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[
     Ok(inputs)
 }
 
-// One declared input, read under `base` at the per-file limit, and hashed;
-// else why it can't be.
-build_snapshot_input: fn(base: String, input: String) -[FS]> {capture: ActionInputCapture?, error: BuildIOError?} Never! {
-    if build_capture_input(base, input) == {
+// One declared input, streamed under `base` at `limit` (or unbounded when
+// negative), and hashed; else why it can't be.
+build_snapshot_input: fn(base: String, input: String, limit: Int) -[FS]> {capture: ActionInputCapture?, error: BuildIOError?} Never! {
+    if build_capture_input(base, input, limit) == {
         .Ok(capture) -> {capture: Val(capture), error: None}
         .Err(error) -> {capture: None, error: Val(error)}
     }
 }
 
-build_capture_input: fn(base: String, input: String) -[FS]> ActionInputCapture BuildIOError! {
+build_capture_input: fn(base: String, input: String, limit: Int) -[FS]> ActionInputCapture BuildIOError! {
     path: build_resolve_under(base, input)
-    bytes: build_secure_read_file(base, path, BUILD_MAX_ACTION_FILE_BYTES)
-    digest: ContentDigest.from_bytes(bytes)
-    executable: build_owner_executable(path) ?? return Err(err)
-    Ok(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest: digest, byte_len: bytes.len(), executable: executable}, bytes: bytes})
+    streamed: build_stream_file_digest(base, path, limit, shown: input) ?? return Err(err)
+    Ok(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest: streamed.digest, byte_len: streamed.byte_len, executable: streamed.executable}, source: path})
 }
 
 // Whether the file at `path` has its owner's execute bit.
@@ -341,16 +344,17 @@ build_kept_output: fn(action: HermeticBuildAction, output: String) -> KeptOutput
 // as it is; one holding bytes that are neither those nor the ones the last
 // build wrote there (`kept.written`) was edited by hand. With no build
 // before (a fresh checkout), the file is written whenever its bytes differ.
-build_output_write: fn(base: String, kept: KeptOutput, made: ContentDigest) -[FS]> BuildOutputWrite BuildIOError! {
+build_output_write: fn(base: String, kept: KeptOutput, made: ContentDigest, *, bounded: Bool{true}) -[FS]> BuildOutputWrite BuildIOError! {
     path: build_resolve_under(base, kept.path)
-    bytes: if build_secure_read_file(base, path, BUILD_MAX_ACTION_FILE_BYTES) == {
+    limit: if bounded -> BUILD_MAX_ACTION_FILE_BYTES else -> BUILD_NO_BYTE_LIMIT
+    streamed: if build_stream_file_digest(base, path, limit, shown: kept.path) == {
         .Ok(found) -> found
         .Err(error) -> {
             if error.kind == BuildIOKind.NotFound -> return Ok(BuildOutputWrite.Write)
             return Err(error)
         }
     }
-    held: ContentDigest.from_bytes(bytes).as_str()
+    held: streamed.digest.as_str()
     if held == made.as_str() -> return Ok(BuildOutputWrite.Unchanged)
     if kept.written == .Val(written) && written != held -> return Ok(BuildOutputWrite.HandEdited)
     Ok(BuildOutputWrite.Write)
@@ -371,22 +375,26 @@ build_relative_components: fn(base: String, path: String, escape: String) -> [St
     Ok(parts)
 }
 
-// Rust `secure_read_file_bounded`: open `base` as a real directory and walk
-// every parent component without following links. The final name is
-// inspected through the held parent without following a link and must be a
-// regular file before it is opened; the open itself never waits on a FIFO or
-// device peer (Core's non-blocking reader, the `jet self completions --for`
-// pattern), and the opened file must be that same inode. Its size is checked
-// against `limit` before any byte is read, and the read stops one byte past
-// `limit`.
-build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
+// Next chunk size when reading up to `limit` bytes (`BUILD_NO_BYTE_LIMIT` for
+// unbounded reads), stopping one byte past `limit` to detect overflow.
+build_chunk_size: fn(total: Int, limit: Int) -> Int Never! {
+    if limit < 0 -> return BUILD_READ_CHUNK_BYTES
+    left: limit + 1 - total
+    if left <= 0 -> return 0
+    if left < BUILD_READ_CHUNK_BYTES -> left else -> BUILD_READ_CHUNK_BYTES
+}
+
+// Stream-hash `path` under `base` without following links and without
+// holding the file bytes in memory. Enforces `limit` only when `limit >= 0`.
+build_stream_file_digest: fn(base: String, path: String, limit: Int, *, shown: String{""}) -[FS]> {digest: ContentDigest, byte_len: Int, executable: Bool} BuildIOError! {
     parts: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 {
         return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
     }
+    label: if shown != "" -> shown else -> path
     directory: build_held_parent(base, parts) ?? return Err(err)
     name: parts[parts.len() - 1]
-    entry: build_regular_entry(directory, name, limit) ?? return Err(err)
+    entry: build_regular_entry(directory, name, limit, shown: label) ?? return Err(err)
     reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file {
@@ -395,18 +403,75 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     if info.id != entry.id {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
     }
-    if info.size > limit {
-        return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    if limit >= 0 && info.size > limit {
+        return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({info.size} bytes) exceeds its byte limit ({limit} bytes)"))
+    }
+    hasher := crypto.Hasher.new()
+    total := 0
+    loop {
+        want: build_chunk_size(total, limit)
+        if want <= 0 -> break
+        chunk: reader.read_bytes(want) ?? return Err(BuildIOError.from(err))
+        if chunk.len() == 0 -> break
+        total += chunk.len()
+        if limit >= 0 && total > limit {
+            return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({total} bytes) exceeds its byte limit ({limit} bytes)"))
+        }
+        hasher.update(chunk)
+    }
+    digest: ContentDigest.parse("sha256:{hasher.digest()}") ?? return Err(BuildIOError.new(.InvalidData, err.message))
+    Ok({digest: digest, byte_len: total, executable: (info.mode /% 64) % 2 == 1})
+}
+
+// Stream-hash a host file `path` without holding its bytes in memory.
+build_stream_host_digest: fn(path: String) -[FS]> ContentDigest BuildIOError! {
+    reader := files.open(path) ?? return Err(BuildIOError.from(err))
+    hasher := crypto.Hasher.new()
+    loop {
+        chunk: reader.read_bytes(BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
+        if chunk.len() == 0 -> break
+        hasher.update(chunk)
+    }
+    ContentDigest.parse("sha256:{hasher.digest()}") ?? return Err(BuildIOError.new(.InvalidData, err.message))
+}
+
+// Rust `secure_read_file_bounded`: open `base` as a real directory and walk
+// every parent component without following links. The final name is
+// inspected through the held parent without following a link and must be a
+// regular file before it is opened; the open itself never waits on a FIFO or
+// device peer (Core's non-blocking reader, the `jet self completions --for`
+// pattern), and the opened file must be that same inode. Its size is checked
+// against `limit` before any byte is read (when `limit >= 0`), and the read
+// stops one byte past `limit`.
+build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
+    parts: build_relative_components(base, path, "cache path escapes root")
+    if parts.len() == 0 {
+        return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
+    }
+    directory: build_held_parent(base, parts) ?? return Err(err)
+    name: parts[parts.len() - 1]
+    entry: build_regular_entry(directory, name, limit, shown: path) ?? return Err(err)
+    reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    info: reader.stat() ?? return Err(BuildIOError.from(err))
+    if !info.is_file {
+        return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+    }
+    if info.id != entry.id {
+        return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
+    }
+    if limit >= 0 && info.size > limit {
+        return Err(BuildIOError.new(.InvalidData, "cache entry `{path}` ({info.size} bytes) exceeds its byte limit ({limit} bytes)"))
     }
     bytes := [U8]{}
-    loop bytes.len() <= limit {
-        want: limit + 1 - bytes.len()
-        chunk: reader.read_bytes(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
+    loop limit < 0 || bytes.len() <= limit {
+        want: build_chunk_size(bytes.len(), limit)
+        if want <= 0 -> break
+        chunk: reader.read_bytes(want) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
         bytes.extend(chunk)
     }
-    if bytes.len() > limit {
-        return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    if limit >= 0 && bytes.len() > limit {
+        return Err(BuildIOError.new(.InvalidData, "cache entry `{path}` ({bytes.len()} bytes) exceeds its byte limit ({limit} bytes)"))
     }
     Ok(bytes)
 }
@@ -422,29 +487,31 @@ build_held_parent: fn(base: String, parts: [String]) -[FS]> files.Directory Buil
 }
 
 // The entry `name` of `directory`, inspected without following a link: a
-// regular file of at most `limit` bytes.
-build_regular_entry: fn(directory: files.Directory, name: String, limit: Int) -[FS]> files.Stat BuildIOError! {
+// regular file, bounded by `limit` bytes when `limit >= 0`.
+build_regular_entry: fn(directory: files.Directory, name: String, limit: Int, *, shown: String{""}) -[FS]> files.Stat BuildIOError! {
     entry: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
     if entry.is_symlink || !entry.is_file {
         return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
     }
-    if entry.size > limit {
-        return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
+    if limit >= 0 && entry.size > limit {
+        label: if shown != "" -> shown else -> name
+        return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({entry.size} bytes) exceeds its byte limit ({limit} bytes)"))
     }
     Ok(entry)
 }
 
 // The size of the work-tree output at `path` under `base`, checked as
 // build_secure_read_file checks a file before reading it (no link on the
-// way, a regular file, at most `limit` bytes) without reading a byte:
-// build_move_output publishes it by renaming it.
-build_work_output_size: fn(base: String, path: String, limit: Int) -[FS]> Int BuildIOError! {
+// way, a regular file, at most `limit` bytes when `limit >= 0`) without
+// reading a byte: build_move_output publishes it by renaming it.
+build_work_output_size: fn(base: String, path: String, limit: Int, *, shown: String{""}) -[FS]> Int BuildIOError! {
     parts: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 {
         return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
     }
     directory: build_held_parent(base, parts) ?? return Err(err)
-    entry: build_regular_entry(directory, parts[parts.len() - 1], limit) ?? return Err(err)
+    label: if shown != "" -> shown else -> path
+    entry: build_regular_entry(directory, parts[parts.len() - 1], limit, shown: label) ?? return Err(err)
     Ok(entry.size)
 }
 
@@ -454,15 +521,17 @@ build_work_output_size: fn(base: String, path: String, limit: Int) -[FS]> Int Bu
 // owner may run it, else 0600), its bytes are made durable, then it is
 // renamed from its held directory into the held destination directory over
 // the final name. A file another name also links, or one the rename can't
-// move (another file system), is read and restored instead.
-build_move_output: fn(work: String, from: String, base: String, path: String) -[FS, Rand]> BuildIOError! {
+// move (another file system), is streamed into a temporary file and renamed
+// instead without buffering the whole file in memory.
+build_move_output: fn(work: String, from: String, base: String, path: String, *, limit: Int{BUILD_MAX_ACTION_FILE_BYTES}, shown: String{""}) -[FS, Rand]> BuildIOError! {
     source_parts: build_relative_components(work, from, "cache path escapes root")
     if source_parts.len() == 0 {
         return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
     }
     source: build_held_parent(work, source_parts) ?? return Err(err)
     name: source_parts[source_parts.len() - 1]
-    entry: build_regular_entry(source, name, BUILD_MAX_ACTION_FILE_BYTES) ?? return Err(err)
+    label: if shown != "" -> shown else -> from
+    entry: build_regular_entry(source, name, limit, shown: label) ?? return Err(err)
     executable: (entry.mode /% 64) % 2 == 1
     if entry.links == 1 {
         files.set_mode(from, if executable -> 0o755 else -> 0o600) ?? return Err(BuildIOError.from(err))
@@ -476,8 +545,84 @@ build_move_output: fn(work: String, from: String, base: String, path: String) -[
             return
         }
     }
-    bytes: build_secure_read_file(work, from, BUILD_MAX_ACTION_FILE_BYTES) ?? return Err(err)
-    build_atomic_restore_file(base, path, bytes, executable: executable) ?? return Err(err)
+    build_atomic_stream_copy(work, from, base, path, executable: executable, limit: limit, shown: label) ?? return Err(err)
+}
+
+// Atomically copy regular file `from` under `work` to `path` under `base`
+// by streaming chunks into `.jet-restore-<nonce>`, fsyncing, and renaming.
+build_atomic_stream_copy: fn(work: String, from: String, base: String, path: String, *, executable: Bool, limit: Int, shown: String{""}) -[FS, Rand]> BuildIOError! {
+    source_parts: build_relative_components(work, from, "cache path escapes root")
+    if source_parts.len() == 0 {
+        return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
+    }
+    source_dir: build_held_parent(work, source_parts) ?? return Err(err)
+    source_name: source_parts[source_parts.len() - 1]
+    label: if shown != "" -> shown else -> from
+    entry: build_regular_entry(source_dir, source_name, limit, shown: label) ?? return Err(err)
+    reader := files.jet_std_files_open_reader_nonblocking(files.join(source_dir.path, source_name)) ?? return Err(BuildIOError.from(err))
+    info: reader.stat() ?? return Err(BuildIOError.from(err))
+    if !info.is_file {
+        return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
+    }
+    if info.id != entry.id {
+        return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
+    }
+    if limit >= 0 && info.size > limit {
+        return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({info.size} bytes) exceeds its byte limit ({limit} bytes)"))
+    }
+    parts: build_relative_components(base, path, "build output escapes root")
+    if parts.len() == 0 {
+        return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
+    }
+    directory: build_output_parent(base, parts) ?? return Err(err)
+    final_name: parts[parts.len() - 1]
+    loop {
+        random_bytes: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))
+        temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
+        if directory.create(temp_name, if_exists: .Refuse, mode: Val(if executable -> 0o755 else -> 0o600)) == {
+            .Ok(created) -> {
+                writer := created
+                total := 0
+                loop {
+                    want: build_chunk_size(total, limit)
+                    if want <= 0 -> break
+                    chunk: reader.read_bytes(want) ?? {
+                        close(writer)
+                        directory.remove(temp_name).drop("cleanup partial stream restore")
+                        return Err(BuildIOError.from(err))
+                    }
+                    if chunk.len() == 0 -> break
+                    total += chunk.len()
+                    if limit >= 0 && total > limit {
+                        close(writer)
+                        directory.remove(temp_name).drop("cleanup over-limit stream restore")
+                        return Err(BuildIOError.new(.InvalidData, "cache entry `{label}` ({total} bytes) exceeds its byte limit ({limit} bytes)"))
+                    }
+                    writer.write_bytes(chunk) ?? {
+                        close(writer)
+                        directory.remove(temp_name).drop("cleanup failed stream restore")
+                        return Err(BuildIOError.from(err))
+                    }
+                }
+                writer.fsync() ?? {
+                    close(writer)
+                    directory.remove(temp_name).drop("cleanup failed fsync restore")
+                    return Err(BuildIOError.from(err))
+                }
+                close(writer)
+                if directory.rename(temp_name, final_name) == {
+                    .Ok(_) -> return
+                    .Err(error) -> {
+                        directory.remove(temp_name).drop("the restore stage is removed best-effort; the rename error is reported")
+                        return Err(BuildIOError.from(error))
+                    }
+                }
+            }
+            .Err(error) -> {
+                if !(error == .AlreadyExists(_)) -> return Err(BuildIOError.from(error))
+            }
+        }
+    }
 }
 
 // The held real directory holding the last of `parts` below `base`, every
