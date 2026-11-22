@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113187,
+    "rev": 113189,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30147,7 +30147,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-22T14:57:30.698Z",
+      "updated": "2026-11-22T15:11:25.103Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 20
     },
@@ -131249,6 +131249,325 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-21T12:58:45.557Z"
+    },
+    {
+      "id": "D-MAP-VIEWKEY1",
+      "cardId": "c00rqc09",
+      "group": "language",
+      "title": "Read-only map and set lookups with a string view",
+      "situation": "A string view points straight into text you already hold, without copying bytes onto the heap. Today, looking up a string view in a text-keyed map copies the view into a brand-new string on every read, or fails when explicit copies are on. That hurts hot loops in parsers, log scanners, and compilers that check thousands of trimmed words against a map. This vote decides whether read-only map and set lookups accept a string view in place; we recommend accepting views directly on reads while keeping inserts owned.",
+      "gist": "Should read-only map and set lookups accept a string view without copying?",
+      "lesson": "A string view borrows text from an owner string without copying bytes. Looking up a key only reads it and never keeps it. Every option still copies when inserting a new key into the map.",
+      "explainer": "",
+      "story": "Maya writes a log counter that trims each line and checks a map of known routes. She expects a lookup to only read the trimmed slice, not allocate a new string for every log line.",
+      "inWild": "let key: &str = line.trim();\nlet count = counts.get(key).copied().unwrap_or(0);\n// Rust std::collections::HashMap::get (https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Borrow view on reads",
+          "detail": "Read-only lookup operations on `[String: V]` (`m[k]`, `m.get(k)`, `m.contains_key(k)`, `m.remove(k)`) and `Set<String>` (`s.contains(k)`, `s.remove(k)`) accept a local zero-copy string view or `View<str>` directly without materializing an owned `String`. Writing a new key (`m[k] = v`, `m.insert(k, v)`, `s.insert(k)`) still needs an owned `String`, so it materializes as today (or asks for `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust `HashMap::get<Q: Borrow<K>>` and C++20 transparent lookup (`std::unordered_map::find(std::string_view)`) both solved this exact allocation hotspot; C++'s mistake was requiring an opt-in transparent comparator per map, whereas Rust makes `&str` work automatically for every `String`-keyed map. Jet gets Rust's zero-ceremony default with no trait boilerplate because `String` and `View<str>` share one UTF-8 byte-slice representation.",
+          "technical": "In `Compiler/JetSema/Source/Sema/Ownership/StringViews.jet`, exempt the key argument of read-only `Map<String, V>` and `Set<String>` operations (`Index`, `GetMap`, `ContainsKey`, `RemoveMap`, `SetContains`, `SetRemove`) from `sema_string_view_check_read` and `MaterializeView`. In `JetIR` and `JetRuntime`, pass `(ptr, len)` to the shared byte-slice lookup routine. Probe on `bfea516e21` confirmed `counts.get(key)` currently fails with `E2307` (`Jet.StringViewOutlivesOwner`) under `#Policy(copies: .Explicit)` and inserts `MaterializeView` otherwise.",
+          "code": "key: line.trim()\ncount: counts.get(key) ?? 0\nhas: seen.contains(key)"
+        },
+        {
+          "key": "B",
+          "name": "Keep owned key on reads",
+          "detail": "Every map and set lookup continues to take an owned `String`, copying a string view implicitly by default or requiring `key.copy()` under `#Policy(copies: .Explicit)`. This keeps every key slot uniform but leaves a permanent allocation tax on every lookup of a trimmed or sliced string, pushing performance-sensitive code toward custom tables.",
+          "technical": "Keep `sema_string_view_check_read` rejecting string views in map/set lookup key slots under `copies: .Explicit` and inserting `MaterializeView` otherwise.",
+          "code": "key: line.trim()\ncount: counts.get(key.copy()) ?? 0\nhas: seen.contains(key.copy())"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "HashMap<String, V>::get accepts &str automatically through Borrow<str>; https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get.",
+          "code": "let count = counts.get(line.trim()).copied().unwrap_or(0);"
+        },
+        {
+          "lang": "C++20",
+          "note": "Transparent lookup lets unordered_map<string, V> accept string_view, but only when the caller writes a custom transparent hash and equal_to; https://en.cppreference.com/w/cpp/container/unordered_map/find.",
+          "code": "auto it = counts.find(std::string_view(line));"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Reads never store the key, so borrowing a string view avoids wasted heap copies with zero new syntax.",
+        "gains": [
+          "Eliminates per-lookup copies in parsers, CSV readers, and compiler tables.",
+          "Matches proven zero-copy lookup ergonomics in Rust and C++."
+        ],
+        "losses": [
+          {
+            "loss": "Hash and equality must stay identical for owned strings and views.",
+            "mitigation": "Both share one byte-slice hash and comparison function in the runtime."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B forces a heap copy on every lookup of a trimmed or sliced key."
+          }
+        ],
+        "tradeoff": "The runtime shares one hash and equality routine across owned strings and string views."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should read-only map and set lookups accept a string view without copying?",
+        "lesson": "A string view borrows text from an owner string without copying bytes. Looking up a key only reads it and never keeps it. Every option still copies when inserting a new key into the map.",
+        "trio": {
+          "current": {
+            "note": "Today a read-only lookup copies the view, or fails under explicit copies.",
+            "code": "key: line.trim()\ncount: counts.get(key) ?? 0\n// Error under explicit copies: write key.copy()"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's HashMap::get accepts &str for HashMap<String, V> via Borrow. See https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get.",
+            "code": "let key: &str = line.trim();\nlet count = counts.get(key).copied().unwrap_or(0);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Borrow view on reads",
+            "gist": "Accept string views in read-only map and set lookups with zero copy.",
+            "gains": [
+              "Zero allocation on map and set reads.",
+              "Same plain lookup spelling for beginners and experts.",
+              "Inserts still require an owned string key."
+            ],
+            "losses": [
+              "Key hash and equality must match between owned strings and views."
+            ],
+            "proposed": {
+              "code": "key: line.trim()\ncount: counts.get(key) ?? 0\nhas: seen.contains(key)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep owned key on reads",
+            "gist": "Require an owned string on every map and set lookup.",
+            "gains": [
+              "One key type across every map and set method."
+            ],
+            "losses": [
+              "Every lookup on a view copies text onto the heap.",
+              "Hot code drops to byte arrays or custom tables."
+            ],
+            "proposed": {
+              "code": "key: line.trim()\ncount: counts.get(key.copy()) ?? 0\nhas: seen.contains(key.copy())"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Reads never store the key, so borrowing a string view avoids wasted heap copies with zero new syntax.",
+          "gains": [
+            "Eliminates per-lookup copies in parsers, CSV readers, and compiler tables.",
+            "Matches proven zero-copy lookup ergonomics in Rust and C++."
+          ],
+          "losses": [
+            {
+              "loss": "Hash and equality must stay identical for owned strings and views.",
+              "mitigation": "Both share one byte-slice hash and comparison function in the runtime."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B forces a heap copy on every lookup of a trimmed or sliced key."
+            }
+          ],
+          "tradeoff": "The runtime shares one hash and equality routine across owned strings and string views."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-22T15:10:42.746Z"
+    },
+    {
+      "id": "D-STR-VIEW-SPLIT1",
+      "cardId": "c00rqc09",
+      "group": "language",
+      "title": "Zero-copy string views for split, lines, and trim edges",
+      "situation": "Splitting text into lines or comma-separated fields is one of the most common loops in scripts, parsers, and data tools. Today, only trim, after, before, and slice borrow straight from the source string; lines, split, split_once, cut_last, trim_start, and trim_end allocate a fresh string on the heap for every piece. That makes idiomatic text loops allocate millions of tiny strings and forces performance code down to raw byte indexes. This vote decides whether these text-splitting methods yield zero-copy string views; we recommend yielding zero-copy views that keep the same plain string spelling and copy only when stored.",
+      "gist": "Should split, lines, split_once, cut_last, trim_start, and trim_end yield zero-copy string views?",
+      "lesson": "A zero-copy string view points into its source string without allocating bytes. Beginners still see plain String values and never write lifetimes. Storing a piece into an owning slot copies it automatically.",
+      "explainer": "",
+      "story": "Devon writes a CSV and log analyzer in Jet using text.lines() and line.split(\",\"). He wants the natural high-level loop to run with zero per-field heap allocations rather than rewriting it with manual byte offsets.",
+      "inWild": "for line in text.lines() {\n    for field in line.split(',') {\n        total += field.len();\n    }\n}\n// Rust std::primitive::str::split (https://doc.rust-lang.org/std/primitive.str.html#method.split)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Zero-copy views by default",
+          "detail": "Extend Jet's existing zero-copy string view rule (currently covering `.trim()`, `.after()`, `.before()`, and `.slice()`) to `.trim_start()`, `.trim_end()`, `.split_once()`, `.cut_last()`, `.split()`, and `.lines()`. Each bound or iterated piece borrows from the source string's UTF-8 buffer with zero allocation. Passing a piece into an owning slot (`List.push`, struct field, owned `String` return) materializes an owned copy automatically (or requires `.copy()` under `#Policy(copies: .Explicit)`). Prior art: Rust (`str::lines`, `str::split`), Zig (`std.mem.splitScalar`), and Go (`strings.SplitSeq` / zero-copy substring slicing) all avoid copying during text splitting; Java's early `String.substring` mistake was silently pinning huge backing buffers across arbitrary escaping references, which Jet avoids because provenance ends at the owner's read loan and escaping slots copy only the small piece.",
+          "technical": "In `Compiler/JetSema/Source/Sema/Ownership/StringViews.jet`, add `.TrimStart`, `.TrimEnd`, `.StringSplitOnce`, `.StringCutLast`, `.Split`, and `.Lines` to `sema_string_view_call_sources` and `sema_string_view_lower_init`, recording a read loan on the receiver across loop iteration and materializing via `MaterializeView` at owning destinations (`Docs/Spec/spec.md:2191,2310`). Probe on `bfea516e21` confirmed `line.split(\",\")` currently allocates owned `String` elements and rejects `View<str>` returns (`Jet.ReturnTypeMismatch`).",
+          "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Separate view sibling methods",
+          "detail": "Keep `.split()`, `.lines()`, `.split_once()`, `.cut_last()`, `.trim_start()`, and `.trim_end()` returning newly allocated `String` values, and add six parallel view-returning methods (`.split_views()`, `.line_views()`, etc.). This avoids a read loan on the plain names, but violates Jet's one-mechanism law by duplicating six core methods and leaving beginner code slow.",
+          "technical": "Add six new Core/Prelude string methods returning `View<str>` / view iterators while keeping existing `.Split`/`.Lines` lowering to owned `String` allocations.",
+          "code": "loop line in text.line_views() {\n    loop field in line.split_views(\",\") {\n        total += field.count_bytes()\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Always allocate owned strings",
+          "detail": "Keep `.split()`, `.lines()`, `.split_once()`, `.cut_last()`, `.trim_start()`, and `.trim_end()` returning freshly allocated owned `String` values with no view path. This avoids holding a read loan during iteration, but permanently taxes every text-splitting loop with heap allocations and forces performance-critical code (like CSV parsing and compiler scanners) onto manual byte offsets.",
+          "technical": "Leave `sema_string_view_lower_init` returning `None` for `.TrimStart`, `.TrimEnd`, `.StringSplitOnce`, `.StringCutLast`, `.Split`, and `.Lines`.",
+          "code": "bytes: text.bytes()\n// Manual byte-offset scanner to avoid per-field allocation"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "str::lines and str::split yield borrowed &str items with zero heap allocation; https://doc.rust-lang.org/std/primitive.str.html#method.split.",
+          "code": "for field in line.split(',') { total += field.len(); }"
+        },
+        {
+          "lang": "Zig",
+          "note": "std.mem.splitScalar yields zero-copy []const u8 slices into the source buffer; https://ziglang.org/documentation/master/std/#std.mem.splitScalar.",
+          "code": "var it = std.mem.splitScalar(u8, line, ',');"
+        },
+        {
+          "lang": "Go",
+          "note": "Go 1.24 added strings.SplitSeq returning zero-copy sub-slices without allocating a slice header array; https://pkg.go.dev/strings#SplitSeq.",
+          "code": "for field := range strings.SplitSeq(line, \",\") { total += len(field) }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Defaulting split and lines to zero-copy views makes idiomatic Jet fast by default and matches trim, after, and before.",
+        "gains": [
+          "Eliminates millions of allocations in scripts, CSV parsers, and compiler passes.",
+          "Keeps one small text API instead of duplicating every method."
+        ],
+        "losses": [
+          {
+            "loss": "The source string cannot be mutated while iterating its pieces.",
+            "mitigation": "Call .to_list() or .copy() before mutating, matching Jet's existing read-loan error message."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B splits the text API in two and leaves the plain spelling slow."
+          },
+          {
+            "key": "C",
+            "reason": "C forces fast text tools off String onto manual byte indexing."
+          }
+        ],
+        "tradeoff": "Mutating the source string mid-loop requires copying first, which Jet already explains clearly."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should split, lines, split_once, cut_last, trim_start, and trim_end yield zero-copy string views?",
+        "lesson": "A zero-copy string view points into its source string without allocating bytes. Beginners still see plain String values and never write lifetimes. Storing a piece into an owning slot copies it automatically.",
+        "trio": {
+          "current": {
+            "note": "Today split and lines allocate a new heap string for every piece, and cannot feed a View<str> return.",
+            "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's str::lines and str::split yield borrowed &str slices with zero heap allocation. See https://doc.rust-lang.org/std/primitive.str.html#method.split.",
+            "code": "for line in text.lines() {\n    for field in line.split(',') {\n        total += field.len();\n    }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Zero-copy views by default",
+            "gist": "Yield zero-copy views from split, lines, split_once, cut_last, trim_start, and trim_end.",
+            "gains": [
+              "Zero heap allocation in line and field loops.",
+              "Matches trim, after, before, and slice with no extra method names.",
+              "Owning slots still copy automatically for beginners."
+            ],
+            "losses": [
+              "You cannot mutate the source string while iterating its lines or fields."
+            ],
+            "proposed": {
+              "code": "loop line in text.lines() {\n    loop field in line.split(\",\") {\n        total += field.count_bytes()\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Separate view sibling methods",
+            "gist": "Keep split and lines allocating owned strings; add split_views and line_views.",
+            "gains": [
+              "Mutating the source string inside a plain lines loop stays allowed."
+            ],
+            "losses": [
+              "Doubles the text API surface with six extra methods.",
+              "Idiomatic loops stay slow unless users learn the expert names."
+            ],
+            "proposed": {
+              "code": "loop line in text.line_views() {\n    loop field in line.split_views(\",\") {\n        total += field.count_bytes()\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Always allocate owned strings",
+            "gist": "Keep split and lines returning freshly copied strings with no view form.",
+            "gains": [
+              "No read loan is held on the source string during the loop."
+            ],
+            "losses": [
+              "Every piece longer than inline storage allocates on the heap.",
+              "Fast parsers and CSV tools must bypass String and index raw bytes."
+            ],
+            "proposed": {
+              "code": "bytes: text.bytes()\n// Manual byte-offset scanner to avoid per-field allocation"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Defaulting split and lines to zero-copy views makes idiomatic Jet fast by default and matches trim, after, and before.",
+          "gains": [
+            "Eliminates millions of allocations in scripts, CSV parsers, and compiler passes.",
+            "Keeps one small text API instead of duplicating every method."
+          ],
+          "losses": [
+            {
+              "loss": "The source string cannot be mutated while iterating its pieces.",
+              "mitigation": "Call .to_list() or .copy() before mutating, matching Jet's existing read-loan error message."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B splits the text API in two and leaves the plain spelling slow."
+            },
+            {
+              "key": "C",
+              "reason": "C forces fast text tools off String onto manual byte indexing."
+            }
+          ],
+          "tradeoff": "Mutating the source string mid-loop requires copying first, which Jet already explains clearly."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-22T15:11:25.103Z"
     }
   ],
   "questions": [
@@ -133582,6 +133901,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T15:11:25.103Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-STR-VIEW-SPLIT1",
+      "note": "Zero-copy string views for split, lines, and trim edges (draft)"
+    },
+    {
+      "at": "2026-11-22T15:10:42.746Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-MAP-VIEWKEY1",
+      "note": "Read-only map and set lookups with a string view (draft)"
+    },
     {
       "at": "2026-11-22T15:07:18.293Z",
       "by": "Orchestrator",
@@ -137567,713 +137900,6 @@
       "by": "owner",
       "action": "card.update",
       "ref": "c0i0wm0m",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08lw188",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kwxkks",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bzkfdl",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0dxl32d",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0rfs1zh",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wxdq1k",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02h4gry",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0x0y1os",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0mvpscb",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.707Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0h2hvwv",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bf48a4",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c013frzw",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0vquonw",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lm8b0h",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fr9gl2",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0a4dfud",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ycfgad",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0i1vxui",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08g84nj",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02xubmv",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.706Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0x2g69u",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c04s3toz",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ze7k0c",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0pfw87t",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kbw9dr",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ae8vxy",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c051psx0",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0v25706",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kodh8n",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0av1t1i",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c000i200",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0rgy9zq",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fwzyiv",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05glk9b",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.705Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c002nhca",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ptq2fy",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fttoym",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05968om",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0v3x1cu",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0pllqqs",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ff4rd6",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08ehiis",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0dwvyof",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0x1bnix",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0njkjtb",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0i3v9v2",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cslm3b",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07a88xb",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.704Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0x0ur5x",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0rec6tv",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0gqfgov",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08en8ex",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0xnjpjq",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0r7qh3o",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0u8cs6x",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0p1zm2a",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0jsg61e",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c09hoi6l",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0zu27v0",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ufilnz",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kv3mji",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.703Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fryjkw",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06791le",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00xg57g",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0vb58xt",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lgsfwe",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0aatck7",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c04ucjza",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0v77oqp",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0q1ctbc",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kwrsnd",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fdw5bn",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c04phsyd",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.702Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0zbbsy1",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ttmmhd",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0utsmdj",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0eaqe17",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wqwqaq",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0i0ho3h",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0m3ug2h",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0qqwe62",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0pfsrnc",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0yry94n",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.701Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0by6tvm",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c03asgps",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0t4root",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kbaab0",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0j57gh4",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0hzhedp",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0gtqigv",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fp9sb3",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0eli2fh",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.700Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0dhzann",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cc6n6t",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0b698t4",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0a11ldt",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08vpj75",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07p2e72",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06lehoq",
-      "note": "epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-22T02:10:23.699Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05iu605",
       "note": "epoch,milestoneId"
     }
   ],
