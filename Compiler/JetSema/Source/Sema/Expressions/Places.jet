@@ -682,29 +682,40 @@ sema_expression_vjp_run_field: fn(gradient: Type, member: String) -> Type? {
 // `field` is the whole `base.member` expression (spanning `span`): the moved
 // checks read it in place instead of rebuilding it around a copy of `base`.
 sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_core_path_unimported(base, member, "", scopes) == .Val(report) {
-        diagnostics.push(report)
-        return None
-    }
-    // `task.x` with no local named `task` in scope: `x` is not a task
-    // combinator (the parser takes only the complete task surface), so teach
-    // the selectors rather than report an unknown `task`.
-    if base == .Ident(root, _, _) && root == "task" && sema_scope_resolve_index(scopes, root) == None {
-        member_span: Span{start: span.end - member.len(), end: span.end}
-        diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
-        return None
-    }
-    // `context.field`, where the root names the task context (a bare
-    // `context` nothing in scope declares, or an import of `core.context`),
-    // reads the task context.
-    if base == .Ident(root, root_span, _) {
-        if sema_context_root(root, root_span, environment, program, scopes, context) {
-            return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
+    base_local_slot := Int?{None}
+    if base == .Ident(root, _, _) {
+        if sema_scope_resolve_index(scopes, root) == .Val(found) {
+            kind: scopes.bindings[found].symbol.kind
+            if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
+                base_local_slot = Val(found)
+            }
         }
     }
-    // `#package.*` / `#build.*` fold from the build snapshot.
-    build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)
-    if build_fact.handled -> return build_fact.value
+    member_span: Span{start: span.end - member.len(), end: span.end}
+    if base_local_slot == None {
+        if sema_core_path_unimported(base, member, "", scopes) == .Val(report) {
+            diagnostics.push(report)
+            return None
+        }
+        // `task.x` with no local named `task` in scope: `x` is not a task
+        // combinator (the parser takes only the complete task surface), so teach
+        // the selectors rather than report an unknown `task`.
+        if base == .Ident(root, _, _) && root == "task" && sema_scope_resolve_index(scopes, root) == None {
+            diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
+            return None
+        }
+        // `context.field`, where the root names the task context (a bare
+        // `context` nothing in scope declares, or an import of `core.context`),
+        // reads the task context.
+        if base == .Ident(root, root_span, _) {
+            if sema_context_root(root, root_span, environment, program, scopes, context) {
+                return sema_expression_context_read(member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+            }
+        }
+        // `#package.*` / `#build.*` fold from the build snapshot.
+        build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)
+        if build_fact.handled -> return build_fact.value
+    }
     // `subject.$fact` reads a compiler-held plane.
     if member.starts_with("$") {
         fact: sema_fact_read_check(base, member, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -715,69 +726,71 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         catalog: sema_fact_enum_values(base, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if catalog.handled -> return catalog.value
     }
-    // Rust reports the E0220 owner read at the member name.
-    member_span: Span{start: span.end - member.len(), end: span.end}
     // (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,
     // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
     // numeric type's own constants.
-    if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
-        // Rust `numeric_const_type`: a numeric constant is a value, not a
-        // call, so the site is known-pure rather than an unknown callee.
-        if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) {
-            return None
-        }
-        bound: sema_tree_node(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
-        return sema_expr_expected_owned(bound, expected, environment, program, diagnostics)
-    }
-    // `TerminalFact.resize` is a stable key of the terminal fact report
-    // (`ProcessSpec.abilities()`), read as its key text, unless the program
-    // declares its own `TerminalFact`.
-    if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(scopes, owner) == None && sema_expression_type_symbol(scopes, environment, program, owner) == None {
-        return sema_expression_terminal_fact(member, member_span, expected, environment, program, diagnostics)
-    }
-    // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
-    // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the
-    // variant; a payload case read without a call is its constructor value.
-    if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
-        type_args: sema_expression_path_type_args(base)
-        constructor: sema_expression_enum_constructor_value(path, type_args, member_span, Span{start: expr_span(base).start, end: span.end}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        if constructor.handled -> return constructor.value
-        return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
-    // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
-    // whole-module import reads that module's constant `NAME`, and
-    // `core.math.NAME` through `use core: core` the nested module's.
-    if base == .Ident(alias, _, _) {
-        module_constant: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
-        if module_constant.handled -> return module_constant.value
-        if sema_call_taken_over_file_member(alias, member, member_span, environment, program, scopes) == .Val(taken) {
-            diagnostics.push(taken)
-            return None
-        }
-        // `m: lib.inner`: a module named through its parent is not a value.
-        if sema_expr_core_module_alias_visible(alias, scopes) && sema_call_module_member_is_module(environment, program, alias, member) {
-            diagnostics.push(sema_module_used_as_value("{alias}.{member}", span))
-            return None
-        }
-    }
-    if base == .Field(root, nested, _, _) {
-        if root == .Ident(alias, _, _) {
-            nested_constant: sema_expression_core_nested_constant(alias, nested, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
-            if nested_constant.handled -> return nested_constant.value
-        }
-    }
-    // Rust `infer_field` (static-owner arm): `Type.member` on a declared
-    // struct reads no value. A typestate label is a compile-time fact, and
-    // any other member is not a static member of the struct. A trait
-    // constant (`Type.name`, `T.name`) is the one static member a type has.
-    if base == .Ident(type_name, _, _) {
-        trait_constant: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
-        if trait_constant.handled -> return trait_constant.value
-        owner: sema_expression_type_symbol(scopes, environment, program, type_name)
-        if owner == .Val(symbol) {
-            if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {
-                diagnostics.push(sema_expression_struct_static_member_error(type_name, member, states, member_span))
+    if base_local_slot == None || member == "MIN" || member == "MAX" || member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON" {
+        if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
+            // Rust `numeric_const_type`: a numeric constant is a value, not a
+            // call, so the site is known-pure rather than an unknown callee.
+            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) {
                 return None
+            }
+            bound: sema_tree_node(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
+            return sema_expr_expected_owned(bound, expected, environment, program, diagnostics)
+        }
+    }
+    if base_local_slot == None {
+        // `TerminalFact.resize` is a stable key of the terminal fact report
+        // (`ProcessSpec.abilities()`), read as its key text, unless the program
+        // declares its own `TerminalFact`.
+        if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(scopes, owner) == None && sema_expression_type_symbol(scopes, environment, program, owner) == None {
+            return sema_expression_terminal_fact(member, member_span, expected, environment, program, diagnostics)
+        }
+        // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
+        // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the
+        // variant; a payload case read without a call is its constructor value.
+        if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
+            type_args: sema_expression_path_type_args(base)
+            constructor: sema_expression_enum_constructor_value(path, type_args, member_span, Span{start: expr_span(base).start, end: span.end}, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if constructor.handled -> return constructor.value
+            return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+        // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
+        // whole-module import reads that module's constant `NAME`, and
+        // `core.math.NAME` through `use core: core` the nested module's.
+        if base == .Ident(alias, _, _) {
+            module_constant: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+            if module_constant.handled -> return module_constant.value
+            if sema_call_taken_over_file_member(alias, member, member_span, environment, program, scopes) == .Val(taken) {
+                diagnostics.push(taken)
+                return None
+            }
+            // `m: lib.inner`: a module named through its parent is not a value.
+            if sema_expr_core_module_alias_visible(alias, scopes) && sema_call_module_member_is_module(environment, program, alias, member) {
+                diagnostics.push(sema_module_used_as_value("{alias}.{member}", span))
+                return None
+            }
+        }
+        if base == .Field(root, nested, _, _) {
+            if root == .Ident(alias, _, _) {
+                nested_constant: sema_expression_core_nested_constant(alias, nested, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+                if nested_constant.handled -> return nested_constant.value
+            }
+        }
+        // Rust `infer_field` (static-owner arm): `Type.member` on a declared
+        // struct reads no value. A typestate label is a compile-time fact, and
+        // any other member is not a static member of the struct. A trait
+        // constant (`Type.name`, `T.name`) is the one static member a type has.
+        if base == .Ident(type_name, _, _) {
+            trait_constant: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
+            if trait_constant.handled -> return trait_constant.value
+            owner: sema_expression_type_symbol(scopes, environment, program, type_name)
+            if owner == .Val(symbol) {
+                if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {
+                    diagnostics.push(sema_expression_struct_static_member_error(type_name, member, states, member_span))
+                    return None
+                }
             }
         }
     }
@@ -791,53 +804,81 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // moves of itself or its ancestors. The complete place checks all moves.
     moved_ok: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(state, field, scopes, diagnostics) else -> sema_ownership_check_moved_place_use(state, field, scopes, diagnostics)
     if !moved_ok -> return None
-    // The base is checked once, for real. When it is a shared handle, that
-    // check is rolled back and the locked-read rewrite is checked instead.
-    // (Probing the base before checking it re-checked every prefix of a field
-    // chain twice per level: exponential in the chain depth.)
-    base_scope_mark: sema_scope_mark(scopes)
-    base_context_mark: sema_check_context_save(context)
-    // copy: the probe's ownership state is restored when the base check is rolled back.
-    base_state: state.copy()
-    base_diagnostic_count: diagnostics.len()
-    base_tail_body_count: tail_store.bodies.len()
-    previous_root_read: context.suppress_partial_move_root_read
-    context.suppress_partial_move_root_read = true
-    checked_base_value: sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics)
-    context.suppress_partial_move_root_read = previous_root_read
-    if checked_base_value == .Val(probe_value) {
-        rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, scopes)
-        if rewritten == None {
-            rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
-        }
-        if rewritten == None {
-            rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
-        }
-        if rewritten == None {
-            swizzle: sema_expression_swizzle_read(base, member, span, probe_value.ty, environment, program, diagnostics)
-            if swizzle.invalid -> return None
-            rewritten = swizzle.read
-        }
-        if rewritten == None {
-            bound: sema_expression_bound_method(base, member, span, probe_value.ty, expected, environment, program, scopes, diagnostics)
-            if bound.invalid -> return None
-            rewritten = bound.read
-        }
-        if rewritten == .Val(generated) {
-            sema_check_context_rollback(context, base_context_mark.move())
-            sema_scope_rollback(scopes, base_scope_mark)
-            sema_ownership_state_restore(state, base_state.move())
-            loop diagnostics.len() > base_diagnostic_count -> _ := diagnostics.pop()
-            loop tail_store.bodies.len() > base_tail_body_count -> _ := tail_store.bodies.pop()
-            checked_generated: sema_check_expression(generated, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-            return Val(checked_generated)
+    // Plain local/parameter bases whose known type is a non-generic nominal
+    // cannot trigger Shared, Rows, computed-field, swizzle, or bound-method
+    // rewrites when none of those surfaces apply, so skip rollback snapshots.
+    skip_rollback := false
+    if base_local_slot == .Val(slot) && !program.has_computed_fields && !sema_expression_is_swizzle_member(member) {
+        if sema_scope_binding_type(environment, scopes, slot) == .Val(known_ty) {
+            if known_ty == .Named(_) && (expected == None || sema_expression_fn_slot(expected, environment, program) == None) {
+                skip_rollback = true
+            }
         }
     }
-    sema_scope_commit(scopes, base_scope_mark)
+    checked_base_value := TExpr?{None}
+    if skip_rollback {
+        previous_root_read: context.suppress_partial_move_root_read
+        context.suppress_partial_move_root_read = true
+        checked_base_value = sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        context.suppress_partial_move_root_read = previous_root_read
+    } else {
+        // The base is checked once, for real. When it is a shared handle, that
+        // check is rolled back and the locked-read rewrite is checked instead.
+        // (Probing the base before checking it re-checked every prefix of a field
+        // chain twice per level: exponential in the chain depth.)
+        base_scope_mark: sema_scope_mark(scopes)
+        base_context_mark: sema_check_context_save(context)
+        base_fork: sema_ownership_mark(state)
+        base_diagnostic_count: diagnostics.len()
+        base_tail_body_count: tail_store.bodies.len()
+        previous_root_read: context.suppress_partial_move_root_read
+        context.suppress_partial_move_root_read = true
+        checked_base_value = sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        context.suppress_partial_move_root_read = previous_root_read
+        if checked_base_value == .Val(probe_value) {
+            rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, scopes)
+            if rewritten == None {
+                rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
+            }
+            if rewritten == None {
+                rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
+            }
+            if rewritten == None {
+                swizzle: sema_expression_swizzle_read(base, member, span, probe_value.ty, environment, program, diagnostics)
+                if swizzle.invalid {
+                    sema_scope_commit(scopes, base_scope_mark)
+                    sema_ownership_fork_commit(state)
+                    return None
+                }
+                rewritten = swizzle.read
+            }
+            if rewritten == None {
+                bound: sema_expression_bound_method(base, member, span, probe_value.ty, expected, environment, program, scopes, diagnostics)
+                if bound.invalid {
+                    sema_scope_commit(scopes, base_scope_mark)
+                    sema_ownership_fork_commit(state)
+                    return None
+                }
+                rewritten = bound.read
+            }
+            if rewritten == .Val(generated) {
+                sema_check_context_rollback(context, base_context_mark.move())
+                sema_scope_rollback(scopes, base_scope_mark)
+                sema_ownership_fork_rollback(state, base_fork)
+                sema_ownership_fork_close(state, base_fork)
+                loop diagnostics.len() > base_diagnostic_count -> _ := diagnostics.pop()
+                loop tail_store.bodies.len() > base_tail_body_count -> _ := tail_store.bodies.pop()
+                checked_generated: sema_check_expression(generated, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return Val(checked_generated)
+            }
+        }
+        sema_scope_commit(scopes, base_scope_mark)
+        sema_ownership_fork_commit(state)
+    }
     checked_base: checked_base_value ?? return None
     // (Rust `infer_field` Dyn arm): `tree.member` on a Dyn
     // reads the object member as a checked Dyn; method names stay reserved.
-    if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
+    if checked_base.ty == .Named(_) && sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
         if sema_dyn_is_member(member) {
             diagnostics.push(sema_dyn_member_error(member, member_span))
             return None
@@ -1013,6 +1054,7 @@ sema_expression_computed_field_read: fn(base: Expr, member: String, span: Span, 
 // generated getter it names when `getter` is set. None for a stored field,
 // an unknown member or a base that is no struct.
 sema_expression_computed_field_named: fn(ty: Type, member: String, getter: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String? {
+    if !program.has_computed_fields -> return None
     owner_name := ""
     if sema_expr_unwrap_tag(ty) == {
         .Named(name) -> owner_name = name
@@ -1350,6 +1392,10 @@ sema_expression_bound_method: fn(base: Expr, member: String, span: Span, receive
 // `(F)?`, read through aliases; None for any other expectation.
 sema_expression_fn_slot: fn(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
     wanted: expected ?? return None
+    if wanted == {
+        .Fn(_, _, _, _, _, _) | .Option(_) | .Named(_) | .Apply(_, _) | .Tagged(_, _) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+    }
     resolved: sema_expr_unwrap_tag(sema_call_resolved_type(wanted, environment, program))
     if resolved == .Fn(_, _, _, _, _, _) -> return Val(resolved)
     sema_expression_optional_fn_slot(expected, environment, program)
@@ -1440,8 +1486,20 @@ SemaSwizzleRead: struct {
     invalid: Bool,
 }
 
+// Fast pre-filter: only 1..4 ASCII swizzle letters (x/y/z/w/r/g/b/a) can
+// ever parse as a swizzle member, avoiding nominal graph lookups on ordinary fields.
+sema_expression_is_swizzle_member: fn(member: String) -> Bool Never! {
+    len: member.count_bytes()
+    if len == 0 || len > 4 -> return false
+    loop byte in member.bytes() {
+        if sema_expression_swizzle_letter(byte) == None -> return false
+    }
+    true
+}
+
 sema_expression_swizzle_read: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaSwizzleRead {
     none: SemaSwizzleRead{read: None, invalid: false}
+    if !sema_expression_is_swizzle_member(member) -> return none
     slots: sema_expression_swizzle_slots(ty, environment, program) ?? return none
     parsed: sema_expression_math_swizzle_parse(slots, member, span, diagnostics)
     if parsed == {

@@ -5978,13 +5978,17 @@ sema_registration_lookup_name: fn(graph: SemaRegistrationGraph, module_identity:
 // sema_registration_lookup_name in the module row `module_index` (the row of
 // `module_identity`), for a caller that already holds it.
 sema_registration_lookup_name_at: fn(graph: SemaRegistrationGraph, module_index: Int, module_identity: ModuleID, name: String) -> SemaRegistrationResolvedSymbol? {
+    sema_registration_lookup_name_hashed(graph, module_index, module_identity, name, name_rows_hash(name))
+}
+
+// sema_registration_lookup_name_at for a caller that already computed
+// `name_rows_hash(name)`.
+sema_registration_lookup_name_hashed: fn(graph: SemaRegistrationGraph, module_index: Int, module_identity: ModuleID, name: String, hash: Int) -> SemaRegistrationResolvedSymbol? {
     if graph.counting {
         counters := graph.lookup_counters
         permit: counters.guard_read()
         _: permit.value.name_lookups.add(1)
     }
-    // One hash of the name serves every table below (A1).
-    hash: name_rows_hash(name)
     // The module is passed as a place to a read parameter: binding it here
     // copied the whole module (its program and tables) on every lookup.
     local: sema_registration_lookup_module_probe(graph.modules[module_index], module_index, module_identity, name, hash)

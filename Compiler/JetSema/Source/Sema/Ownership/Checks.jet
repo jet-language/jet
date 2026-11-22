@@ -6661,6 +6661,12 @@ sema_ownership_fork_close: fn(state: &SemaOwnershipState, fork: SemaOwnershipFor
     if state.forks == 0 -> state.trail = [SemaOwnershipUndo]{}
 }
 
+// Ends a mark whose work is kept in place: trail rows stay for any enclosing fork.
+sema_ownership_fork_commit: fn(state: &SemaOwnershipState) Never! {
+    state.forks -= 1
+    if state.forks == 0 -> state.trail = [SemaOwnershipUndo]{}
+}
+
 // Ends a fork whose arms stop the check: the state before the fork, plus
 // the share sites the arms found (sema_ownership_keep_share_found).
 sema_ownership_fork_drop: fn(state: &SemaOwnershipState, fork: SemaOwnershipFork, first: [SemaOwnershipShareSite], second: [SemaOwnershipShareSite]) Never! {

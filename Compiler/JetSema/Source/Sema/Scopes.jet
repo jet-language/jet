@@ -1214,6 +1214,10 @@ SemaProgramTables: struct {
     // check_program); a graph's own table (SemaRegistrationGraph.symbols)
     // is the run's otherwise.
     symbols: SymbolTable{symbol_table()},
+    // True if any struct declaration may have a computed field (or when no
+    // registration graph is present); lets field reads skip computed-field
+    // symbol lookups in O(1) when false.
+    has_computed_fields: Bool{true},
 }
 
 // The run-wide id of `key`, if a registration holds it.
@@ -1292,10 +1296,19 @@ sema_program_tables_init: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
 sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: &&[String:[String]], copy_facts: &&SemaCopyFactsTable) -> SemaProgramTables Never! {
     names := name_table_sized(checked_types.len() * 2 + 2)
     name_rows := [[Int]]{[Int]{}}
+    has_computed := graph == None
     loop (index, definition) in checked_types {
         id: name_index(name_intern(names, definition.name))
         if id == name_rows.len() -> name_rows.push([Int]{})
         name_rows[id].push(index)
+        if !has_computed && definition.kind == .Struct(fields, _) {
+            loop field in fields {
+                if field.computed {
+                    has_computed = true
+                    break
+                }
+            }
+        }
     }
     SemaProgramTables{
         registration_graph: graph,
@@ -1304,6 +1317,7 @@ sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
         checked_type_name_rows: name_rows,
         boxed_edges: boxed_edges,
         copy_facts: copy_facts,
+        has_computed_fields: has_computed,
     }
 }
 
@@ -1750,18 +1764,18 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             allow_string_view_read: context.allow_string_view_read,
             suppress_partial_move_root_read: context.suppress_partial_move_root_read,
             allow_fixed_constructor: context.allow_fixed_constructor,
-            generic_params: context.generic_params.copy(),
+            generic_params: if context.generic_params.len() == 0 -> [TGenericParam]{} else -> context.generic_params.copy(),
             lambda_escapes: context.lambda_escapes,
             lambda_lending_views: context.lambda_lending_views,
-            lending_view_parameter_keys: context.lending_view_parameter_keys.copy(),
-            lambda_statement_tails: context.lambda_statement_tails.copy(),
+            lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
+            lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
             call_facts: [SemaCallSiteFact]{},
             http_routes: context.http_routes.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             call_return_views: [SemaCallReturnView]{},
             local_view_provenance: [SemaLocalViewProvenance]{},
             return_view_receiver_key: context.return_view_receiver_key,
-            return_view_parameter_keys: context.return_view_parameter_keys.copy(),
+            return_view_parameter_keys: if context.return_view_parameter_keys.len() == 0 -> [String]{} else -> context.return_view_parameter_keys.copy(),
             return_view_provenance: context.return_view_provenance,
             name_references: [SemaNameReferenceFact]{},
             comptime_requests: [SemaComptimeRequest]{},
@@ -1779,17 +1793,17 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             autodiff_unsafe_panic: context.autodiff_unsafe_panic,
             autodiff_safe_panic_context: context.autodiff_safe_panic_context,
             copy_events: [SemaCopyEvent]{},
-            loop_value_frames: context.loop_value_frames.copy(),
-            loop_break_flows: sema_loop_break_flows_snapshot(context.loop_break_flows),
+            loop_value_frames: if context.loop_value_frames.len() == 0 -> [SemaLoopValueFrame]{} else -> context.loop_value_frames.copy(),
+            loop_break_flows: if context.loop_break_flows.len() == 0 -> [SemaLoopBreakFlows]{} else -> sema_loop_break_flows_snapshot(context.loop_break_flows),
             pending_loop_value: context.pending_loop_value,
-            collect_item_types: context.collect_item_types.copy(),
+            collect_item_types: if context.collect_item_types.len() == 0 -> [Type?]{} else -> context.collect_item_types.copy(),
             collect_item_if: context.collect_item_if,
             last_loop_result_type: context.last_loop_result_type,
             arrow_loop_body: context.arrow_loop_body,
-            reactive_upgrades: context.reactive_upgrades.copy(),
-            reactive_upgrade_names: context.reactive_upgrade_names.copy(),
-            reactive_local_ids: context.reactive_local_ids.copy(),
-            reactive_shared_ids: context.reactive_shared_ids.copy(),
+            reactive_upgrades: if context.reactive_upgrades.len() == 0 -> [String]{} else -> context.reactive_upgrades.copy(),
+            reactive_upgrade_names: if context.reactive_upgrade_names.len() == 0 -> [String]{} else -> context.reactive_upgrade_names.copy(),
+            reactive_local_ids: if context.reactive_local_ids.len() == 0 -> [SymbolID]{} else -> context.reactive_local_ids.copy(),
+            reactive_shared_ids: if context.reactive_shared_ids.len() == 0 -> [SymbolID]{} else -> context.reactive_shared_ids.copy(),
             taskgroups: sema_taskgroup_state_snapshot(context.taskgroups),
             failure_carrier_root: context.failure_carrier_root,
             failure_success_view: context.failure_success_view,
@@ -1814,7 +1828,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             failure_union_edges: [String]{},
             failure_union_general: context.failure_union_general,
             task_body_propagates: context.task_body_propagates,
-            iter_borrowed: context.iter_borrowed.copy(),
+            iter_borrowed: if context.iter_borrowed.len() == 0 -> [String]{} else -> context.iter_borrowed.copy(),
             binding_initializer: context.binding_initializer,
             source_nesting: context.source_nesting,
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
@@ -2760,6 +2774,10 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     count: source.bindings.len()
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
+    if count > 0 {
+        bindings.try_reserve(count) ?? panic("reserve failed")
+        light.try_reserve(count) ?? panic("reserve failed")
+    }
     loop i in 0..<count {
         function_type: source.bindings[i].symbol.ty == .Val(.Fn(_, _, _, _, _, _))
         if function_type {

@@ -333,15 +333,11 @@ sema_app_caller_names: fn(graph: SemaRegistrationGraph, function: FnBody, caller
 
 // Adds each symbol `function` calls or names to `callees`.
 sema_app_caller_scan_calls: fn(graph: SemaRegistrationGraph, function: FnBody, callees: &[U32:Bool]) Never! {
-    loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_app_caller_scan_expr(graph, function, expression, callees) })
+    loop i in 0..<function.tree.nodes.len() {
+        if sema_app_caller_callee(graph, function, function.tree.nodes[i].kind) == .Val(symbol) {
+            callees[symbol] = true
+        }
     }
-}
-
-sema_app_caller_scan_expr: fn(graph: SemaRegistrationGraph, function: FnBody, expression: Int, callees: &[U32:Bool]) Never! {
-    node: body_node(function.tree, expression)
-    if sema_app_caller_callee(graph, function, node.kind) == .Val(symbol) -> callees[symbol] = true
-    body_each_expr_child(function.tree, node, fn(child: Int) { sema_app_caller_scan_expr(graph, function, child, callees) })
 }
 
 // Walks a root: one where a caller is certain (a signed-in method) only for

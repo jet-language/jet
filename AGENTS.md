@@ -30,6 +30,32 @@ A newer ruling from a higher authority wins. Never average conflicting rules.
 When a conflict or owner gate blocks one slice of work, stop only that slice
 and continue with independent work.
 
+## Verify before claiming or changing
+
+No agent may state a claim about Jet's syntax, semantics, shipped features,
+missing features, diagnostics, docs, or Tower state from memory or from
+intuition about another language. Before reporting to the owner, filing a card
+or ballot, or editing code or prose:
+
+1. **Read the syntax registry first.** Check
+   `Compiler/JetFoundation/Data/Syntax/Spellings.jet` (and sibling files under
+   `Compiler/JetFoundation/Data/Syntax/`) before naming any Jet keyword, sigil,
+   marker, or grammar form. Never write another language's syntax as Jet syntax
+   or claim a registered spelling does not exist.
+2. **Read the spec and live code together.** Check `Docs/Spec/spec.md`, the
+   relevant `Docs/Spec/Reference/` page, and the implementing compiler or Core
+   source before claiming a feature is missing, partial, or broken. Distinguish
+   explicitly between (a) a defect or unbuilt piece of an already-ratified
+   decision (cardable without a ballot) and (b) a genuinely unratified surface
+   change (ballotable only after verifying no decision already covers it).
+3. **Check Tower before planning, carding, or balloting.** Search existing
+   cards and decisions in Tower first. Attach defects and follow-ups to the
+   existing owning card; never duplicate a card or re-ballot a settled choice.
+4. **Cite the exact source.** Every claim about what Jet allows, forbids, or
+   ships must rest on a file, symbol, registry row, or command output read in
+   the current session. Guessing and filling gaps with plausible prose is a
+   contract violation.
+
 ## Decision levels
 
 | Level | Decides | Central question |

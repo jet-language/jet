@@ -823,16 +823,7 @@ sema_core_bound_walk: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
 // value, a shared global's initializer), each into `valued` and, the first
 // time, named again into `names`: the walk passed it by if it is a stop.
 sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, valued: &[U32:Bool], names: &SemaCoreDemandNames) Never! {
-    pending := [Int]{}
-    loop parameter in function.params {
-        if parameter.default == .Val(value) -> pending.push(value)
-    }
-    loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child: Int) { pending.push(child) })
-    }
-    loop pending.len() > 0 {
-        expression: pending.pop() ?? break
-        idx: body_node_index(function.tree, expression)
+    loop idx in 0..<function.tree.nodes.len() {
         named := DeclID?{None}
         if function.tree.nodes[idx].kind == .FnValue(kind) {
             if kind == .NamedFn(value, _) -> named = value
@@ -847,7 +838,6 @@ sema_core_bound_values: fn(function: FnBody, graph: SemaRegistrationGraph, value
                 }
             }
         }
-        body_each_expr_child(function.tree, function.tree.nodes[idx], fn(child: Int) { pending.push(child) })
     }
 }
 
@@ -1562,21 +1552,11 @@ sema_core_demand_body_names: fn(function: FnBody, decls: DeclTable, symbols: Sym
 }
 
 // The names checked body `function` holds that may name a function, into
-// `reads` in walk order. The expressions are walked from a work list. A
-// body's own id names no Core body, so it adds no name.
+// `reads` in tree node order. A body's own id names no Core body, so it adds
+// no name.
 sema_core_demand_body_reads: fn(function: FnBody, reads: &SemaCoreDemandReads) Never! {
-    pending := [Int]{}
-    loop parameter in function.params {
-        if parameter.default == .Val(value) -> pending.push(value)
-    }
-    loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child: Int) { pending.push(child) })
-    }
-    loop pending.len() > 0 {
-        expression: pending.pop() ?? break
-        idx: body_node_index(function.tree, expression)
+    loop idx in 0..<function.tree.nodes.len() {
         sema_core_demand_expr_reads(function.tree.nodes[idx], reads)
-        body_each_expr_child(function.tree, function.tree.nodes[idx], fn(child: Int) { pending.push(child) })
     }
 }
 
