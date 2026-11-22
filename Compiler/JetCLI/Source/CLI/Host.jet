@@ -217,7 +217,6 @@ use {
         ir_opt_marked_calls,
         ir_opt_module_start,
         ir_opt_o0_bodies,
-        ir_opt_o0_fast,
         ir_optimize_module,
         ir_x64_compile_module_logged,
         ir_x64_hot_order,
@@ -1229,20 +1228,33 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         runtime = jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_PACK_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime: {err.message}"}}
     }
     if decided {
-        // `runtime` is the pack: the collection names the live undefined
-        // symbols, and only their declarations' providers are realized.
-        query := x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
-        live := [String:Bool]{}
-        loop symbol in query.symbols -> live[symbol.copy()] = true
-        queried := query.bufs.move()
-        runtime = queried.pop() ?? panic("the live symbol query lost the runtime pack")
-        object = queried.pop() ?? panic("the live symbol query lost the program object")
-        kept: jet_driver_foreign_link_live(foreign_link, live)
-        if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 {
-            live_closure: jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, false)
-            closure = live_closure.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: live_closure.error}}
-            runtime = live_closure.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: live_closure.runtime_error}}
-            runtime_path = live_closure.runtime_path
+        needs_live_query := foreign_link.inline_c.len() > 0 || built.imports.len() == 0
+        if !needs_live_query {
+            declared_syms := name_table_sized(64)
+            loop decl in foreign_link.declarations -> _ := name_intern(declared_syms, decl.symbol)
+            loop symbol in built.imports {
+                if name_find(declared_syms, symbol) != None {
+                    needs_live_query = true
+                    break
+                }
+            }
+        }
+        if needs_live_query {
+            // `runtime` is the pack: the collection names the live undefined
+            // symbols, and only their declarations' providers are realized.
+            query := x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
+            live := [String:Bool]{}
+            loop symbol in query.symbols -> live[symbol.copy()] = true
+            queried := query.bufs.move()
+            runtime = queried.pop() ?? panic("the live symbol query lost the runtime pack")
+            object = queried.pop() ?? panic("the live symbol query lost the program object")
+            kept: jet_driver_foreign_link_live(foreign_link, live)
+            if jet_cli_native_c_linked(kept) || kept.inline_c.len() > 0 {
+                live_closure: jet_cli_native_foreign_realize(kept, None, sources, runtime_dir, runtime_key, false)
+                closure = live_closure.inputs ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Foreign{message: live_closure.error}}
+                runtime = live_closure.runtime.move() ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: live_closure.runtime_error}}
+                runtime_path = live_closure.runtime_path
+            }
         }
     }
     // Input names appear only in link diagnostics; the image is a function of
@@ -1625,7 +1637,7 @@ jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> NameTable Nev
 // `#FFI(asm)` leaf: the compiler's own leaves, a stop poll or a reduction,
 // have no source file) and no plugin. Anything else keeps the locked forms.
 jet_cli_single_thread: fn(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [String:Bool]) -> Bool Never! {
-    receipt: runtime.threads ?? return false
+    if runtime.threads == None -> return false
     called := [Bool]{}
     loop _ in 0..<m.names.len() -> called.push(false)
     loop f in m.functions {
@@ -1636,6 +1648,21 @@ jet_cli_single_thread: fn(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [
             if op == .CallRuntime -> called[f.a[at]] = true
         }
     }
+    jet_cli_single_thread_check(m, called, runtime, foreign)
+}
+
+jet_cli_single_thread_called: fn(m: IRModule, called: [Bool], runtime: JetCLIRuntimeExports, foreign: [String:Bool]) -> Bool Never! {
+    if runtime.threads == None -> return false
+    loop f in m.functions {
+        if (f.asm != None && f.source_file != "") || f.key.starts_with(IR_PLUGIN_GUEST_PREFIX) {
+            return false
+        }
+    }
+    jet_cli_single_thread_check(m, called, runtime, foreign)
+}
+
+jet_cli_single_thread_check: fn(m: IRModule, called: [Bool], runtime: JetCLIRuntimeExports, foreign: [String:Bool]) -> Bool Never! {
+    receipt: runtime.threads ?? return false
     starts := [String:Bool]{}
     starts["*"] = false
     loop route in JET_CLI_MAIN_ROUTES -> starts[route.copy()] = false
@@ -1664,6 +1691,7 @@ jet_cli_single_thread: fn(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [
 JetCLINativeObject: struct {
     bytes: [U8],
     failure: JetCLINativeFailure?,
+    imports: [String]{[String]{}},
 }
 
 jet_cli_native_object_failure: fn(failure: JetCLINativeFailure) -> JetCLINativeObject Never! {
@@ -1854,20 +1882,25 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     if exported.len() > 0 -> jet_cli_runtime_exports_mark(runtime.exports, exported)
     // Per name row: a runtime call of it fails its function.
     unexported := [Bool]{}
+    any_unexported := false
     loop (row, calls) in called {
-        unexported.push(calls && !(exported.get(built.program.names[row]) ?? true))
+        bad: calls && !(exported.get(built.program.names[row]) ?? true)
+        unexported.push(bad)
+        if bad -> any_unexported = true
     }
-    loop index in 0..<built.program.functions.len() {
-        missing := String?{None}
-        loop (at, op) in built.program.functions[index].op {
-            if op == .CallRuntime && unexported[built.program.functions[index].a[at]] {
-                missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
-                break
+    if any_unexported {
+        loop index in 0..<built.program.functions.len() {
+            missing := String?{None}
+            loop (at, op) in built.program.functions[index].op {
+                if op == .CallRuntime && unexported[built.program.functions[index].a[at]] {
+                    missing = Val(built.program.names[built.program.functions[index].a[at]].copy())
+                    break
+                }
             }
+            symbol: missing ?? next
+            key: built.program.functions[index].key.copy()
+            jet_cli_ice_trap(census, built.program, key, "ir.build", "runtime-route", "runtime route {symbol}: the Jet runtime {runtime.key} exports no `{symbol}`")
         }
-        symbol: missing ?? next
-        key: built.program.functions[index].key.copy()
-        jet_cli_ice_trap(census, built.program, key, "ir.build", "runtime-route", "runtime route {symbol}: the Jet runtime {runtime.key} exports no `{symbol}`")
     }
     // The memory term is read now: the compile before this holds most of it.
     threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
@@ -1879,7 +1912,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     if trace_sink == .Val(sink) {
         sink.progress("counters.ir.opt.marked_calls", ir_opt_marked_calls(built.program), -1)
     }
-    built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
+    built.program.single_thread = if level <= 0 && !any_unexported -> jet_cli_single_thread_called(built.program, called, runtime, closure_symbols) else -> jet_cli_single_thread(built.program, runtime, closure_symbols)
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source, cli_files.cwd() ?? "")
     built.program.debug_level = level
     built.program.fast_o0 = level <= 0 && !opt_options.verify && !opt_options.stress
@@ -1947,15 +1980,15 @@ jet_cli_native_optimize: fn(program: &IRModule, opt: IROptOptions, threads: Comp
 }
 
 // O0's IR before selection: runs return-slot rewriting and `#Inline(Always)`
-// inlining (`ir_opt_module_start`), then on the fast unverified path runs
-// single-round loop-only inline Int facts fused with early Drops and skips IR
-// Lint. Under verify/stress/dump it runs the full ir_opt_o0_bodies pass.
+// inlining (`ir_opt_module_start`), then on the fast unverified path lets
+// `ir_x64_compile_module_logged` run early Drops fused before selection so
+// O0 avoids an extra stop-the-world pass. Under verify/stress/dump it runs
+// the full ir_opt_o0_bodies pass.
 jet_cli_native_o0: fn(program: &IRModule, options: IROptOptions, threads: CompilerThreads, census: &[JetDriverIceRow], trace_sink: CompilerTraceSink?) -[FS, Time]> Never! {
     count: program.functions.len()
     if !options.verify && !options.stress && options.dump == "" {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "O0", -1, -1)
-        report := ir_opt_module_start(program, options, threads)
-        ir_opt_o0_fast(program, options, threads, report)
+        _ := ir_opt_module_start(program, options, threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", count)
         return
     }
@@ -2047,7 +2080,7 @@ jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLow
     if object.errors.len() > 0 && object.bytes.len() == 0 {
         return jet_cli_native_object_failure(JetCLINativeFailure.Faulted)
     }
-    JetCLINativeObject{bytes: object.bytes.move(), failure: None}
+    JetCLINativeObject{bytes: object.bytes.move(), failure: None, imports: object.imports.move()}
 }
 
 // The compilation directory the image's DWARF records for `file`, the entry

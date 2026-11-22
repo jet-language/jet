@@ -903,10 +903,12 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
     inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
-    outputs := [[IRX64FunctionResult]]{}
+    outputs := [IRX64FunctionResult?]{}
     stops := [String]{}
+    outputs.try_reserve(count) ?? panic("reserve failed")
+    stops.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count {
-        outputs.push([IRX64FunctionResult]{})
+        outputs.push(None)
         stops.push("")
     }
     ir_x64_select_rows(inputs, workers, outputs, stops)
@@ -918,11 +920,17 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     row_uses := [IRX64Uses]{}
     row_hot := [[Int]]{}
     row_cold := [[Int]]{}
+    functions.try_reserve(count) ?? panic("reserve failed")
+    debug.try_reserve(count) ?? panic("reserve failed")
+    variables.try_reserve(count) ?? panic("reserve failed")
+    row_uses.try_reserve(count) ?? panic("reserve failed")
+    row_hot.try_reserve(count) ?? panic("reserve failed")
+    row_cold.try_reserve(count) ?? panic("reserve failed")
     row := count - 1
     loop row >= 0 {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
         stop: stops.pop() ?? ""
-        if (taken.pop()) == .Val(compiled) {
+        if taken.move() == .Val(compiled) {
             selected := compiled.move()
             row_errors.push(compiler_take_rows<String>(selected.errors))
             row_logs.push(compiler_take_rows<String>(selected.log))
@@ -1001,7 +1009,7 @@ IRX64Selected: struct {
 // or `stops` the panic text of a thread that stopped on it. A stopped
 // thread's finished rows go with it and are selected again (selection is
 // deterministic), so a round that leaves rows behind has stopped on one.
-ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[[IRX64FunctionResult]], stops: &[String]) {
+ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[IRX64FunctionResult?], stops: &[String]) {
     loop {
         parts := ir_x64_claimers(inputs, 0, workers, stops) ?? panic("the x64 selection threads failed")
         loop parts.len() > 0 {
@@ -1012,13 +1020,13 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[[IR
                 selected := part.pop() ?? {
                     break
                 }
-                outputs[selected.row].push(selected.compiled.move())
+                outputs[selected.row] = Val(selected.compiled.move())
             }
         }
         missing := [Int]{}
         stopped := 0
         loop row in 0..<outputs.len() {
-            if stops[row] != "" -> stopped += 1 else if outputs[row].len() == 0 -> missing.push(row)
+            if stops[row] != "" -> stopped += 1 else if outputs[row] == None -> missing.push(row)
         }
         if missing.len() == 0 {
             return
@@ -1056,6 +1064,8 @@ ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: &
 ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
     reads: inputs.guard_read()
     selected := [IRX64Selected]{}
+    est: reads.value.order.len().div_euclid(reads.value.seats.len() + 1) + 16
+    selected.try_reserve(est) ?? panic("reserve failed")
     loop {
         rank: reads.value.next.add(1)
         if rank >= reads.value.order.len() -> break

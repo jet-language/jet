@@ -5752,13 +5752,65 @@ jet_driver_take_line_starts: fn(segments: &[SemaSourceSegment], line_starts: &&[
 // Every unit the load never parsed (or whose parse stopped before lexing)
 // scans its own text for its line table, before anything reads one.
 jet_driver_fill_line_starts: fn(request: JetDriverCompileRequest, source_units: &[JetDriverSourceUnit]) {
+    indices := [Int]{}
+    texts := [String]{}
+    weights := [Int]{}
+    total := 0
     loop index in 0..<source_units.len() {
         if source_units[index].source_segments.len() != 1 || source_units[index].source_segments[0].line_starts.len() != 0 {
             next
         }
         text: jet_driver_source_unit_text(request, source_units[index])
-        source_units[index].source_segments[0].line_starts = if text == .Val(value) -> parser_line_starts(value.bytes()) else -> [Int]{0}
+        if text == .Val(value) {
+            weight: 1 + value.bytes().len()
+            indices.push(index)
+            texts.push(value)
+            weights.push(weight)
+            total += weight
+        } else { source_units[index].source_segments[0].line_starts = [Int]{0} }
     }
+    if indices.len() == 0 {
+        return
+    }
+    workers: compiler_threads_admit(request.compiler_threads, indices.len(), total, 131072, 0, 0)
+    if workers <= 1 {
+        loop (pos, index) in indices {
+            source_units[index].source_segments[0].line_starts = parser_line_starts(texts[pos].bytes())
+        }
+        return
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    parts := jet_driver_line_starts_ranges(texts, bounds, 0)
+    pos := 0
+    loop part in parts.move() {
+        loop starts in part.move() {
+            source_units[indices[pos]].source_segments[0].line_starts = starts.move()
+            pos += 1
+        }
+    }
+}
+
+jet_driver_line_starts_range: fn(texts: [String], start: Int, end: Int) -> [[Int]] Never! {
+    out := [[Int]]{}
+    out.try_reserve(end - start) ?? panic("reserve failed")
+    loop i in start..<end -> out.push(parser_line_starts(texts[i].bytes()))
+    out
+}
+
+jet_driver_line_starts_ranges: fn(texts: [String], bounds: [Int], at: Int) -> [[[Int]]] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [[[Int]]]{}
+    if at == last {
+        return [[[Int]]]{jet_driver_line_starts_range(texts, bounds[at], bounds[at + 1])}
+    }
+    done := [[[Int]]]{}
+    task.group jet_driver_line_starts_threads {
+        head: task jet_driver_line_starts_range(texts, bounds[at], bounds[at + 1])
+        rest: jet_driver_line_starts_ranges(texts, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
 }
 
 // The source unit of the Core module `module_name`, cataloged once. A public

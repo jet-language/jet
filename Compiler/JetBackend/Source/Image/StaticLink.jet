@@ -2888,6 +2888,9 @@ link_phdr: fn(out: &[U8], offset: Int, kind: Int, flags: Int, start: Int, file_s
 
 link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -> [U8] Never! {
     out := [U8]{}
+    est := if l.has_rw -> l.file_end - c.base - l.rw_shift else -> l.r_end - c.base
+    if l.packed && l.text_end > l.text_start -> est += (l.text_end - l.text_start) + LINK_PAGE
+    if est > 0 -> out.try_reserve(est + 4096) ?? panic("reserve failed")
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> out.push(U8{byte})
     elf64_u16(out, 2)
@@ -2987,6 +2990,10 @@ link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkP
         return
     }
     at: link_align(image.len(), LINK_PAGE)
+    if l.text_end > l.text_start {
+        want: at + l.text_end - l.text_start
+        if want > image.len() -> image.try_reserve(want) ?? panic("reserve failed")
+    }
     link_pad_to(image, at, 0)
     loop row in l.order[LINK_TEXT] {
         link_pad_to(image, at + c.live_addr[row] - l.text_start, 0xcc)
@@ -3008,17 +3015,21 @@ link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkP
 }
 
 // Each live row's bytes with its relocations applied and its reports, by
-// live row, built ahead on the compiler threads (link_emit_pieces). With no
-// rows (link_no_pieces) the image writer emits every row in place.
+// live row, built ahead on the compiler threads (link_emit_pieces). A giant
+// section split across threads stores its consecutive slices in `chunks[row]`
+// so link_place_row appends them straight into the image without joining.
 LinkPieces: struct {
     bytes: [[U8]],
+    chunks: [[[U8]]],
     errors: [[String]],
 }
 
-link_no_pieces: fn() -> LinkPieces Never! { LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}} }
+link_no_pieces: fn() -> LinkPieces Never! {
+    LinkPieces{bytes: [[U8]]{}, chunks: [[[U8]]]{}, errors: [[String]]{}}
+}
 
 // Append live row `row` to `out`, which is at the row's file offset: its
-// piece, which leaves `pieces` once placed, else the row emitted in place.
+// piece(s), which leave `pieces` once placed, else the row emitted in place.
 // Its reports join the link's in emit order either way.
 link_place_row: fn(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Never! {
     if pieces.bytes.len() == 0 {
@@ -3027,9 +3038,14 @@ link_place_row: fn(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) N
         c.errors.extend(errors)
         return
     }
-    out.extend(pieces.bytes[row])
+    if pieces.chunks[row].len() > 0 {
+        loop chunk in pieces.chunks[row] -> out.extend(chunk[0..<chunk.len()])
+        pieces.chunks[row] = [[U8]]{}
+    } else {
+        out.extend(pieces.bytes[row])
+        pieces.bytes[row] = [U8]{}
+    }
     c.errors.extend(pieces.errors[row])
-    pieces.bytes[row] = [U8]{}
 }
 
 // The live rows the image writer emits from file bytes, in emit order: the
@@ -3057,6 +3073,118 @@ link_row_weight: fn(c: LinkContext, row: Int) -> Int Never! {
     weight
 }
 
+// Whether relocation `kind` writes only bytes inside `[off, off + 8)` and
+// never returns `skip = true`, so a section can be split cleanly before it.
+link_reloc_plain: fn(kind: Int) -> Bool Never! {
+    kind == LINK_R_NONE || kind == LINK_R_64 || kind == LINK_R_PC32 || kind == LINK_R_PLT32 || kind == LINK_R_32 || kind == LINK_R_32S || kind == LINK_R_PC64 || kind == LINK_R_GOTPC32 || kind == LINK_R_GOTOFF64
+}
+
+// A slice of one giant section: byte range `[byte_start..<byte_end)` and
+// relocation range `[rel_start..<rel_end)`.
+LinkSectionSlice: struct {
+    row: Int,
+    byte_start: Int,
+    byte_end: Int,
+    rel_start: Int,
+    rel_end: Int,
+}
+
+// Splits a large section (`size >= 262144` and `count >= 4096`) into up to
+// `parts` disjoint byte slices when its relocations are plain and ascending.
+// Returns an empty list when the section is not eligible for splitting.
+link_section_split: fn(c: LinkContext, row: Int, parts: Int) -> [LinkSectionSlice] Never! {
+    if parts <= 1 -> return [LinkSectionSlice]{}
+    s: c.live_secs[row]
+    obj: link_obj_of(c, s)
+    size: link_sec_size(c, obj, s)
+    if size < 262144 -> return [LinkSectionSlice]{}
+    r: link_rela_of(c, obj, s)
+    if r < 0 -> return [LinkSectionSlice]{}
+    count: link_sec_size(c, obj, r).div_euclid(24)
+    if count < 4096 -> return [LinkSectionSlice]{}
+    b: c.obj_buffer[obj]
+    table: link_sec_offset(c, obj, r)
+    base: c.rel_base[row]
+    // Verify ascending offsets and plain relocation kinds in one quick scan.
+    prev_off := -16
+    loop k in 0..<count {
+        at: table + 24 * k
+        off: link_u32(c.bufs, b, at)
+        if off < prev_off -> return [LinkSectionSlice]{}
+        slot: c.rel_slot[base + k]
+        if slot < 0 && !link_reloc_plain(link_u32(c.bufs, b, at + 8)) -> return [LinkSectionSlice]{}
+        prev_off = off
+    }
+    slices := [LinkSectionSlice]{}
+    byte_from := 0
+    rel_from := 0
+    loop p in 1..<parts {
+        target_k: (count * p).div_euclid(parts)
+        if target_k <= rel_from -> next
+        k := target_k
+        loop k < count {
+            off: link_u32(c.bufs, b, table + 24 * k)
+            prev: link_u32(c.bufs, b, table + 24 * (k - 1))
+            if off >= prev + 16 && off > byte_from {
+                slices.push(LinkSectionSlice{row: row, byte_start: byte_from, byte_end: off, rel_start: rel_from, rel_end: k})
+                byte_from = off
+                rel_from = k
+                break
+            }
+            k += 1
+        }
+    }
+    if slices.len() == 0 -> return slices
+    slices.push(LinkSectionSlice{row: row, byte_start: byte_from, byte_end: size, rel_start: rel_from, rel_end: count})
+    slices
+}
+
+link_emit_slice: fn(c: LinkContext, slice: LinkSectionSlice, errors: &[String]) -> [U8] Never! {
+    s: c.live_secs[slice.row]
+    obj: link_obj_of(c, s)
+    b: c.obj_buffer[obj]
+    sec_start: link_sec_offset(c, obj, s)
+    out := [U8]{}
+    slice_len: slice.byte_end - slice.byte_start
+    out.try_reserve(slice_len) ?? panic("reserve failed")
+    out.extend(c.bufs[b][sec_start + slice.byte_start..<sec_start + slice.byte_end])
+    r: link_rela_of(c, obj, s)
+    table: link_sec_offset(c, obj, r)
+    address: c.live_addr[slice.row]
+    base: c.rel_base[slice.row]
+    loop k in slice.rel_start..<slice.rel_end {
+        at: table + 24 * k
+        off: link_u32(c.bufs, b, at)
+        slot: c.rel_slot[base + k]
+        _ := link_apply(c, errors, out, obj, s, at, off, slot, off - slice.byte_start, address + off)
+    }
+    out
+}
+
+LinkSliceDone: struct {
+    bytes: [U8],
+    errors: [String],
+}
+
+link_emit_slice_one: fn(c: LinkContext, slice: LinkSectionSlice) -> LinkSliceDone Never! {
+    errs := [String]{}
+    bytes := link_emit_slice(c, slice, errs)
+    LinkSliceDone{bytes: bytes.move(), errors: errs.move()}
+}
+
+link_emit_slice_jobs: fn(c: LinkContext, slices: [LinkSectionSlice], at: Int) -> [LinkSliceDone] Never! {
+    if at >= slices.len() -> return [LinkSliceDone]{}
+    if at == slices.len() - 1 -> return [LinkSliceDone]{link_emit_slice_one(c, slices[at])}
+    done := [LinkSliceDone]{}
+    task.group link_slice_threads {
+        head: task link_emit_slice_one(c, slices[at])
+        rest: link_emit_slice_jobs(c, slices, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest.move() -> done.push(item)
+    }
+    done
+}
+
 // The emitting threads' inputs, read only: the link context (moved in and
 // back out, one row) and the rows in emit order.
 LinkEmitInputs: struct {
@@ -3079,11 +3207,9 @@ LinkEmitted: struct {
 }
 
 // Every emitted row's piece (link_emit_section into an empty piece), built
-// on the threads `threads` admits over consecutive ranges of `rows`. A
-// row's relocations read and write only its own bytes and the finished
-// layout, so each piece is the bytes the row has in place, and the reports
-// keep their row. One admitted thread builds no pieces: the image writer
-// then emits every row in place, as it would anyway.
+// on the threads `threads` admits over consecutive ranges of `rows`, with
+// giant plain-reloc sections (like program.o's `.text`) split across threads
+// into zero-join chunks.
 link_emit_pieces: fn(c: &&LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
     weights := [Int]{}
     total := 0
@@ -3094,29 +3220,58 @@ link_emit_pieces: fn(c: &&LinkContext, rows: [Int], threads: CompilerThreads) ->
     }
     workers: compiler_threads_admit(threads, rows.len(), total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
     if workers <= 1 -> return LinkEmitted{context: c.move(), pieces: link_no_pieces()}
-    bounds: compiler_threads_partition(weights, workers)
-    live: c.live_secs.len()
-    inputs: Shared{LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: rows}}
-    parts := [Shared<LinkEmitPart>]{}
-    loop part in 0..<(bounds.len() - 1) {
-        parts.push(Shared{LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}}})
+    // Separate giant splittable sections from ordinary section rows.
+    slice_parts: if workers > 12 -> 12 else -> workers
+    split_slices := [LinkSectionSlice]{}
+    small_rows := [Int]{}
+    small_weights := [Int]{}
+    small_total := 0
+    loop (index, row) in rows {
+        slices: link_section_split(c, row, slice_parts)
+        if slices.len() > 0 -> split_slices.extend(slices) else {
+            small_rows.push(row)
+            small_weights.push(weights[index])
+            small_total += weights[index]
+        }
     }
-    _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
-    pieces := LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
+    live: c.live_secs.len()
+    slice_results: if split_slices.len() > 0 -> link_emit_slice_jobs(c, split_slices, 0) else -> [LinkSliceDone]{}
+    small_workers: if small_rows.len() == 0 -> 0 else -> compiler_threads_admit(threads, small_rows.len(), small_total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
+    bounds: if small_workers <= 1 -> [Int]{0, small_rows.len()} else -> compiler_threads_partition(small_weights, small_workers)
+    inputs: Shared{LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: small_rows}}
+    parts := [Shared<LinkEmitPart>]{}
+    if small_rows.len() > 0 {
+        loop part in 0..<(bounds.len() - 1) {
+            parts.push(Shared{LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}}})
+        }
+    }
+    if parts.len() > 0 {
+        _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
+    }
+    pieces := LinkPieces{bytes: [[U8]]{}, chunks: [[[U8]]]{}, errors: [[String]]{}}
+    pieces.bytes.try_reserve(live) ?? panic("reserve failed")
+    pieces.chunks.try_reserve(live) ?? panic("reserve failed")
+    pieces.errors.try_reserve(live) ?? panic("reserve failed")
     loop _ in 0..<live {
         pieces.bytes.push([U8]{})
+        pieces.chunks.push([[U8]]{})
         pieces.errors.push([String]{})
     }
+    loop (idx, res) in slice_results.move() {
+        row: split_slices[idx].row
+        pieces.chunks[row].push(res.bytes)
+        pieces.errors[row].extend(res.errors)
+    }
+    back := inputs.guard_edit()
     loop part in parts {
         held := part.guard_edit()
         index := held.value.end
         loop index > held.value.start {
             index -= 1
-            pieces.bytes[rows[index]] = held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
-            pieces.errors[rows[index]] = held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
+            pieces.bytes[back.value.rows[index]] = held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
+            pieces.errors[back.value.rows[index]] = held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
         }
     }
-    back := inputs.guard_edit()
     context := back.value.contexts.pop() ?? panic("the link emitting threads lost the link context")
     LinkEmitted{context: context.move(), pieces: pieces.move()}
 }
@@ -3280,13 +3435,11 @@ link_image_symbol_from_buf: fn(bufs: [[U8]], b: Int, name_at: Int, symtab: &[U8]
     buf: bufs[b]
     i := name_at
     limit: buf.len()
-    loop i < limit {
-        byte: buf[i]
-        strtab.push(byte)
-        if byte == (U8{0}) -> break
-        i += 1
+    loop i < limit && buf[i] != (U8{0}) -> i += 1
+    if i < limit -> strtab.extend(buf[name_at..<i + 1]) else {
+        strtab.extend(buf[name_at..<limit])
+        strtab.push(U8{0})
     }
-    if i >= limit -> strtab.push(U8{0})
     elf64_u32(symtab, names_base + offset)
     symtab.push(U8{info})
     symtab.push(U8{0})
@@ -3344,8 +3497,15 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
 
     // Symbols: every named local function and object of a loaded section,
     // then the globals defined in one.
-    strtab := [U8]{U8{0}}
+    strtab := [U8]{}
     symtab := [U8]{}
+    if c.live_secs.len() > 256 {
+        sym_est := 1 + c.g_name.len()
+        loop obj in 0..<c.obj_name.len() -> sym_est += c.obj_first_global[obj]
+        strtab.try_reserve(1 + sym_est * 24) ?? panic("reserve failed")
+        symtab.try_reserve(sym_est * 24) ?? panic("reserve failed")
+    }
+    strtab.push(U8{0})
     loop _ in 0..<24 -> symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj]
@@ -3608,6 +3768,8 @@ link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
                 errors := [String]{}
                 link_emit_section(c, errors, bytes, row)
                 c.errors.extend(errors)
+            } else if pieces.chunks[row].len() > 0 {
+                loop chunk in pieces.chunks[row] -> bytes.extend(chunk[0..<chunk.len()])
             } else { bytes.extend(pieces.bytes[row].copy()) }
         }
         link_pad_to(bytes, debug.sizes[group], 0)
@@ -4370,6 +4532,15 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
         build_id = link_build_id(image, debug_file, layout.note_at - c.base)
         link_debug_link_crc(image, crc, debug_file, threads)
     } else {
+        if c.live_secs.len() > 256 {
+            debug_total := 0
+            loop sz in debug.sizes -> debug_total += sz
+            sym_est := 1 + c.g_name.len()
+            loop obj in 0..<c.obj_name.len() -> sym_est += c.obj_first_global[obj]
+            text_est: if layout.packed && layout.text_end > layout.text_start -> layout.text_end - layout.text_start + LINK_PAGE else -> 0
+            full_est: image.len() + debug_total + sym_est * 64 + text_est + 65536
+            if full_est > image.len() -> image.try_reserve(full_est) ?? panic("reserve failed")
+        }
         link_write_sections(c, image, layout, debug, emitted.pieces, false)
         link_write_code(c, image, layout, emitted.pieces)
     }

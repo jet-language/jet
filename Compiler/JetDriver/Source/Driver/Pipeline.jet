@@ -5215,10 +5215,21 @@ JetDriverLoweringInputsResult: struct {
 // jet_driver_compile_keep_going does, one row each in the result's
 // keep_going_rows.
 jet_driver_lowering_inputs: fn(request: JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+    none := [JetDriverPreloaded]{}
+    jet_driver_lowering_inputs_with(request, none, keep_going)
+}
+
+jet_driver_lowering_inputs_owned: fn(owned_request: &&JetDriverCompileRequest, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+    request := owned_request.move()
+    preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
+    jet_driver_lowering_inputs_with(request, preloaded, keep_going)
+}
+
+jet_driver_lowering_inputs_with: fn(request: JetDriverCompileRequest, preloaded: &[JetDriverPreloaded], keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     collecting: keep_going != None
     kg := jet_driver_keep_going_log(keep_going)
     capture := JetDriverCheckedProjectionCapture{stop_before_lowering: true}
-    compile := jet_driver_compile_stages(request, kg, false, capture)
+    compile := jet_driver_compile_stages(request, preloaded, kg, false, capture)
     if collecting {
         jet_driver_trace_keep_going_begin(request.trace_sink)
         if compile.internal_problem == .Val(problem) {
@@ -5397,10 +5408,12 @@ jet_driver_project_completed_check: fn(
     JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
 }
 
-jet_driver_checked_projection: fn(request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+jet_driver_checked_projection: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+    request := owned_request.move()
+    preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     capture := JetDriverCheckedProjectionCapture{}
     kg := jet_driver_keep_going_log(None)
-    compile := jet_driver_compile_stages(request, kg, true, capture)
+    compile := jet_driver_compile_stages(request, preloaded, kg, true, capture)
     if !compile.complete {
         capture.source_modules = [Int]{}
         capture.entry_module = None
@@ -5412,24 +5425,31 @@ jet_driver_checked_projection: fn(request: &&JetDriverCompileRequest) -> JetDriv
 // `jet budget`'s preflight: the `Check` compile of `request` and, when it
 // completes, its checked budget specs. Invalid specs are the compile's
 // diagnostics, as a check reports them.
-jet_driver_budget_projection: fn(request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+jet_driver_budget_projection: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCheckedProjectionResult {
+    request := owned_request.move()
+    preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     capture := JetDriverCheckedProjectionCapture{budget: true}
     kg := jet_driver_keep_going_log(None)
-    compile := jet_driver_compile_stages(request, kg, false, capture)
+    compile := jet_driver_compile_stages(request, preloaded, kg, false, capture)
     if !compile.complete -> capture.budget_specs = [JetDriverBudgetSpec]{}
     JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: [Int]{}, entry_module: None, schema_ingress: None, budget_specs: capture.budget_specs, budget_facts: capture.budget_facts}
 }
 
-jet_driver_compile: fn(request: &&JetDriverCompileRequest) -> JetDriverCompileResult {
-    jet_driver_compile_borrowed(request)
+jet_driver_compile: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCompileResult {
+    request := owned_request.move()
+    preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
+    kg := jet_driver_keep_going_log(None)
+    capture := JetDriverCheckedProjectionCapture{}
+    jet_driver_compile_stages(request, preloaded, kg, false, capture)
 }
 
 // One ordinary compile, borrowed by staged build queries. The owned command
 // entry above still retires its invocation request on completion.
 jet_driver_compile_borrowed: fn(request: JetDriverCompileRequest) -> JetDriverCompileResult {
+    preloaded := [JetDriverPreloaded]{}
     kg := jet_driver_keep_going_log(None)
     capture := JetDriverCheckedProjectionCapture{}
-    result := jet_driver_compile_stages(request, kg, false, capture)
+    result := jet_driver_compile_stages(request, preloaded, kg, false, capture)
     result
 }
 
@@ -5546,10 +5566,12 @@ jet_driver_compile_selection: fn(request: &JetDriverCompileRequest, mode: JetDri
 // The result keeps every error report, so a compile with any row never
 // passes; a crash later in the run still leaves the rows already streamed to
 // the trace sink.
-jet_driver_compile_keep_going: fn(request: &&JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
+jet_driver_compile_keep_going: fn(owned_request: &&JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
+    request := owned_request.move()
+    preloaded := compiler_take_rows<JetDriverPreloaded>(request.preloaded)
     kg := jet_driver_keep_going_log(Val(options))
     capture := JetDriverCheckedProjectionCapture{}
-    result := jet_driver_compile_stages(request, kg, false, capture)
+    result := jet_driver_compile_stages(request, preloaded, kg, false, capture)
     jet_driver_trace_keep_going_begin(request.trace_sink)
     if result.internal_problem == .Val(problem) {
         jet_driver_keep_going_row(kg, "internal", "-", "ICE", problem, "-")
@@ -5561,15 +5583,19 @@ jet_driver_compile_keep_going: fn(request: &&JetDriverCompileRequest, options: J
     result
 }
 
-jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
+jet_driver_compile_stages: fn(request: JetDriverCompileRequest, preloaded: &[JetDriverPreloaded], kg: &JetDriverKeepGoingLog, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
-    if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
     // JET_KEEP_GOING and `jet check Core` load every declaration of each
     // loaded Core module, so they check the Core bodies no program calls too;
     // so does a `jet test` of a Core source, so its unit loads with its owner.
-    load := jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
-    if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
+    use_driven: !kg.enabled && !request.every_core_body && request.core_tests == ""
+    load := jet_driver_preloaded_take(preloaded, use_driven) ?? {
+        if request.trace_sink == .Val(sink) -> sink.begin("load", "", -1, -1)
+        fresh: jet_driver_load_reach(request, use_driven)
+        if request.trace_sink == .Val(sink) -> sink.end("load", fresh.modules.len())
+        fresh
+    }
     // Under `jet check Core`, each Core name of a higher layer's module
     // (E1012). The name still binds, so it reports without stopping the
     // compile, and the check also reports every Core body's errors.
@@ -7580,6 +7606,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             }
         }
         loop index in order {
+            if rows[index] < 0 -> next
             bits := local_bits[index]
             if bits == 0 -> next
             loop k in 0..<bit_count {
@@ -7637,19 +7664,16 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     loop (index, function) in functions {
         if sites[index] == "" -> next
         // A same-package edge names its callee's site, and one to a callee
-        // with no site leaves, in place from the back.
-        edges := jet_driver_effect_edges(function)
-        edge_index := edges.len()
-        loop edge_index > 0 {
-            edge_index -= 1
-            if name_rows_get_text(by_key, edges[edge_index]) == .Val(callee) {
-                if sites[callee] == "" -> _ := edges.remove(edge_index, .Slot) else {
-                    edges[edge_index] = sites[callee].copy()
-                }
-            }
+        // with no site leaves, built in one forward pass.
+        kept_edges := [String]{}
+        raw_edges := jet_driver_effect_edges(function)
+        loop edge in raw_edges.move() {
+            if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if sites[callee] != "" -> kept_edges.push(sites[callee].copy())
+            } else { kept_edges.push(edge) }
         }
-        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: edges.move(), maximal: false}
-        solved[sites[index]] = if reached[index] -> local[index].copy() else -> function.effects.direct.copy()
+        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: kept_edges.move(), maximal: false}
+        solved[sites[index]] = if reached[index] -> compiler_take_rows<String>(local[index]) else -> function.effects.direct.copy()
     }
     entry_module: module_rows.get(load.entry_module_identity.id) ?? rows[entry_row]
     program.entry = entry_module

@@ -629,8 +629,11 @@ x64_object_text_part_take: fn(part: Shared<X64ObjectTextPart>) -> X64ObjectTextR
 // Takes each function's code out of `functions`, in function order; each
 // is left with none.
 x64_object_take_codes: fn(functions: &[X64CompiledFunction]) -> [[U8]] Never! {
+    count: functions.len()
     codes := [[U8]]{}
     kept := [X64CompiledFunction]{}
+    codes.try_reserve(count) ?? panic("reserve failed")
+    kept.try_reserve(count) ?? panic("reserve failed")
     loop functions.len() > 0 {
         function := functions.pop() ?? panic("a nonempty function list failed to pop")
         codes.push(function.code.move())
@@ -674,6 +677,14 @@ x64_object_read_only: fn(object: X64Data) -> Bool Never! {
 // relocations reach (x64_object_functions_threads lays `.data` and `.rodata`
 // out so).
 x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[Int]) Never! {
+    if row < 0 || row >= placed.len() || placed[row] {
+        return
+    }
+    if data[row].relocs.len() == 0 {
+        placed[row] = true
+        order.push(row)
+        return
+    }
     pending := [Int]{row}
     loop pending.len() > 0 {
         at: pending.pop() ?? -1
@@ -989,7 +1000,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     // thread of their own while the file is assembled; a smaller object
     // assembles its file first and they drop as this returns.
     if laid.workers <= 1 {
-        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans), errors: [String]{}}
+        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans), errors: [String]{}, imports: laid.imports.move()}
     }
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
@@ -999,7 +1010,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
         files.push(x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
-    X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
+    X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}, imports: laid.imports.move()}
 }
 
 // What x64_object_lay builds for x64_object_functions_threads besides the
@@ -1026,6 +1037,7 @@ X64ObjectLaid: struct {
     first_global: Int{0},
     data_relas: [X64ObjectRela]{[X64ObjectRela]{}},
     own: [X64ObjectSection]{[X64ObjectSection]{}},
+    imports: [String]{[String]{}},
     workers: Int{0},
     errors: [String]{[String]{}},
 }
@@ -1055,12 +1067,25 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     data_align := 1
     rodata := [U8]{}
     rodata_align := 1
+    data_count: program.data.len()
     data_offsets := [Int]{}
+    data_offsets.try_reserve(data_count) ?? panic("reserve failed")
     loop _ in program.data -> data_offsets.push(0)
     placed := [Bool]{}
     if !own_sections {
+        placed.try_reserve(data_count) ?? panic("reserve failed")
         loop _ in program.data -> placed.push(false)
         order: x64_object_data_order(program.data, functions, data_rows, placed)
+        rodata_est := 0
+        data_est := 0
+        loop index in order {
+            align: program.data[index].align
+            if x64_object_read_only(program.data[index]) {
+                rodata_est += program.data[index].bytes.len() + align
+            } else { data_est += program.data[index].bytes.len() + align }
+        }
+        if rodata_est > 0 -> rodata.try_reserve(rodata_est) ?? panic("reserve failed")
+        if data_est > 0 -> data.try_reserve(data_est) ?? panic("reserve failed")
         loop index in order {
             align: program.data[index].align
             if x64_object_read_only(program.data[index]) {
@@ -1330,6 +1355,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         first_global: first_global,
         data_relas: data_relas.move(),
         own: own.move(),
+        imports: imports.move(),
         workers: workers,
     }
 }

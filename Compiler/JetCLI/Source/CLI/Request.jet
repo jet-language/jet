@@ -71,9 +71,10 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD,
         jet_driver_report_problems,
+        JetDriverPreloaded,
         jet_driver_compile,
         jet_driver_compile_keep_going,
-        jet_driver_lowering_inputs,
+        jet_driver_lowering_inputs_owned,
         jet_driver_moment_hooks,
         jet_driver_checked_declarations,
         jet_driver_c_symbol,
@@ -136,11 +137,11 @@ jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
 // (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
 jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
     if !jet_cli_keep_going_enabled() {
-        lowered: jet_driver_lowering_inputs(request, None)
+        lowered: jet_driver_lowering_inputs_owned(request, None)
         jet_cli_comptime_debug_trace(lowered.compile)
         return lowered
     }
-    front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")}))
+    front := jet_driver_lowering_inputs_owned(request, Val(JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")}))
     jet_cli_comptime_debug_trace(front.compile)
     if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
@@ -2488,7 +2489,10 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
                 return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
             }
             compiled_request := contributed.request.move()
-            if entry != None -> compiled_request.selected_entry = entry.copy()
+            if entry != None {
+                compiled_request.selected_entry = entry.copy()
+                compiled_request.preloaded = [JetDriverPreloaded]{}
+            }
             compiled_request.deep_checks = options.deep_checks.copy()
             // A package with moment hooks records its moments for them
             // (Host.jet jet_cli_build_result).

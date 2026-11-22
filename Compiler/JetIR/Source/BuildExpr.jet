@@ -1055,6 +1055,8 @@ ir_text_piece: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init
     if node == .BuiltinMethod(receiver, operation, args) {
         maker := ""
         if operation == .TrimView && args.len() == 0 -> maker = "jet_rt_text_trim_frame"
+        if operation == .TrimStart && args.len() == 0 -> maker = "jet_rt_text_trim_start_frame"
+        if operation == .TrimEnd && args.len() == 0 -> maker = "jet_rt_text_trim_end_frame"
         if operation == .AfterView && args.len() == 1 -> maker = "jet_rt_text_after_frame"
         if operation == .BeforeView && args.len() == 1 -> maker = "jet_rt_text_before_frame"
         if maker == "" || !ir_text_piece_types(m, p, b, receiver, args) -> return false

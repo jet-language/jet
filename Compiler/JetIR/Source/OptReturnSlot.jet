@@ -30,7 +30,7 @@
 // stored with a value that has a Drop keeps its boxes too: the caller's
 // Drop of the box would drop that value. Library and runtime modules
 // (no program entry) keep every convention, their exports' ABI.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_rows_set, name_rows_value]
 
 // The box size of each function whose Returns can use a return slot (-1:
 // none), the instructions whose allocations it returns, by function.
@@ -55,6 +55,8 @@ ir_opt_return_slots: fn(m: &IRModule, threads: CompilerThreads) -> Int Never! {
     count: m.functions.len()
     weights := [Int]{}
     results := [Int]{}
+    weights.try_reserve(count) ?? panic("reserve failed")
+    results.try_reserve(count) ?? panic("reserve failed")
     total := 0
     loop f in m.functions {
         weights.push(1 + f.op.len())
@@ -76,108 +78,125 @@ ir_opt_return_slots: fn(m: &IRModule, threads: CompilerThreads) -> Int Never! {
         return made
     }
     bounds: compiler_threads_partition(weights, workers)
-    // Parts leave the list last-first: part `workers - 1` pops first.
-    slots := [Shared<IROptSlotPart>]{}
-    part := workers - 1
-    loop part >= 0 {
-        rows := [IRFunction]{}
-        loop m.functions.len() > bounds[part] {
-            row: m.functions.pop() ?? panic("the IR optimizer lost a function to its return slots")
-            rows.push(row)
-        }
-        rows.reverse()
-        slots.push(Shared{IROptSlotPart{functions: rows.move(), start: bounds[part], size: [Int]{}, allocs: [[Int]]{}, marks: [Int]{}}})
-        part -= 1
+    scans := ir_opt_slot_scan_ranges(m, bounds, calls, results, 0)
+    plan.size.try_reserve(count) ?? panic("reserve failed")
+    plan.allocs.try_reserve(count) ?? panic("reserve failed")
+    loop at in 0..<scans.len() {
+        plan.size.extend(compiler_take_rows<Int>(scans[at].size))
+        plan.allocs.extend(compiler_take_rows<[Int]>(scans[at].allocs))
+        marks.extend(compiler_take_rows<Int>(scans[at].marks))
     }
-    slots.reverse()
-    lent: ir_opt_lend(m)
-    shared: Shared{IROptSlotView{views: [IRModule]{lent.move()}, calls: [Int]{alloc, value, unique, free}, results: results.move(), plan: IROptSlotPlan{size: [Int]{}, allocs: [[Int]]{}}}}
-    _: ir_opt_slot_threads(slots, shared, 0) ?? panic("the IR return slot threads failed")
-    loop slot in slots {
-        held := slot.guard_edit()
-        plan.size.extend(compiler_take_rows<Int>(held.value.size))
-        plan.allocs.extend(compiler_take_rows<[Int]>(held.value.allocs))
-        marks.extend(compiler_take_rows<Int>(held.value.marks))
-    }
-    ir_opt_slot_unlend(m, shared)
     made: ir_opt_slot_mark(m, plan, marks)
-    if made > 0 {
-        ir_opt_slot_publish(shared, plan)
-        _: ir_opt_slot_threads(slots, shared, 0) ?? panic("the IR return slot threads failed")
+    if made == 0 -> return 0
+    touched := ir_opt_slot_touched_ranges(m, bounds, plan, 0)
+    if touched.len() < 32 {
+        loop id in touched -> ir_opt_slot_rewrite(m.functions[id], plan, results, id, calls)
+        return made
     }
-    loop slot in slots {
-        held := slot.guard_edit()
-        m.functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
+    rewritten := ir_opt_slot_rebuild_touched(m, touched, plan, results, calls, workers)
+    at := touched.len() - 1
+    loop at >= 0 {
+        rebuilt: rewritten.pop() ?? panic("the IR optimizer lost a return-slot rewrite")
+        m.functions[touched[at]] = rebuilt.move()
+        at -= 1
     }
     made
 }
 
-// The functions of one thread of ir_opt_return_slots, in order, from
-// function `start`, with what its scan found: their sizes and allocations
-// (IROptSlotPlan) and the functions they rule out (`marks`).
-IROptSlotPart: struct {
-    functions: [IRFunction],
-    start: Int,
+IROptSlotScan: struct {
     size: [Int],
     allocs: [[Int]],
     marks: [Int],
 }
 
-// What every thread of ir_opt_return_slots reads: the module's lent rows
-// (ir_opt_lend), in a list of one, the runtime calls a box's life uses,
-// each function's result type, and once the scan is done the plan.
-IROptSlotView: struct {
-    views: [IRModule],
-    calls: [Int],
-    results: [Int],
-    plan: IROptSlotPlan,
-}
-
-// Runs a return slot thread per slot from `at`; returns the functions they
-// read.
-ir_opt_slot_threads: fn(slots: [Shared<IROptSlotPart>], shared: Shared<IROptSlotView>, at: Int) -> Int {
-    if at >= slots.len() -> return 0
-    rows := 0
-    task.group ir_opt_slot_group {
-        head: task ir_opt_slot_part(slots[at], shared)
-        rows = ir_opt_slot_threads(slots, shared, at + 1)
-        rows += head.join() ?? ir_opt_prepare_stopped(err)
+ir_opt_slot_scan_range: fn(m: IRModule, start: Int, end: Int, calls: [Int], results: [Int]) -> IROptSlotScan Never! {
+    size := [Int]{}
+    allocs_list := [[Int]]{}
+    size.try_reserve(end - start) ?? panic("reserve failed")
+    allocs_list.try_reserve(end - start) ?? panic("reserve failed")
+    marks := [Int]{}
+    loop id in start..<end {
+        allocs := [Int]{}
+        size.push(ir_opt_slot_scan(m, m.functions[id], calls, results, allocs, marks))
+        allocs_list.push(allocs)
     }
-    rows
+    IROptSlotScan{size: size.move(), allocs: allocs_list.move(), marks: marks.move()}
 }
 
-// One thread's functions: their scan before the plan is known, their
-// rewrite after.
-ir_opt_slot_part: fn(slot: Shared<IROptSlotPart>, shared: Shared<IROptSlotView>) -> Int {
-    reads: shared.guard_read()
-    held := slot.guard_edit()
-    count: held.value.functions.len()
-    start: held.value.start
-    if reads.value.plan.size.len() == 0 {
-        loop row in 0..<count {
-            allocs := [Int]{}
-            held.value.size.push(ir_opt_slot_scan(reads.value.views[0], held.value.functions[row], reads.value.calls, reads.value.results, allocs, held.value.marks))
-            held.value.allocs.push(allocs)
+ir_opt_slot_scan_ranges: fn(m: IRModule, bounds: [Int], calls: [Int], results: [Int], at: Int) -> [IROptSlotScan] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [IROptSlotScan]{}
+    if at == last {
+        return [IROptSlotScan]{ir_opt_slot_scan_range(m, bounds[at], bounds[at + 1], calls, results)}
+    }
+    done := [IROptSlotScan]{}
+    task.group ir_opt_slot_scan_group {
+        head: task ir_opt_slot_scan_range(m, bounds[at], bounds[at + 1], calls, results)
+        rest: ir_opt_slot_scan_ranges(m, bounds, calls, results, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest.move() -> done.push(item)
+    }
+    done
+}
+
+ir_opt_slot_touched_range: fn(m: IRModule, start: Int, end: Int, plan: IROptSlotPlan) -> [Int] Never! {
+    touched := [Int]{}
+    loop id in start..<end {
+        if m.functions[id].asm == None && m.functions[id].op.len() > 0 && ir_opt_slot_touches(m.functions[id], plan, id) {
+            touched.push(id)
         }
-        return count
     }
-    loop row in 0..<count {
-        ir_opt_slot_rewrite(held.value.functions[row], reads.value.plan, reads.value.results, start + row, reads.value.calls)
-    }
-    count
+    touched
 }
 
-// Moves the module's rows back from the threads' view.
-ir_opt_slot_unlend: fn(m: &IRModule, shared: Shared<IROptSlotView>) Never! {
-    held := shared.guard_edit()
-    ir_opt_lend_into(m, held.value.views[0])
+ir_opt_slot_touched_ranges: fn(m: IRModule, bounds: [Int], plan: IROptSlotPlan, at: Int) -> [Int] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [Int]{}
+    if at == last -> return ir_opt_slot_touched_range(m, bounds[at], bounds[at + 1], plan)
+    done := [Int]{}
+    task.group ir_opt_slot_touch_group {
+        head: task ir_opt_slot_touched_range(m, bounds[at], bounds[at + 1], plan)
+        rest: ir_opt_slot_touched_ranges(m, bounds, plan, at + 1)
+        done.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.extend(rest.move())
+    }
+    done
 }
 
-// Gives the threads the plan for the rewrite.
-ir_opt_slot_publish: fn(shared: Shared<IROptSlotView>, plan: &IROptSlotPlan) Never! {
-    held := shared.guard_edit()
-    held.value.plan.size = compiler_take_rows<Int>(plan.size)
-    held.value.plan.allocs = compiler_take_rows<[Int]>(plan.allocs)
+ir_opt_slot_rebuild_range: fn(m: IRModule, touched: [Int], start: Int, end: Int, plan: IROptSlotPlan, results: [Int], calls: [Int]) -> [IRFunction] Never! {
+    out := [IRFunction]{}
+    out.try_reserve(end - start) ?? panic("reserve failed")
+    loop at in start..<end {
+        id: touched[at]
+        out.push(ir_opt_slot_rebuild(m.functions[id], plan, results, id, calls[2], calls[3]))
+    }
+    out
+}
+
+ir_opt_slot_rebuild_touched: fn(m: IRModule, touched: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], workers: Int) -> [IRFunction] Never! {
+    total: touched.len()
+    parts: if workers > total -> total else -> workers
+    if parts <= 1 -> return ir_opt_slot_rebuild_range(m, touched, 0, total, plan, results, calls)
+    bounds := [Int]{}
+    loop p in 0..<parts -> bounds.push((total * p) /% parts)
+    bounds.push(total)
+    ir_opt_slot_rebuild_parts(m, touched, bounds, plan, results, calls, 0)
+}
+
+ir_opt_slot_rebuild_parts: fn(m: IRModule, touched: [Int], bounds: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], at: Int) -> [IRFunction] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [IRFunction]{}
+    if at == last {
+        return ir_opt_slot_rebuild_range(m, touched, bounds[at], bounds[at + 1], plan, results, calls)
+    }
+    done := [IRFunction]{}
+    task.group ir_opt_slot_rebuild_group {
+        head: task ir_opt_slot_rebuild_range(m, touched, bounds[at], bounds[at + 1], plan, results, calls)
+        rest: ir_opt_slot_rebuild_parts(m, touched, bounds, plan, results, calls, at + 1)
+        done.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.extend(rest.move())
+    }
+    done
 }
 
 // Function `f`'s box size (ir_opt_slot_size, its allocations into
@@ -189,15 +208,22 @@ ir_opt_slot_publish: fn(shared: Shared<IROptSlotView>, plan: &IROptSlotPlan) Nev
 // `jet_rt_alloc_value`, `jet_rt_block_unique` and `jet_rt_free`.
 ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], allocs: &[Int], marks: &[Int]) -> Int Never! {
     size: ir_opt_slot_size(m, f, calls[0], calls[1], allocs)
+    has_ptr_call := false
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .FunctionAddress && f.a[at] >= 0 -> marks.push(f.a[at])
         if op == .CallRuntime && f.a[at] >= 0 && f.a[at] < m.names.len() {
             if name_rows_value(m.function_rows, m.names[f.a[at]]) == .Val(id) -> marks.push(id)
         }
+        if op == .Call && f.dst[at] >= 0 {
+            callee: f.a[at]
+            if callee >= 0 && callee < results.len() && results[callee] >= 0 && m.types[results[callee]].kind == .Pointer {
+                has_ptr_call = true
+            }
+        }
     }
     // Every direct call's result used only so.
-    if f.asm != None || f.op.len() == 0 -> return size
+    if !has_ptr_call || f.asm != None || f.op.len() == 0 -> return size
     facts: ir_opt_facts(f)
     loose: ir_opt_slot_loose(f, facts, calls[2], calls[3])
     loop at in 0..<f.op.len() {
