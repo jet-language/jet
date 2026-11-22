@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113220,
+    "rev": 113221,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40469,7 +40469,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-22T11:20:48.523Z",
+      "updated": "2026-11-22T19:44:32.345Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 17
     },
@@ -131696,6 +131696,220 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-22T18:53:57.824Z"
+    },
+    {
+      "id": "D-ARRAY-COMPLEX-LABELS1",
+      "cardId": "c05gn07n",
+      "group": "language",
+      "title": "Field labels for Complex, Complex32, and Quaternion",
+      "situation": "Complex and Complex32 in Core/Math/Math.jet currently spell their fields `real` and `imaginary`. Meanwhile, Color uses single letters (`r`, `g`, `b`, `a`), and D-ARRAY-QUAT1=A gives Quaternion `w`, `x`, `y`, and `z`. Writing `Complex{real: 3.0, imaginary: 4.0}` repeats long labels on every constructor and read. This vote picks one concise, consistent set of field labels across Complex, Complex32, and Quaternion. We recommend `re` and `im` on Complex and Complex32, keeping `w`, `x`, `y`, and `z` on Quaternion.",
+      "gist": "Which field labels should Complex, Complex32, and Quaternion use?",
+      "lesson": "Struct field labels serve both constructors (`Complex{...}`) and field reads (`z.re` or `z.r`). Short labels save tokens in numeric code, while avoiding confusion with polar radius `r` or 3D axes `x`, `y`, `z`, `w`.",
+      "explainer": "",
+      "story": "Maya writes an FFT and 3D camera transform in Core math. She wants short field labels without mixing up real parts, polar radii, and 3D rotation axes.",
+      "inWild": "// Rust num-complex uses re and im; glam Quat uses x, y, z, w.\nlet z = num_complex::Complex::new(3.0, 4.0); // z.re, z.im\n// Julia uses Complex(3.0, 4.0) with re/im fields.\n// Odin uses quaternion(w=1, x=0, y=0, z=0) and complex literals 3 + 4i.",
+      "detail": "Provenance: owner comment on D-ARRAY-COMPLEXT1 (2026-11-17), tracked as #6177 c13. Verified in Core/Math/Math.jet (`Complex` and `Complex32` use `real` and `imaginary`). `Vec2`/`Vec3`/`Vec4` expose `x`, `y`, `z`, `w` accessors, swizzles, and `.new(...)` parameters over `lanes: [Float#N]`. `Color` and `LinearColor` use `r`, `g`, `b`, `a` (`Core/Color/Color.jet:33-44`). D-ARRAY-QUAT1=A specifies `Quaternion` with `w`, `x`, `y`, `z` and `q.xyz`, not yet landed in Core. D-LITCARRIER1=D ratifies `3 + 4i` and `1 + 2i + 3j + 4k` suffixes (not yet shipped).",
+      "options": [
+        {
+          "key": "A",
+          "name": "`re` and `im` on Complex/Complex32; `w`, `x`, `y`, `z` on Quaternion",
+          "detail": "Rename `real` and `imaginary` to `re` and `im` on both `Complex` and `Complex32`. Keep `Quaternion`'s ratified `w`, `x`, `y`, `z` fields from D-ARRAY-QUAT1=A.\n\n`re` and `im` shrink `imaginary` from nine characters to two. They stay unambiguous beside polar radius `r` (`r: z.abs()`, `z.re`, `z.im`). This matches Rust `num-complex`, Julia `Complex`, and standard math notation `Re(z)` and `Im(z)`.",
+          "technical": "Greenfield cutover in `Core/Math/Math.jet` and all callers (`Examples/Math/ComplexConjugate.jet`, `Examples/Math/Complex32.jet`, `Tests/Run/UnsafeAndRuntime/ExactSourceIdentity.jet`, `Tests/Cases/CoreMathNumeric/*`, and `Core/Math/Math.jet` tests). Rename `Complex` and `Complex32` fields to `re` and `im`. Keep `Quaternion` fields `w`, `x`, `y`, `z` per D-ARRAY-QUAT1=A.",
+          "code": "z: Complex{re: 3.0, im: 4.0}\ns: Complex32{re: 3.0, im: 4.0}\nmag: math.sqrt(z.re * z.re + z.im * z.im)\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}\nprint(\"{mag} {q.w}\")"
+        },
+        {
+          "key": "B",
+          "name": "`r` and `i` on Complex/Complex32; `w`, `x`, `y`, `z` on Quaternion",
+          "detail": "Rename `real` and `imaginary` to `r` and `i` on both `Complex` and `Complex32`. Keep `Quaternion`'s ratified `w`, `x`, `y`, `z` fields from D-ARRAY-QUAT1=A.\n\nThis gives the shortest character spelling on complex numbers, matching single-letter `Color{r, g, b, a}`. Its trade-off is that `r` also denotes polar radius (`r * exp(i * theta)`), so polar code can collide `r` with `z.r`.",
+          "technical": "Greenfield cutover in `Core/Math/Math.jet` and all in-repo callers. Rename `Complex` and `Complex32` fields to `r` and `i`. Keep `Quaternion` fields `w`, `x`, `y`, `z` per D-ARRAY-QUAT1=A. Free scalar helpers `real(Float)` and `imag(Float)` stay unchanged.",
+          "code": "z: Complex{r: 3.0, i: 4.0}\ns: Complex32{r: 3.0, i: 4.0}\nmag: math.sqrt(z.r * z.r + z.i * z.i)\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}\nprint(\"{mag} {q.w}\")"
+        },
+        {
+          "key": "C",
+          "name": "`r`/`i` on Complex/Complex32 and `r`/`i`/`j`/`k` on Quaternion",
+          "detail": "Use one algebraic single-letter naming rule across all three types: `r` and `i` on `Complex` and `Complex32`, and `r`, `i`, `j`, `k` on `Quaternion`.\n\nEvery field matches the ratified `3 + 4i` and `1 + 2i + 3j + 4k` suffixes (D-LITCARRIER1=D, not yet shipped). This amends D-ARRAY-QUAT1=A, dropping 3D graphics coordinates (`q.x`, `q.y`, `q.z`, `q.w`) and changing vector swizzle `q.xyz` to `q.ijk`.",
+          "technical": "Greenfield cutover in `Core/Math/Math.jet`. Rename `Complex` and `Complex32` fields to `r` and `i`. Amend D-ARRAY-QUAT1=A so `Quaternion` stores `r`, `i`, `j`, `k` and exposes `q.ijk` instead of `w`, `x`, `y`, `z` and `q.xyz`.",
+          "code": "z: Complex{r: 3.0, i: 4.0}\ns: Complex32{r: 3.0, i: 4.0}\nmag: math.sqrt(z.r * z.r + z.i * z.i)\nq: Quaternion{r: 1.0, i: 0.0, j: 0.0, k: 0.0}\nprint(\"{mag} {q.r}\")"
+        },
+        {
+          "key": "D",
+          "name": "Keep `real`/`imaginary` on Complex/Complex32 and `w`, `x`, `y`, `z` on Quaternion",
+          "detail": "Keep `Complex` and `Complex32` fields spelled `real` and `imaginary` (matching Swift Numerics). Keep `Quaternion` fields `w`, `x`, `y`, `z` per D-ARRAY-QUAT1=A.\n\nZero rename churn. Short constants will use ratified `3 + 4i` and `1 + 2i + 3j + 4k` literals once shipped (D-LITCARRIER1=D), while runtime construction keeps the longer labels.",
+          "technical": "No field renames in `Core/Math/Math.jet`. Implement `Quaternion` with `w`, `x`, `y`, `z` and `q.xyz` per D-ARRAY-QUAT1=A.",
+          "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex32{real: 3.0, imaginary: 4.0}\nmag: math.sqrt(z.real * z.real + z.imaginary * z.imaginary)\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}\nprint(\"{mag} {q.w}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (num-complex & glam)",
+          "note": "num-complex uses `re` and `im`; glam `Quat` uses `x`, `y`, `z`, `w`; https://docs.rs/num-complex/latest/num_complex/struct.Complex.html.",
+          "code": "let z = Complex { re: 3.0, im: 4.0 };\nlet q = Quat::from_xyzw(0.0, 0.0, 0.0, 1.0);"
+        },
+        {
+          "lang": "Julia",
+          "note": "Base `Complex` exposes `re` and `im` fields; https://docs.julialang.org/en/v1/manual/complex-and-rational-numbers/.",
+          "code": "z = Complex(3.0, 4.0); (z.re, z.im)"
+        },
+        {
+          "lang": "Odin",
+          "note": "Built-in `complex128` uses `real(z)`/`imag(z)` and `quaternion256` uses `w`, `x`, `y`, `z`; https://odin-lang.org/docs/overview/#quaternion-types.",
+          "code": "z := 3 + 4i\nq := quaternion(w=1, x=0, y=0, z=0)"
+        },
+        {
+          "lang": "Swift Numerics & simd",
+          "note": "Swift Numerics `Complex` uses `real`/`imaginary`; `simd_quatd` exposes `.vector` (`x, y, z, w`); https://github.com/apple/swift-numerics.",
+          "code": "let z = Complex(3.0, 4.0); (z.real, z.imaginary)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "`re`/`im` cuts verbosity without colliding `r` with polar radius, matches Rust and Julia, and keeps D-ARRAY-QUAT1=A intact.",
+        "gains": [
+          "Same token count as `r`/`i`, with zero polar radius `r` ambiguity.",
+          "Matches Rust `num-complex`, Julia `Complex`, and math `Re`/`Im`.",
+          "Keeps ratified `Quaternion` `w`, `x`, `y`, `z` fields for 3D code."
+        ],
+        "losses": [
+          {
+            "loss": "Two letters per label instead of one (`re`/`im` vs `r`/`i`).",
+            "mitigation": "Same token count in Jet's lexer; only two extra characters per write."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Saves two characters, but `z.r` collides with polar radius `r` and color red."
+          },
+          {
+            "key": "C",
+            "reason": "Reopens D-ARRAY-QUAT1=A and drops standard 3D `w`/`x`/`y`/`z` and `q.xyz`."
+          },
+          {
+            "key": "D",
+            "reason": "Keeps the nine-character `imaginary` label on every constructor and read."
+          }
+        ],
+        "tradeoff": "`re`/`im` spends two extra characters over `r`/`i` to avoid colliding with polar radius `r`."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Gemini. Adversarial model family: Gemini. Fresh agent: CodegenOpt (independent read-only audit against live Core/Math/Math.jet, Core/Color/Color.jet, BuiltinMethods.jet, Spellings.jet, and ratified D-ARRAY-QUAT1/D-ARRAY-COMPLEXT1/D-LITCARRIER1). Caught and fixed non-existent Float.sqrt() calls (now math.sqrt(...)), corrected Vec2/Vec3/Vec4 storage description, qualified unshipped D-LITCARRIER1 suffixes as ratified, and added Option C's q.xyz/q.ijk swizzle trade-off."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Which field labels should Complex, Complex32, and Quaternion use?",
+        "lesson": "Struct field labels serve both constructors (`Complex{...}`) and reads (`z.re` or `z.r`). Short labels save tokens while avoiding confusion with polar radius `r` or 3D axes `x`, `y`, `z`, `w`.",
+        "trio": {
+          "current": {
+            "note": "Complex and Complex32 use `real` and `imaginary` (`Core/Math/Math.jet`); D-ARRAY-QUAT1=A specifies `w`, `x`, `y`, `z`.",
+            "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex32{real: 3.0, imaginary: 4.0}\nmag: math.sqrt(z.real * z.real + z.imaginary * z.imaginary)"
+          },
+          "wild": {
+            "lang": "Rust (num-complex & glam)",
+            "note": "num-complex uses `re` and `im`; glam `Quat` uses `x`, `y`, `z`, `w`. See https://docs.rs/num-complex/latest/num_complex/struct.Complex.html.",
+            "code": "let z = Complex { re: 3.0, im: 4.0 };\nlet q = Quat::from_xyzw(0.0, 0.0, 0.0, 1.0);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`re` and `im` on Complex/Complex32; `w`, `x`, `y`, `z` on Quaternion",
+            "gist": "Standard `re`/`im` on complex types, keeping `w`/`x`/`y`/`z` on Quaternion.",
+            "gains": [
+              "Same token count as `r`/`i`, no polar radius ambiguity.",
+              "Matches Rust num-complex, Julia, and math `Re`/`Im`.",
+              "Keeps ratified Quaternion `w`/`x`/`y`/`z` fields."
+            ],
+            "losses": [
+              "Two letters per label instead of one."
+            ],
+            "proposed": {
+              "code": "z: Complex{re: 3.0, im: 4.0}\ns: Complex32{re: 3.0, im: 4.0}\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "`r` and `i` on Complex/Complex32; `w`, `x`, `y`, `z` on Quaternion",
+            "gist": "One-letter `r`/`i` on complex types, keeping `w`/`x`/`y`/`z` on Quaternion.",
+            "gains": [
+              "Shortest character spelling for Complex and Complex32.",
+              "Keeps ratified Quaternion `w`/`x`/`y`/`z` fields."
+            ],
+            "losses": [
+              "`r` clashes with polar radius `r` in polar formulas."
+            ],
+            "proposed": {
+              "code": "z: Complex{r: 3.0, i: 4.0}\ns: Complex32{r: 3.0, i: 4.0}\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "`r`/`i` on Complex/Complex32 and `r`/`i`/`j`/`k` on Quaternion",
+            "gist": "Single-letter algebraic labels across Complex, Complex32, and Quaternion.",
+            "gains": [
+              "Matches ratified `3 + 4i` and `1 + 2i + 3j + 4k` suffixes."
+            ],
+            "losses": [
+              "Amends D-ARRAY-QUAT1=A, dropping 3D `w`/`x`/`y`/`z` and `q.xyz`."
+            ],
+            "proposed": {
+              "code": "z: Complex{r: 3.0, i: 4.0}\ns: Complex32{r: 3.0, i: 4.0}\nq: Quaternion{r: 1.0, i: 0.0, j: 0.0, k: 0.0}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep `real`/`imaginary` on Complex/Complex32 and `w`, `x`, `y`, `z` on Quaternion",
+            "gist": "Keep full English words on Complex/Complex32 and `w`/`x`/`y`/`z` on Quaternion.",
+            "gains": [
+              "Zero rename churn in Core/Math/Math.jet."
+            ],
+            "losses": [
+              "Long `imaginary` label repeats on every constructor and read."
+            ],
+            "proposed": {
+              "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex32{real: 3.0, imaginary: 4.0}\nq: Quaternion{w: 1.0, x: 0.0, y: 0.0, z: 0.0}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "`re`/`im` cuts verbosity without colliding `r` with polar radius, matches Rust and Julia, and keeps D-ARRAY-QUAT1=A intact.",
+          "gains": [
+            "Same token count as `r`/`i`, no polar radius ambiguity.",
+            "Matches Rust num-complex, Julia, and math `Re`/`Im`.",
+            "Keeps ratified Quaternion `w`/`x`/`y`/`z` fields."
+          ],
+          "losses": [
+            {
+              "loss": "Two letters per label instead of one (`re`/`im` vs `r`/`i`).",
+              "mitigation": "Same token count; only two extra characters per write."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Saves two characters, but `z.r` collides with polar radius `r` and color red."
+            },
+            {
+              "key": "C",
+              "reason": "Reopens D-ARRAY-QUAT1=A and drops 3D `w`/`x`/`y`/`z` and `q.xyz`."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps the nine-character `imaginary` label on every constructor and read."
+            }
+          ],
+          "tradeoff": "`re`/`im` spends two extra characters over `r`/`i` to avoid colliding with polar radius `r`."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "CodegenOpt",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-22T19:44:32.345Z"
     }
   ],
   "questions": [
@@ -134029,6 +134243,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T19:44:32.345Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-ARRAY-COMPLEX-LABELS1",
+      "note": "Field labels for Complex, Complex32, and Quaternion"
+    },
     {
       "at": "2026-11-22T19:11:46.113Z",
       "by": "Orchestrator",
