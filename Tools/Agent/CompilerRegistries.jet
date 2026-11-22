@@ -1281,7 +1281,7 @@ execute: fn(lane: &Lane, command: String, args: [String], cwd: String, extra: [S
     loop name in keys {
         if strips_transport(name) -> spec = spec.env_remove(name)
     }
-    spec = spec.env("JET_TOOLCHAIN_ROOT", lane.repo).env("JET_KEEP_GOING", "1").env("JET", lane.jet).env("NO_COLOR", "1").env("TERM", "dumb")
+    spec = spec.env("JET_TOOLCHAIN_ROOT", lane.repo).env("JET", lane.jet).env("NO_COLOR", "1").env("TERM", "dumb")
     loop setting in extra -> spec = spec.env(setting.name, setting.value)
     prefix: "{lane.log_dir}/{lane.id.replace("/", "_")}-{lane.evidence.len()}"
     receipt: spec.run() ?? {

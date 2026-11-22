@@ -35,8 +35,8 @@ rm -rf "$S" "$OUT"; mkdir -p "$S" "$OUT"
 for f in "$@"; do if [ -e "$W/$f" ]; then mkdir -p "$S/$(dirname "$f")" && cp "$W/$f" "$S/$f"; else rm -f "$S/$f"; fi; done
 fi
 cd "$S" || exit 2
-JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_TOOLCHAIN_ROOT:-$S} JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/check-keep-going.tsv" \
-  prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$C/jet" check --threads 12 Compiler/JetCLI > "$OUT/check.out" 2> "$OUT/check.err"
+JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_TOOLCHAIN_ROOT:-$S} \
+  prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$C/jet" check --keep-going --keep-going-report="$OUT/check-keep-going.tsv" --threads 12 Compiler/JetCLI > "$OUT/check.out" 2> "$OUT/check.err"
 crc=$?
 echo "check rc=$crc"
 # The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
@@ -45,8 +45,7 @@ node "$G/census-errors.mjs" "$OUT/check-keep-going.tsv" "$S" 2>&1 | awk 'NR<=21'
 [ "${CENSUS_BUILD:-1}" = 0 ] && exit 0
 rm -rf Compiler/JetCLI/.jet/build
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_BUILD_ROOT:-$S} \
-  JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/build-keep-going.tsv" \
-  timeout 1800 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$C/jet" build --threads 12 Compiler > "$OUT/build.out" 2> "$OUT/build.err"
+  timeout 1800 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$C/jet" build --keep-going --keep-going-report="$OUT/build-keep-going.tsv" --threads 12 Compiler > "$OUT/build.out" 2> "$OUT/build.err"
 brc=$?
 rows=$(awk 'NR>1' "$OUT/build-keep-going.tsv" 2>/dev/null | wc -l)
 echo "build rc=$brc rows=$rows"
@@ -80,8 +79,8 @@ fi
 # Self-check pass (CENSUS_SELFCHECK=0 skips): the compiler just built checks the compiler packages with
 # keep-going, as chain s2 does; a sema/comptime row here would stop s2 (e.g. an unlowered inline module).
 if [ "${CENSUS_SELFCHECK:-1}" = 1 ]; then
-  JET_COMPILER_IDENTITY="$ID" JET_TOOLCHAIN_ROOT="$S" JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/selfcheck-keep-going.tsv" \
-    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$SELF" check --threads 12 Compiler/JetCLI > "$OUT/selfcheck.out" 2> "$OUT/selfcheck.err"
+  JET_COMPILER_IDENTITY="$ID" JET_TOOLCHAIN_ROOT="$S" \
+    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$SELF" check --keep-going --keep-going-report="$OUT/selfcheck-keep-going.tsv" --threads 12 Compiler/JetCLI > "$OUT/selfcheck.out" 2> "$OUT/selfcheck.err"
   src=$?
   srows=$(awk 'NR>1' "$OUT/selfcheck-keep-going.tsv" 2>/dev/null | wc -l)
   echo "selfcheck rc=$src rows=$srows"
@@ -89,8 +88,8 @@ if [ "${CENSUS_SELFCHECK:-1}" = 1 ]; then
   [ "$src" = 0 ] && [ "$srows" = 0 ] || exit 1
   # Core pass (Land.jet census selfcheck-core): every Core body, called or not, checked by the compiler just
   # built. Without it a Core spelling no compiler accepts landed (cd58a15b81 fixed it) and stopped a release preflight.
-  JET_COMPILER_IDENTITY="$ID" JET_TOOLCHAIN_ROOT="$S" JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/selfcheck-core-keep-going.tsv" \
-    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$SELF" check --threads 12 Core > "$OUT/selfcheck-core.out" 2> "$OUT/selfcheck-core.err"
+  JET_COMPILER_IDENTITY="$ID" JET_TOOLCHAIN_ROOT="$S" \
+    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 bash "$G/jetenv.sh" "$S" "$SELF" check --keep-going --keep-going-report="$OUT/selfcheck-core-keep-going.tsv" --threads 12 Core > "$OUT/selfcheck-core.out" 2> "$OUT/selfcheck-core.err"
   crc=$?
   crows=$(awk 'NR>1' "$OUT/selfcheck-core-keep-going.tsv" 2>/dev/null | wc -l)
   echo "selfcheck-core rc=$crc rows=$crows"

@@ -75,7 +75,7 @@ it every time; never drift into one-blocker-at-a-time work:
 
 1. **Collect every closure blocker at once.** List every open criterion on
    every open card of the epoch, and run each one's census in collect-all mode
-   in the same pass: `JET_KEEP_GOING=1` checks of every package it names (and
+   in the same pass: `jet check --keep-going` checks of every package it names (and
    of every sibling the same rule covers), an inventory of every file it
    names, and the suite or fresh-clone run it names. The complete list exists
    before the first fix.

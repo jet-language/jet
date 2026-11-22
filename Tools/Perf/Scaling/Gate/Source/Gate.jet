@@ -738,7 +738,7 @@ prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: Stri
     files.create_dir_all(store)
     command: if compiler.kind == {
         "bootstrap" -> [String]{compiler.path ?? ""}
-        "jet" -> [String]{compiler.path ?? "", config.jet_command, "--color=never", entry}
+        "jet" -> [String]{compiler.path ?? "", config.jet_command, "--color=never", "--trace={trace}", "--phase-counters", entry}
         else -> [String]{"/bin/sh", "-c", expand(compiler.template ?? "", [{key: "project", value: project_dir}, {key: "entry", value: entry}, {key: "n", value: "{n}"}, {key: "trace", value: trace}, {key: "dir", value: build_dir}])}
     }
     scoped: compiler.kind != "command"
@@ -762,12 +762,14 @@ prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: Stri
             {name: "JET_BOOTSTRAP_ENTRY", value: "main.jet"},
             {name: "JET_BOOTSTRAP_OUTPUT", value: files.join(build_dir, "out.rs")},
             {name: "JET_BOOTSTRAP_RECEIPT", value: receipt},
+            {name: "JET_TRACE_FILE", value: trace},
+            {name: "JET_PHASE_COUNTERS", value: "1"},
             {name: "RUST_MIN_STACK", value: "8388608"},
         }
         loop variable in bootstrap -> spec = spec.env(variable.name, variable.value)
     }
     loop variable in
-        [{name: "JET_STORE_DIR", value: store}, {name: "JET_TRACE_FILE", value: trace}, {name: "JET_PHASE_COUNTERS", value: "1"}, {name: "TMPDIR", value: build_dir}, {name: "NO_COLOR", value: "1"}] {
+        [{name: "JET_STORE_DIR", value: store}, {name: "TMPDIR", value: build_dir}, {name: "NO_COLOR", value: "1"}] {
         spec = spec.env(variable.name, variable.value)
     }
     x: if built.kind == .Domain -> built.code_lines else -> n

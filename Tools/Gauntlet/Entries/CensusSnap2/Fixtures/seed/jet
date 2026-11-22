@@ -9,15 +9,21 @@ set -u
 verb=$1
 target=${!#}
 case "$0" in */.jet/build/jet) who=built ;; *) who=seed ;; esac
+report_path=${JET_KEEP_GOING_REPORT:-}
+for arg in "$@"; do
+  case "$arg" in
+    --keep-going-report=*) report_path=${arg#--keep-going-report=} ;;
+  esac
+done
 # rows N KIND: the report's header and N rows of KIND, the row j of a key
 # repeated (j % 4) + 1 times, so the counts differ and tie.
 rows() {
-  printf 'kind\tlocation\tcode\tmessage\n' > "$JET_KEEP_GOING_REPORT"
+  printf 'kind\tlocation\tcode\tmessage\n' > "$report_path"
   local left=$1 j=0 k
   while [ "$left" -gt 0 ]; do
     for ((k = 0; k <= j % 4 && left > 0; k++)); do
       printf '%s\tCompiler/JetCLI/Source/CLI/F%d.jet:%d:4\tE%04d\t%s %d\n' "$2" "$j" "$((k + 1))" "$((900 + j))" \
-        "$( [ $((j % 5)) = 0 ] && printf 'a message long enough to cross the two hundred byte cut of every census line, %.0s' 1 2 3 || printf 'cannot lower call' )" "$j" >> "$JET_KEEP_GOING_REPORT"
+        "$( [ $((j % 5)) = 0 ] && printf 'a message long enough to cross the two hundred byte cut of every census line, %.0s' 1 2 3 || printf 'cannot lower call' )" "$j" >> "$report_path"
       left=$((left - 1))
     done
     j=$((j + 1))

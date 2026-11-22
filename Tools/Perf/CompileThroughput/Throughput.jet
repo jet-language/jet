@@ -682,7 +682,8 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     }
     argv := if compiler == "" -> [String]{jet} else -> [String]{options.tool, "perf", "attach", "--lens=counts", "--quiet", "--out", counts_file, "--", jet}
     argv.extend(mode_args(mode, options.threads))
-    spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
+    argv.push("--trace={trace_file}")
+    spec := process.cmd(argv).cwd(project).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
     if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
     spec = spec.memory_scope(options.memory).timeout(time.duration_seconds(options.timeout)).output_limit(GIB)
     if options.cpus.len() > 0 -> spec = spec.cpu_affinity(options.cpus.copy())
@@ -2371,10 +2372,10 @@ cell_sample: fn(options: Options, inputs: [String], jet: String, identity: Strin
         sample.problems.push(problem)
         return sample
     }
-    argv := [String]{jet, "build", "--color=never"}
+    argv := [String]{jet, "build", "--color=never", "--trace={trace_file}"}
     if arm == "single" -> argv.extend([String]{"--threads", "1"})
     argv.push(prepared.program.entry.copy())
-    spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1").env("TMPDIR", dir)
+    spec := process.cmd(argv).cwd(project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1").env("TMPDIR", dir)
     if prepared.selfhost -> spec = spec.env("JET_TOOLCHAIN_ROOT", project)
     if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
     spec = spec.memory_scope(options.memory).timeout(time.duration_seconds(options.timeout)).output_limit(GIB)

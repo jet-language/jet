@@ -566,7 +566,7 @@ in one pass:
   good factory, an older compiler, a dry run) and fix what they find in the
   same batch.
 - **Run every stage in collect-all mode.** Use the existing keep-going
-  mechanisms (`JET_KEEP_GOING=1` all-phases reports,
+  mechanisms (`--keep-going` all-phases reports,
   `JET_DEBUG_LOWER_ALL=1` lowering sweeps, per-error census scripts) so one run
   reports all errors in all items, not the first one. A tool that stops at its
   first failure needs a collect-all mode before it gates anything.
