@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113033,
+    "rev": 113050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,23 +25,19 @@
         "radar:e14",
         "radar:e11",
         "radar:e7",
-        "radar:e5",
         "radar:e15",
-        "radar:e21",
         "radar:e22",
         "radar:e23",
         "radar:e24",
         "radar:e25",
         "radar-cards",
         "radar:e3",
-        "radar:e4",
-        "radar:e6",
-        "radar:e16",
         "radar:e19",
         "board-ideas",
-        "radar:e20",
+        "radar-sq",
         "radar:e18",
-        "radar-sq"
+        "radar:e21",
+        "radar:e20"
       ]
     },
     "completionCursor": "2026-11-21T23:03:17.545Z",
@@ -23978,6 +23974,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "Main",
+          "text": "Handover 2026-11-21 20:40: every criterion is met except c13, which needs the compiler session protocol (#5050, unbuilt; its session criterion moved to #6960 on e24). Nothing of this card is unlanded; resume when #5050 is built."
+        },
+        {
           "at": "2026-11-21",
           "by": "Main",
           "text": "c39 (p406, dev 113879859e): the JSON half holds. CompilerAPI/semantic_index_derives_each_declaration_once passes: one derivation per declaration (the struct, its three methods, run), each credited to its own text, 5 distinct subjects and 5 distinct sources, no codec records. c39 stays open on its typed half: the typed index record carries no derivations (typed_consumers_match_cli_json says so), so the typed result cannot be compared until D-SEMINDEX-TYPED1 is ratified, the same wait as c19."
@@ -24446,7 +24447,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-21T22:49:08.909Z",
+      "updated": "2026-11-22T01:39:26.545Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "criteriaLastN": 41
@@ -50221,7 +50222,7 @@
       "body": "Owner order (2026-11-09): Jet is to be the best language for making games, so it must be capable of rendering full high-resolution 3D games. Do not build a 3D rendering engine now, but ship all the tools and primitives needed to make one: GPU device, swapchain and presentation on the native window, buffers, textures, render passes and pipelines, shaders written in Jet (D-GPU-SHADER-SURFACE1), GPU compute, 3D math (vectors, matrices, quaternions, SIMD), image and mesh asset loading, raw and relative input, audio, frame pacing and GPU timing. Related cards: #c0ce571w (shader stages and pipelines), #c0li0kor (GPU kernels), #c084tcrl (device providers), #c0776o2m (game platform layer), #c0ba141x (linking model: GPU drivers need the platform loader). First step: a gap map against code, then ballots for every public API.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "frozen",
       "priority": "P1",
@@ -50275,8 +50276,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T13:45:30.524Z",
-      "updated": "2026-11-16T13:03:50.887Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-22T01:42:04.652Z",
+      "updatedBy": "owner",
       "criteriaLastN": 4
     },
     {
@@ -54446,6 +54447,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "Main",
+          "text": "Handover 2026-11-21 20:40 (owner paused this stream for an uninterrupted compiler-performance session). c94: Rivet-6841-c94-attach-window landed as 5c61361976 (p438, dev d643d1e71a). On the gate-p438 jet, `jet test Compiler --profile cases --filter Perf/attach` passes 11 of 12; Perf/attach_samples_a_command still fails at its unchanged hot-function check (\"% total · unit.rt_text_append_owner\"), because the comptime child's samples are unnamed (#6995 c11). That root is Lens-6995-c11-comptime-names.r1, landing in p439; once it is on dev, rerun the Perf/attach filter and meet c94 if all 12 pass. c39 stays open: the review's verdict does not hold on every axis yet (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md). c108 waits on its ballot for the Canvas Debug panels. A stale worktree (IfHole-6-1, base 50b6fec6e7) held an uncommitted, earlier version of the c95/c106 disassembly work that landed as c0e8fae53e and 04181acf9c (its cases pass on a0.0.46); it was removed, and its diff is kept at $JET_SCRATCH_ROOT/lanes/Main/handover/IfHole-6-1-uncommitted.patch."
+        },
+        {
           "at": "2026-11-21",
           "by": "Main",
           "text": "Worktree audit 2026-11-21 (dev 938d4d84f8): the IfHole-6-1 worktree (base 50b6fec6e7) holds unlanded work. When a call is inlined, OptEntry.jet and OptInline.jet copy the caller slot_formal, so an inlined frame lists its function parameters at -O1 and -O2. Native.jet adds a test for it, and observability.md text says an inlined frame locals lists its parameters \"with the value passed where the code still holds it, else <Unavailable> with why\". Every other added line in that tree is on dev. Its diff is saved at $JET_SCRATCH_ROOT/lanes/Main/wt-save/IfHole-6-1.diff. The tree stays until a worker rebases and submits this or it is judged superseded."
@@ -55990,7 +55996,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-21T21:35:03.112Z",
+      "updated": "2026-11-22T01:39:25.203Z",
       "updatedBy": "Main",
       "criteriaLastN": 118
     },
@@ -73296,11 +73302,20 @@
         {
           "n": 32,
           "text": "Expressions evaluate at a stop in the compiler itself, the jet binary built from Compiler: on the p436 batch compiler (dev 942f0c6d93), `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do \"print function.name\" --do \"print function.params.len()\" -- check hello.jet` stops at Casing.jet:219 in sema_casing_function, and Locals show function = Func{… name: \"greet_user\" …}, but both prints fail with \"Can't evaluate `function.name`: `Byte` changed its layout (its size changed from 9 to 16 bytes)\". The evaluator compiles against the image's own layout of each type it reads, or reports which declaration differs. Proof: that command prints function.name = \"greet_user\" and the parameter count, and a Debug case covers a stop in a program whose layout facts include Byte.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Fix b4913d8f00 (Lens-6995-eval-compiler-layout, landed p438; dev d643d1e71a). On the gate-p438 jet (built from d643d1e71a), from the tree root: `jet debug <jet> --break Compiler/JetSema/Source/Sema/Casing.jet:216 --do \"print function.name\" --do \"print function.params.len()\" -- check hello.jet` stops at Casing.jet:219 in sema_casing_function and prints function.name = \"greet_user\" and function.params.len() = 1, rc 0; Tests/Cases/Debug/print_evaluates_beside_an_enum_payload_it_never_reads PASS 1/1. Transcript: $JET_SCRATCH_ROOT/lanes/Main/handover/6995-c32-p438.out.",
+          "at": "2026-11-22T01:39:11.936Z"
+        },
+        {
+          "n": 33,
+          "text": "A breakpoint given as an absolute path binds to the wrong function: on the gate-p438 jet (dev d643d1e71a), `jet debug <jet> --break <tree>/Compiler/JetSema/Source/Sema/Casing.jet:216 … -- check hello.jet` reports \"Breakpoint hit Casing.jet:216 in sema_casing_split_words()\", while the same file given relative to the tree root binds to sema_casing_function (stops at 219). The absolute and the relative spelling of one file must bind the same line of the same file, or the absolute one must be refused naming the ambiguity. Proof: a Debug case that sets one breakpoint both ways and stops in the same function. Transcript: $JET_SCRATCH_ROOT/lanes/Main/handover/6995-abs-path-break-p438.out.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-21T22:54:39.409Z"
+          "at": "2026-11-22T01:39:12.955Z"
         }
       ],
       "refs": [],
@@ -73308,9 +73323,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-21T22:54:39.409Z",
+      "updated": "2026-11-22T01:39:12.955Z",
       "updatedBy": "Main",
-      "criteriaLastN": 32
+      "criteriaLastN": 33
     },
     {
       "id": "c0c3gh6u",
@@ -133167,6 +133182,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T01:42:04.653Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c00chl86",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-11-22T01:39:26.546Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T01:39:25.203Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T01:39:12.955Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "31 criteria, soft limit 6: debugger friction found while proving c32; owner order: every friction is a criterion on the dogfood card"
+    },
+    {
+      "at": "2026-11-22T01:39:12.955Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#33 A breakpoint given as an absolute path binds to the wrong fu"
+    },
+    {
+      "at": "2026-11-22T01:39:11.936Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ni11n",
+      "note": "#32"
+    },
     {
       "at": "2026-11-22T00:59:21.031Z",
       "by": "Main",
