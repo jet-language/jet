@@ -56,32 +56,32 @@ export function renderNowReports({ briefings = [], statusSnapshot = null } = {},
   const [latest, ...history] = briefings;
   const historyKey = 'briefing-history';
   const historyOpen = isOpen(historyKey, defaultOpen(historyKey));
-  const past = history.length ? `<details class="report__history" data-report="${historyKey}"${historyOpen ? ' open' : ''}><summary>Briefing history · ${history.length}</summary>${history.map(record => {
+  const past = history.length ? `<details class="report__history" data-report="${historyKey}"${historyOpen ? ' open' : ''}><summary>Briefing History · ${history.length}</summary>${history.map(record => {
     const key = `briefing:${record.id}`;
     const open = isOpen(key, false);
     return `<details class="report__past" data-report="${esc(key)}"${open ? ' open' : ''}><summary>${esc(record.title)} · ${stamp(record.created)} · ${esc(record.by)}</summary>${historyOpen && open ? briefingBody(record) : ''}</details>`;
   }).join('')}</details>` : '';
   const brief = section({
-    key: 'briefing', cls: 'report--briefing', label: 'Latest briefing', isOpen,
-    title: latest ? esc(latest.title) : 'None yet',
+    key: 'briefing', cls: 'report--briefing', label: 'Latest Briefing', isOpen,
+    title: latest ? esc(latest.title) : 'None Yet',
     meta: latest ? `${stamp(latest.created)} · ${esc(latest.by)}` : '',
     body: `${latest ? briefingBody(latest) : '<p class="report__empty">No briefing posted yet.</p>'}${past}`,
   });
 
   const s = statusSnapshot;
   const status = section({
-    key: 'status', cls: 'report--status', label: 'Status board', isOpen,
+    key: 'status', cls: 'report--status', label: 'Status Board', isOpen,
     title: s?.summary ? esc(s.summary.length > 110 ? `${s.summary.slice(0, 109)}…` : s.summary) : '',
-    meta: s ? `Updated ${stamp(s.updatedAt || s.created)} · ${esc(s.by)}` : 'No snapshot yet',
+    meta: s ? `Updated ${stamp(s.updatedAt || s.created)} · ${esc(s.by)}` : 'No Snapshot Yet',
     body: s ? `${s.summary ? `<p class="report__lead">${esc(s.summary)}</p>` : ''}
       <div class="report__label">Milestones</div><div class="report__grid">${s.milestones.map(m =>
         `<article class="report__tile"><div class="report__head"><h3>${esc(m.title)}</h3><span class="report__state">${esc(m.state)}</span></div>
         ${Object.entries(m.progress).map(([label, percent]) => `<div class="report__metric"><label>${esc(label)} <b>${esc(percent)}%</b><progress max="100" value="${esc(percent)}" aria-label="${esc(m.title)}: ${esc(label)}">${esc(percent)}%</progress></label></div>`).join('')}${links(m.links)}</article>`
       ).join('') || '<p class="report__empty">No milestones in this snapshot.</p>'}</div>
-      <div class="report__label">Workstreams / lanes</div><div class="report__grid">${s.workstreams.map(w =>
+      <div class="report__label">Workstreams &amp; Lanes</div><div class="report__grid">${s.workstreams.map(w =>
         `<article class="report__tile"><div class="report__head"><h3>${esc(w.title)}</h3><span class="report__state">${esc(w.state)}</span></div>
         <div class="report__meta">Updated ${stamp(w.updatedAt || s.updatedAt || s.created)}</div>
-        <p><b>Active workers:</b> ${esc(w.workers.join(', ') || 'None')}</p>
+        <p><b>Active Workers:</b> ${esc(w.workers.join(', ') || 'None')}</p>
         ${w.blockers.length ? `<ul class="report__blockers">${w.blockers.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : '<p class="report__empty">No reported blockers.</p>'}${links(w.links)}</article>`
       ).join('') || '<p class="report__empty">No workstreams in this snapshot.</p>'}</div>
       <div class="report__meta">Snapshot posted ${stamp(s.created)}. Reported progress; card gates and ballots remain authoritative.</div>`
