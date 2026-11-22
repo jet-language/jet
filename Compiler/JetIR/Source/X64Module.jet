@@ -89,6 +89,9 @@ IRX64Tables: struct {
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
     fma: Int,
+    // The data row of the byte caching the CPU SIMD level (0=unprobed, 1=SSE2,
+    // 2=AVX2+POPCNT, 3=AVX-512+POPCNT) for reduction asm leaves, -1 if unused.
+    simd: Int,
     // Per data row, whether code that goes on reads it (ir_x64_tables_heat);
     // rows past its end are not.
     hot: [Bool]{[Bool]{}},
@@ -96,9 +99,9 @@ IRX64Tables: struct {
 
 // The data rows a function's selection names besides the IR data rows, a
 // row per use: a selector text, the String header of an IR data row, a
-// big-integer decimal's static Int word, the FMA byte. Per use its kind,
-// the IR data row a Header names (-1 for the others), and the text a Text
-// or StaticInt names ("" for the others).
+// big-integer decimal's static Int word, the FMA byte, or the SIMD level byte.
+// Per use its kind, the IR data row a Header names (-1 for the others), and
+// the text a Text or StaticInt names ("" for the others).
 IRX64Uses: struct {
     kinds: [IRX64UseKind]{[IRX64UseKind]{}},
     data: [Int]{[Int]{}},
@@ -110,6 +113,7 @@ IRX64UseKind: enum {
     Header,
     StaticInt,
     Fma,
+    Simd,
 }
 
 // Use k of a function's selection is data row IR_X64_LOCAL_DATA + k in its
@@ -135,6 +139,8 @@ IRX64FunctionTables: struct {
     // The local data row of the FMA byte, -1 when the function calls no
     // jet_std_math_fma.
     fma: Int,
+    // The local data row of the SIMD level byte, -1 when not a SIMD reduction leaf.
+    simd: Int,
     // Whether the selection keeps an emission log (JET_X64_EMIT_LOG,
     // ir_x64_compile_module_logged).
     logged: Bool,
@@ -485,7 +491,7 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
 
 // The module's tables before any function's uses: its IR data rows.
 ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: IRX64TextRows{}, ints: IRX64TextRows{}, files: [String]{}, file_rows: IRX64TextRows{}, debug_types: [X64DebugType]{}, fma: -1}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: IRX64TextRows{}, ints: IRX64TextRows{}, files: [String]{}, file_rows: IRX64TextRows{}, debug_types: [X64DebugType]{}, fma: -1, simd: -1}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words, which the program
         // may write; a text row is read-only bytes (IR.jet ir_intern_text).
@@ -524,6 +530,14 @@ ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [
                 }
                 tables.fma
             }
+            .Simd -> {
+                if tables.simd < 0 {
+                    tables.simd = tables.data.len()
+                    tables.lengths.push(1)
+                    tables.data.push(X64Data{id: X64DataID{value: tables.simd}, bytes: [U8]{U8{0}}, align: 1, relocs: [X64DataReloc]{}})
+                }
+                tables.simd
+            }
         }
         rows.push(row)
     }
@@ -539,6 +553,7 @@ ir_x64_use_rows: fn(tables: IRX64Tables, uses: IRX64Uses) -> [Int] Never! {
             .Header -> tables.headers[uses.data[at]]
             .StaticInt -> ir_x64_text_rows_get(tables.ints, uses.texts[at])
             .Fma -> tables.fma
+            .Simd -> tables.simd
         }
         rows.push(row)
     }
@@ -601,8 +616,11 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 // in `cold` when the instruction is on its way to a stop (ir_x64_dying).
 ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionTables Never! {
     f: m.functions[row]
-    tables := IRX64FunctionTables{uses: IRX64Uses{}, lengths: [Int]{}, texts: IRX64TextRows{}, headers: [Int:Int]{}, ints: IRX64TextRows{}, fma: -1, logged: ir_x64_log_names(f, names)}
+    tables := IRX64FunctionTables{uses: IRX64Uses{}, lengths: [Int]{}, texts: IRX64TextRows{}, headers: [Int:Int]{}, ints: IRX64TextRows{}, fma: -1, simd: -1, logged: ir_x64_log_names(f, names)}
     _ := ir_x64_use_text(tables, f.source_file)
+    if f.asm != None && ir_x64_simd_leaf_kind(f.key) >= 0 {
+        tables.simd = ir_x64_add_use(tables, IRX64UseKind.Simd, -1, "", 1)
+    }
     // The stop texts already in (ir_x64_add_stop_texts).
     stops := [Bool]{false, false, false, false}
     // The DataAddress and ConstText instructions, with the row each reads.

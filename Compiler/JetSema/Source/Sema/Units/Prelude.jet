@@ -24,6 +24,43 @@ sema_units_catalog_read: fn() -> [UnitFamilyDef] {
     families
 }
 
+// Integer scale of `suffix` inside catalog family `family_name`, or None when
+// absent or non-integer. Readers of budget and allocator byte/time/percent
+// suffixes query the declared Prelude `#UnitFamily` catalog through this
+// helper instead of keeping separate suffix tables.
+sema_units_catalog_scale: fn(family_name: String, suffix: String) -> Int? Never! {
+    loop family in SEMA_UNITS_CATALOG {
+        if family.family != family_name -> next
+        loop member in family.members {
+            if member.name == suffix && member.scale.denominator == 1 {
+                return Val(member.scale.numerator)
+            }
+        }
+        return None
+    }
+    None
+}
+
+// Member suffixes of catalog family `family_name` filtered by case and an
+// optional maximum integer scale (`max_scale > 0`).
+sema_units_catalog_suffixes: fn(family_name: String, uppercase_head: Bool, max_scale: Int) -> [String] Never! {
+    names := [String]{}
+    loop family in SEMA_UNITS_CATALOG {
+        if family.family != family_name -> next
+        loop member in family.members {
+            if member.scale.denominator != 1 -> next
+            if max_scale > 0 && member.scale.numerator > max_scale -> next
+            bytes: member.name.bytes()
+            if bytes.is_empty() -> next
+            is_upper: bytes[0] >= (U8{65}) && bytes[0] <= (U8{90})
+            if is_upper != uppercase_head -> next
+            names.push("{member.name}")
+        }
+        break
+    }
+    names
+}
+
 // The names `items` declares (`occupied`) and the unit families it declares
 // itself (`local_families`); each item is read in place.
 sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_families: &[String:Bool]) Never! {

@@ -1,0 +1,53 @@
+Error: Jet.InvalidSwizzleLane: `[Float#3].swizzle` needs at least one constant slot index
+  --> Tests/UI/swizzle_numeric_invalid.jet:6:13
+    |
+  6 |     _a: rgb.swizzle()
+    |             ^^^^^^^
+ Why: Numeric swizzle selects one or more fixed slots from `[Float#3]` at compile time
+ Fix: Pass constant slot indexes in `0..<3`, such as `.swizzle(0)`
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane
+
+Error: Jet.InvalidSwizzleLane: Swizzle index `-1` is out of range for `[Float#3]`
+  --> Tests/UI/swizzle_numeric_invalid.jet:7:21
+    |
+  7 |     _b: rgb.swizzle(-1, 0)
+    |                     ^
+ Why: `[Float#3]` has 3 slots (`0` through `2`)
+ Fix: Use slot indexes between `0` and `2`
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane
+
+Error: Jet.InvalidSwizzleLane: Swizzle index `3` is out of range for `[Float#3]`
+  --> Tests/UI/swizzle_numeric_invalid.jet:8:21
+    |
+  8 |     _c: rgb.swizzle(3, 0)
+    |                     ^
+ Why: `[Float#3]` has 3 slots (`0` through `2`)
+ Fix: Use slot indexes between `0` and `2`
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane
+
+Error: Jet.InvalidSwizzleLane: Swizzle slot index must be a compile-time constant integer
+  --> Tests/UI/swizzle_numeric_invalid.jet:9:21
+    |
+  9 |     _d: rgb.swizzle(i, 0)
+    |                     ^
+ Why: Numeric swizzle selects fixed slots while compiling, so every index must be known at compile time
+ Fix: Pass a constant integer between `0` and `2`
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane
+
+Error: Jet.InvalidSwizzleLane: Can't swizzle `[String#2]` because `String` is not copyable
+  --> Tests/UI/swizzle_numeric_invalid.jet:11:15
+    |
+ 11 |     _e: names.swizzle(1, 0)
+    |               ^^^^^^^
+ Why: Numeric swizzle reads slots by value and may repeat them, so the element type must be copyable
+ Fix: Swizzle a fixed array of a copyable type, or move elements explicitly
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane
+
+Error: Jet.InvalidSwizzleLane: `F32x4.swizzle` has no 3-lane result type for `F32`
+  --> Tests/UI/swizzle_numeric_invalid.jet:13:12
+    |
+ 13 |     _f: v4.swizzle(2, 1, 0)
+    |            ^^^^^^^
+ Why: Exact lane swizzles return a legal lane type with the same element type
+ Fix: Pass a supported lane count for `F32`
+More: jet-lang.dev/e/Jet.InvalidSwizzleLane

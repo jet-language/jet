@@ -1,0 +1,14 @@
+// D-ARRAY-SHUFFLE1=B: numeric `.swizzle` rejects out-of-range indexes,
+// non-constant indexes, empty calls, unsupported lane widths, and non-copy
+// element types at compile time.
+bad_swizzles: fn(i: Int) {
+    rgb: [Float#3]{0.9, 0.5, 0.1}
+    _a: rgb.swizzle()
+    _b: rgb.swizzle(-1, 0)
+    _c: rgb.swizzle(3, 0)
+    _d: rgb.swizzle(i, 0)
+    names: [String#2]{"a", "b"}
+    _e: names.swizzle(1, 0)
+    v4: F32x4.new(F32{1.0}, F32{2.0}, F32{3.0}, F32{4.0})
+    _f: v4.swizzle(2, 1, 0)
+}

@@ -1,0 +1,17 @@
+Error: Jet.UndefinedOperator: `*` isn't defined between `F32x4` and `Float`
+  --> Tests/UI/lane_scalar_wrong_element_type.jet:5:16
+    |
+  5 |     bad_right: pixels * Float{2.0}
+    |                ^^^^^^^^^^^^^^^^^^^
+ Why: Built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook
+ Fix: Match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair
+More: jet-lang.dev/e/Jet.UndefinedOperator
+
+Error: Jet.UndefinedOperator: `*` isn't defined between `Float` and `F32x4`
+  --> Tests/UI/lane_scalar_wrong_element_type.jet:6:15
+    |
+  6 |     bad_left: Float{2.0} * pixels
+    |               ^^^^^^^^^^^^^^^^^^^
+ Why: Built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook
+ Fix: Match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair
+More: jet-lang.dev/e/Jet.UndefinedOperator

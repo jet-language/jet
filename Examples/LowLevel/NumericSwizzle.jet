@@ -1,0 +1,36 @@
+// D-ARRAY-SHUFFLE1=B: lanes and fixed arrays pick slots by number with
+// `.swizzle(i, ...)`. Source expressions are evaluated once, constant
+// expressions and repeated indexes work, and exact lanes return a legal lane
+// type with the same element type.
+LAST: 2
+
+make_rgb: fn(calls: &Int) -> [Float#3] {
+    calls += 1
+    [Float#3]{0.9, 0.5, 0.1}
+}
+
+run: fn() {
+    rgb: [Float#3]{0.9, 0.5, 0.1}
+    bgr: rgb.swizzle(2, 1, 0)
+    print(bgr)
+
+    eight: [Int#8]{0, 1, 2, 3, 4, 5, 6, 7}
+    picks: eight.swizzle(7, 6, 5, 4)
+    print(picks)
+    repeated: eight.swizzle(0, 0, LAST, LAST + 1)
+    print(repeated)
+
+    calls := 0
+    once: make_rgb(calls).swizzle(2, 2, 0)
+    print("{once} calls={calls}")
+
+    v4: F32x4.new(F32{1.0}, F32{2.0}, F32{3.0}, F32{4.0})
+    print(v4.swizzle(3, 2, 1, 0).to_array())
+    print(v4.swizzle(0, 1, 0, 1, 2, 3, 2, 3).to_array())
+
+    v8: F32x8.new(F32{10.0}, F32{20.0}, F32{30.0}, F32{40.0}, F32{50.0}, F32{60.0}, F32{70.0}, F32{80.0})
+    print(v8.swizzle(7, 6, 5, 4).to_array())
+
+    i4: I32x4.new(I32{10}, I32{20}, I32{30}, I32{40})
+    print(i4.swizzle(3, 1, 2, 0).to_array())
+}

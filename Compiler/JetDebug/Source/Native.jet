@@ -6100,19 +6100,40 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
 // file's matches, names every file of that base name.
 native_line_functions: fn(image: NativeImage, file: String) -> [Int] Never! {
     wanted: native_files.basename(file)
-    by_path := false
-    if file.contains("/") {
+    target: if file.contains("/") -> native_files.normalize(file) else -> file
+    best := 0
+    if target.contains("/") {
         loop function in image.lines.functions {
-            if native_line_file_is(function.dir, function.file, file) {
-                by_path = true
-                break
-            }
+            score: native_line_file_match(function.dir, function.file, target)
+            if score > best -> best = score
         }
     }
     found := [Int]{}
+    if best > 0 {
+        loop (index, function) in image.lines.functions {
+            if native_line_file_match(function.dir, function.file, target) == best {
+                found.push(index)
+            }
+        }
+        return found
+    }
+    if target.contains("/") {
+        only := ""
+        ambiguous := false
+        loop function in image.lines.functions {
+            if native_files.basename(function.file) != wanted -> next
+            source: native_line_source(function.dir, function.file)
+            if only == "" {
+                only = source
+            } else if only != source {
+                ambiguous = true
+                break
+            }
+        }
+        if ambiguous -> return found
+    }
     loop (index, function) in image.lines.functions {
-        named: if by_path -> native_line_file_is(function.dir, function.file, file) else -> native_files.basename(function.file) == wanted
-        if named -> found.push(index)
+        if native_files.basename(function.file) == wanted -> found.push(index)
     }
     found
 }
@@ -6896,12 +6917,28 @@ native_line_source: fn(dir: String, file: String) -> String Never! {
     if joined.starts_with("./") && !plain.starts_with("../") -> "./{plain}" else -> plain
 }
 
-// Whether `path` names the source a line-table function records as `file`
-// under `dir`: its path (native_line_source), or that path's last
-// components.
-native_line_file_is: fn(dir: String, file: String, path: String) -> Bool Never! {
+// Match strength of `path` against the source a line-table function records
+// as `file` under `dir`: 0 when they do not name the same file, else higher
+// for a more specific match (exact path, relative suffix, or longest
+// recorded relative/Core suffix of an absolute `path`).
+native_line_file_match: fn(dir: String, file: String, path: String) -> Int Never! {
     source: native_line_source(dir, file)
-    source == path || source.ends_with("/{path}")
+    if source == path -> return path.len() + 1
+    if !native_files.is_absolute(path) {
+        if source.ends_with("/{path}") -> return path.len()
+        return 0
+    }
+    if native_files.is_absolute(source) -> return 0
+    plain: if source.starts_with(MODULE_CORE_PREFIX) -> source.slice(MODULE_CORE_PREFIX.len(), source.len()) else -> native_files.normalize(source)
+    if plain != "" && !plain.starts_with("../") && path.ends_with("/{plain}") -> return plain.len()
+    0
+}
+
+// Whether `path` names the source a line-table function records as `file`
+// under `dir`: its path (native_line_source), its last components, or an
+// absolute path ending with that recorded relative path.
+native_line_file_is: fn(dir: String, file: String, path: String) -> Bool Never! {
+    native_line_file_match(dir, file, path) > 0
 }
 
 // Line `line` (1 for the first) of `lines`; "" when they have no such line.
@@ -6923,6 +6960,14 @@ native_source_line: fn(lines: [String], line: Int) -> String Never! {
     assert_eq(native_line_source(".", "../lib/step.jet"), "../lib/step.jet")
     assert_eq(native_line_source("./app", "../lib/step.jet"), "./lib/step.jet")
     assert(native_line_file_is("Compiler/JetCLI", "../JetSema/Source/Sema/CheckProgram.jet", "Sema/CheckProgram.jet"))
+}
+
+#Test("an absolute path matches only the recorded relative source it ends with") {
+    abs_sema: "/work/tree/Compiler/JetSema/Source/Sema/Casing.jet"
+    assert(native_line_file_is("Compiler/JetCLI", "../JetSema/Source/Sema/Casing.jet", abs_sema))
+    assert(!native_line_file_is("Compiler/JetCLI", "../JetFoundation/Source/Names/Casing.jet", abs_sema))
+    assert(native_line_file_match(".", "sub/a.jet", "/repo/sub/a.jet") > native_line_file_match(".", "a.jet", "/repo/sub/a.jet"))
+    assert(native_line_file_is(".", "<corelib>/Core/Net/URL.jet", "/repo/Core/Net/URL.jet"))
 }
 
 // A task the runtime's registry lists (JetRuntime Observe.jet): its id, its

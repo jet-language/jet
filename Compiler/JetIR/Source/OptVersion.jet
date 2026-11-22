@@ -167,6 +167,9 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
     starts := [Int]{}
     lasts := [Int]{}
     bounds := [Int]{}
+    word_indices := [Int]{}
+    word_limits := [Int]{}
+    word_maxes := [Int]{}
     // The IntBig guards of the guarded loops: the region each guards, its
     // slot, whether it tests at the head of every pass, and for a stepped
     // index the step it is tested to grow by and the bound slot its head
@@ -227,20 +230,31 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
             stepping.push(stepped)
         }
         narrow: ir_version_narrow(m, f, facts, at, end, guards, others, stepping, report)
+        accum: ir_version_accumulators(m, f, facts, first, start, at, end, guards, others, stepping)
         loop (k, slot) in guards {
             stepped: stepping[k]
             step: stepped.step
+            promoted: accum.promoted.contains(slot)
+            bits := if narrow.contains(slot) -> IR_VERSION_PRODUCT_BITS else -> IR_VERSION_GUARD_BITS
+            loop j in 0..<accum.narrow_slots.len() {
+                if accum.narrow_slots[j] == slot && accum.narrow_bits[j] < bits {
+                    bits = accum.narrow_bits[j]
+                }
+            }
             guard_region.push(starts.len())
             guard_slot.push(slot)
-            guard_head.push(!others.contains(slot) && step < 0)
+            guard_head.push(!others.contains(slot) && step < 0 && !promoted)
             guard_step.push(if step >= 0 && !ir_version_constant(f, facts, step) -> step else -> -1)
             guard_limit.push(if stepped.bound >= 0 && !ir_version_constant(f, facts, stepped.bound) -> stepped.bound else -> -1)
             guard_range.push(stepped.range_head)
-            guard_bits.push(if narrow.contains(slot) -> IR_VERSION_PRODUCT_BITS else -> IR_VERSION_GUARD_BITS)
+            guard_bits.push(bits)
         }
         starts.push(start)
         lasts.push(last)
         bounds.push(bound)
+        word_indices.push(accum.word_index)
+        word_limits.push(accum.word_limit)
+        word_maxes.push(accum.word_max)
     }
     if starts.len() == 0 -> return 0
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
@@ -271,7 +285,7 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
         if bounds[region] >= 0 {
             ir_version_counted(f, code, first, latest, starts[region], lasts[region], bounds[region])
         } else {
-            ir_version_guarded_copy(f, code, facts, first, latest, starts[region], lasts[region], pre, pre_bits, head, IRVersionSteps{signs: signs, limits: limits, range_head: range_head}, bool_row)
+            ir_version_guarded_copy(f, code, facts, first, latest, starts[region], lasts[region], pre, pre_bits, head, IRVersionSteps{signs: signs, limits: limits, range_head: range_head, word_index: word_indices[region], word_limit: word_limits[region], word_max: word_maxes[region]}, bool_row)
         }
         at = lasts[region] + 1
         region += 1
@@ -424,6 +438,9 @@ IRVersionSteps: struct {
     signs: [Int],
     limits: [Int],
     range_head: Bool,
+    word_index: Int,
+    word_limit: Int,
+    word_max: Int,
 }
 
 // The loop start..=last behind its IntBig guards (the header comment's
@@ -453,6 +470,22 @@ ir_version_guarded_copy: fn(f: &IRFunction, code: &IROptCode, facts: OptFacts, f
         ir_opt_code_put(code, .Const, one, 1, -1, -1, line)
         ir_opt_code_put(code, .Lt, below, step, one, -1, line)
         ir_opt_code_put(code, .BrIf, -1, below, 0, -1, line)
+    }
+    if steps.word_limit >= 0 && steps.word_index >= 0 {
+        word_row: f.slot_type[steps.word_limit]
+        max_slot: ir_slot(f, word_row, .Temp, -1, line)
+        too_big: ir_slot(f, bool_row, .Temp, -1, line)
+        ir_opt_code_put(code, .Const, max_slot, steps.word_max, -1, -1, line)
+        ir_opt_code_put(code, .Gt, too_big, steps.word_limit, max_slot, -1, line)
+        ir_opt_code_put(code, .BrIf, -1, too_big, 0, -1, line)
+        zero_slot: ir_slot(f, word_row, .Temp, -1, line)
+        neg_idx: ir_slot(f, bool_row, .Temp, -1, line)
+        ir_opt_code_put(code, .Const, zero_slot, 0, -1, -1, line)
+        ir_opt_code_put(code, .Lt, neg_idx, steps.word_index, zero_slot, -1, line)
+        ir_opt_code_put(code, .BrIf, -1, neg_idx, 0, -1, line)
+        own_limit: ir_slot(f, word_row, .Temp, -1, line)
+        ir_opt_code_put(code, .Copy, own_limit, steps.word_limit, -1, -1, line)
+        names[steps.word_limit] = own_limit
     }
     // A limit the loop never writes, inline below its guard.
     loop limit in steps.limits {
@@ -832,6 +865,207 @@ ir_version_factor: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end:
     if stepped.step >= 0 && others.contains(stepped.step) -> limits.push(stepped.step)
     if stepped.bound >= 0 && others.contains(stepped.bound) -> limits.push(stepped.bound)
     IRVersionFactor{slot: slot, limits: limits, carried: false}
+}
+
+// Bounded accumulators of a counted loop (ir_version_accumulators): `promoted`
+// are Int accumulators moved from per-iteration head guards to pre-loop guards,
+// `narrow_slots`/`narrow_bits` narrow the counted Int index and its bound
+// before the loop so `acc + passes * K` stays inline, and `word_index`/
+// `word_limit`/`word_max` guard a Word/8 counted loop's bound when no Int
+// stepped index drives the loop.
+IRVersionAccum: struct {
+    promoted: [Int],
+    narrow_slots: [Int],
+    narrow_bits: [Int],
+    word_index: Int,
+    word_limit: Int,
+    word_max: Int,
+}
+
+ir_version_accum_none: fn() -> IRVersionAccum Never! {
+    IRVersionAccum{promoted: [Int]{}, narrow_slots: [Int]{}, narrow_bits: [Int]{}, word_index: -1, word_limit: -1, word_max: -1}
+}
+
+ir_version_accumulators: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int, guards: [Int], others: [Int], stepping: [IRVersionStep]) -> IRVersionAccum Never! {
+    // First look for an Int stepped index whose bound is a constant or guarded
+    // before the loop (`others`).
+    int_index := -1
+    int_limit := -1
+    loop (k, slot) in guards {
+        if stepping[k].reason == "" && stepping[k].step >= 0 && stepping[k].bound >= 0 {
+            int_index = slot
+            int_limit = stepping[k].bound
+            break
+        }
+    }
+    // Otherwise look for a signed 64-bit Word counted index whose bound is
+    // invariant and defined before the loop.
+    word_index := -1
+    word_limit := -1
+    if int_index < 0 {
+        found: ir_version_word_counter(m, f, facts, first, start, at, end)
+        word_index = found.index
+        word_limit = found.limit
+    }
+    if int_index < 0 && word_index < 0 -> return ir_version_accum_none()
+    out := ir_version_accum_none()
+    loop (k, slot) in guards {
+        if others.contains(slot) || stepping[k].step >= 0 -> next
+        max_delta: ir_version_accum_bound(m, f, facts, at, end, slot)
+        if max_delta <= 0 -> next
+        delta_bits := 0
+        span := 1
+        loop span < max_delta {
+            span *= 2
+            delta_bits += 1
+        }
+        bound_bits: 59 - delta_bits
+        if bound_bits < 2 || bound_bits > IR_VERSION_GUARD_BITS -> next
+        max_val: (1 << (bound_bits - 1)) - 1
+        if int_index >= 0 {
+            if ir_version_constant(f, facts, int_limit) {
+                v: f.a[facts.def_at[int_limit]]
+                if v < 0 - (1 << (bound_bits - 1)) || v > max_val -> next
+            } else {
+                out.narrow_slots.push(int_limit)
+                out.narrow_bits.push(bound_bits)
+            }
+            out.narrow_slots.push(int_index)
+            out.narrow_bits.push(bound_bits)
+            out.promoted.push(slot)
+        } else {
+            out.word_index = word_index
+            out.word_limit = word_limit
+            if out.word_max < 0 || max_val < out.word_max -> out.word_max = max_val
+            out.promoted.push(slot)
+        }
+    }
+    out
+}
+
+IRVersionWordCounter: struct {
+    index: Int,
+    limit: Int,
+}
+
+// A signed 64-bit Word loop counter of `at..end`: written once by adding a
+// positive constant and tested at the loop head against an invariant Word
+// bound defined before `start`.
+ir_version_word_counter: fn(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int) -> IRVersionWordCounter Never! {
+    none: IRVersionWordCounter{index: -1, limit: -1}
+    head := at + 1
+    loop head < end && (f.op[head] == .Load || f.op[head] == .Offset) -> head += 1
+    if head + 1 >= end || f.dst[head] < 0 -> return none
+    test: f.op[head]
+    exit: if f.op[head + 1] == .Not && head + 2 < end && f.a[head + 1] == f.dst[head] -> head + 2 else -> head + 1
+    if f.op[exit] != .BrIf || f.a[exit] != f.dst[exit - 1] || f.b[exit] < 1 -> return none
+    negated: exit == head + 2
+    leaves_above: if negated -> test == .Lt || test == .Le else -> test == .Ge || test == .Gt
+    leaves_below: if negated -> test == .Gt || test == .Ge else -> test == .Le || test == .Lt
+    if !leaves_above && !leaves_below -> return none
+    idx: if leaves_above -> f.a[head] else -> f.b[head]
+    limit: if leaves_above -> f.b[head] else -> f.a[head]
+    if idx < 0 || limit < 0 || idx == limit -> return none
+    idx_ty: m.types[f.slot_type[idx]]
+    lim_ty: m.types[f.slot_type[limit]]
+    if idx_ty.kind != .Word || !idx_ty.signed || idx_ty.size != 8 -> return none
+    if lim_ty.kind != .Word || !lim_ty.signed || lim_ty.size != 8 -> return none
+    if ir_version_writes(f, at, end, limit) -> return none
+    if limit >= f.param_count && first[limit] >= start -> return none
+    if idx >= f.param_count && first[idx] >= start -> return none
+    step := -1
+    loop k in (at + 1)..<end {
+        if ir_x64_write(f, k) != idx -> next
+        if step >= 0 || f.op[k] != .Add -> return none
+        s: if f.a[k] == idx -> f.b[k] else if f.b[k] == idx -> f.a[k] else -> -1
+        if s < 0 || !ir_version_constant(f, facts, s) || f.a[facts.def_at[s]] < 1 -> return none
+        step = s
+    }
+    if step < 0 -> return none
+    IRVersionWordCounter{index: idx, limit: limit}
+}
+
+// Maximum total |delta| per iteration across all writes to `slot` in `at..end`
+// when every write is an Add or Sub to `slot` by a statically bounded value;
+// -1 otherwise.
+ir_version_accum_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int) -> Int Never! {
+    writes := 0
+    total := 0
+    cap: 1 << 30
+    loop k in (at + 1)..<end {
+        if ir_x64_write(f, k) != slot -> next
+        op_at: ir_version_accum_op(f, facts, at, k, slot)
+        if op_at < 0 -> return -1
+        delta_slot: if f.op[op_at] == .Sub -> f.b[op_at] else if f.a[op_at] == slot -> f.b[op_at] else -> f.a[op_at]
+        bound: ir_version_delta_bound(m, f, facts, at, end, delta_slot, 0)
+        if bound < 0 || total > cap - bound -> return -1
+        total += bound
+        writes += 1
+    }
+    if writes == 0 -> return -1
+    total
+}
+
+// The Add or Sub writing `slot` at `k` in loop `at`, either directly or via a
+// single-use temporary moved into `slot` after dropping `slot`; -1 otherwise.
+ir_version_accum_op: fn(f: IRFunction, facts: OptFacts, at: Int, k: Int, slot: Int) -> Int Never! {
+    if f.op[k] == .Add -> return if f.a[k] == slot || f.b[k] == slot -> k else -> -1
+    if f.op[k] == .Sub -> return if f.a[k] == slot -> k else -> -1
+    if f.op[k] != .Move -> return -1
+    t: f.a[k]
+    if t < f.param_count || facts.defs[t] != 1 || facts.uses[t] != 1 -> return -1
+    op_at: facts.def_at[t]
+    if op_at <= at || op_at >= k -> return -1
+    ok: (f.op[op_at] == .Add && (f.a[op_at] == slot || f.b[op_at] == slot)) || (f.op[op_at] == .Sub && f.a[op_at] == slot)
+    if !ok -> return -1
+    loop between in (op_at + 1)..<k {
+        if f.op[between] != .Drop || f.a[between] != slot -> return -1
+    }
+    op_at
+}
+
+// Static upper bound K >= 0 on |value| for `slot` (<= 2^30), or -1 if unknown.
+ir_version_delta_bound: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, depth: Int) -> Int Never! {
+    if slot < 0 || depth > 4 -> return -1
+    cap: 1 << 30
+    ty: m.types[f.slot_type[slot]]
+    if ty.kind == .Bool -> return 1
+    if ty.kind == .Word && ty.bits > 0 && ty.bits <= 30 {
+        return if ty.signed -> 1 << (ty.bits - 1) else -> (1 << ty.bits) - 1
+    }
+    if slot < f.param_count || facts.defs[slot] != 1 || facts.def_at[slot] < 0 -> return -1
+    def: facts.def_at[slot]
+    op: f.op[def]
+    if op == .Const {
+        v: f.a[def]
+        mag: if v < 0 -> 0 - v else -> v
+        return if mag <= cap -> mag else -> -1
+    }
+    if op == .Copy || op == .Move || op == .Convert {
+        return ir_version_delta_bound(m, f, facts, at, end, f.a[def], depth + 1)
+    }
+    if op == .BitAnd {
+        if ir_version_constant(f, facts, f.b[def]) {
+            c: f.a[facts.def_at[f.b[def]]]
+            if c >= 0 && c <= cap -> return c
+        }
+        if ir_version_constant(f, facts, f.a[def]) {
+            c: f.a[facts.def_at[f.a[def]]]
+            if c >= 0 && c <= cap -> return c
+        }
+        return -1
+    }
+    if (op == .Mod || op == .Rem) && ir_version_constant(f, facts, f.b[def]) {
+        c: f.a[facts.def_at[f.b[def]]]
+        if c >= 1 && c <= cap -> return c - 1
+        return -1
+    }
+    if op == .Add || op == .Sub {
+        left: ir_version_delta_bound(m, f, facts, at, end, f.a[def], depth + 1)
+        right: ir_version_delta_bound(m, f, facts, at, end, f.b[def], depth + 1)
+        if left >= 0 && right >= 0 && left <= cap - right -> return left + right
+    }
+    -1
 }
 
 // Whether the loop `at` (its End `end`) writes `slot`.
@@ -1354,4 +1588,135 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     assert_eq(wrapped, 1)
     assert_eq(trapped, 1)
     assert_eq(ifs, 1)
+}
+
+// A strided counted loop accumulating U8 elements (`m = 9; while m < n { total += Int{b}; m += 3 }`):
+// `total` is promoted from a per-iteration head guard to a pre-loop guard and
+// `n` is narrowed to 51 bits before the loop, so inside the fast loop there is
+// zero IntBig and both `total += delta` and `m += 3` wrap.
+#Test("A bounded U8 accumulator in a strided loop has no per-iteration IntBig guard") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    byte_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? panic("no U8 row")
+    word: ir_word_row(m)
+    g := ir_function_new("stride_accum", "test:stride.jet.stride_accum", "", "stride.jet", 1)
+    ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
+    n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    g.result = exact
+    total: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    step: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    raw_i: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    b: ir_slot(g, byte_row, IRSlotKind.Temp, -1, 0)
+    widen: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, i, 9, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, step, 3, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Move, raw_i, i, -1, -1, 4)
+    _ := ir_emit(g, IROp.Add, addr, ptr, raw_i, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
+    _ := ir_emit(g, IROp.Copy, widen, b, -1, -1, 4)
+    _ := ir_emit(g, IROp.Add, total, total, widen, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 5)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    in_loops := 0
+    narrow51 := 0
+    wrapped_int_adds := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .IntBig && f.b[at] == 51 -> narrow51 += 1
+        if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP && m.types[f.slot_type[f.dst[at]]].kind == .Int {
+            wrapped_int_adds += 1
+        }
+        if f.op[at] != .Loop -> next
+        loop k in (at + 1)..<f.a[at] {
+            if f.op[k] == .IntBig -> in_loops += 1
+        }
+    }
+    assert_eq(in_loops, 0)
+    assert(narrow51 >= 1)
+    assert(wrapped_int_adds >= 2)
+}
+
+// A counted loop with a conditional +1 accumulator (`if b == 111 -> count += 1`)
+// bounded by a List length proves `count` inline in OptRange without any IntBig guard.
+#Test("A conditional +1 accumulator bounded by a List length wraps without IntBig") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    byte_ty: Type.IntN{signed: false, bits: 8}
+    byte_row: ir_type_row(m, byte_ty) ?? panic("no U8 row")
+    word: ir_word_row(m)
+    list: ir_intern_type(m, "test [U8]", ir_layout(IRTypeKind.Aggregate, Type.List{element: byte_ty}, 24, 8, IRClass.Pointer, false, 64, ""))
+    g := ir_function_new("cond_count", "test:count.jet.cond_count", "", "count.jet", 1)
+    xs: ir_slot(g, list, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
+    g.result = exact
+    count: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "count"), 2)
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    n: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    data: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    one_w: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    one_i: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    target: ir_slot(g, byte_row, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    b: ir_slot(g, byte_row, IRSlotKind.Temp, -1, 0)
+    hit: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, count, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Load, n, xs, 0, -1, 2)
+    _ := ir_emit(g, IROp.Load, data, xs, 16, -1, 2)
+    _ := ir_emit(g, IROp.Const, one_w, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one_i, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, target, 111, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Add, addr, data, i, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Load, b, addr, 0, -1, 4)
+    _ := ir_emit(g, IROp.Eq, hit, b, target, -1, 4)
+    ir_open_if(g, hit, 4)
+    _ := ir_emit(g, IROp.Add, count, count, one_i, IR_OVERFLOW_TRAP, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Add, i, i, one_w, IR_OVERFLOW_WRAP, 5)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, count, -1, -1, 6)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    int_bigs := 0
+    wrapped_counts := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .IntBig -> int_bigs += 1
+        if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP && m.types[f.slot_type[f.dst[at]]].kind == .Int {
+            wrapped_counts += 1
+        }
+    }
+    assert_eq(int_bigs, 0)
+    assert(wrapped_counts >= 1)
 }

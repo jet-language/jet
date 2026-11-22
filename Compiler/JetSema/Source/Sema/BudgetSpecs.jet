@@ -51,16 +51,8 @@ BUDGET_TARGET_CLASSES: [String]{"Native", "Web", "Freestanding", "Plugin", "OSIm
 BUDGET_SCOPE_TEST_MEASURE: "measure"
 
 sema_budget_unit_scale: fn(suffix: String) -> Int? Never! {
-    if suffix == {
-        "ns" | "B" -> Val(1)
-        "us" -> Val(1000)
-        "ms" -> Val(1000000)
-        "s" -> Val(1000000000)
-        "KiB" -> Val(1024)
-        "MiB" -> Val(1048576)
-        "GiB" -> Val(1073741824)
-        else -> None
-    }
+    if sema_units_catalog_scale("DataSize", suffix) == .Val(scale) -> return Val(scale)
+    sema_units_catalog_scale("Time", suffix)
 }
 
 BudgetSpec: struct {
@@ -1015,8 +1007,8 @@ sema_budget_normalize_limit: fn(name: String, metric: String, limit: String, exp
         return Ok(BudgetLimitFact{kind: limit, quantity: rate.quantity, raw: rate.raw})
     }
     allowed: if {
-        metric == "BinarySize" || metric == "ArtifactSize" || metric == "AllocationBytes" || metric == "MemoryHighWater" || metric == "SceneAssetBytes" -> [String]{"B", "KiB", "MiB", "GiB"}
-        metric == "StartupTime" || metric == "FrameTime" || metric == "Latency" || metric == "BenchTime" || metric == "ServiceReadiness" || metric == "CompileTime" -> [String]{"ns", "us", "ms", "s"}
+        metric == "BinarySize" || metric == "ArtifactSize" || metric == "AllocationBytes" || metric == "MemoryHighWater" || metric == "SceneAssetBytes" -> sema_units_catalog_suffixes("DataSize", true, 0)
+        metric == "StartupTime" || metric == "FrameTime" || metric == "Latency" || metric == "BenchTime" || metric == "ServiceReadiness" || metric == "CompileTime" -> sema_units_catalog_suffixes("Time", false, 1000000000)
         else -> [String]{}
     }
     if allowed.len() == 0 {
@@ -1034,7 +1026,7 @@ sema_budget_normalize_limit: fn(name: String, metric: String, limit: String, exp
         range_error: sema_budget_fail(sema_budget_invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", expr_span(value)))
         whole: sema_budget_parse_u128(raw) ?? return Err(range_error)
         base: sema_budget_checked_mul(whole, multiplier) ?? return Err(range_error)
-        bytes: suffix == "B" || suffix == "KiB" || suffix == "MiB" || suffix == "GiB"
+        bytes: sema_units_catalog_scale("DataSize", suffix) != None
         quantity: if bytes -> BudgetQuantity.Bytes{value: base} else -> BudgetQuantity.DurationNs{value: base}
         return Ok(BudgetLimitFact{kind: limit, quantity: quantity, raw: BudgetRawQuantity.Scalar{digits: raw, suffix: Val(suffix)}})
     }
@@ -1055,7 +1047,7 @@ sema_budget_digits: fn(text: String) -> Bool Never! {
 
 sema_budget_normalize_percent: fn(value: Expr) -> BudgetPercent? Never! {
     if value == .UnitLit(raw, _, _, suffix, _, _, _) {
-        if suffix != "pct" -> return None
+        if sema_units_catalog_scale("Percent", suffix) == None -> return None
         parts: raw.split(".").to_list()
         if parts.len() > 2 -> return None
         whole_text: parts[0].copy()
@@ -1109,9 +1101,8 @@ sema_budget_normalize_rate: fn(name: String, value: Expr) -> BudgetRate BudgetSp
         count_raw = text
     } else { return Err(count_error) }
     if per_expr == .UnitLit(per_raw, _, _, suffix, _, _, _) {
-        duration_unit: suffix == "ns" || suffix == "us" || suffix == "ms" || suffix == "s"
         unit_error: sema_budget_fail(sema_budget_invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", expr_span(per_expr)))
-        multiplier: if duration_unit -> sema_budget_unit_scale(suffix) ?? return Err(unit_error) else -> {
+        multiplier: if sema_units_catalog_scale("Time", suffix) == .Val(scale) && scale <= 1000000000 -> scale else -> {
             return Err(unit_error)
         }
         positive_error: sema_budget_fail(sema_budget_invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", expr_span(per_expr)))
@@ -1148,4 +1139,20 @@ sema_budget_snake_case: fn(value: String) -> Bool Never! {
         }
     }
     true
+}
+
+#Test("budget and allocator suffixes come from the Prelude unit family catalog") {
+    assert_eq(sema_units_catalog_suffixes("DataSize", true, 0), [String]{"B", "KiB", "MiB", "GiB"})
+    assert_eq(sema_units_catalog_suffixes("Time", false, 1000000000), [String]{"ns", "us", "ms", "s"})
+    assert_eq(sema_budget_unit_scale("B"), Val(1))
+    assert_eq(sema_budget_unit_scale("KiB"), Val(1024))
+    assert_eq(sema_budget_unit_scale("MiB"), Val(1048576))
+    assert_eq(sema_budget_unit_scale("GiB"), Val(1073741824))
+    assert_eq(sema_budget_unit_scale("ns"), Val(1))
+    assert_eq(sema_budget_unit_scale("s"), Val(1000000000))
+    assert_eq(sema_units_catalog_scale("DataSize", "bytes"), Val(1))
+    assert_eq(sema_units_catalog_scale("DataSize", "kib"), Val(1024))
+    assert_eq(sema_units_catalog_scale("DataSize", "mib"), Val(1048576))
+    assert_eq(sema_units_catalog_scale("DataSize", "gib"), Val(1073741824))
+    assert_eq(sema_units_catalog_scale("Percent", "pct"), Val(1))
 }

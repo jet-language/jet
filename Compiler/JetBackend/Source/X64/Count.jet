@@ -1,5 +1,5 @@
 // How many elements of a run equal one value, as an asm leaf's body
-// (JetIR OptReduce.jet): x64_count_code's bytes run in place, with
+// (JetIR OptReduce.jet): x64_count_leaf's bytes run with
 //
 //   rdi  the address of element 0 of the List's data
 //   rsi  the run's first index, as a raw word
@@ -21,17 +21,18 @@
 // result's inline test. On a decline the leaf has written no memory and
 // changed nothing the caller sees.
 //
-// SSE2 (every x86-64 has it). Bytes: xmm7 holds the value in every byte;
-// pcmpeqb leaves -1 in a matching byte, so psubb counts matches in the
-// sixteen bytes of xmm1, 64 bytes per step and at most 63 steps (252
-// matches per byte) before psadbw sums them into the two words of xmm2.
-// Words: pcmpeqd compares the halves, pshufd 0xb1 swaps them and pand
-// leaves -1 in a word whose halves both match, which psubq counts in xmm2,
-// four words per step. The last elements go one at a time. Only
-// caller-saved registers are written (rax, rcx, rdx, rsi, rdi, r8-r11 and
-// xmm0-xmm7), rsp is untouched, and the code falls through its last byte.
+// Runtime CPUID/XGETBV dispatch (cached in one module data byte):
+// - AVX-512 (level 3): 256 bytes/step via vpcmpeqb/vpcmpeqq + kmov + popcnt.
+// - AVX2 (level 2): 128 bytes/step via vpcmpeqb/vpcmpeqq + vpmovmskb/vmovmskpd + popcnt.
+// - SSE2 (level 1): 64 bytes/step (bytes) or 32 bytes/step (words).
+// Only caller-saved registers are written (rax, rcx, rdx, rsi, rdi, r8-r11 and
+// xmm/ymm/zmm0-7, k1), rsp is untouched, and the code falls through its last byte.
 
 x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
+    x64_count_leaf(stride, exact).bytes
+}
+
+x64_count_leaf: fn(stride: Int, exact: Bool) -> X64SimdLeaf Never! {
     code := x64_code()
     declines := [Int]{}
     x64_mov_ri(code, X64_RAX, X64_INT_SUM_DECLINED)
@@ -49,28 +50,62 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
         x64_alu_ri(code, X64Alu.Cmp, X64_R8, 255)
         declines.push(x64_jcc_rel32(code, X64Cond.A))
     }
-    // r9 the elements left, rdi the first one, r10 the scalar count, xmm7
-    // the value in every element of a vector, xmm2 the vector counts.
+    // r9 the elements left, rdi the first one, r10 the running count.
     x64_mov_rr(code, X64_R9, X64_RDX)
     x64_alu_rr(code, X64Alu.Sub, X64_R9, X64_RSI)
     if stride == 8 -> x64_shift_ri(code, X64Shift.Shl, X64_RSI, 3)
     x64_alu_rr(code, X64Alu.Add, X64_RDI, X64_RSI)
+    if stride == 1 -> x64_movzx_r8(code, X64_R8, X64_R8)
+    x64_mov_ri(code, X64_R10, 0)
+    // Short runs skip SIMD dispatch entirely.
+    min_vec: if stride == 1 -> 32 else -> 4
+    x64_alu_ri(code, X64Alu.Cmp, X64_R9, min_vec)
+    short_to_tail: x64_jcc_rel32(code, X64Cond.L)
+    dispatch: x64_simd_dispatch_head(code)
+
+    // --- SSE2 path ---
     if stride == 1 {
-        // movzx r8, r8b; r10 = r8 * 0x0101010101010101.
-        x64_movzx_r8(code, X64_R8, X64_R8)
-        x64_mov_ri(code, X64_R10, 72340172838076673)
-        x64_imul_rr(code, X64_R10, X64_R8)
-        x64_movq_to_xmm(code, false, 7, X64_R10)
+        x64_mov_ri(code, X64_RDX, 72340172838076673)
+        x64_imul_rr(code, X64_RDX, X64_R8)
+        x64_movq_to_xmm(code, false, 7, X64_RDX)
     } else { x64_movq_to_xmm(code, false, 7, X64_R8) }
-    // punpcklqdq xmm7, xmm7; pxor xmm2, xmm2; pxor xmm6, xmm6.
     x64_sse(code, 0x66, false, 0x6c, 7, 7)
     x64_sse(code, 0x66, false, 0xef, 2, 2)
     x64_sse(code, 0x66, false, 0xef, 6, 6)
-    x64_mov_ri(code, X64_R10, 0)
     if stride == 1 -> x64_count_bytes(code) else -> x64_count_words(code)
-    // The last elements, one at a time: r10 += (element == value).
+    // Fold SSE2's two vector counts in xmm2 into r10.
+    x64_movq_from_xmm(code, false, X64_RDX, 2)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_sse(code, 0x66, false, 0x70, 2, 2)
+    x64_byte(code.bytes, 0xee)
+    x64_movq_from_xmm(code, false, X64_RDX, 2)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    sse2_done: x64_jmp_rel32(code)
+
+    // --- AVX2 + POPCNT path ---
+    avx2_entry: code.bytes.len()
+    x64_patch_rel32(code.bytes, dispatch.to_avx2, avx2_entry)
+    if stride == 1 -> x64_count_bytes_avx2(code) else -> x64_count_words_avx2(code)
+    x64_vzeroupper(code)
+    avx2_done: x64_jmp_rel32(code)
+
+    // --- AVX-512 + POPCNT path ---
+    avx512_entry: code.bytes.len()
+    x64_patch_rel32(code.bytes, dispatch.to_avx512, avx512_entry)
+    min_zmm: if stride == 1 -> 64 else -> 8
+    x64_alu_ri(code, X64Alu.Cmp, X64_R9, min_zmm)
+    avx512_short: x64_jcc_rel32(code, X64Cond.L)
+    x64_patch_rel32(code.bytes, avx512_short, avx2_entry)
+    if stride == 1 -> x64_count_bytes_avx512(code) else -> x64_count_words_avx512(code)
+    x64_vzeroupper(code)
+
+    // --- Scalar tail (remaining elements, one at a time: r10 += (element == value)) ---
+    tail: code.bytes.len()
+    x64_patch_rel32(code.bytes, short_to_tail, tail)
+    x64_patch_rel32(code.bytes, sse2_done, tail)
+    x64_patch_rel32(code.bytes, avx2_done, tail)
     x64_test_rr(code, X64_R9, X64_R9)
-    to_fold: x64_jcc_rel32(code, X64Cond.E)
+    to_finish: x64_jcc_rel32(code, X64Cond.E)
     single: code.bytes.len()
     if stride == 1 -> x64_load_u8(code, X64_RDX, X64_RDI, 0) else {
         x64_load(code, X64_RDX, X64_RDI, 0)
@@ -83,20 +118,157 @@ x64_count_code: fn(stride: Int, exact: Bool) -> [U8] Never! {
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 1)
     more: x64_jcc_rel32(code, X64Cond.NE)
     x64_patch_rel32(code.bytes, more, single)
-    // The two vector counts into r10, r10 into the total.
-    x64_patch_rel32(code.bytes, to_fold, code.bytes.len())
-    x64_movq_from_xmm(code, false, X64_RDX, 2)
-    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
-    x64_sse(code, 0x66, false, 0x70, 2, 2)
-    x64_byte(code.bytes, 0xee)
-    x64_movq_from_xmm(code, false, X64_RDX, 2)
-    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_patch_rel32(code.bytes, to_finish, code.bytes.len())
     x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R10)
     x64_int_sum_test(code, X64_RCX, declines)
     x64_mov_rr(code, X64_RAX, X64_RCX)
+    to_end: x64_jmp_rel32(code)
+
+    // One-time cold CPUID/XGETBV probe.
+    probe_simd_site: x64_simd_dispatch_probe(code, dispatch)
+
     end: code.bytes.len()
+    x64_patch_rel32(code.bytes, to_end, end)
     loop site in declines -> x64_patch_rel32(code.bytes, site, end)
-    code.bytes
+    X64SimdLeaf{bytes: code.bytes.move(), simd_sites: [Int]{dispatch.simd_site, probe_simd_site}}
+}
+
+// AVX2 + POPCNT byte count: 128 bytes/step, then 32 bytes/step into r10.
+x64_count_bytes_avx2: fn(code: &X64Code) Never! {
+    x64_vmovq_to_xmm(code, 7, X64_R8)
+    x64_vpbroadcastb(code, true, 7, 7)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 128)
+    to_32: x64_jcc_rel32(code, X64Cond.L)
+    body128: code.bytes.len()
+    loop part in 0..<4 {
+        x64_vmovdqu_load(code, true, 0, X64_RDI, part * 32)
+        x64_vex_rr(code, 1, 1, true, 0x74, 0, 0, 7)
+        x64_vpmovmskb(code, true, X64_RDX, 0)
+        x64_popcnt(code, X64_RDX, X64_RDX)
+        x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    }
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 128)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 128)
+    again128: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again128, body128)
+    x64_patch_rel32(code.bytes, to_32, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 128)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    to_done: x64_jcc_rel32(code, X64Cond.L)
+    body32: code.bytes.len()
+    x64_vmovdqu_load(code, true, 0, X64_RDI, 0)
+    x64_vex_rr(code, 1, 1, true, 0x74, 0, 0, 7)
+    x64_vpmovmskb(code, true, X64_RDX, 0)
+    x64_popcnt(code, X64_RDX, X64_RDX)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 32)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    again32: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again32, body32)
+    x64_patch_rel32(code.bytes, to_done, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 32)
+}
+
+// AVX2 + POPCNT word count: 16 words (128 bytes)/step, then 4 words/step into r10.
+x64_count_words_avx2: fn(code: &X64Code) Never! {
+    x64_vmovq_to_xmm(code, 7, X64_R8)
+    x64_vpbroadcastq(code, true, 7, 7)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 16)
+    to_4: x64_jcc_rel32(code, X64Cond.L)
+    body16: code.bytes.len()
+    loop part in 0..<4 {
+        x64_vmovdqu_load(code, true, 0, X64_RDI, part * 32)
+        x64_vex_rr(code, 1, 2, true, 0x29, 0, 0, 7)
+        x64_vmovmskpd(code, true, X64_RDX, 0)
+        x64_popcnt(code, X64_RDX, X64_RDX)
+        x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    }
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 128)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 16)
+    again16: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again16, body16)
+    x64_patch_rel32(code.bytes, to_4, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 16)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 4)
+    to_done: x64_jcc_rel32(code, X64Cond.L)
+    body4: code.bytes.len()
+    x64_vmovdqu_load(code, true, 0, X64_RDI, 0)
+    x64_vex_rr(code, 1, 2, true, 0x29, 0, 0, 7)
+    x64_vmovmskpd(code, true, X64_RDX, 0)
+    x64_popcnt(code, X64_RDX, X64_RDX)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 32)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 4)
+    again4: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again4, body4)
+    x64_patch_rel32(code.bytes, to_done, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 4)
+}
+
+// AVX-512BW + POPCNT byte count: 256 bytes/step, then 64 bytes/step into r10.
+x64_count_bytes_avx512: fn(code: &X64Code) Never! {
+    x64_evex_vpbroadcastb_gpr(code, 7, X64_R8)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 256)
+    to_64: x64_jcc_rel32(code, X64Cond.L)
+    body256: code.bytes.len()
+    loop part in 0..<4 {
+        x64_evex_vpcmpeqb_mem(code, 1, 7, X64_RDI, part * 64)
+        x64_kmovq_rk(code, X64_RDX, 1)
+        x64_popcnt(code, X64_RDX, X64_RDX)
+        x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    }
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 256)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 256)
+    again256: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again256, body256)
+    x64_patch_rel32(code.bytes, to_64, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 256)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 64)
+    to_done: x64_jcc_rel32(code, X64Cond.L)
+    body64: code.bytes.len()
+    x64_evex_vpcmpeqb_mem(code, 1, 7, X64_RDI, 0)
+    x64_kmovq_rk(code, X64_RDX, 1)
+    x64_popcnt(code, X64_RDX, X64_RDX)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 64)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 64)
+    again64: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again64, body64)
+    x64_patch_rel32(code.bytes, to_done, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 64)
+}
+
+// AVX-512F + POPCNT word count: 32 words (256 bytes)/step, then 8 words/step into r10.
+x64_count_words_avx512: fn(code: &X64Code) Never! {
+    x64_evex_vpbroadcastq_gpr(code, 7, X64_R8)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    to_8: x64_jcc_rel32(code, X64Cond.L)
+    body32: code.bytes.len()
+    loop part in 0..<4 {
+        x64_evex_vpcmpeqq_mem(code, 1, 7, X64_RDI, part * 64)
+        x64_kmovw_rk(code, X64_RDX, 1)
+        x64_popcnt(code, X64_RDX, X64_RDX)
+        x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    }
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 256)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
+    again32: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again32, body32)
+    x64_patch_rel32(code.bytes, to_8, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 32)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 8)
+    to_done: x64_jcc_rel32(code, X64Cond.L)
+    body8: code.bytes.len()
+    x64_evex_vpcmpeqq_mem(code, 1, 7, X64_RDI, 0)
+    x64_kmovw_rk(code, X64_RDX, 1)
+    x64_popcnt(code, X64_RDX, X64_RDX)
+    x64_alu_rr(code, X64Alu.Add, X64_R10, X64_RDX)
+    x64_alu_ri(code, X64Alu.Add, X64_RDI, 64)
+    x64_alu_ri(code, X64Alu.Sub, X64_R9, 8)
+    again8: x64_jcc_rel32(code, X64Cond.GE)
+    x64_patch_rel32(code.bytes, again8, body8)
+    x64_patch_rel32(code.bytes, to_done, code.bytes.len())
+    x64_alu_ri(code, X64Alu.Add, X64_R9, 8)
 }
 
 // Whole 64-byte blocks: up to 63 at a time into xmm1's byte counts, then

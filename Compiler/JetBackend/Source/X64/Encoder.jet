@@ -1056,3 +1056,333 @@ x64_movq_to_xmm: fn(code: &X64Code, single: Bool, xmm: Int, reg: Int) Never! {
 x64_movq_from_xmm: fn(code: &X64Code, single: Bool, reg: Int, xmm: Int) Never! {
     x64_sse(code, 0x66, !single, 0x7e, xmm, reg)
 }
+
+// popcnt dst, src (F3 REX.W 0F B8 /r): 64-bit population count.
+x64_popcnt: fn(code: &X64Code, dst: Int, src: Int) Never! {
+    x64_byte(code.bytes, 0xf3)
+    x64_rex(code.bytes, true, dst, src)
+    x64_byte(code.bytes, 0x0f)
+    x64_byte(code.bytes, 0xb8)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// Three-byte VEX prefix (C4): `pp` 0=none, 1=66, 2=F3, 3=F2; `map` 1=0F,
+// 2=0F38, 3=0F3A; `wide` sets VEX.W; `vec256` sets VEX.L (256-bit ymm);
+// `reg` and `rm` extend ModRM.reg and ModRM.rm; `vvvv` is the extra source
+// register (0 when unused).
+x64_vex3: fn(code: &X64Code, pp: Int, map: Int, wide: Bool, vec256: Bool, reg: Int, vvvv: Int, rm: Int) Never! {
+    x64_byte(code.bytes, 0xc4)
+    first := 0x40 | map
+    if reg < 8 -> first |= 0x80
+    if rm < 8 -> first |= 0x20
+    x64_byte(code.bytes, first)
+    second := ((15 - vvvv) << 3) | pp
+    if wide -> second |= 0x80
+    if vec256 -> second |= 0x04
+    x64_byte(code.bytes, second)
+}
+
+// VEX register-register-register instruction: dst, src1, src2.
+x64_vex_rr: fn(code: &X64Code, pp: Int, map: Int, vec256: Bool, opcode: Int, dst: Int, src1: Int, src2: Int) Never! {
+    x64_vex3(code, pp, map, false, vec256, dst, src1, src2)
+    x64_byte(code.bytes, opcode)
+    x64_modrm_reg(code.bytes, dst, src2)
+}
+
+// vmovdqu ymm/xmm, [base + disp] (VEX.F3.0F.W0 6F /r).
+x64_vmovdqu_load: fn(code: &X64Code, vec256: Bool, dst: Int, base: Int, disp: Int) Never! {
+    x64_vex3(code, 2, 1, false, vec256, dst, 0, base)
+    x64_byte(code.bytes, 0x6f)
+    x64_modrm_mem(code, dst, base, disp)
+}
+
+// vmovdqa dst, src (VEX.66.0F.W0 6F /r).
+x64_vmovdqa_rr: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int) Never! {
+    x64_vex3(code, 1, 1, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0x6f)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vmovq xmm, r64 (VEX.128.66.0F.W1 6E /r).
+x64_vmovq_to_xmm: fn(code: &X64Code, xmm: Int, reg: Int) Never! {
+    x64_vex3(code, 1, 1, true, false, xmm, 0, reg)
+    x64_byte(code.bytes, 0x6e)
+    x64_modrm_reg(code.bytes, xmm, reg)
+}
+
+// vmovq r64, xmm (VEX.128.66.0F.W1 7E /r).
+x64_vmovq_from_xmm: fn(code: &X64Code, reg: Int, xmm: Int) Never! {
+    x64_vex3(code, 1, 1, true, false, xmm, 0, reg)
+    x64_byte(code.bytes, 0x7e)
+    x64_modrm_reg(code.bytes, xmm, reg)
+}
+
+// vpshufd dst, src, imm8 (VEX.66.0F.W0 70 /r ib).
+x64_vpshufd: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int, imm: Int) Never! {
+    x64_vex3(code, 1, 1, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0x70)
+    x64_modrm_reg(code.bytes, dst, src)
+    x64_byte(code.bytes, imm)
+}
+
+// vpbroadcastq dst, src_xmm (VEX.66.0F38.W0 59 /r).
+x64_vpbroadcastq: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int) Never! {
+    x64_vex3(code, 1, 2, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0x59)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vpbroadcastb dst, src_xmm (VEX.66.0F38.W0 78 /r).
+x64_vpbroadcastb: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int) Never! {
+    x64_vex3(code, 1, 2, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0x78)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vmovmskpd dst_r32, src (VEX.66.0F.W0 50 /r).
+x64_vmovmskpd: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int) Never! {
+    x64_vex3(code, 1, 1, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0x50)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vpmovmskb dst_r32, src (VEX.66.0F.W0 D7 /r).
+x64_vpmovmskb: fn(code: &X64Code, vec256: Bool, dst: Int, src: Int) Never! {
+    x64_vex3(code, 1, 1, false, vec256, dst, 0, src)
+    x64_byte(code.bytes, 0xd7)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vextracti128 dst_xmm, src_ymm, imm8 (VEX.256.66.0F3A.W0 39 /r ib).
+x64_vextracti128: fn(code: &X64Code, dst_xmm: Int, src_ymm: Int, imm: Int) Never! {
+    x64_vex3(code, 1, 3, false, true, src_ymm, 0, dst_xmm)
+    x64_byte(code.bytes, 0x39)
+    x64_modrm_reg(code.bytes, src_ymm, dst_xmm)
+    x64_byte(code.bytes, imm)
+}
+
+// vzeroupper (C5 F8 77).
+x64_vzeroupper: fn(code: &X64Code) Never! {
+    x64_byte(code.bytes, 0xc5)
+    x64_byte(code.bytes, 0xf8)
+    x64_byte(code.bytes, 0x77)
+}
+
+// kmovw dst_r32, src_k (VEX.L0.0F.W0 93 /r).
+x64_kmovw_rk: fn(code: &X64Code, dst: Int, kreg: Int) Never! {
+    x64_vex3(code, 0, 1, false, false, dst, 0, kreg)
+    x64_byte(code.bytes, 0x93)
+    x64_modrm_reg(code.bytes, dst, kreg)
+}
+
+// kmovq dst_r64, src_k (VEX.L0.F2.0F.W1 93 /r).
+x64_kmovq_rk: fn(code: &X64Code, dst: Int, kreg: Int) Never! {
+    x64_vex3(code, 3, 1, true, false, dst, 0, kreg)
+    x64_byte(code.bytes, 0x93)
+    x64_modrm_reg(code.bytes, dst, kreg)
+}
+
+// Four-byte EVEX prefix (62) for 512-bit zmm (ll = 2), regs 0..15, unmasked.
+x64_evex512: fn(code: &X64Code, pp: Int, map: Int, wide: Bool, reg: Int, vvvv: Int, rm: Int) Never! {
+    x64_byte(code.bytes, 0x62)
+    p0 := 0x50 | map
+    if reg < 8 -> p0 |= 0x80
+    if rm < 8 -> p0 |= 0x20
+    x64_byte(code.bytes, p0)
+    p1 := ((15 - vvvv) << 3) | 0x04 | pp
+    if wide -> p1 |= 0x80
+    x64_byte(code.bytes, p1)
+    x64_byte(code.bytes, 0x48)
+}
+
+// ModRM + SIB + compressed disp8*64 (or disp32) for 512-bit EVEX full-vector memory.
+x64_modrm_mem_evex512: fn(code: &X64Code, reg: Int, base: Int, disp: Int) Never! {
+    r: (reg & 7) << 3
+    b: base & 7
+    sib: b == 4
+    if disp == 0 && b != 5 {
+        x64_byte(code.bytes, r | b)
+        if sib -> x64_byte(code.bytes, 0x24)
+        return
+    }
+    if disp % 64 == 0 {
+        scaled: disp /% 64
+        if scaled >= -128 && scaled <= 127 {
+            x64_byte(code.bytes, 0x40 | r | b)
+            if sib -> x64_byte(code.bytes, 0x24)
+            x64_byte(code.bytes, scaled & 255)
+            return
+        }
+    }
+    x64_byte(code.bytes, 0x80 | r | b)
+    if sib -> x64_byte(code.bytes, 0x24)
+    x64_u32(code.bytes, disp)
+}
+
+// vmovdqu64 dst_zmm, [base + disp] (EVEX.512.F3.0F.W1 6F /r).
+x64_evex_vmovdqu64_load: fn(code: &X64Code, dst: Int, base: Int, disp: Int) Never! {
+    x64_evex512(code, 2, 1, true, dst, 0, base)
+    x64_byte(code.bytes, 0x6f)
+    x64_modrm_mem_evex512(code, dst, base, disp)
+}
+
+// vmovdqa64 dst_zmm, src_zmm (EVEX.512.66.0F.W1 6F /r).
+x64_evex_vmovdqa64_rr: fn(code: &X64Code, dst: Int, src: Int) Never! {
+    x64_evex512(code, 1, 1, true, dst, 0, src)
+    x64_byte(code.bytes, 0x6f)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+// vpbroadcastq dst_zmm, src_r64 (EVEX.512.66.0F38.W1 7C /r).
+x64_evex_vpbroadcastq_gpr: fn(code: &X64Code, dst: Int, src_gpr: Int) Never! {
+    x64_evex512(code, 1, 2, true, dst, 0, src_gpr)
+    x64_byte(code.bytes, 0x7c)
+    x64_modrm_reg(code.bytes, dst, src_gpr)
+}
+
+// vpbroadcastb dst_zmm, src_r32 (EVEX.512.66.0F38.W0 7A /r).
+x64_evex_vpbroadcastb_gpr: fn(code: &X64Code, dst: Int, src_gpr: Int) Never! {
+    x64_evex512(code, 1, 2, false, dst, 0, src_gpr)
+    x64_byte(code.bytes, 0x7a)
+    x64_modrm_reg(code.bytes, dst, src_gpr)
+}
+
+// EVEX 512-bit 64-bit integer register-register-register op (vpaddq/vporq/vpxorq).
+x64_evex512_q_rr: fn(code: &X64Code, opcode: Int, dst: Int, src1: Int, src2: Int) Never! {
+    x64_evex512(code, 1, 1, true, dst, src1, src2)
+    x64_byte(code.bytes, opcode)
+    x64_modrm_reg(code.bytes, dst, src2)
+}
+
+// vpmovq2m dst_k, src_zmm (EVEX.512.F3.0F38.W1 39 /r).
+x64_evex_vpmovq2m: fn(code: &X64Code, dst_k: Int, src_zmm: Int) Never! {
+    x64_evex512(code, 2, 2, true, dst_k, 0, src_zmm)
+    x64_byte(code.bytes, 0x39)
+    x64_modrm_reg(code.bytes, dst_k, src_zmm)
+}
+
+// vpcmpeqb dst_k, src_zmm, [base + disp] (EVEX.512.66.0F.W0 74 /r).
+x64_evex_vpcmpeqb_mem: fn(code: &X64Code, dst_k: Int, src_zmm: Int, base: Int, disp: Int) Never! {
+    x64_evex512(code, 1, 1, false, dst_k, src_zmm, base)
+    x64_byte(code.bytes, 0x74)
+    x64_modrm_mem_evex512(code, dst_k, base, disp)
+}
+
+// vpcmpeqq dst_k, src_zmm, [base + disp] (EVEX.512.66.0F38.W1 29 /r).
+x64_evex_vpcmpeqq_mem: fn(code: &X64Code, dst_k: Int, src_zmm: Int, base: Int, disp: Int) Never! {
+    x64_evex512(code, 1, 2, true, dst_k, src_zmm, base)
+    x64_byte(code.bytes, 0x29)
+    x64_modrm_mem_evex512(code, dst_k, base, disp)
+}
+
+// vextracti64x4 dst_ymm, src_zmm, imm8 (EVEX.512.66.0F3A.W1 3B /r ib).
+x64_evex_vextracti64x4: fn(code: &X64Code, dst_ymm: Int, src_zmm: Int, imm: Int) Never! {
+    x64_evex512(code, 1, 3, true, src_zmm, 0, dst_ymm)
+    x64_byte(code.bytes, 0x3b)
+    x64_modrm_reg(code.bytes, src_zmm, dst_ymm)
+    x64_byte(code.bytes, imm)
+}
+
+// Assembled reduction leaf with the byte offsets of its RIP-relative loads of
+// the module's cached SIMD feature byte (0=unprobed, 1=SSE2, 2=AVX2+POPCNT,
+// 3=AVX-512F/DQ/BW/VL+POPCNT).
+X64SimdLeaf: struct {
+    bytes: [U8],
+    simd_sites: [Int],
+}
+
+// Patch sites of a SIMD dispatch check emitted by x64_simd_dispatch_head.
+X64SimdDispatch: struct {
+    simd_site: Int,
+    to_probe: Int,
+    probe_done: Int,
+    to_avx512: Int,
+    to_avx2: Int,
+}
+
+// Fast-path runtime SIMD dispatch header: reads the cached feature byte at
+// [rip + disp32] into r11, branches to cold CPUID/XGETBV probe if 0, jumps to
+// AVX-512 if 3, AVX2 if 2, or falls through to SSE2 (1). Preserves all
+// registers except r11 (and rsi during the one-time cold probe).
+x64_simd_dispatch_head: fn(code: &X64Code) -> X64SimdDispatch Never! {
+    simd_site: x64_lea_rip(code, X64_R11)
+    x64_load_u8(code, X64_R11, X64_R11, 0)
+    x64_test_rr(code, X64_R11, X64_R11)
+    to_probe: x64_jcc_rel32(code, X64Cond.E)
+    probe_done: code.bytes.len()
+    x64_alu_ri(code, X64Alu.Cmp, X64_R11, 3)
+    to_avx512: x64_jcc_rel32(code, X64Cond.E)
+    x64_alu_ri(code, X64Alu.Cmp, X64_R11, 2)
+    to_avx2: x64_jcc_rel32(code, X64Cond.E)
+    X64SimdDispatch{simd_site: simd_site, to_probe: to_probe, probe_done: probe_done, to_avx512: to_avx512, to_avx2: to_avx2}
+}
+
+// Cold one-time CPUID + XGETBV probe for x64_simd_dispatch_head: saves/restores
+// rax, rbx, rcx, rdx (and uses rsi as scratch), stores 1 (SSE2), 2 (AVX2+POPCNT),
+// or 3 (AVX-512F/DQ/BW/VL+POPCNT) into the module's simd cell, leaves that level
+// in r11, and jumps back to dispatch.probe_done. Returns the RIP-relative patch
+// offset for the store's lea of the simd cell.
+x64_simd_dispatch_probe: fn(code: &X64Code, dispatch: X64SimdDispatch) -> Int Never! {
+    x64_patch_rel32(code.bytes, dispatch.to_probe, code.bytes.len())
+    x64_push(code, X64_RAX)
+    x64_push(code, X64_RBX)
+    x64_push(code, X64_RCX)
+    x64_push(code, X64_RDX)
+    // Default level = 1 (SSE2).
+    x64_mov_ri(code, X64_RSI, 1)
+    // CPUID(1, 0): POPCNT (bit 23) + OSXSAVE (27) + AVX (28) = 0x18800000.
+    x64_mov_ri(code, X64_RAX, 1)
+    x64_mov_ri(code, X64_RCX, 0)
+    x64_cpuid(code)
+    x64_alu_ri(code, X64Alu.And, X64_RCX, 0x18800000)
+    x64_alu_ri(code, X64Alu.Cmp, X64_RCX, 0x18800000)
+    store_sites := [Int]{x64_jcc_rel32(code, X64Cond.NE)}
+    // XGETBV(0): OS saves XMM (bit 1) + YMM (bit 2) = 0x6.
+    x64_mov_ri(code, X64_RCX, 0)
+    x64_xgetbv(code)
+    x64_mov_rr(code, X64_RDX, X64_RAX)
+    x64_alu_ri(code, X64Alu.And, X64_RAX, 6)
+    x64_alu_ri(code, X64Alu.Cmp, X64_RAX, 6)
+    store_sites.push(x64_jcc_rel32(code, X64Cond.NE))
+    // CPUID(0, 0): max leaf >= 7.
+    x64_push(code, X64_RDX)
+    x64_mov_ri(code, X64_RAX, 0)
+    x64_mov_ri(code, X64_RCX, 0)
+    x64_cpuid(code)
+    x64_alu_ri(code, X64Alu.Cmp, X64_RAX, 7)
+    x64_pop(code, X64_RDX)
+    store_sites.push(x64_jcc_rel32(code, X64Cond.L))
+    // CPUID(7, 0): AVX2 (ebx bit 5 = 0x20).
+    x64_push(code, X64_RDX)
+    x64_mov_ri(code, X64_RAX, 7)
+    x64_mov_ri(code, X64_RCX, 0)
+    x64_cpuid(code)
+    x64_pop(code, X64_RDX)
+    x64_test_ri(code, X64_RBX, 0x20)
+    store_sites.push(x64_jcc_rel32(code, X64Cond.E))
+    // AVX2 + POPCNT supported!
+    x64_mov_ri(code, X64_RSI, 2)
+    // Check AVX-512: XCR0 bits 1,2,5,6,7 (0xe6) and ebx bits 16,17,30,31.
+    x64_alu_ri(code, X64Alu.And, X64_RDX, 0xe6)
+    x64_alu_ri(code, X64Alu.Cmp, X64_RDX, 0xe6)
+    store_sites.push(x64_jcc_rel32(code, X64Cond.NE))
+    x64_shift_ri(code, X64Shift.Shr, X64_RBX, 16)
+    x64_alu_ri(code, X64Alu.And, X64_RBX, 0xc003)
+    x64_alu_ri(code, X64Alu.Cmp, X64_RBX, 0xc003)
+    store_sites.push(x64_jcc_rel32(code, X64Cond.NE))
+    // AVX-512F/DQ/BW/VL + POPCNT supported!
+    x64_mov_ri(code, X64_RSI, 3)
+    store_at: code.bytes.len()
+    loop site in store_sites -> x64_patch_rel32(code.bytes, site, store_at)
+    probe_simd_site: x64_lea_rip(code, X64_R11)
+    x64_store_u8(code, X64_R11, 0, X64_RSI)
+    x64_mov_rr(code, X64_R11, X64_RSI)
+    x64_pop(code, X64_RDX)
+    x64_pop(code, X64_RCX)
+    x64_pop(code, X64_RBX)
+    x64_pop(code, X64_RAX)
+    back: x64_jmp_rel32(code)
+    x64_patch_rel32(code.bytes, back, dispatch.probe_done)
+    probe_simd_site
+}
+
