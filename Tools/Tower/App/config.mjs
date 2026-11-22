@@ -24,7 +24,7 @@ const rejectSecretKeys = (value, file) => {
 export const DEFAULTS = {
   project: 'Project',                 // shown in the UI topbar + <title>
   // What the big grouping and its milestones are called in the UI.
-  terms: { epoch: 'Epoch', epochs: 'Epochs', milestone: 'Milestone', milestones: 'Milestones', sidequest: 'Sidequests', ideas: 'Ideas', owner: 'Owner', agent: 'Agent' },
+  terms: { epoch: 'Goal', epochs: 'Goals', milestone: 'Milestone', milestones: 'Milestones', sidequest: 'Sidequests', ideas: 'Ideas', owner: 'Owner', agent: 'Agent' },
   tracks: ['epoch', 'sidequest'],
   kinds: ['task', 'feature', 'idea', 'bug'],
   priorities: ['P0', 'P1', 'P2', 'P3'],
