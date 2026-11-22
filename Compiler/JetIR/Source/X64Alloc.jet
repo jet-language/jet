@@ -737,7 +737,10 @@ ir_x64_scratches: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int]) 
             k += 1
         }
         if !armed -> next
-        masks[otherwise] = 0x400
+        masks[at] = masks[at] | 0x800
+        loop j in (at + 1)..<otherwise -> masks[j] = masks[j] | 0x800
+        masks[otherwise] = 0xc00
+        loop j in (otherwise + 1)..<f.c[at] -> masks[j] = masks[j] | 0xc00
         masks[f.c[at]] = IR_X64_PICK_SCRATCH
     }
     masks
@@ -745,7 +748,7 @@ ir_x64_scratches: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int]) 
 
 // Whether a select's arm may hold `op` (X64Select.jet ir_x64_select_safe).
 ir_x64_arm_op: fn(op: IROp) -> Bool Never! {
-    op == .Nop || op == .Const || op == .Add || op == .Sub || op == .Mul || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Div || op == .FloorDiv || op == .Shl || op == .Shr
+    op == .Nop || op == .Const || op == .Add || op == .Sub || op == .Mul || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Div || op == .FloorDiv || op == .Mod || op == .Rem || op == .Shl || op == .Shr
 }
 
 // Per instruction, its heat for the Float cost rule: the loops whose turns

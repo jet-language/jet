@@ -1,0 +1,419 @@
+// Induction-variable strength reduction (O1, O2, pass "strength"):
+// inside a loop with a single constant-stepped 64-bit word induction variable
+// `idx = idx +/- step`, replaces repeated loop-body multiplications
+// `scaled = Mul(idx, stride)` (and pointer additions `addr = Add(base, scaled)`
+// with loop-invariant `base`) where `stride` is a constant not in {0, 1, 2, 4, 8}
+// (which x86-64 indexed addressing already folds for free) by a running
+// induction variable initialized before the loop and stepped by `step * stride`
+// alongside `idx`.
+use jet_foundation.[Type, compiler_threads_single, name_rows_set]
+
+// Whether `stride` is worth strength-reducing (not a free x86-64 SIB scale
+// and small enough that `step * stride` fits an x86-64 imm32).
+ir_strength_worth: fn(stride: Int, step: Int) -> Bool Never! {
+    if stride == 0 || stride == 1 || stride == 2 || stride == 4 || stride == 8 -> return false
+    if stride < -1048576 || stride > 1048576 -> return false
+    if step < -1024 || step > 1024 || step == 0 -> return false
+    delta: stride * step
+    delta >= -2147483648 && delta <= 2147483647
+}
+
+// Rewrites derived linear induction variables in `f`.
+// Returns the number of multiplications strength-reduced.
+ir_opt_strength: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    if count < 6 -> return 0
+    has_loop := false
+    loop at in 0..<count {
+        if f.op[at] == .Loop {
+            has_loop = true
+            break
+        }
+    }
+    if !has_loop -> return 0
+
+    slots: f.slot_type.len()
+    writes := loop _ in 0..<slots -> 0
+    write_at := loop _ in 0..<slots -> -1
+    const_val := loop _ in 0..<slots -> 0
+    is_const := loop _ in 0..<slots -> false
+    dropped := loop _ in 0..<slots -> false
+    read_count := loop _ in 0..<slots -> 0
+    reads := [Int]{}
+    loop at in 0..<count {
+        w: ir_x64_write(f, at)
+        if w >= 0 {
+            writes[w] = writes[w] + 1
+            write_at[w] = at
+        }
+        if f.op[at] == .Drop || f.op[at] == .Close {
+            s: f.a[at]
+            if s >= 0 && s < slots -> dropped[s] = true
+        }
+        ir_x64_reads_into(f, at, reads)
+        if f.op[at] == .If || f.op[at] == .BrIf -> reads.push(f.a[at])
+        loop r in reads {
+            if r >= 0 && r < slots -> read_count[r] = read_count[r] + 1
+        }
+    }
+    loop s in 0..<slots {
+        if writes[s] == 1 && write_at[s] >= 0 && f.op[write_at[s]] == .Const {
+            is_const[s] = true
+            const_val[s] = f.a[write_at[s]]
+        }
+    }
+
+    // Plan per-instruction edits:
+    // - pre_ops[loop_at]: instructions to insert right before `loop_at`
+    // - post_ops[step_at]: instructions to insert right after `step_at`
+    // - kill[at]: drop original Mul (and fused Add)
+    // - replace_slot[old]: substitute `old` reads with `new` slot
+    kill := loop _ in 0..<count -> false
+    replace_slot := loop _ in 0..<slots -> -1
+    pre_at := [Int]{}
+    pre_code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    post_at := [Int]{}
+    post_code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    reduced := 0
+
+    // Process innermost loops only (loops that contain no nested Loop).
+    loop loop_at in 0..<count {
+        if f.op[loop_at] != .Loop -> next
+        loop_end: f.a[loop_at]
+        if loop_end <= loop_at + 2 || loop_end >= count -> next
+        has_inner := false
+        loop k in (loop_at + 1)..<loop_end {
+            if f.op[k] == .Loop {
+                has_inner = true
+                break
+            }
+        }
+        if has_inner -> next
+
+        // Count writes inside this loop per slot, and record top-level mask.
+        loop_writes := loop _ in 0..<slots -> 0
+        loop_write_at := loop _ in 0..<slots -> -1
+        top_level := loop _ in 0..<(loop_end - loop_at) -> false
+        if_depth := 0
+        loop k in (loop_at + 1)..<loop_end {
+            op: f.op[k]
+            w: ir_x64_write(f, k)
+            if w >= 0 {
+                loop_writes[w] = loop_writes[w] + 1
+                loop_write_at[w] = k
+            }
+            if op == .End {
+                opener: f.a[k]
+                if opener > loop_at && f.op[opener] == .If -> if_depth -= 1
+                next
+            }
+            if op == .Else -> next
+            if op == .If {
+                if_depth += 1
+                next
+            }
+            if if_depth == 0 -> top_level[k - loop_at] = true
+        }
+
+        // Identify single-write constant-stepped 64-bit word induction variables.
+        iv_step := loop _ in 0..<slots -> 0
+        iv_at := loop _ in 0..<slots -> -1
+        loop s in 0..<slots {
+            if loop_writes[s] != 1 || dropped[s] -> next
+            st: loop_write_at[s]
+            if st <= loop_at || !top_level[st - loop_at] -> next
+            ty: m.types[f.slot_type[s]]
+            if ty.kind != .Word || ty.bits != 64 -> next
+            op: f.op[st]
+            if (op != .Add && op != .Sub) || f.c[st] != IR_OVERFLOW_WRAP -> next
+            if f.dst[st] != s -> next
+            step := 0
+            if op == .Add {
+                if f.a[st] == s && f.b[st] >= 0 && is_const[f.b[st]] {
+                    step = const_val[f.b[st]]
+                } else if f.b[st] == s && f.a[st] >= 0 && is_const[f.a[st]] {
+                    step = const_val[f.a[st]]
+                }
+            } else if f.a[st] == s && f.b[st] >= 0 && is_const[f.b[st]] {
+                step = 0 - const_val[f.b[st]]
+            }
+            if step == 0 -> next
+            iv_step[s] = step
+            iv_at[s] = st
+        }
+
+        // Scan top-level Mul(idx, stride) before idx's step.
+        loop mul_at in (loop_at + 1)..<loop_end {
+            if !top_level[mul_at - loop_at] || kill[mul_at] -> next
+            if f.op[mul_at] != .Mul || f.c[mul_at] != IR_OVERFLOW_WRAP -> next
+            scaled: f.dst[mul_at]
+            if scaled < f.param_count || writes[scaled] != 1 || dropped[scaled] -> next
+            scaled_ty: m.types[f.slot_type[scaled]]
+            if scaled_ty.kind != .Word || scaled_ty.bits != 64 -> next
+
+            idx := -1
+            stride := 0
+            a: f.a[mul_at]
+            b: f.b[mul_at]
+            if a >= 0 && b >= 0 {
+                if iv_at[a] >= 0 && is_const[b] {
+                    idx = a
+                    stride = const_val[b]
+                } else if iv_at[b] >= 0 && is_const[a] {
+                    idx = b
+                    stride = const_val[a]
+                }
+            }
+            if idx < 0 -> next
+            step_at: iv_at[idx]
+            step: iv_step[idx]
+            if mul_at >= step_at || !ir_strength_worth(stride, step) -> next
+
+            // Check if `scaled` is used ONLY by one top-level `addr = Add(base, scaled)`
+            // with loop-invariant `base` before `step_at`.
+            add_at := -1
+            base := -1
+            if read_count[scaled] == 1 {
+                loop k in (mul_at + 1)..<step_at {
+                    if !top_level[k - loop_at] || kill[k] -> next
+                    if f.op[k] != .Add || f.c[k] != IR_OVERFLOW_WRAP -> next
+                    if f.a[k] == scaled && f.b[k] >= 0 && loop_writes[f.b[k]] == 0 {
+                        add_at = k
+                        base = f.b[k]
+                        break
+                    }
+                    if f.b[k] == scaled && f.a[k] >= 0 && loop_writes[f.a[k]] == 0 {
+                        add_at = k
+                        base = f.a[k]
+                        break
+                    }
+                }
+            }
+
+            target_old := scaled
+            target_ty := f.slot_type[scaled]
+            use_base := -1
+            if add_at >= 0 {
+                addr: f.dst[add_at]
+                addr_ty: m.types[f.slot_type[addr]]
+                if addr >= f.param_count && writes[addr] == 1 && !dropped[addr] && addr_ty.kind == .Word && addr_ty.bits == 64 && replace_slot[addr] < 0 {
+                    target_old = addr
+                    target_ty = f.slot_type[addr]
+                    use_base = base
+                } else {
+                    add_at = -1
+                }
+            }
+            if replace_slot[target_old] >= 0 -> next
+
+            // Verify every read of `target_old` lies inside `(mul_at..step_at)` so
+            // stepping the new IV right after `step_at` never alters any read.
+            def_pos: if add_at >= 0 -> add_at else -> mul_at
+            reads_safe := true
+            loop k in 0..<count {
+                if k > def_pos && k < step_at -> next
+                ir_x64_reads_into(f, k, reads)
+                if f.op[k] == .If || f.op[k] == .BrIf -> reads.push(f.a[k])
+                if reads.contains(target_old) {
+                    reads_safe = false
+                    break
+                }
+            }
+            if !reads_safe -> next
+
+            // When fusing `base + idx * stride` into a running pointer, avoid
+            // keeping both `base` and `ptr` live simultaneously across the loop
+            // (which happens if `base` is still read after `loop_end`).
+            if use_base >= 0 {
+                base_escapes := false
+                loop k in (loop_end + 1)..<count {
+                    ir_x64_reads_into(f, k, reads)
+                    if f.op[k] == .If || f.op[k] == .BrIf -> reads.push(f.a[k])
+                    if reads.contains(use_base) {
+                        base_escapes = true
+                        break
+                    }
+                }
+                if base_escapes -> next
+            }
+
+            // Check whether `idx` is provably initialized to 0 before the loop
+            // by scanning straight-line backward from `loop_at - 1`.
+            idx_zero := false
+            back := loop_at - 1
+            loop back >= 0 {
+                bop: f.op[back]
+                if bop == .End || bop == .Else || bop == .If || bop == .Loop -> break
+                if ir_x64_write(f, back) == idx {
+                    if bop == .Const && f.a[back] == 0 -> idx_zero = true
+                    break
+                }
+                back -= 1
+            }
+
+            line: f.code_line[def_pos]
+            iv_slot: ir_slot(f, target_ty, IRSlotKind.Temp, -1, 0)
+            c_delta: ir_slot(f, target_ty, IRSlotKind.Temp, -1, 0)
+            delta: step * stride
+
+            // Preheader initialization before `loop_at`.
+            pre_at.push(loop_at)
+            ir_opt_code_put(pre_code, IROp.Const, c_delta, delta, -1, -1, line)
+            if use_base >= 0 {
+                if idx_zero {
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Move, iv_slot, use_base, -1, -1, line)
+                } else {
+                    c_stride: ir_slot(f, f.slot_type[idx], IRSlotKind.Temp, -1, 0)
+                    init_scaled: ir_slot(f, f.slot_type[scaled], IRSlotKind.Temp, -1, 0)
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Const, c_stride, stride, -1, -1, line)
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Mul, init_scaled, idx, c_stride, IR_OVERFLOW_WRAP, line)
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Add, iv_slot, use_base, init_scaled, IR_OVERFLOW_WRAP, line)
+                }
+            } else {
+                if idx_zero {
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Const, iv_slot, 0, -1, -1, line)
+                } else {
+                    c_stride: ir_slot(f, target_ty, IRSlotKind.Temp, -1, 0)
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Const, c_stride, stride, -1, -1, line)
+                    pre_at.push(loop_at)
+                    ir_opt_code_put(pre_code, IROp.Mul, iv_slot, idx, c_stride, IR_OVERFLOW_WRAP, line)
+                }
+            }
+
+            // Step `iv_slot += delta` right after `step_at`.
+            post_at.push(step_at)
+            ir_opt_code_put(post_code, IROp.Add, iv_slot, iv_slot, c_delta, IR_OVERFLOW_WRAP, f.code_line[step_at])
+
+            kill[mul_at] = true
+            if add_at >= 0 -> kill[add_at] = true
+            replace_slot[target_old] = iv_slot
+            reduced += 1
+        }
+    }
+
+    if reduced == 0 -> return 0
+
+    // Rebuild `f` inserting preheader ops before `loop_at`, post-step ops after
+    // `step_at`, dropping killed ops, and rewriting reads of replaced slots.
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    pre_rows := [Int:[Int]]{}
+    loop pi in 0..<pre_at.len() {
+        pos: pre_at[pi]
+        list := pre_rows.get(pos) ?? [Int]{}
+        list.push(pi)
+        pre_rows[pos] = list.move()
+    }
+    post_rows := [Int:[Int]]{}
+    loop pi in 0..<post_at.len() {
+        pos: post_at[pi]
+        list := post_rows.get(pos) ?? [Int]{}
+        list.push(pi)
+        post_rows[pos] = list.move()
+    }
+
+    loop at in 0..<count {
+        if pre_rows.get(at) == .Val(list) {
+            loop pi in list {
+                ir_opt_code_put(code, pre_code.op[pi], pre_code.dst[pi], pre_code.a[pi], pre_code.b[pi], pre_code.c[pi], pre_code.line[pi])
+            }
+        }
+        if !kill[at] {
+            op: f.op[at]
+            dst: f.dst[at]
+            a := f.a[at]
+            b := f.b[at]
+            c := f.c[at]
+            // Rewrite slot operands via `replace_slot`.
+            if op == .Call || op == .CallRuntime || op == .CallIndirect {
+                start: b
+                argc: c
+                loop ai in 0..<argc {
+                    arg: f.args[start + ai]
+                    if arg >= 0 && arg < slots && replace_slot[arg] >= 0 {
+                        f.args[start + ai] = replace_slot[arg]
+                    }
+                }
+                if op == .CallIndirect && a >= 0 && a < slots && replace_slot[a] >= 0 {
+                    a = replace_slot[a]
+                }
+            } else if op == .Load || op == .Offset || op == .Move || op == .Copy || op == .Neg || op == .Not || op == .Sqrt || op == .Convert || op == .IntBig || op == .Return || op == .If || op == .BrIf {
+                if a >= 0 && a < slots && replace_slot[a] >= 0 -> a = replace_slot[a]
+            } else if op == .Store || op == .StreamStore {
+                if a >= 0 && a < slots && replace_slot[a] >= 0 -> a = replace_slot[a]
+                if c >= 0 && c < slots && replace_slot[c] >= 0 -> c = replace_slot[c]
+            } else if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr || op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge || op == .CopyBytes || op == .Concat {
+                if a >= 0 && a < slots && replace_slot[a] >= 0 -> a = replace_slot[a]
+                if b >= 0 && b < slots && replace_slot[b] >= 0 -> b = replace_slot[b]
+            }
+            ir_opt_code_put(code, op, dst, a, b, c, f.code_line[at])
+        }
+        if post_rows.get(at) == .Val(list) {
+            loop pi in list {
+                ir_opt_code_put(code, post_code.op[pi], post_code.dst[pi], post_code.a[pi], post_code.b[pi], post_code.c[pi], post_code.line[pi])
+            }
+        }
+    }
+
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
+    reduced
+}
+
+#Test("Strength reduction replaces base + i * 24 inside a counted loop with ptr += 24") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no Word row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("stride24", "test:strength.jet.stride24", "", "strength.jet", 1)
+    base: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "base"), 1)
+    n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    g.result = word
+    total: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    c1: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    c24: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    cond: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    scaled: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    addr: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    val: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, total, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, c1, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, c24, 24, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, cond, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, cond, 1, -1, 3)
+    _ := ir_emit(g, IROp.Mul, scaled, i, c24, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Add, addr, base, scaled, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Load, val, addr, 0, -1, 4)
+    _ := ir_emit(g, IROp.Add, total, total, val, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(g, IROp.Add, i, i, c1, IR_OVERFLOW_WRAP, 5)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, total, -1, -1, 6)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f: m.functions[0]
+    muls := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Mul -> muls += 1
+    }
+    assert_eq(muls, 0)
+}
