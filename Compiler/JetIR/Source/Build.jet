@@ -60,6 +60,7 @@ IRWriteBack: struct {
     cell: Int,
     slot: Int,
     ends: Bool{false},
+    link_mode: Int{0},
 }
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
@@ -3058,7 +3059,7 @@ ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
         return true
     }
     if kind == .Pointer {
-        return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop" || m.types[row].clone == ir_closure_share()
+        return ir_box_row(m, row) || ir_trait_row(m, row) || ir_link_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop" || m.types[row].clone == ir_closure_share()
     }
     if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
     if ir_counted_entry(m, p, row) != None -> return true
@@ -3415,6 +3416,20 @@ ir_release: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
 // from its cell, and a temporary that was given the cell as its place ends.
 ir_write_backs: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, backs: [IRWriteBack], span: Span) Never! {
     loop back in backs {
+        if back.link_mode == IR_LINK_BACK_WRITE {
+            ir_link_write_leave(m, b, back.cell)
+            if back.ends && ir_has_drop(m, b, back.cell) {
+                ir_emit(b.f, IROp.Drop, -1, back.cell, -1, -1, b.line)
+            }
+            next
+        }
+        if back.link_mode == IR_LINK_BACK_READ {
+            ir_link_read_leave(m, b, back.cell)
+            if back.ends && ir_has_drop(m, b, back.cell) {
+                ir_emit(b.f, IROp.Drop, -1, back.cell, -1, -1, b.line)
+            }
+            next
+        }
         ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
         if back.ends {
             ir_close_temporary(m, p, b, back.slot, span)

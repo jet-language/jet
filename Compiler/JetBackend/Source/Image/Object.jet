@@ -39,7 +39,10 @@
 // hooks (RUNTIME_PROVIDER_HOOKS) are weak globals, and its calls to them are
 // relocations against those globals, so a program that defines one replaces
 // it at link time and the library's calls reach the program's definition.
-use jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+use {
+    core.collections.[Rows]
+    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+}
 
 ELF64_SECTION_HEADER_SIZE: 64
 
@@ -909,28 +912,27 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     }
     // Each function's place in `.text`: on its alignment, in function order;
     // with own sections the start of its own. `.text` takes the largest.
-    // Its size and `.text` weight are kept beside it: its code leaves it
-    // below.
-    offsets := [Int]{}
-    sizes := [Int]{}
-    weights := [Int]{}
+    // Its offset, size, and `.text` weight live in one columnar table.
+    layout := Rows<X64FunctionLayout>{}
     text_size := 0
     text_align := X64_FUNCTION_ALIGN
     weight := 0
     loop function in functions {
         function_weight: x64_object_text_weight(function)
-        weights.push(function_weight)
         weight += function_weight
-        sizes.push(function.code.len())
+        size: function.code.len()
         if function.align > text_align -> text_align = function.align
-        if own_sections {
-            offsets.push(0)
-            next
+        offset := 0
+        if !own_sections {
+            loop text_size % function.align != 0 -> text_size += 1
+            offset = text_size
+            text_size += size
         }
-        loop text_size % function.align != 0 -> text_size += 1
-        offsets.push(text_size)
-        text_size += function.code.len()
+        _ := layout.add(X64FunctionLayout{offset: offset, size: size, weight: function_weight})
     }
+    offsets: layout.offset
+    sizes: layout.size
+    weights: layout.weight
     // Calls between functions are patched below as rel32 without per-site
     // checks: every distance inside `.text` is below its length.
     if !x64_fits_i32(text_size) {
@@ -1004,6 +1006,13 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
 // debug sections: `.data` and `.rodata`, `.text` and their relocations, the
 // symbols, with own sections the functions' and data objects' sections,
 // and how many `.text` threads were admitted; with an error only `errors`.
+// Per-function layout entry in `.text`, stored columnarly via `Rows<X64FunctionLayout>`.
+X64FunctionLayout: struct {
+    offset: Int,
+    size: Int,
+    weight: Int,
+}
+
 X64ObjectLaid: struct {
     text: [X64ObjectPiece]{[X64ObjectPiece]{}},
     data: [U8]{[U8]{}},

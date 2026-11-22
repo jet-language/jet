@@ -48,6 +48,7 @@ ir_carries_sender: fn(m: &IRModule, p: IRProgram, row: Int, depth: Int) -> Bool 
     if ir_channel_element(ty, "Receiver") != None || ir_task_element(ty) != None -> return false
     if ty == .Option(inner) -> return ir_type_carries_sender(m, p, inner, depth + 1)
     if ty == .Shared(inner) -> return ir_type_carries_sender(m, p, inner, depth + 1)
+    if ir_link_inner(ty) == .Val(inner) -> return ir_type_carries_sender(m, p, inner, depth + 1)
     if ty == .Result(ok, err) {
         return ir_type_carries_sender(m, p, ok, depth + 1) || ir_type_carries_sender(m, p, err, depth + 1)
     }

@@ -28,6 +28,7 @@
 // an operation's own operands right after it run only in its slow path: its
 // hot path proved them inline. Eq and Ne against a constant compare words.
 use {
+    core.collections.[Rows]
     jet_foundation.[Type, name_rows_value]
     jet_backend.[
         X64Alu,
@@ -1131,13 +1132,17 @@ ir_x64_add_stop_texts: fn(tables: &IRX64FunctionTables, added: &[Bool], m: IRMod
 // call published a stop leaves by its stop point's edge (IRX64Cold.pad),
 // else by the stop `exit` with no result written, where its caller's stop
 // check takes the stop on (Build.jet ir_stop_check).
+IRX64StopTail: struct {
+    offset: Int,
+    path: Int,
+    text: Int,
+    target: Int,
+}
+
 ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, exit: Int) Never! {
     // The shared calls of the numeric stops (.Stop): offset, path, text
-    // and edge of each.
-    tails := [Int]{}
-    tail_paths := [Int]{}
-    tail_texts := [Int]{}
-    tail_targets := [Int]{}
+    // and edge of each, stored columnarly.
+    stop_tails := Rows<IRX64StopTail>{}
     loop cold in e.colds {
         e.at = cold.at
         e.code.at = cold.at
@@ -1231,7 +1236,10 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 shared := -1
                 keeps: ir_x64_keeps_xmms(e, f, al)
                 if !keeps {
-                    loop (k, tail) in tails {
+                    tail_paths: stop_tails.path
+                    tail_texts: stop_tails.text
+                    tail_targets: stop_tails.target
+                    loop (k, tail) in stop_tails.offset {
                         if tail_paths[k] == path && tail_texts[k] == cold.text && tail_targets[k] == target {
                             shared = tail
                         }
@@ -1239,10 +1247,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 }
                 if shared >= 0 -> ir_x64_jump_to(e, shared) else {
                     if !keeps {
-                        tails.push(e.code.bytes.len())
-                        tail_paths.push(path)
-                        tail_texts.push(cold.text)
-                        tail_targets.push(target)
+                        _ := stop_tails.add(IRX64StopTail{offset: e.code.bytes.len(), path: path, text: cold.text, target: target})
                     }
                     ir_x64_lea_data(e, X64_RDI, path)
                     x64_mov_ri(e.code, X64_RSI, ir_x64_use_length(tables, path))
@@ -4731,60 +4736,82 @@ ir_x64_stop_quiet: fn(code: &X64Code, bits: Int) -> IRX64StopQuiet Never! {
 // runs, in the same order. A tail that leaves by a branch into the body (an
 // inlined callee's stop edge) is shared only where it disturbs no value
 // the body keeps past the other edge (ir_x64_share_safe).
+IRX64PadEntry: struct {
+    key: [Int],
+    label: Int,
+    next: Int,
+}
+
+IRX64PadTail: struct {
+    key: [Int],
+    label: Int,
+    token: Int,
+    pad: Int,
+    from: Int,
+    next: Int,
+}
+
 ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, exit: Int, lines: &[X64LineRow]) Never! {
-    // Keys by hash (ir_x64_key_hash) -> their indexes in `keys`, compared
-    // in full.
-    seen := [Int:[Int]]{}
-    keys := [[Int]]{}
-    labels := [Int]{}
-    // The laid-out tails of cleanup edges, the same way: each tail's code
-    // offset, the token slot its code reads, its edge (an index in e.pads)
-    // and its first instruction.
-    tail_seen := [Int:[Int]]{}
-    tail_keys := [[Int]]{}
-    tail_labels := [Int]{}
-    tail_tokens := [Int]{}
-    tail_pads := [Int]{}
-    tail_froms := [Int]{}
+    // Keys by hash (ir_x64_key_hash) -> head row in `entries`, chained via `next`.
+    seen := [Int:Int]{}
+    entries := Rows<IRX64PadEntry>{}
+    // The laid-out tails of cleanup edges, stored columnarly and chained via `next`.
+    tail_seen := [Int:Int]{}
+    pad_tails := Rows<IRX64PadTail>{}
     loop (nth, pad) in e.pads {
         label := exit
         bare: pad.end == pad.at + 2 && f.op[pad.at + 1] == .Return && f.a[pad.at + 1] < 0
         if !bare {
             key := ir_x64_pad_key(f, al, pad, pad.at + 1, -1)
             hash: ir_x64_key_hash(key)
-            known: seen.get(hash) ?? [Int]{}
+            head: seen.get(hash) ?? -1
             label = -1
-            loop index in known {
-                if label < 0 && ir_x64_same_key(keys[index], key) -> label = labels[index]
+            entry_keys: entries.key
+            entry_labels: entries.label
+            entry_nexts: entries.next
+            probe := head
+            loop probe >= 0 {
+                if ir_x64_same_key(entry_keys[probe], key) {
+                    label = entry_labels[probe]
+                    break
+                }
+                probe = entry_nexts[probe]
             }
             if label < 0 {
-                token: ir_x64_pad_token(e, m, f, al, pad)
+                token: ir_x64_pad_token(m, f, al, pad)
+                first := pad.at + 1
+                loop first < pad.end - 1 && f.op[first] == .Nop -> first += 1
                 // The longest laid-out tail this edge ends in.
                 share := -1
                 share_label := -1
                 share_token := -1
                 if token >= 0 {
-                    loop from in (pad.at + 1)..<(pad.end - 2) {
-                        if share < 0 && ir_x64_tail_entry(f, al, pad, from, token) {
+                    tail_keys: pad_tails.key
+                    tail_labels: pad_tails.label
+                    tail_tokens: pad_tails.token
+                    tail_pads: pad_tails.pad
+                    tail_froms: pad_tails.from
+                    tail_nexts: pad_tails.next
+                    loop from in first..<(pad.end - 1) {
+                        if share < 0 && ir_x64_tail_entry(e, f, al, pad, from, first, token) {
                             tail: ir_x64_pad_key(f, al, pad, from, token)
-                            listed: tail_seen.get(ir_x64_key_hash(tail)) ?? [Int]{}
-                            loop index in listed {
-                                if share < 0 && ir_x64_same_key(tail_keys[index], tail) && ir_x64_share_safe(f, al, e.pads[tail_pads[index]], tail_froms[index], pad) {
+                            tprobe := tail_seen.get(ir_x64_key_hash(tail)) ?? -1
+                            loop tprobe >= 0 {
+                                if ir_x64_same_key(tail_keys[tprobe], tail) && ir_x64_share_safe(f, al, e.pads[tail_pads[tprobe]], tail_froms[tprobe], pad) {
                                     share = from
-                                    share_label = tail_labels[index]
-                                    share_token = tail_tokens[index]
+                                    share_label = tail_labels[tprobe]
+                                    share_token = tail_tokens[tprobe]
+                                    break
                                 }
+                                tprobe = tail_nexts[tprobe]
                             }
                         }
                     }
                 }
-                if share == pad.at + 1 -> label = share_label else {
+                if share == first -> label = share_label else {
                     label = e.code.bytes.len()
-                    grown := known.copy()
-                    grown.push(keys.len())
-                    seen[hash] = grown.move()
-                    keys.push(key.move())
-                    labels.push(label)
+                    added: entries.add(IRX64PadEntry{key: key.move(), label: label, next: head})
+                    seen[hash] = added.index()
                     e.open = pad.open
                     e.heads = pad.heads
                     e.open.push(pad.at)
@@ -4819,19 +4846,14 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
                         }
                     }
                     if token >= 0 {
-                        loop from in (pad.at + 1)..<stop {
-                            if ir_x64_tail_entry(f, al, pad, from, token) {
+                        limit: if stop < pad.end - 1 -> stop else -> pad.end - 1
+                        loop from in first..<limit {
+                            if ir_x64_tail_entry(e, f, al, pad, from, first, token) {
                                 tail := ir_x64_pad_key(f, al, pad, from, token)
                                 tail_hash: ir_x64_key_hash(tail)
-                                listed: tail_seen.get(tail_hash) ?? [Int]{}
-                                extended := listed.copy()
-                                extended.push(tail_keys.len())
-                                tail_seen[tail_hash] = extended.move()
-                                tail_keys.push(tail.move())
-                                tail_labels.push(offsets[from - pad.at - 1])
-                                tail_tokens.push(token)
-                                tail_pads.push(nth)
-                                tail_froms.push(from)
+                                prev: tail_seen.get(tail_hash) ?? -1
+                                row: pad_tails.add(IRX64PadTail{key: tail.move(), label: offsets[from - pad.at - 1], token: token, pad: nth, from: from, next: prev})
+                                tail_seen[tail_hash] = row.index()
                             }
                         }
                     }
@@ -4849,16 +4871,20 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
 // The cleanup token of stop edge `pad` (ir_stop_return's, or an inlined
 // callee's: OptInline's branch out of the callee for its Return): the edge
 // is `jet_rt_cleanup_enter` into a temp it alone reads, drops, closes and
-// their live-flag Ifs, `jet_rt_cleanup_leave` of the temp, and a bare
-// Return or a branch past the edge's own If. -1 for any other edge.
-ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> Int Never! {
-    first: pad.at + 1
-    leave: pad.end - 2
-    if leave <= first -> return -1
+// their live-flag Ifs (including bitmask tests and Nops left by opt passes),
+// `jet_rt_cleanup_leave` of the temp, and a bare Return or a branch past
+// the edge's own If. -1 for any other edge.
+ir_x64_pad_token: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> Int Never! {
     last: pad.end - 1
+    if last <= pad.at + 1 -> return -1
     if !((f.op[last] == .Return && f.a[last] < 0) || (f.op[last] == .Br && f.a[last] >= 1 && f.a[last] <= pad.open.len())) {
         return -1
     }
+    first := pad.at + 1
+    loop first < last && f.op[first] == .Nop -> first += 1
+    leave := last - 1
+    loop leave > first && f.op[leave] == .Nop -> leave -= 1
+    if leave <= first -> return -1
     if f.op[first] != .CallRuntime || f.op[leave] != .CallRuntime -> return -1
     if m.names[f.a[first]] != "jet_rt_cleanup_enter" || m.names[f.a[leave]] != "jet_rt_cleanup_leave" {
         return -1
@@ -4869,7 +4895,6 @@ ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
     }
     depth := 0
     loop at in first..<last {
-        if e.absorbed[at] -> return -1
         op: f.op[at]
         if op == {
             .If -> depth += 1
@@ -4877,8 +4902,11 @@ ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
                 depth -= 1
                 if depth < 0 -> return -1
             }
-            .Drop | .Close | .Load | .Const | .Copy | .Move | .CallRuntime -> {}
-            .Nop | .ConstText | .ConstBigInt | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return -1
+            .Else -> {
+                if depth <= 0 -> return -1
+            }
+            .Nop | .Drop | .Close | .Load | .Const | .Copy | .Move | .CallRuntime | .Call | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Offset -> {}
+            .ConstText | .ConstBigInt | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Neg | .Convert | .Concat | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .CopyBytes | .Block | .Loop | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return -1
         }
     }
     if depth != 0 -> return -1
@@ -4886,15 +4914,20 @@ ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
 }
 
 // Whether another cleanup edge may enter `pad`'s code at instruction
-// `from`: its `jet_rt_cleanup_enter` (the whole edge), or a Drop, Close,
-// Load or live-flag If outside every If the edge opens, after which no
-// temp of the edge but `token` is read that was written before `from`.
-ir_x64_tail_entry: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, token: Int) -> Bool Never! {
-    if from == pad.at + 1 -> return true
+// `from`: its `jet_rt_cleanup_enter` (the whole edge), or a top-level
+// unabsorbed cleanup instruction outside every If the edge opens, after
+// which no temp of the edge but `token` is read that was written before
+// `from`.
+ir_x64_tail_entry: fn(e: IRX64Emitter, f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, first: Int, token: Int) -> Bool Never! {
+    if from == first -> return true
+    if e.absorbed[from] || (from > pad.at + 1 && e.absorbed[from - 1]) -> return false
     op: f.op[from]
-    if op != .Drop && op != .Close && op != .Load && op != .If -> return false
+    if op == {
+        .Drop | .Close | .Load | .If | .Const | .Copy | .Move | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Offset | .Call | .CallRuntime -> {}
+        .Nop | .ConstText | .ConstBigInt | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Neg | .Convert | .Concat | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .CopyBytes | .Block | .Loop | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return false
+    }
     depth := 0
-    loop at in (pad.at + 1)..<from {
+    loop at in first..<from {
         if f.op[at] == .If -> depth += 1
         if f.op[at] == .End -> depth -= 1
     }

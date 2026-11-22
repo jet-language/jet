@@ -390,33 +390,29 @@ ir_opt_o0_bodies: fn(m: &IRModule, options: IROptOptions, lint: IRLintContext, p
     ir_opt_dump(m, ir_opt_dump_names(options), "after", report)
 }
 
-// Fast unverified O0 bodies pass: runs single-round inline Int facts only on
-// functions with loops (skipping loopless functions and the second SSA build),
-// fused with early Drops in one parallel sweep, and skips IR Lint.
+// Fast unverified O0 bodies pass: skips SSA construction, range analysis, and
+// IR Lint (O1/O2 run those), running only early String Drops (DropEarly.jet)
+// in one direct or weight-partitioned parallel sweep.
 ir_opt_o0_fast: fn(m: &IRModule, options: IROptOptions, threads: CompilerThreads, report: &IROptReport) Never! {
-    facts: ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa")
+    if m.dropped_early {
+        return
+    }
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     total := 0
-    has_loop := false
-    loop f in m.functions {
-        total += 1 + f.op.len()
-        if !has_loop && f.op.contains(IROp.Loop) -> has_loop = true
-    }
+    loop f in m.functions -> total += 1 + f.op.len()
     workers: compiler_threads_admit(threads, m.functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
-    if workers <= 1 && (!facts || !has_loop) {
-        if !m.dropped_early {
-            loop id in 0..<m.functions.len() {
-                if m.functions[id].asm != None -> next
-                plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
-                if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
-            }
-            m.dropped_early = true
+    if workers <= 1 {
+        loop id in 0..<m.functions.len() {
+            if m.functions[id].asm != None -> next
+            plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
+            if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
         }
+        m.dropped_early = true
         return
     }
-    work: IROptBodyWork{facts: facts, facts_loops_only: true, versions: false, lint: false, drop: !m.dropped_early, licm: false, strength: false, strip_mine: false, serial: false, poll: poll, trap: trap, turn: turn, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
+    work: IROptBodyWork{facts: false, facts_loops_only: false, versions: false, lint: false, drop: true, licm: false, strength: false, strip_mine: false, serial: false, poll: poll, trap: trap, turn: turn, stop_keys: [Bool]{}, safe_routes: [Int]{}, char_len_route: -2}
     found := [IRLintFinding]{}
     ir_opt_module_bodies(m, work, options, ir_lint_context_none(), "", threads, report, found)
     m.dropped_early = true
