@@ -1380,9 +1380,24 @@ ZonedDateTime: struct {
                     value: civil_dyn_datetime(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected RFC 3339 date-time with a minute-aligned offset"}})
                     Ok(value)
                 }
-                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {core.encoding.__dyn_kind(tree)}"}})
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {time_dyn_kind(tree)}"}})
             }
         }
+    }
+}
+
+priv time_dyn_kind: fn(tree: Dyn) -> String Never! {
+    if tree == {
+        .Null -> "Null"
+        .Bool(_) -> "Bool"
+        .Int(_) -> "Int"
+        .Float(_) -> "Float"
+        .Number(_) -> "number"
+        .Text(_) -> "Text"
+        .Bytes(_) -> "Bytes"
+        .DateTime(_) -> "DateTime"
+        .Array(_) -> "a list"
+        .Object(_) -> "an object"
     }
 }
 

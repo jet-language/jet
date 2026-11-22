@@ -40317,7 +40317,7 @@ Decimal: struct {
                 .Number(lexeme) -> decimal_decoded(lexeme)
                 .Int(value) -> decimal_decoded("{value}")
                 .Text(text) -> decimal_decoded(text)
-                .Null | .Bool(_) | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
+                .Null | .Bool(_) | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {math_dyn_kind(tree)}"}})
             }
         }
     }
@@ -40358,6 +40358,21 @@ Decimal: struct {
 priv decimal_decoded: fn(text: String) -> Decimal [FieldError]! {
     value: decimal_parse(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected Decimal: invalid Decimal string"}})
     Ok(value)
+}
+
+priv math_dyn_kind: fn(tree: Dyn) -> String Never! {
+    if tree == {
+        .Null -> "Null"
+        .Bool(_) -> "Bool"
+        .Int(_) -> "Int"
+        .Float(_) -> "Float"
+        .Number(_) -> "number"
+        .Text(_) -> "Text"
+        .Bytes(_) -> "Bytes"
+        .DateTime(_) -> "DateTime"
+        .Array(_) -> "a list"
+        .Object(_) -> "an object"
+    }
 }
 
 exact_power: fn(base: Int, exponent: Int) -> Int Never! {

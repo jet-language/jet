@@ -1037,6 +1037,14 @@ sema_expression_map_slot: fn(base: Expr, key: Expr, start: Expr, span: Span, exp
 }
 
 sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_expression_index_inner(base, index, ast_kind, true, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+sema_expression_index_for_write: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_expression_index_inner(base, index, ast_kind, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, read_only: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if index == .Call(call, _) {
         if expr_is_map_slot_or(call) {
             return sema_expression_map_slot(base, call.args[0].expr, call.args[1].expr, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1058,9 +1066,23 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
     // integer (every integer indexes); any other such index meets `Int` as
     // before.
     named_position: sema_expression_index_self_typed(index) && index_expected == (Val(Type.Int))
-    hint: if named_position -> Type?{None} else -> index_expected
+    borrows_map_string_key: read_only && index_expected == (Val(Type.String))
+    view_str_key: borrows_map_string_key && sema_stmt_string_view_type(sema_stmt_return_known_type(index, environment, scopes) ?? Type.Int)
+    hint: if named_position || view_str_key -> Type?{None} else -> index_expected
     index_start: diagnostics.len()
-    inferred_index: sema_check_expression(index, hint, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+    previous_borrow: context.borrow_ctx
+    previous_view_read: context.allow_string_view_read
+    if borrows_map_string_key {
+        context.borrow_ctx = true
+        context.allow_string_view_read = true
+    } else if !read_only && index_expected == (Val(Type.String)) {
+        context.borrow_ctx = false
+        context.allow_string_view_read = false
+    }
+    checked_index_opt: sema_check_expression(index, hint, environment, program, scopes, state, tail_store, context, diagnostics)
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_view_read
+    inferred_index := checked_index_opt ?? {
         if sema_value_mismatch_index(diagnostics, index_start, expr_span(index)) != None {
             probe_diagnostics := [Diagnostic]{}
             if sema_probe_expression(index, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(offered) {
@@ -1068,6 +1090,9 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
             }
         }
         return None
+    }
+    if view_str_key && sema_stmt_string_view_type(inferred_index.ty) {
+        tree_expr_retype(inferred_index, Type.String)
     }
     // A `distinct Int(lo..hi)` position on a `[T#N]` indexes by its raw Int,
     // and its declared range is the interval the bounds proof reads.

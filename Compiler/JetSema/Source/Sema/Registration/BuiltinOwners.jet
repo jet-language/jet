@@ -35,7 +35,9 @@ sema_registration_core_builtin_owner_fact: fn(name: String) -> SemaRegistrationC
     }
 }
 
-sema_registration_core_builtin_owner_facts: fn() -> [SemaRegistrationCoreBuiltinOwnerFact] Never! {
+SEMA_REGISTRATION_CORE_BUILTIN_OWNER_FACTS: #run sema_registration_core_builtin_owner_facts_build()
+
+sema_registration_core_builtin_owner_facts_build: fn() -> [SemaRegistrationCoreBuiltinOwnerFact] Never! {
     [SemaRegistrationCoreBuiltinOwnerFact]{
         sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_task_name()),
         sema_registration_core_builtin_owner_fact(sema_registration_core_builtin_receiver_name()),
@@ -43,11 +45,12 @@ sema_registration_core_builtin_owner_facts: fn() -> [SemaRegistrationCoreBuiltin
     }
 }
 
+sema_registration_core_builtin_owner_facts: fn() -> [SemaRegistrationCoreBuiltinOwnerFact] Never! {
+    SEMA_REGISTRATION_CORE_BUILTIN_OWNER_FACTS
+}
+
 sema_registration_core_builtin_is_name: fn(name: String) -> Bool Never! {
-    loop fact in sema_registration_core_builtin_owner_facts() {
-        if fact.name == name -> return true
-    }
-    false
+    name == "Task" || name == "Receiver" || name == "Sender"
 }
 
 SemaRegistrationCoreBuiltinOwnerFact: struct {

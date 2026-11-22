@@ -14,9 +14,7 @@ use {
     net: core.net
     files: core.files
     process_api: core.process
-    text_parse: core.text.parse
     rt: jet.runtime.encoding
-    core.encoding.[Dyn]
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
@@ -424,7 +422,7 @@ release: fn() -[Env, FS, Exec, Time.Wait]> String Never! {
     platform: name()
     if platform == "linux" {
         kernel: files.read("/proc/sys/kernel/osrelease") ?? ""
-        trimmed: core.text.trim(kernel)
+        trimmed: kernel.trim().copy()
         if trimmed != "" -> return trimmed
         config: files.read("/etc/os-release") ?? return ""
         return release_field(config, "VERSION_ID=") ?? ""
@@ -1027,7 +1025,7 @@ success: fn(code: Int) -> Bool Never! { code == 0 }
 uptime: fn() -[Time, Env, FS]> Float Never! {
     if name() != "linux" -> return 0.0
     contents: files.read("/proc/uptime") ?? return 0.0
-    fields: text_parse.split_ws(contents)
+    fields: contents.words()
     if fields.len() == 0 -> return 0.0
     Float.parse(fields[0]) ?? 0.0
 }
@@ -1308,7 +1306,7 @@ tree_cpu_time: fn(pid: Int{0}) -[Env, FS.Read]> Duration IOError! {
         threads: files.list_dir("/proc/{current}/task") ?? next
         loop thread in threads {
             children: files.read(files.join(thread.path, "children")) ?? next
-            loop word in text_parse.split_ws(children) {
+            loop word in children.words() {
                 child: Int.parse(word) ?? next
                 queue.push(child)
             }
@@ -1328,7 +1326,7 @@ priv tree_stat_ticks: fn(stat: String) -> Int Never! {
     }
     if close < 0 -> return 0
     after: close + 1
-    fields: text_parse.split_ws(String.from_bytes(raw[after..<raw.len()]) ?? "")
+    fields: (String.from_bytes(raw[after..<raw.len()]) ?? "").words()
     // fields[0] is field 3, the state.
     if fields.len() < 15 -> return 0
     sum := 0
@@ -2003,13 +2001,13 @@ priv id_rows: module {
     // name:password:uid:gid:gecos:home:shell, cut as musl's getpwent_a cuts
     // it: the shell is the rest of the line.
     passwd_entry: fn(line: String) -> User? Never! {
-        name: text_parse.split_once(line, ":")
-        password: text_parse.split_once(name.tail, ":")
-        uid: text_parse.split_once(password.tail, ":")
-        gid: text_parse.split_once(uid.tail, ":")
-        gecos: text_parse.split_once(gid.tail, ":")
-        home: text_parse.split_once(gecos.tail, ":")
-        if !name.found || !password.found || !uid.found || !gid.found || !gecos.found || !home.found {
+        name: line.partition(":")
+        password: name.tail.partition(":")
+        uid: password.tail.partition(":")
+        gid: uid.tail.partition(":")
+        gecos: gid.tail.partition(":")
+        home: gecos.tail.partition(":")
+        if name.sep == "" || password.sep == "" || uid.sep == "" || gid.sep == "" || gecos.sep == "" || home.sep == "" {
             return None
         }
         Val(User{
@@ -2025,13 +2023,13 @@ priv id_rows: module {
     // name:password:gid:members, members comma-separated; an empty member
     // (a trailing comma) is dropped.
     group_entry: fn(line: String) -> Group? Never! {
-        name: text_parse.split_once(line, ":")
-        password: text_parse.split_once(name.tail, ":")
-        gid: text_parse.split_once(password.tail, ":")
-        if !name.found || !password.found || !gid.found -> return None
+        name: line.partition(":")
+        password: name.tail.partition(":")
+        gid: password.tail.partition(":")
+        if name.sep == "" || password.sep == "" || gid.sep == "" -> return None
         members := [String]{}
         if gid.tail != "" {
-            loop member in text_parse.split(gid.tail, ",") {
+            loop member in gid.tail.split(",") {
                 if member != "" -> members.push(member)
             }
         }
@@ -2040,8 +2038,12 @@ priv id_rows: module {
 
     // Decimal digits only, at most 4294967294.
     database_id: fn(text: String) -> Int? Never! {
-        if text.bytes().len() > 10 || !text_parse.is_digit(text) -> return None
-        value: text_parse.parse_int(text) ?? return None
+        raw: text.bytes()
+        if raw.len() == 0 || raw.len() > 10 -> return None
+        loop byte in raw {
+            if byte < (U8{48}) || byte > (U8{57}) -> return None
+        }
+        value: Int.parse(text) ?? return None
         if value > 4294967294 -> return None
         Val(value)
     }
@@ -2316,7 +2318,7 @@ release_field: fn(config: String, key: String) -> String? Never! {
 
 command_fact: fn(argv: [String]) -[Exec, Time.Wait]> String Never! {
     receipt: process_api.cmd(argv).run() ?? return ""
-    core.text.trim(receipt.output)
+    receipt.output.trim().copy()
 }
 
 #Test("OS release fields preserve first-match and quote semantics") {
@@ -2569,7 +2571,7 @@ config_find: fn(raw: [U8], needle: [U8]) -> Int? Never! {
 }
 
 config_dotenv_value: fn(value: String) -> String Never! {
-    trimmed: core.text.trim(value)
+    trimmed: value.trim().copy()
     raw: trimmed.bytes()
     if raw.len() >= 2 {
         double_quote: raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34})
@@ -2577,7 +2579,7 @@ config_dotenv_value: fn(value: String) -> String Never! {
         if double_quote || single_quote -> return slice_ascii(raw, 1, raw.len() - 1)
     }
     comment: config_find(raw, " #".bytes()) ?? return trimmed
-    core.text.trim_end(slice_ascii(raw, 0, comment))
+    slice_ascii(raw, 0, comment).trim_end().copy()
 }
 
 // Dotenv syntax joins the same typed FieldError domain as Decode failures.
@@ -2593,7 +2595,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
             loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
             line_end := end
             if end < raw.len() && line_end > start && raw[line_end - 1] == (U8{13}) -> line_end -= 1
-            line := core.text.trim(slice_ascii(raw, start, line_end))
+            line := slice_ascii(raw, start, line_end).trim().copy()
             line_index += 1
             if line.len() > 0 && line.bytes()[0] != (U8{35}) {
                 bytes: line.bytes()
@@ -2601,7 +2603,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
                     line = slice_ascii(bytes, 7, bytes.len())
                 }
                 equal: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("Jet.EnvDecodeFailed: invalid .env line {line_index}"))
-                name: core.text.trim(slice_ascii(line.bytes(), 0, equal))
+                name: slice_ascii(line.bytes(), 0, equal).trim().copy()
                 if config_allowed(name, allow) {
                     value: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
                     config_put(values, name, value)

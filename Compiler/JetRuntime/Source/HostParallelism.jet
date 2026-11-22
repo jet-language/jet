@@ -1,6 +1,5 @@
-// The ONE native std.thread.available_parallelism (Rust std 1.96,
-// library/std/src/sys/thread/unix.rs:147-191 Linux arm and cgroups.quota
-// :772-991). The scheduler pool, core.sys.cpu_count and the parallel kernels
+// Native available_parallelism (Linux sched_getaffinity and cgroups v1/v2 quota).
+// The scheduler pool, core.sys.cpu_count and the parallel kernels
 // all call that single probe, so the scheduler and jet_sys_cpu_count_raw
 // share this one too.
 // Result: the positive count, or 0 for Rust's Err (each caller owns its
@@ -238,7 +237,7 @@ cpu_list_has_cpu: fn(data: I64, length: I64) -> Bool {
     false
 }
 
-// library/std/src/sys/thread/unix.rs:842-888 quota_v2: walk cpu.max from the group to the mount root.
+// quota_v2: walk cpu.max from the group to the mount root.
 // A readable cpu.max without a first line or a second field ends the walk
 // (the try block's `?`), keeping the quota found so far.
 cpu_quota_v2: fn(ctx: I64) -> I64 {
@@ -274,7 +273,7 @@ cpu_quota_v2: fn(ctx: I64) -> I64 {
     quota
 }
 
-// library/std/src/sys/thread/unix.rs:919-929 parse_file: read, trim, parse; the path is restored first.
+// parse_file: read, trim, parse; the path is restored first.
 cpu_parse_file: fn(ctx: I64, name: I64, out: I64) -> Bool {
     cpu_path_append_text(ctx, name)
     read: cpu_read(ctx)
@@ -290,7 +289,7 @@ cpu_parse_file: fn(ctx: I64, name: I64, out: I64) -> Bool {
     cpu_parse(wrapping(data + start), end - start, out)
 }
 
-// library/std/src/sys/thread/unix.rs:954-990 find_mountpoint. Every `?` aborts the whole scan (None).
+// find_mountpoint. Every `?` aborts the whole scan (None).
 // Sets the path to mount + trimmed group and captures the mount.
 cpu_find_mountpoint: fn(ctx: I64) -> Bool {
     cpu_path_set_text(ctx, rt_static_text("/proc/self/mountinfo"))
@@ -393,7 +392,7 @@ cpu_find_mountpoint: fn(ctx: I64) -> Bool {
     false
 }
 
-// library/std/src/sys/thread/unix.rs:890-948 quota_v1: the first mount guess whose group directory
+// quota_v1: the first mount guess whose group directory
 // exists is walked up to its mount; later guesses are not tried.
 cpu_quota_v1: fn(ctx: I64) -> I64 {
     quota := CPU_UNLIMITED
@@ -422,7 +421,7 @@ cpu_quota_v1: fn(ctx: I64) -> I64 {
     quota
 }
 
-// library/std/src/sys/thread/unix.rs:795-840 quota: fold /proc/self/cgroup lines. An explicit v1 `cpu`
+// quota: fold /proc/self/cgroup lines. An explicit v1 `cpu`
 // controller line replaces any earlier choice; a v2 line only fills an empty
 // choice; a selected line without a path field resets the fold to None.
 cpu_quota: fn(ctx: I64) -> I64 {
@@ -533,7 +532,7 @@ cpu_online_count: fn(ctx: I64) -> I64 {
     total
 }
 
-// library/std/src/sys/thread/unix.rs:159-191 Linux arm. root/root_len prefix every probed path.
+// Linux available_parallelism entry. root/root_len prefix every probed path.
 cpu_available_parallelism: fn(root: I64, root_len: I64) -> I64 {
     ctx: cpu_ctx_new(root, root_len)
     raw: cpu_quota(ctx)

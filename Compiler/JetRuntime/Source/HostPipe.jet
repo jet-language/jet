@@ -18,8 +18,7 @@ PIPE_SOURCE: I64{24}
 PIPE_STREAM: I64{32}
 
 pipe_borrow_stop: fn() {
-    // Seed rustc 1.97.1 (8bab26f4f); library/core/src/cell.rs:902,912-917:
-    // panic_already_borrowed(BorrowMutError) => "RefCell already borrowed".
+    // Borrow conflict stop text: "RefCell already borrowed".
     // Emit the actual payload without allocating on the failing borrow path.
     reason: rt_static_text("RefCell already borrowed")
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
