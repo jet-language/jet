@@ -1,0 +1,17 @@
+# Complex32.from_complex narrows each Float part with F32.from_float: an
+# in-range Complex narrows to Complex32, while an out-of-range real or
+# imaginary part returns Err on O0, O1 and O2.
+fixture: Complex32NarrowingFailureOnEveryTier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = complex32_narrowing_failure_on_every_tier.out
+stderr: = ""
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = complex32_narrowing_failure_on_every_tier.out
+stderr: = ""
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = complex32_narrowing_failure_on_every_tier.out
+stderr: = ""

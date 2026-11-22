@@ -9,6 +9,8 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [ApproxIntoFloat](ApproxIntoFloat.jet) — A whole number that meets a Float converts with an exact check, so a value no Float holds stops.
 - [BitNot](BitNot.jet) — Integer `~` flips bits; `!` only negates Bool.
 - [Combinatorics](Combinatorics.jet) — core.math.combinatorics generates over any element type; list methods cover the sequence work.
+- [Complex32](Complex32.jet) — Single-precision complex numbers sharing the same operations at F32 precision, with lossless widening and fallible narrowing.
+- [ComplexConjugate](ComplexConjugate.jet) — Complex.conj() and Complex32.conj() return the conjugate at the value's own precision.
 - [Constants](Constants/) — core.math constants: PI, E, TAU, INFINITY and NAN are comptime values, read as `math.PI`, never called.
 - [Decimal](Decimal.jet) — Decimal literals use exact base-10 arithmetic.
 - [ExpMinusOne](ExpMinusOne.jet) — 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and full precision for small x, where exp2(x) - 1 cancels.

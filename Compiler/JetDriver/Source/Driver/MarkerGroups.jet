@@ -269,7 +269,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: &[JetDriverLoadedModule], 
         if trace_sink == .Val(sink) {
             sink.begin("load.marker_groups.relex", unit.path, module_index, modules.len())
         }
-        lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)
+        lexed := if unit.allow_reserved_identifiers -> lex_generated(source_bytes) else -> lex(source_bytes)
         expanded: expand_named_marker_groups_with_uses(lexed.tokens, lexed.tables, groups)
         if trace_sink == .Val(sink) -> sink.end("load.marker_groups.relex", source_bytes.len())
         if expanded.uses.len() == 0 -> next

@@ -4278,9 +4278,11 @@ priv app_page_redraw: fn() -[Browser, FS.Read, Net]> Never! {
 priv app_page_due: fn(now: AppCurrent?) -> Bool Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     held.value.page = true
-    if !held.value.stale && held.value.drawn == now -> return false
+    saved_ver: ui.saved_version()
+    if !held.value.stale && held.value.drawn == now && held.value.saved_version == saved_ver -> return false
     held.value.stale = false
     held.value.drawn = now.copy()
+    held.value.saved_version = saved_ver
     true
 }
 
@@ -6874,6 +6876,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     tree := ui.box([UINode]{})
     focused := -1
     drawn := false
+    saved_seen := -1
     shown := AppCurrent?{None}
     open := AppOpenMenu?{None}
     back := Notice?{None}
@@ -6946,7 +6949,8 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             stale = true
         }
         now: app_graph_current()
-        if now != shown || woken.stale {
+        saved_ver: ui.saved_version()
+        if now != shown || woken.stale || saved_ver != saved_seen {
             if now != shown {
                 focused = -1
                 open = None
@@ -6955,6 +6959,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             }
             tree = app_window_tree(now)
             shown = now
+            saved_seen = saved_ver
             stale = true
         }
         if !stale -> next
@@ -7184,9 +7189,26 @@ priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
     screen: app_screen(current.state) ?? return ui.box([UINode]{})
     me: tasks.current_task()
     resume_begin(me)
+    ui.saved_scope_begin(app_saved_scope_key(current))
     shown: App{title: app_graph_title()}.__open(screen, current.fields)
+    ui.saved_scope_end()
     live_drop(app_graph_route_data(resume_end(me)))
     shown ?? ui.box([UINode]{})
+}
+
+// A stable key for the screen and route fields currently shown, so `ui.saved`
+// state stays bound to the screen (for example, each task's comment box).
+priv app_saved_scope_key: fn(current: AppCurrent) -> String Never! {
+    if current.fields.len() == 0 -> return current.state.copy()
+    names := [String]{}
+    loop name in current.fields.keys() -> names.push(name.copy())
+    names.sort()
+    parts := [String]{}
+    loop name in names {
+        value: current.fields.get(name) ?? ""
+        parts.push("{name}={value}")
+    }
+    "{current.state}?{parts.join("&")}"
 }
 
 // Keeps a notice that the window couldn't be shown or kept, and why.
@@ -7219,9 +7241,10 @@ priv AppWindowWake: struct {
     task: TaskID?,
     page: Bool,
     drawn: AppCurrent?,
+    saved_version: Int,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, resumed: None, woken: false, window: None, task: None, page: false, drawn: None}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, resumed: None, woken: false, window: None, task: None, page: false, drawn: None, saved_version: -1}}
 
 // Keeps `window`, whose frames run in this task, for the clipboard
 // (`copy_text`, `paste_text`).

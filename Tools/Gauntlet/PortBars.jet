@@ -601,14 +601,26 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
             return not_run("the fixtures cannot be copied: {copied.errors.trim()}")
         }
     }
-    report: "{cwd}.launch"
-    command := [String]{launcher.copy(), report.copy()}
+    report := ""
+    command := [String]{}
+    if launcher != "" {
+        report = "{cwd}.launch"
+        command.push(launcher.copy())
+        command.push(report.copy())
+    }
     command.extend(argv.copy())
     command.extend(case.args.copy())
     spec := process.cmd(command).cwd(cwd).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
     loop setting in inherited -> spec = spec.env(setting.name, setting.value)
     loop setting in case.env -> spec = spec.env(setting.name, setting.value)
-    receipt: spec.run() ?? return not_run("the launcher cannot start: {err}")
+    receipt: spec.run() ?? return not_run(if launcher != "" -> "the launcher cannot start: {err}" else -> "the program cannot start: {err}")
+    if launcher == "" {
+        if receipt.timed_out {
+            return Run{code: 124, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: 0, peak_bytes: 0, problem: ""}
+        }
+        code: if receipt.signal == .Val(sig) -> 128 + sig else -> receipt.code
+        return Run{code: code, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: 0, peak_bytes: 0, problem: ""}
+    }
     // The launcher's end line: exit code, wall ns, first stdout ns, peak
     // KiB, user us, system us, exec errno.
     end := [String]{}
@@ -1314,6 +1326,36 @@ bound_words: fn(list: [Token], start: Int, end: Int) -> [String] Never! {
         after: token_text(list, at + 1)
         if token.kind == .Word && (after == ":" || (after == "->" && ["(", ","].contains(token_text(list, at - 1)))) {
             out.push(token.text.copy())
+        }
+        if token.kind == .Word && token.text == "fn" && after == "(" {
+            depth := 0
+            inner := at + 1
+            expect_name := true
+            loop inner < end {
+                text: token_text(list, inner)
+                if text == "(" {
+                    depth += 1
+                    inner += 1
+                    next
+                }
+                if text == ")" {
+                    depth -= 1
+                    if depth == 0 -> break
+                    inner += 1
+                    next
+                }
+                if depth == 1 {
+                    if text == "," {
+                        expect_name = true
+                    } else if text == ":" {
+                        expect_name = false
+                    } else if expect_name && list[inner].kind == .Word {
+                        out.push(list[inner].text.copy())
+                        expect_name = false
+                    }
+                }
+                inner += 1
+            }
         }
         if token.kind == .Word && token.text == "loop" {
             head := at + 1
@@ -2338,6 +2380,43 @@ case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never!
     files.join(work, "{name}/case-{index + 1}-{SIDES[side]}")
 }
 
+// Runs only the untimed parity step of tool entry `name` of `repo`, without
+// building the C timing launcher or running timed rounds. Each case runs on
+// both sides in fresh copies of the fixtures and compares exit status and
+// expected output (via `check` when configured).
+judge_parity: fn(repo: String, name: String, jet: String, work: String) -[Env, Exec, FS, Time, Time.Wait]> Bar Never! {
+    entry := read_entry(repo, name)
+    if entry.problems.len() > 0 {
+        return Bar{name: "parity", pass: false, detail: "the entry cannot be judged: {entry.problems.join("; ")}"}
+    }
+    inherited: jet_env(jet)
+    programs: [[String]]{original_command(files.join(repo, entry.original)), [String]{jet.copy(), files.join(repo, entry.twin), "--"}}
+    fixtures: if entry.fixtures == "" -> "" else -> files.join(repo, "{entry.dir}/{entry.fixtures}")
+    expected := [String]{}
+    loop case in entry.cases {
+        expected.push(files.read(files.join(repo, "{entry.dir}/{case.expected}")) ?? "")
+    }
+    failures := [String]{}
+    identical := 0
+    loop index in 0..<entry.cases.len() {
+        same := true
+        loop side in 0..<2 {
+            raw: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), "")
+            check: entry.cases[index].check
+            run: if check == "" -> raw else -> checked(raw, files.join(repo, "{entry.dir}/{check}"), jet, entry.cases[index], inherited, case_dir(work, name, index, side))
+            why: run_failure(run, entry.cases[index], expected[index])
+            if why != "" {
+                same = false
+                failures.push("case {index + 1} {SIDES[side]}: {why}")
+            }
+        }
+        if same -> identical += 1
+    }
+    cases: entry.cases.len()
+    detail: if failures.len() == 0 -> "{cases}/{cases} cases do the job" else -> "{identical}/{cases} cases do the job; {failures.join("; ")}"
+    Bar{name: "parity", pass: failures.len() == 0, detail: detail}
+}
+
 // Judges the tool entry `name` of `repo` on every bar, running its programs
 // under `work` with `jet` and `runs` timing rounds.
 judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[Env, Exec, FS, Time, Time.Wait]> Report Never! {
@@ -2525,7 +2604,7 @@ work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
 cannot_run: fn(message: String) -[Exec, IO]> Never { process.fail(64, message) }
 
 usage: fn() -[Exec, IO]> Never {
-    cannot_run("usage: jet Tools/Gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR] [--measure]")
+    cannot_run("usage: jet Tools/Gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jobs N] [--jet PATH] [--repo DIR] [--measure | --parity]")
 }
 
 run: fn() {
@@ -2533,8 +2612,10 @@ run: fn() {
     repo := repo_root()
     only := ""
     runs := DEFAULT_RUNS
+    jobs := 4
     jet := process.env_get("JET") ?? "jet"
     measure := false
+    parity := false
     index := 0
     loop {
         if index >= args.len() -> break
@@ -2543,18 +2624,24 @@ run: fn() {
             index += 1
             next
         }
+        if args[index] == "--parity" {
+            parity = true
+            index += 1
+            next
+        }
         if index + 1 >= args.len() -> usage()
         value: args[index + 1]
         if {
             args[index] == "--entry" -> only = value.copy()
             args[index] == "--runs" -> runs = value.to_int() ?? usage()
+            args[index] == "--jobs" -> jobs = value.to_int() ?? usage()
             args[index] == "--jet" -> jet = value.copy()
             args[index] == "--repo" -> repo = absolute(value)
             else -> usage()
         }
         index += 2
     }
-    if runs < 1 -> usage()
+    if runs < 1 || jobs < 1 || (measure && parity) -> usage()
     if jet.contains("/") -> jet = absolute(jet)
     names := [String]{}
     if only != "" {
@@ -2572,6 +2659,22 @@ run: fn() {
             loop line in rows -> print(line)
         }
         if refused > 0 -> process.exit(1)
+        return
+    }
+    if parity {
+        work: work_dir("parity") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
+        results: if jobs > 1 && names.len() > 1 -> names.para_map(fn(name: String) { judge_parity(repo, name, jet, work) }, limit: jobs) else -> names.map(fn(name: String) { judge_parity(repo, name, jet, work) })
+        failed := 0
+        print("entry\tbar\tresult\tdetail")
+        loop at in 0..<names.len() {
+            bar: results[at]
+            result: if bar.pass -> "PASS" else -> "FAIL"
+            if !bar.pass -> failed += 1
+            print("{names[at]}\t{bar.name}\t{result}\t{bar.detail}")
+        }
+        files.remove_all(work) ?? ()
+        print("port parity: {names.len()} entries, {names.len() - failed} pass, {failed} fail")
+        if failed > 0 -> process.exit(1)
         return
     }
     work: work_dir("judge") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
@@ -3048,3 +3151,23 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     assert(tokens_bar(10, 8, [String]{}, "").pass)
     assert(!tokens_bar(10, 8, [String]{}, "the original cannot be read").pass)
 }
+
+#Test("untimed parity passes when both sides match expected and fails on a planted stale expected file") {
+    dir: work_dir("parity_test") ?? panic("a scratch directory cannot be made: {err}")
+    work: work_dir("parity_work") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/fx/three.py", "print(3)\n")
+    plant(dir, "Tools/fx/Three.jet", "run: fn() {{ print(3) }}\n")
+    plant_entry(dir, "clean", "Tools/fx/three.py", "Tools/fx/Three.jet", "")
+    plant_entry(dir, "stale", "Tools/fx/three.py", "Tools/fx/Three.jet", "")
+    plant(dir, "{ENTRIES_ROOT}/stale/expected/three.out", "stale\n")
+    jet: planted_jet()
+    passed: judge_parity(dir, "clean", jet, work)
+    assert(passed.pass, passed.detail)
+    assert_eq(passed.detail, "1/1 cases do the job")
+    failed: judge_parity(dir, "stale", jet, work)
+    assert(!failed.pass)
+    assert(failed.detail.contains("case 1 original") && failed.detail.contains("case 1 jet") && failed.detail.contains("expected \"stale\\n\""), failed.detail)
+    files.remove_all(dir) ?? ()
+    files.remove_all(work) ?? ()
+}
+

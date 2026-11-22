@@ -2511,9 +2511,9 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
         unit := source_units[loaded_module.source_unit_index]
         // Embedded Core modules have no authority root: their exact text is
         // the compiler-generated record the loader retained for them.
-        if jet_driver_unit_is_core(unit) {
+        if jet_driver_unit_is_embedded(unit) {
             if jet_driver_source_path_is_authorized(snapshot, unit.path) {
-                diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an embedded Core module aliases an authorized physical source", "Core library identities are distinct from immutable disk snapshots", "keep the `<corelib>/` origin for embedded Core sources"))
+                diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an embedded Core module aliases an authorized physical source", "Core library identities are distinct from immutable disk snapshots", "keep the embedded library origin for embedded Core sources"))
                 next
             }
             core_file: jet_driver_find_generated_source_file(generated_sources, unit.path, diagnostics) ?? {
@@ -3597,25 +3597,11 @@ jet_driver_bind_package_namespaces: fn(
     true
 }
 
-// Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
-// the Rust `Diagnostics.CORE_SOURCE_ROOT`. Core is library source, not the
-// user's program; no authorized disk file ever carries this prefix.
-JET_DRIVER_CORE_SOURCE_ROOT: "<corelib>"
-
-// A Core library module the loader placed in the graph (2531-2683). It has no
-// authority root. `file_index` selects its row in `request.core_sources`, or is
-// -1 for a Core module the host implements entirely, whose empty module keeps
-// every member a host row.
-jet_driver_unit_is_core: fn(unit: JetDriverSourceUnit) -> Bool Never! {
-    unit.root_index < 0 && unit.source_origin == SemaSourceOrigin.CompilerGenerated && unit.path.starts_with("{JET_DRIVER_CORE_SOURCE_ROOT}/")
-}
-
-// A Core source module's identity is its module name under the Core root
-// (`<corelib>/core.perf`), so its nominals are keyed
-// `<corelib>/core.perf.PerfError` wherever its file lives: renaming or
-// moving a Core file changes no identity and no runtime symbol.
+// An embedded library source module's identity is its module name under the
+// embedded library root, so renaming or moving its source file changes no
+// nominal identity and no runtime symbol.
 jet_driver_unit_module_identity: fn(unit: JetDriverSourceUnit) -> String Never! {
-    if !jet_driver_unit_is_core(unit) {
+    if !jet_driver_unit_is_embedded(unit) {
         return jet_driver_module_identity(unit.package_identity, unit.path)
     }
     if unit.file_index < 0 -> return unit.path
@@ -3677,7 +3663,7 @@ jet_driver_check_reserved_import: fn(declaration: ImportDecl, reserved: [String]
 jet_driver_check_package_languages: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> Bool {
     languages := [String]{}
     loop loaded in modules {
-        if loaded.source_unit_index < 0 || jet_driver_unit_is_core(source_units[loaded.source_unit_index]) {
+        if loaded.source_unit_index < 0 || jet_driver_unit_is_embedded(source_units[loaded.source_unit_index]) {
             next
         }
         loop item in loaded.program.items {
@@ -3696,7 +3682,7 @@ jet_driver_check_package_languages: fn(modules: [JetDriverLoadedModule], source_
     loop loaded in modules {
         if loaded.source_unit_index < 0 -> next
         unit: source_units[loaded.source_unit_index]
-        if jet_driver_unit_is_core(unit) -> next
+        if jet_driver_unit_is_embedded(unit) -> next
         scoped_imports := [JetDriverScopedImport]{}
         jet_driver_scoped_imports(loaded.program.imports, loaded.program.items, "", true, scoped_imports)
         loop scoped in scoped_imports {
@@ -4857,7 +4843,7 @@ jet_driver_generated_module_path: fn(package_identity: String, relative_path: St
 }
 
 jet_driver_source_unit_text: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> String? Never! {
-    if jet_driver_unit_is_core(unit) {
+    if unit.embedded {
         if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return None
         return Val(request.core_sources[unit.file_index].source())
     }
@@ -4911,10 +4897,10 @@ jet_driver_is_build_manifest: fn(relative_path: String, source: String) -> Bool 
     relative_path == "package.jet" && pkg_build_entry_source(source) != None
 }
 
-// `interface` is what the load has read of the host's Core interface: a
-// Core unit of a load that reads it takes its block along.
+// `interface` is what the load has read of the host's Core interface: an
+// embedded library unit of a load that reads it takes its block along.
 jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool, prelude_entry: Bool, interface: &JetDriverCoreInterfaceIndex) -> JetDriverParseJob {
-    if !jet_driver_unit_is_core(unit) {
+    if !unit.embedded {
         text: jet_driver_source_unit_text(request, unit) ?? return JetDriverParseJob.Missing
         // A `package.jet` unit parses as its `build: fn` declarations alone, at
         // their own byte offsets (the manifest blocks are blanked).
@@ -5699,6 +5685,8 @@ jet_driver_core_source_unit: fn(module_name: String, relative_path: String, file
         source_segments: jet_driver_unparsed_source_segments(path, source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
         source_origin: SemaSourceOrigin.CompilerGenerated,
         in_namespace: false,
+        embedded: true,
+        allow_reserved_identifiers: true,
     }
 }
 
@@ -5754,7 +5742,7 @@ jet_driver_core_unit: fn(
         }
     }
     loop (index, unit) in source_units {
-        if jet_driver_unit_is_core(unit) && unit.module_name == module_name -> return Val(index)
+        if jet_driver_unit_is_embedded(unit) && unit.module_name == module_name -> return Val(index)
     }
     loop (row_index, row) in core_sources {
         if row.owner != "" || row.module_name != module_name || (row.runtime && !importer_core) {
@@ -5767,7 +5755,7 @@ jet_driver_core_unit: fn(
             // an alias import may already have cataloged this part.
             scheduled := false
             loop unit in source_units {
-                if jet_driver_unit_is_core(unit) && unit.module_name == part.module_name {
+                if jet_driver_unit_is_embedded(unit) && unit.module_name == part.module_name {
                     scheduled = true
                 }
             }
@@ -5831,7 +5819,7 @@ jet_driver_core_part_unit: fn(source_units: &[JetDriverSourceUnit], queued: &[Bo
     loop (row_index, row) in core_sources {
         if row.owner == "" || row.alias != alias -> next
         loop (index, candidate) in source_units {
-            if jet_driver_unit_is_core(candidate) && candidate.module_name == row.module_name {
+            if jet_driver_unit_is_embedded(candidate) && candidate.module_name == row.module_name {
                 return Val(index)
             }
         }
@@ -5881,7 +5869,9 @@ jet_driver_importable_core_modules: fn() -> String Never! {
 jet_driver_core_module_position: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], module_name: String) -> Int? {
     loop (position, module_row) in modules {
         unit: source_units[module_row.source_unit_index]
-        if jet_driver_unit_is_core(unit) && unit.module_name == module_name -> return Val(position)
+        if jet_driver_unit_is_embedded(unit) && unit.module_name == module_name {
+            return Val(position)
+        }
     }
     None
 }
@@ -5897,7 +5887,7 @@ jet_driver_place_core_module: fn(modules: [JetDriverLoadedModule], source_units:
     owner: source_units[modules[position].source_unit_index].module_name
     loop (part_position, module_row) in modules {
         unit: source_units[module_row.source_unit_index]
-        if placed[part_position] || !jet_driver_unit_is_core(unit) || unit.file_index < 0 || unit.file_index >= core_sources.len() {
+        if placed[part_position] || !jet_driver_unit_is_embedded(unit) || unit.file_index < 0 || unit.file_index >= core_sources.len() {
             next
         }
         if core_sources[unit.file_index].owner == owner {
@@ -5944,7 +5934,7 @@ jet_driver_core_module_order: fn(modules: [JetDriverLoadedModule], source_units:
         direct.push(false)
     }
     loop module_row in modules {
-        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         loop declaration in module_row.program.imports {
             core_name: jet_driver_core_import_module(declaration) ?? next
             position: jet_driver_core_module_position(modules, source_units, core_name) ?? next
@@ -5977,13 +5967,13 @@ jet_driver_core_module_order: fn(modules: [JetDriverLoadedModule], source_units:
     }
     final_order := [Int]{}
     loop position in 0..<modules.len() {
-        if !jet_driver_unit_is_core(source_units[modules[position].source_unit_index]) {
+        if !jet_driver_unit_is_embedded(source_units[modules[position].source_unit_index]) {
             final_order.push(position)
         }
     }
     loop position in order -> final_order.push(position)
     loop position in 0..<modules.len() {
-        if jet_driver_unit_is_core(source_units[modules[position].source_unit_index]) && !placed[position] {
+        if jet_driver_unit_is_embedded(source_units[modules[position].source_unit_index]) && !placed[position] {
             final_order.push(position)
         }
     }
@@ -6011,17 +6001,17 @@ jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, 
 jet_driver_module_meta_needed: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule]) -> Bool Never! {
     names := [String:Bool]{}
     loop module_row in modules {
-        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         sema_module_meta_declared_names(module_row.program.items, module_row.declared_module, names)
     }
     if names.len() == 0 -> return false
     reads := [String:Bool]{}
     loop module_row in modules {
-        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         sema_module_meta_value_reads(jet_driver_source_unit_text(request, source_units[module_row.source_unit_index]) ?? "", names, reads)
     }
     loop module_row in modules {
-        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> next
+        if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         if sema_module_meta_carries(module_row.program.items, module_row.declared_module, reads) {
             return true
         }
@@ -6246,11 +6236,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // view into the list would dangle when the list grows, so the unit row and this snapshot
         // are independent.
         unit: source_units[source_unit_index].copy()
-        is_core: jet_driver_unit_is_core(unit)
+        embedded: jet_driver_unit_is_embedded(unit)
         is_runtime_entry: entry_module != "" && source_unit_index == (entry_index ?? 0)
         // A Core root (JetDriverCompileRequest.core_entry) imports as Core does.
-        is_core_entry: request.core_entry && source_unit_index == (entry_index ?? -1)
-        importer_core: is_core || is_runtime_entry || is_core_entry
+        embedded_entry: request.core_entry && source_unit_index == (entry_index ?? -1)
+        importer_core: embedded || is_runtime_entry || embedded_entry
         deferred := [JetDriverScopedImport]{}
         parsed_unit := parsed.pop() ?? JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
@@ -6281,8 +6271,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
 
         // A Core module (public module, private part or runtime unit) defers
         // its private imports until reached code spells their aliases.
-        defers: reach.enabled && is_core && !is_runtime_entry
-        if !is_core && !spells_program {
+        defers: reach.enabled && embedded && !is_runtime_entry
+        if !embedded && !spells_program {
             spells_program = if words == {
                 .Val(found) -> found.words.contains("program") || found.words.contains("compiler")
                 .None -> true
@@ -6317,7 +6307,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
         }
-        if !is_core && source_unit_index == (entry_index ?? -1) {
+        if !embedded && source_unit_index == (entry_index ?? -1) {
             sema_script_entry(program)
             if request.eval_entry -> sema_eval_entry_show(program)
             if jet_driver_bind_scheduler_provider(program, jet_driver_machine_profile(catalog.packages, unit.root_index)) && words != None {
@@ -6329,7 +6319,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
         // lowercase nominal alias.
-        if !is_core {
+        if !embedded {
             loop bare in CORE_BARE_SOURCE_MODULES {
                 if !demand.bare_names.contains(bare.name) -> next
                 module_name: core_bare_source_module(bare.name) ?? next
@@ -6349,7 +6339,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // reached: the compiler's own records (TypeInfo's `location` is a
         // SourceLocation) with every program, a Core module's records with
         // that module.
-        record_owner: if is_core -> unit.module_name.copy() else -> ""
+        record_owner: if embedded -> unit.module_name.copy() else -> ""
         loop record_demand in CORE_RECORD_SOURCE_DEMANDS {
             if record_demand.owner_module != record_owner -> next
             record_word: jet_driver_reach_word(reach, record_demand.type_name)
@@ -6390,7 +6380,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         // `input.csv<Row>()`: the encoding module an ambient `input` method
         // names owns its `__input_<method>` (core_input_method_modules).
-        if !is_core {
+        if !embedded {
             loop method in demand.input_methods {
                 loop module_name in core_input_method_modules(method) {
                     sourced := false
@@ -6429,7 +6419,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // A boundary typed literal (`DateTime{"…"}`) is checked by its owner
         // module's CheckedText impl, even when the caller has no import of
         // that module.
-        if !is_core {
+        if !embedded {
             loop module_name in demand.typed_head_modules {
                 if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
                 jet_driver_reach_open(reach, module_name)
@@ -6553,7 +6543,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     core_module: jet_driver_core_import_module(scoped.declaration)
                     if core_module == .Val(core_name) {
                         target_index = jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, span, diagnostics)
-                    } else if is_core {
+                    } else if embedded {
                         target_index = jet_driver_core_part_unit(source_units, queued, generated_records, request.core_sources, name)
                         if target_index == None {
                             // A name no cataloged part has and no module
@@ -6595,7 +6585,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             target_identity: module_intern(table, jet_driver_unit_module_identity(target_unit))
             // Core library modules import one another like the Rust loader's
             // transitive Core closure; only user module edges must be acyclic.
-            if !jet_driver_unit_is_core(target_unit) && jet_driver_module_reaches(module_edges, target_identity, module_identity) {
+            if !jet_driver_unit_is_embedded(target_unit) && jet_driver_module_reaches(module_edges, target_identity, module_identity) {
                 diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, table, module_intern(table, jet_driver_unit_module_identity(source_units[entry_index ?? 0])), target_identity, module_identity))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
             }
@@ -6689,7 +6679,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // Keep synthetic imports beside the program until every lookup on its
         // own items and imports has finished, then append them to it.
         synthetic_imports := [ImportDecl]{}
-        if !is_core {
+        if !embedded {
             loop item in program.items {
                 if item == .CodeModule(definition) {
                     if definition.body != None -> next
@@ -6741,7 +6731,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     // members; semantic preparation resolves `use x.[f]`.
                     if jet_driver_program_has_inline_module(program, module_alias) -> next
                     target_index := jet_driver_scoped_alias(aliases, module_alias, scoped.scope)
-                    if target_index == None && is_core {
+                    if target_index == None && embedded {
                         target_index = jet_driver_core_part_unit(source_units, queued, generated_records, request.core_sources, module_alias)
                         if target_index == .Val(core_index) && !queued[core_index] {
                             queued[core_index] = true
@@ -6829,7 +6819,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
-        if is_core {
+        if embedded {
             jet_driver_owned_parts(source_units, queued, pending, generated_records, request.core_sources, unit.module_name, scoped_imports)
         }
         loop synthetic in synthetic_imports -> program.imports.push(synthetic)
@@ -6854,7 +6844,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
 
         if reach.enabled {
-            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
+            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !embedded || is_runtime_entry)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
             if defers {
                 jet_driver_reach_core_demands(reach, reach_unit, demand, path_words, path_modules)
@@ -6994,7 +6984,7 @@ jet_driver_expand_imported_cli_entry: fn(modules: &[JetDriverLoadedModule], sour
     }
     imported := [Item]{}
     loop index in 0..<modules.len() {
-        if index == entry || jet_driver_unit_is_core(source_units[modules[index].source_unit_index]) {
+        if index == entry || jet_driver_unit_is_embedded(source_units[modules[index].source_unit_index]) {
             next
         }
         if sema_cli_entry_module_needed(targets, modules[index].program.items) {

@@ -22,6 +22,10 @@ use {
     draw: __core_ui_draw
     wayland: __core_ui_wayland
     sys: core.sys
+    json: core.encoding.json
+    rt_web: jet.runtime.web
+    ui_rt: jet.runtime.ui
+    world_rt: jet.runtime.testing
     internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
 }
 
@@ -2943,8 +2947,236 @@ priv html_name: fn(tree: UINode) -> String Never! {
     )
 }
 
+// ---- screen-local and saved state ----
+
+priv UI_SAVED_STORE: "ui-saved"
+priv UI_WEB_DEVICE_STORAGE: 23
+priv UI_SAVED_KEY_PREFIX: "jet:ui:saved:"
+
+priv UILocalBox: struct<T> {
+    value: T,
+}
+
+priv UISavedScope: struct {
+    scope: String,
+    next_slot: Int,
+    version: Int,
+}
+
+priv UISavedCell: struct {
+    bytes: [U8],
+}
+
+priv UI_SAVED_SCOPE: Shared{UISavedScope{scope: "screen", next_slot: 0, version: 0}}
+priv UI_SAVED_CELL: Shared{UISavedCell{bytes: [U8]{}}}
+
+/// Screen-local state created by `ui.local` or `ui.saved`. Reading `get()`
+/// returns the current value; `set(value)` updates it, persists it when
+/// created with `ui.saved`, and marks saved UI state changed for the next
+/// frame or page draw.
+Local: struct<T> {
+    priv key: String,
+    priv persisted: Bool,
+    priv slot: Shared<UILocalBox<T>>,
+    priv encode_value: (fn(T) -> String?)?,
+
+    get: fn(self) -> T Never! {
+        held: self.slot.guard_read()
+        held.value.value.copy()
+    }
+
+    set: fn(self, value: T) Never! {
+        ui_local_write<T>(self.slot, value.copy())
+        if self.persisted {
+            if self.encode_value == .Val(encoder) {
+                if encoder(value) == .Val(encoded) {
+                    ui_saved_store_set(self.key, encoded)
+                }
+            }
+        }
+        ui_saved_bump()
+    }
+}
+
+priv ui_local_write: fn<T>(slot: Shared<UILocalBox<T>>, value: T) Never! {
+    held := slot.guard_edit()
+    held.value.value = value
+}
+
+/// Screen-local state that lives for this run.
+local: fn<T>(initial: T) -> Local<T> Never! {
+    key: ui_saved_next_key(None)
+    Local<T>{key: key, persisted: false, slot: Shared{UILocalBox<T>{value: initial}}, encode_value: None}
+}
+
+/// Screen-local state that survives a reload on the web (via browser storage)
+/// and a restart on native platforms (via the app's device store under
+/// `$XDG_DATA_HOME`). Inside an App screen, each `ui.saved` call is scoped to
+/// the current screen and its position (or an explicit `key:`).
+saved: fn<T: [Encode, Decode]>(initial: T, key: String?{None}) -> Local<T> Never! {
+    slot_key: ui_saved_next_key(key)
+    loaded := initial
+    if ui_saved_store_get(slot_key) == .Val(raw) {
+        if json.decode<T>(raw) == .Ok(decoded) {
+            loaded = decoded
+        }
+    }
+    encoder: fn(value: T) -> String? {
+        if json.to_string<T>(value) == {
+            .Ok(text) -> Val(text)
+            .Err(_) -> None
+        }
+    }
+    Local<T>{key: slot_key, persisted: true, slot: Shared{UILocalBox<T>{value: loaded}}, encode_value: Val(encoder)}
+}
+
+// Opens a screen render pass for `scope`, resetting positional slot numbering.
+saved_scope_begin: fn(scope: String) Never! {
+    held := UI_SAVED_SCOPE.guard_edit()
+    held.value.scope = scope.copy()
+    held.value.next_slot = 0
+}
+
+// Ends the current screen render pass.
+saved_scope_end: fn() Never! {
+    held := UI_SAVED_SCOPE.guard_edit()
+    held.value.scope = "screen"
+    held.value.next_slot = 0
+}
+
+// Monotonic counter incremented each time a `Local.set` updates screen state.
+saved_version: fn() -> Int Never! {
+    held: UI_SAVED_SCOPE.guard_read()
+    held.value.version
+}
+
+// Clears persisted screen state in the current store (used by tests).
+saved_clear: fn() Never! {
+    #if #build.target.os == {
+        .Web -> {
+            _: ui_rt.device(UI_WEB_DEVICE_STORAGE, "session clear 0 ")
+            _: ui_rt.device(UI_WEB_DEVICE_STORAGE, "local clear 0 ")
+        }
+        .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
+            loop {
+                current: ui_saved_bytes_load()
+                if ui_saved_bytes_replace(current, [U8]{}) -> break
+            }
+        }
+    }
+}
+
+priv ui_saved_next_key: fn(explicit: String?) -> String Never! {
+    held := UI_SAVED_SCOPE.guard_edit()
+    scope: held.value.scope.copy()
+    if explicit == .Val(name) -> return "{scope}:{name}"
+    slot: held.value.next_slot
+    held.value.next_slot = slot + 1
+    "{scope}#{slot}"
+}
+
+priv ui_saved_bump: fn() Never! {
+    held := UI_SAVED_SCOPE.guard_edit()
+    held.value.version += 1
+}
+
+priv ui_saved_web_ask: fn(area: String, op: String, key: String, value: String) -> String? Never! {
+    full: "{UI_SAVED_KEY_PREFIX}{key}"
+    ui_rt.device(UI_WEB_DEVICE_STORAGE, "{area} {op} {full.bytes().len()} {full}{value}")
+}
+
+priv ui_saved_web_get: fn(key: String) -> String? Never! {
+    said: ui_saved_web_ask("session", "get", key, "") ?? ui_saved_web_ask("local", "get", key, "") ?? return None
+    fields: core.ui.host.provider_record_fields(said) ?? [String]{}
+    if fields.len() == 1 -> Val(fields[0].copy()) else -> None
+}
+
+priv ui_saved_web_set: fn(key: String, value: String) Never! {
+    if ui_saved_web_ask("session", "set", key, value) != None -> return
+    _: ui_saved_web_ask("local", "set", key, value)
+}
+
+priv ui_saved_bytes_load: fn() -> [U8] Never! {
+    if world_rt.world_store_load(UI_SAVED_STORE) == .Val(bytes) -> return bytes
+    if rt_web.device_load(UI_SAVED_STORE) == .Val(bytes) -> return bytes
+    held: UI_SAVED_CELL.guard_read()
+    held.value.bytes.copy()
+}
+
+priv ui_saved_bytes_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace(UI_SAVED_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    if rt_web.device_replace(UI_SAVED_STORE, expected, replacement) == .Val(replaced) {
+        return replaced
+    }
+    held := UI_SAVED_CELL.guard_edit()
+    if held.value.bytes != expected -> return false
+    held.value.bytes = replacement.move()
+    true
+}
+
+priv ui_saved_decode_map: fn(raw: [U8]) -> [String:String] Never! {
+    if raw.len() == 0 -> return [String:String]{}
+    text: String.from_bytes(raw) ?? return [String:String]{}
+    json.decode<[String:String]>(text) ?? [String:String]{}
+}
+
+priv ui_saved_store_get: fn(key: String) -> String? Never! {
+    #if #build.target.os == {
+        .Web -> { return ui_saved_web_get(key) }
+        .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
+            entries: ui_saved_decode_map(ui_saved_bytes_load())
+            return entries.get(key)
+        }
+    }
+}
+
+priv ui_saved_store_set: fn(key: String, encoded: String) Never! {
+    #if #build.target.os == {
+        .Web -> {
+            ui_saved_web_set(key, encoded)
+            return
+        }
+        .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
+            loop {
+                expected: ui_saved_bytes_load()
+                entries := ui_saved_decode_map(expected)
+                entries[key.copy()] = encoded.copy()
+                text: json.to_string<[String:String]>(entries) ?? return
+                if ui_saved_bytes_replace(expected, text.bytes()) -> return
+            }
+        }
+    }
+}
+
 #Test("an asset is named by its path from the calling file") {
     logo: asset("brand/logo.svg")
     assert_eq(logo.path, "brand/logo.svg")
     assert(logo == UIAsset{path: "brand/logo.svg"})
+}
+
+#Test("ui.saved persists screen-scoped values across render passes and advances the version") {
+    saved_clear()
+    before: saved_version()
+    saved_scope_begin("/tasks/7")
+    draft: saved("")
+    assert_eq(draft.get(), "")
+    draft.set("half-typed comment")
+    assert_eq(draft.get(), "half-typed comment")
+    saved_scope_end()
+    assert_eq(saved_version(), before + 1)
+
+    // Re-rendering the same screen restores the saved value.
+    saved_scope_begin("/tasks/7")
+    restored: saved("")
+    assert_eq(restored.get(), "half-typed comment")
+    saved_scope_end()
+
+    // Another screen keeps its own independent saved state.
+    saved_scope_begin("/tasks/8")
+    other: saved("fresh")
+    assert_eq(other.get(), "fresh")
+    saved_scope_end()
+    saved_clear()
 }

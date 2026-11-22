@@ -896,8 +896,12 @@ stat_from_row: fn(row: [Int]) -> Stat Never! {
     kind_code: row[0]
     owner := Int?{None}
     if row[7] >= 0 -> owner = Val(row[7])
+    modified: core.time.from_unix_nanoseconds(row[9])
+    changed: if row[10] == row[9] -> modified.copy() else -> core.time.from_unix_nanoseconds(row[10])
     created := DateTime?{None}
-    if row[11] == 1 -> created = Val(core.time.from_unix_nanoseconds(row[12]))
+    if row[11] == 1 {
+        created = Val(if row[12] == row[9] -> modified.copy() else if row[12] == row[10] -> changed.copy() else -> core.time.from_unix_nanoseconds(row[12]))
+    }
     Stat{
         size: row[1],
         kind: stat_kind(kind_code),
@@ -910,8 +914,8 @@ stat_from_row: fn(row: [Int]) -> Stat Never! {
         links: row[6],
         owner: owner,
         size_on_disk: row[8],
-        modified: core.time.from_unix_nanoseconds(row[9]),
-        changed: core.time.from_unix_nanoseconds(row[10]),
+        modified: modified,
+        changed: changed,
         created: created,
     }
 }
@@ -2008,13 +2012,53 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
         // The walk joins a child's name to its directory with `/`.
         children.push({key: "{entry.path}/", directory: entry.child})
     }
-    if entries.len() > 1 {
-        entries.sort_by(fn(left: WalkEntry, right: WalkEntry) { right.relative <=> left.relative })
-    }
-    if children.len() > 1 {
-        children.sort_by(fn(left: {key: String, directory: Int}, right: {key: String, directory: Int}) { right.key <=> left.key })
-    }
+    walk_sort_entries(entries)
+    walk_sort_children(children)
     Ok(WalkFrame{entries: entries, children: children, depth: depth})
+}
+
+priv walk_sort_entries: fn(entries: &[WalkEntry]) Never! {
+    n: entries.len()
+    if n <= 1 -> return
+    if n <= 32 {
+        i := 1
+        loop i < n {
+            if entries[i - 1].relative < entries[i].relative {
+                key: entries[i].copy()
+                j := i
+                loop j > 0 && entries[j - 1].relative < key.relative {
+                    entries[j] = entries[j - 1].copy()
+                    j -= 1
+                }
+                entries[j] = key
+            }
+            i += 1
+        }
+        return
+    }
+    entries.sort_by(fn(left: WalkEntry, right: WalkEntry) { right.relative <=> left.relative })
+}
+
+priv walk_sort_children: fn(children: &[{key: String, directory: Int}]) Never! {
+    n: children.len()
+    if n <= 1 -> return
+    if n <= 32 {
+        i := 1
+        loop i < n {
+            if children[i - 1].key < children[i].key {
+                key: children[i].copy()
+                j := i
+                loop j > 0 && children[j - 1].key < key.key {
+                    children[j] = children[j - 1].copy()
+                    j -= 1
+                }
+                children[j] = key
+            }
+            i += 1
+        }
+        return
+    }
+    children.sort_by(fn(left: {key: String, directory: Int}, right: {key: String, directory: Int}) { right.key <=> left.key })
 }
 
 // One directory of a walk being read: the entries and child directories it

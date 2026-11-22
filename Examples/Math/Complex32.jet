@@ -1,0 +1,28 @@
+// Complex32 is the F32 specialization of the internal generic complex
+// implementation that backs Complex. Complex.from_complex widens losslessly;
+// Complex32.from_complex narrows fallibly with F32.from_float's policy.
+narrow_or_zero: fn(z: Complex) -> Complex32 Err! {
+    small: Complex32.from_complex(z) ?? return Err(err)
+    Ok(small)
+}
+
+run: fn() {
+    z: Complex{real: 3.0, imaginary: 4.0}
+    s: Complex32{real: 3.0, imaginary: 4.0}
+    wide: Complex.from_complex(s)
+    small: narrow_or_zero(z) ?? panic("in-range value narrows")
+
+    print("s: {s}")
+    print("conj: {s.conj()}")
+    print("abs: {s.abs()}")
+    print("wide: {wide}")
+    print("small: {small}")
+    print("sum: {s + Complex32{real: 1.0, imaginary: -2.0}}")
+    print("mul: {s * Complex32{real: 2.0, imaginary: 0.0}}")
+    print("scaled: {F32{2.0} * s}")
+    print("sqrt: {Complex32{real: -4.0, imaginary: 0.0}.sqrt()}")
+    print("exp_zero: {Complex32{real: 0.0, imaginary: 0.0}.exp()}")
+    print("ln_one: {Complex32{real: 1.0, imaginary: 0.0}.ln()}")
+    // Complex32 runs in F32 dynamic range rather than calculating in Float.
+    print("exp100_f32_inf: {Complex32{real: 100.0, imaginary: 0.0}.exp().real == F32.INFINITY}")
+}

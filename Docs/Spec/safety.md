@@ -6432,14 +6432,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/CSV.jet",
-      "line": 1099,
+      "line": 1104,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/CSV.jet",
-      "line": 1263,
+      "line": 1268,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -12842,8 +12842,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CBORStream.jet | 357:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/CSV.jet | 1099:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/CSV.jet | 1263:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/CSV.jet | 1104:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/CSV.jet | 1268:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 617:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/JSON.jet | 1323:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/JSON.jet | 1328:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |

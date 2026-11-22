@@ -1,0 +1,15 @@
+// Complex.conj() and Complex32.conj() return the conjugate at the value's own
+// precision, negating the imaginary component (including signed zeros).
+run: fn() {
+    z: Complex{real: 3.0, imaginary: 4.0}
+    print(z.conj())
+    print(z.conj().conj())
+
+    s: Complex32{real: 3.0, imaginary: 4.0}
+    print(s.conj())
+    print(s.conj().conj())
+
+    // Signed zero flips sign under scalar negation.
+    print(Complex{real: 1.0, imaginary: 0.0}.conj())
+    print(Complex32{real: 1.0, imaginary: -0.0}.conj())
+}
