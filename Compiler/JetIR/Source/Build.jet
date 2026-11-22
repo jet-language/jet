@@ -3996,30 +3996,29 @@ ir_recursion_drop_slots: fn(f: &IRFunction, written: [Int]) Never! {
         s: f.scattered[k]
         if s >= min_w -> f.scattered[k] = renamed[s]
     }
-    types := [Int]{}
-    kinds := [IRSlotKind]{}
-    names := [Int]{}
-    lines := [Int]{}
-    fixed := [Bool]{}
-    sites := [Int]{}
-    formals := [Bool]{}
+    write := 0
     loop slot in 0..<count {
         if dropped[slot] -> next
-        types.push(f.slot_type[slot])
-        kinds.push(f.slot_kind[slot])
-        names.push(f.slot_name[slot])
-        lines.push(f.slot_line[slot])
-        fixed.push(f.slot_fixed[slot])
-        sites.push(f.slot_site[slot])
-        formals.push(f.slot_formal[slot])
+        if write != slot {
+            f.slot_type[write] = f.slot_type[slot]
+            f.slot_kind[write] = f.slot_kind[slot]
+            f.slot_name[write] = f.slot_name[slot]
+            f.slot_line[write] = f.slot_line[slot]
+            f.slot_fixed[write] = f.slot_fixed[slot]
+            f.slot_site[write] = f.slot_site[slot]
+            f.slot_formal[write] = f.slot_formal[slot]
+        }
+        write += 1
     }
-    f.slot_type = types.move()
-    f.slot_kind = kinds.move()
-    f.slot_name = names.move()
-    f.slot_line = lines.move()
-    f.slot_fixed = fixed.move()
-    f.slot_site = sites.move()
-    f.slot_formal = formals.move()
+    loop f.slot_type.len() > kept {
+        _ := f.slot_type.pop()
+        _ := f.slot_kind.pop()
+        _ := f.slot_name.pop()
+        _ := f.slot_line.pop()
+        _ := f.slot_fixed.pop()
+        _ := f.slot_site.pop()
+        _ := f.slot_formal.pop()
+    }
 }
 
 // Clears the drop of the slot a field of `role` holds.

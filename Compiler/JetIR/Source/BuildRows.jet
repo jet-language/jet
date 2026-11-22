@@ -1,0 +1,598 @@
+// ---------------------------------------------------------------------------
+// Rows<T> (core.collections): true per-field column storage (SoA).
+//
+// When `T` is a concrete Aggregate struct with at least one non-boxed stored
+// field, `Rows<T>` lays out in IR as one inline 24-byte `[F]` column List per
+// stored field of `T` (in field declaration order, 24 bytes apart) instead of
+// a single `__rows: [T]` list. Every aggregate copy, drop, clone, share,
+// freeze and equality operation operates directly on the column lists.
+//
+//   - `Rows<T>{}` zero-initializes every column header with no allocation.
+//   - `table.add(v)` appends each field of `v` into its column in O(1)
+//     amortized, moving owned fields without extra refcount traffic.
+//   - `table[row].field` reads or writes only column `field` at `row.__slot`.
+//   - `table[row]` gathers or scatters all columns after a single bounds check.
+//   - `table.field` returns the contiguous `[F]` column directly via one
+//     Offset (zero loop, zero allocation, zero element copy).
+use {
+    jet_foundation.[
+        BodyStructFieldValue,
+        FnBody,
+        Span,
+        SymbolID,
+        TBinaryOp,
+        TBuiltinOp,
+        TCLIBinding,
+        TComptimeField,
+        TComptimeValue,
+        TConstantDef,
+        TDeclarationOwnership,
+        TGenericParam,
+        TImplDef,
+        TSerdeAttribute,
+        TTypeDef,
+        TTypeDefKind,
+        Type,
+        TypeTupleField,
+        module_none,
+        symbol_table,
+    ]
+    jet_sema.[sema_type_def_instance_type]
+}
+
+// Resolved columnar layout for a concrete `Rows<T>`. `col_members` and
+// `elem_members` are 1-to-1 in `T`'s stored field declaration order.
+IRRowsColumns: struct {
+    elem_ty: Type,
+    elem_row: Int,
+    elem_members: [IRMember],
+    col_members: [IRMember],
+}
+
+// Whether type definition `row` in `p` is Core's `Rows<T>` (a 1-parameter
+// struct whose sole stored field is the reserved `__rows` list).
+ir_rows_is_core_def: fn(p: IRProgram, row: Int) -> Bool Never! {
+    definition: p.types[row]
+    if definition.generic_params.len() != 1 -> return false
+    if definition.kind == .Struct(fields, _) {
+        stored := 0
+        has_rows := false
+        loop field in fields {
+            if field.computed -> next
+            stored += 1
+            if field.name == "__rows" -> has_rows = true
+        }
+        return stored == 1 && has_rows
+    }
+    false
+}
+
+// The concrete struct definition row for `elem_ty` when `Rows<elem_ty>` qualifies
+// for per-field column storage; None for non-structs, empty structs, special
+// runtime records, or structs with boxed recursive edges.
+ir_rows_element_def: fn(p: IRProgram, elem_ty: Type) -> Int? Never! {
+    untagged: ir_untag(elem_ty)
+    nominal: ir_nominal_name(untagged) ?? return None
+    elem_def: ir_type_def(p, nominal) ?? return None
+    if ir_rows_is_core_def(p, elem_def) -> return None
+    if ir_default_err(p, elem_ty) || ir_reactive_type(p, elem_ty) || ir_host_value_held(p, elem_ty) {
+        return None
+    }
+    definition: p.types[elem_def]
+    if definition.boxed_edges.len() > 0 -> return None
+    if definition.kind == .Struct(fields, _) {
+        stored := 0
+        loop field in fields {
+            if !field.computed -> stored += 1
+        }
+        if stored > 0 -> return Val(elem_def)
+    }
+    None
+}
+
+// Column members (`[F_0], [F_1], ...`, 24 bytes each) for `Rows<elem_ty>`
+// during struct layout (`ir_struct_members_in`). None when `Rows<elem_ty>`
+// keeps its default single-list layout.
+ir_rows_struct_members_in: fn(m: &IRModule, p: IRProgram, elem_ty: Type, laying: [String], resolve: Bool) -> [IRMember]? Never! {
+    elem_def: ir_rows_element_def(p, elem_ty) ?? return None
+    elem_row: ir_value_type_in(m, p, elem_ty, laying) ?? return None
+    if m.types[elem_row].kind != .Aggregate -> return None
+    elem_args: ir_type_args(ir_untag(elem_ty))
+    definition: p.types[elem_def]
+    if definition.kind == .Struct(fields, _) {
+        col_members := [IRMember]{}
+        offset := 0
+        loop field in fields {
+            if field.computed -> next
+            field_ty: sema_type_def_instance_type(p.types[elem_def], elem_args, field.ty)
+            col_ty: Type.List{element: field_ty}
+            col_row: ir_value_type_in(m, p, col_ty, laying) ?? return None
+            if m.types[col_row].kind != .Aggregate || m.types[col_row].size != 24 -> return None
+            col_members.push(IRMember{name: field.name, offset: offset, ty: col_row, boxed: false, redact: field.redact})
+            offset += 24
+        }
+        if col_members.len() > 0 -> return Val(col_members)
+    }
+    None
+}
+
+// Columnar description of `ty` if it is a columnar `Rows<T>`; None otherwise.
+ir_rows_columnar: fn(m: &IRModule, p: IRProgram, ty: Type) -> IRRowsColumns? Never! {
+    untagged: ir_untag(ty)
+    if untagged == .Apply(name, args) {
+        if args.len() != 1 -> return None
+        def: ir_type_def(p, name) ?? return None
+        if !ir_rows_is_core_def(p, def) -> return None
+        elem_ty: args[0]
+        elem_def: ir_rows_element_def(p, elem_ty) ?? return None
+        elem_row: ir_value_type(m, p, elem_ty) ?? return None
+        if m.types[elem_row].kind != .Aggregate -> return None
+        elem_members: ir_struct_members(m, p, elem_def, ir_type_args(ir_untag(elem_ty))) ?? return None
+        if elem_members.len() == 0 -> return None
+        loop member in elem_members {
+            if member.boxed -> return None
+        }
+        col_members: ir_struct_members(m, p, def, args) ?? return None
+        if col_members.len() != elem_members.len() -> return None
+        return Val(IRRowsColumns{elem_ty: elem_ty, elem_row: elem_row, elem_members: elem_members, col_members: col_members})
+    }
+    None
+}
+
+// If `node_id` is `.Field(table, "__rows")` on a columnar `Rows<T>`, returns
+// `table`; else -1.
+ir_rows_backing_table: fn(m: &IRModule, p: IRProgram, b: IRBuilder, node_id: Int) -> Int Never! {
+    if ir_body_node(p, b, node_id).kind == .Field(receiver, field) {
+        if field.name == "__rows" && ir_rows_columnar(m, p, ir_ty(p, b, receiver)) != None {
+            return receiver
+        }
+    }
+    -1
+}
+
+// Index of column `name` in `info.col_members`, or -1 when absent.
+ir_rows_col_index: fn(info: IRRowsColumns, name: String) -> Int Never! {
+    loop (i, col) in info.col_members {
+        if col.name == name -> return i
+    }
+    -1
+}
+
+// Evaluates `index` once, converts to a native word index, and checks bounds
+// once against `col0`. Returns the native index word slot (-1 on failure).
+ir_rows_checked_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, col0: Int, index: Int, span: Span) -> Int Never! {
+    position: ir_expr(m, p, b, index)
+    if ir_failed(b) || position < 0 -> return -1
+    native: ir_native_index(m, b, position, span)
+    if ir_failed(b) -> return -1
+    if b.bounds != .Off {
+        length: ir_list_length(m, b, col0)
+        bad: ir_index_order(m, b, IROp.Ge, native, length)
+        ir_open_if(b.f, bad, b.line)
+        if b.bounds == .Report -> ir_list_bounds_report(m, b, length, native) else {
+            ir_list_bounds_stop(m, p, b, length, native, span)
+        }
+        ir_end(b.f, b.line)
+    }
+    native
+}
+
+// `Rows<T>{}` (or `Rows<T>{__rows: xs}`): zero-initializes every column header
+// directly on the stack; if a non-empty `__rows` list is supplied, scatters its
+// rows into the columns.
+ir_rows_struct_lit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Int, info: IRRowsColumns, fields: [BodyStructFieldValue], span: Span) -> Int Never! {
+    storage: ir_fresh_temp(m, b, ty)
+    ir_emit(b.f, IROp.StackAddress, storage, m.types[ty].size, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    loop col in info.col_members {
+        ir_emit(b.f, IROp.Store, -1, storage, col.offset, zero, b.line)
+        ir_emit(b.f, IROp.Store, -1, storage, col.offset + 8, zero, b.line)
+        ir_emit(b.f, IROp.Store, -1, storage, col.offset + 16, zero, b.line)
+    }
+    if fields.len() == 1 && fields[0].field.name == "__rows" && !ir_empty_list_literal(p, b, fields[0].value) {
+        src_list: ir_expr(m, p, b, fields[0].value)
+        if ir_failed(b) || src_list < 0 -> return -1
+        length: ir_list_length(m, b, src_list)
+        data: ir_list_data(m, b, src_list)
+        stride: ir_list_stride(m, info.elem_row)
+        idx: ir_word_const(m, b, 0)
+        one: ir_word_const(m, b, 1)
+        ir_open(b.f, IROp.Block, b.line)
+        ir_open(b.f, IROp.Loop, b.line)
+        done: ir_bool_op(m, b, IROp.Ge, idx, length)
+        ir_emit(b.f, IROp.BrIf, -1, done, 1, -1, b.line)
+        elem_ptr: ir_element_address(m, b, data, idx, stride)
+        elem_val: ir_load_at(m, b, elem_ptr, 0, info.elem_row)
+        loop i in 0..<info.col_members.len() {
+            col_addr: ir_member_read(m, b, storage, info.col_members[i])
+            field_val: ir_member_read(m, b, elem_val, info.elem_members[i])
+            ir_list_push(m, p, b, col_addr, info.elem_members[i].ty, field_val)
+        }
+        ir_emit(b.f, IROp.Add, idx, idx, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        ir_release(m, b, src_list)
+    }
+    storage
+}
+
+// Builtin operations on `table.__rows` (inside Core `Rows<T>` methods):
+// `.len()`, `.is_empty()`, and `.push(value)`. Returns None when `receiver` is
+// not a columnar `Rows<T>.__rows` field.
+ir_rows_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int? Never! {
+    table: ir_rows_backing_table(m, p, b, receiver)
+    if table < 0 -> return None
+    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    if operation == .LenList && args.len() == 0 {
+        table_slot: ir_expr(m, p, b, table)
+        if ir_failed(b) || table_slot < 0 -> return Val(-1)
+        col0: ir_member_read(m, b, table_slot, info.col_members[0])
+        int_row: ir_type_row(m, Type.Int) ?? 0
+        length: ir_temp(m, b, int_row)
+        ir_emit(b.f, IROp.Load, length, col0, 0, IR_LOAD_LENGTH, b.line)
+        ir_release(m, b, table_slot)
+        return Val(length)
+    }
+    if operation == .IsEmpty && args.len() == 0 {
+        table_slot: ir_expr(m, p, b, table)
+        if ir_failed(b) || table_slot < 0 -> return Val(-1)
+        col0: ir_member_read(m, b, table_slot, info.col_members[0])
+        word_row: ir_word_row(m)
+        length: ir_temp(m, b, word_row)
+        ir_emit(b.f, IROp.Load, length, col0, 0, IR_LOAD_LENGTH, b.line)
+        zero: ir_word_const(m, b, 0)
+        empty: ir_bool_op(m, b, IROp.Eq, length, zero)
+        ir_release(m, b, table_slot)
+        return Val(empty)
+    }
+    if operation == .Push && args.len() == 1 {
+        val: ir_value_as(m, p, b, args[0], info.elem_row, span)
+        if ir_failed(b) || val < 0 -> return Val(-1)
+        table_slot: ir_write_base(m, p, b, table, span)
+        if ir_failed(b) || table_slot < 0 -> return Val(-1)
+        moving: b.fresh[val]
+        loop i in 0..<info.col_members.len() {
+            col_addr: ir_member_read(m, b, table_slot, info.col_members[i])
+            ir_make_unique(m, p, b, col_addr)
+            field_val: ir_member_read(m, b, val, info.elem_members[i])
+            if moving && ir_has_drop(m, b, field_val) -> b.fresh[field_val] = true
+            ir_list_push(m, p, b, col_addr, info.elem_members[i].ty, field_val)
+        }
+        if moving {
+            ir_close_disarm(b, val)
+            b.fresh[val] = false
+        } else { ir_release(m, b, val) }
+        return Val(-1)
+    }
+    None
+}
+
+// `table[row].field` direct single-column read: loads only column `field` at
+// `row.__slot` without materializing the full `T` struct.
+ir_rows_field_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, field_name: String, span: Span) -> Int? Never! {
+    if ir_body_node(p, b, receiver).kind == .Index(base, index, kind, _, _, _) {
+        if kind != .List -> return None
+        table: ir_rows_backing_table(m, p, b, base)
+        if table < 0 -> return None
+        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+        ci: ir_rows_col_index(info, field_name)
+        if ci < 0 -> return None
+        table_slot: ir_expr(m, p, b, table)
+        if ir_failed(b) || table_slot < 0 -> return Val(-1)
+        col_addr: ir_member_read(m, b, table_slot, info.col_members[ci])
+        elem_addr: ir_checked_element(m, p, b, col_addr, index, info.elem_members[ci].ty, span)
+        if ir_failed(b) -> return Val(-1)
+        read: ir_load_at(m, b, elem_addr, 0, info.elem_members[ci].ty)
+        return Val(ir_end_read_base(m, p, b, table_slot, read, span))
+    }
+    None
+}
+
+// `table[row]` full-row read: single bounds check on column 0, gathers all
+// column values at `slot` into a fresh stack `T`.
+ir_rows_row_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, span: Span) -> Int? Never! {
+    table: ir_rows_backing_table(m, p, b, base)
+    if table < 0 -> return None
+    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    table_slot: ir_expr(m, p, b, table)
+    if ir_failed(b) || table_slot < 0 -> return Val(-1)
+    col0: ir_member_read(m, b, table_slot, info.col_members[0])
+    native: ir_rows_checked_index(m, p, b, col0, index, span)
+    if ir_failed(b) || native < 0 -> return Val(-1)
+    out: ir_fresh_temp(m, b, info.elem_row)
+    ir_emit(b.f, IROp.StackAddress, out, m.types[info.elem_row].size, 8, -1, b.line)
+    loop i in 0..<info.col_members.len() {
+        col_i: ir_member_read(m, b, table_slot, info.col_members[i])
+        data: ir_list_data(m, b, col_i)
+        stride: ir_list_stride(m, info.elem_members[i].ty)
+        elem_addr: ir_element_address(m, b, data, native, stride)
+        val_i: ir_load_at(m, b, elem_addr, 0, info.elem_members[i].ty)
+        ir_member_write(m, p, b, out, info.elem_members[i], val_i, -1)
+    }
+    ir_release(m, b, table_slot)
+    Val(out)
+}
+
+// `table[row].field (op)= value`: writes directly to column `field` at `slot`.
+ir_rows_field_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, field_name: String, op: TBinaryOp?, value: Int, span: Span) -> Bool Never! {
+    if ir_body_node(p, b, receiver).kind == .Index(base, index, kind, _, _, _) {
+        if kind != .List -> return false
+        table: ir_rows_backing_table(m, p, b, base)
+        if table < 0 -> return false
+        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return false
+        ci: ir_rows_col_index(info, field_name)
+        if ci < 0 -> return false
+        col_elem_row: info.elem_members[ci].ty
+        value_ty: ir_ty(p, b, value)
+        slot: ir_value_as(m, p, b, value, col_elem_row, span)
+        if ir_failed(b) -> return true
+        table_addr: ir_write_base(m, p, b, table, span)
+        if ir_failed(b) || table_addr < 0 -> return true
+        col_addr: ir_member_read(m, b, table_addr, info.col_members[ci])
+        ir_make_unique(m, p, b, col_addr)
+        elem_addr: ir_checked_element(m, p, b, col_addr, index, col_elem_row, span)
+        if ir_failed(b) || slot < 0 -> return true
+        ir_assign_at(m, p, b, elem_addr, col_elem_row, op, slot, value_ty, false, span)
+        return true
+    }
+    false
+}
+
+// `table[row] = value`: single bounds check, scatters every field of `value`
+// into its column at `slot`.
+ir_rows_row_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, op: TBinaryOp?, value: Int, span: Span) -> Bool Never! {
+    if op != None -> return false
+    table: ir_rows_backing_table(m, p, b, base)
+    if table < 0 -> return false
+    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return false
+    val: ir_value_as(m, p, b, value, info.elem_row, span)
+    if ir_failed(b) || val < 0 -> return true
+    table_addr: ir_write_base(m, p, b, table, span)
+    if ir_failed(b) || table_addr < 0 -> return true
+    col0: ir_member_read(m, b, table_addr, info.col_members[0])
+    native: ir_rows_checked_index(m, p, b, col0, index, span)
+    if ir_failed(b) || native < 0 -> return true
+    moving: b.fresh[val]
+    loop i in 0..<info.col_members.len() {
+        col_i: ir_member_read(m, b, table_addr, info.col_members[i])
+        ir_make_unique(m, p, b, col_i)
+        data: ir_list_data(m, b, col_i)
+        elem_row: info.elem_members[i].ty
+        stride: ir_list_stride(m, elem_row)
+        elem_addr: ir_element_address(m, b, data, native, stride)
+        val_i: ir_member_read(m, b, val, info.elem_members[i])
+        if moving && ir_has_drop(m, b, val_i) -> b.fresh[val_i] = true
+        ir_assign_at(m, p, b, elem_addr, elem_row, None, val_i, info.elem_ty, false, span)
+    }
+    if moving {
+        ir_close_disarm(b, val)
+        b.fresh[val] = false
+    } else { ir_release(m, b, val) }
+    true
+}
+
+// `&table[row].field` write place address: directly addresses column `field` at
+// `slot` after making only that column unique.
+ir_rows_field_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, field_name: String, backs: &[IRWriteBack], span: Span) -> Int? Never! {
+    if ir_body_node(p, b, receiver).kind == .Index(base, index, kind, _, _, _) {
+        if kind != .List -> return None
+        table: ir_rows_backing_table(m, p, b, base)
+        if table < 0 -> return None
+        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+        ci: ir_rows_col_index(info, field_name)
+        if ci < 0 -> return None
+        table_addr: ir_place_address(m, p, b, table, backs, span)
+        if ir_failed(b) || table_addr < 0 -> return Val(-1)
+        col_addr: ir_member_read(m, b, table_addr, info.col_members[ci])
+        ir_make_unique(m, p, b, col_addr)
+        elem_row: info.elem_members[ci].ty
+        elem_addr: ir_checked_element(m, p, b, col_addr, index, elem_row, span)
+        if ir_failed(b) -> return Val(elem_addr)
+        address_row: if m.types[elem_row].kind == .Aggregate -> elem_row else -> ir_pointer_row(m)
+        address: ir_temp(m, b, address_row)
+        ir_emit(b.f, IROp.Offset, address, elem_addr, 0, -1, b.line)
+        return Val(address)
+    }
+    None
+}
+
+// Zero-copy column view (`table.field`): recognizes Sema's collecting-loop
+// inline block `loop __row in table.__rows -> __row.field` on a columnar
+// `Rows<T>` and returns `Offset(table, col.offset)` directly with no loop,
+// no allocation, and no element copy.
+ir_rows_column_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], span: Span) -> Int? Never! {
+    if body.len() != 3 -> return None
+    collect_name := ""
+    if ir_body_stmt(p, b, body[0]) == .Let(local, _, init, _, _, _) {
+        if !ir_empty_list_literal(p, b, init) -> return None
+        collect_name = local.name
+    } else { return None }
+    table := -1
+    col_field := ""
+    if ir_body_stmt(p, b, body[1]) == .ForIn(_, row_var, var2, _, collection, step, _, _, _, _, loop_body, _) {
+        if var2 != None || step != None || loop_body.len() != 1 -> return None
+        table = ir_rows_backing_table(m, p, b, collection)
+        if table < 0 -> return None
+        if ir_body_stmt(p, b, loop_body[0]) == .ExprStmt(push_node, _) {
+            if ir_body_node(p, b, push_node).kind == .BuiltinMethod(push_recv, op, push_args) {
+                if op != .Push || push_args.len() != 1 -> return None
+                if ir_body_node(p, b, push_recv).kind == .Local(recv_local) {
+                    if recv_local.name != collect_name -> return None
+                } else { return None }
+                if ir_body_node(p, b, push_args[0]).kind == .Field(item_recv, field) {
+                    if ir_body_node(p, b, item_recv).kind == .Local(item_local) {
+                        if item_local.name != row_var.name -> return None
+                        col_field = field.name
+                    } else { return None }
+                } else { return None }
+            } else { return None }
+        } else { return None }
+    } else { return None }
+    if ir_body_stmt(p, b, body[2]) == .ExprStmt(tail, _) {
+        tail_inner: if ir_body_node(p, b, tail).kind == .Move(inner) -> inner else -> tail
+        if ir_body_node(p, b, tail_inner).kind == .Local(tail_local) {
+            if tail_local.name != collect_name -> return None
+        } else { return None }
+    } else { return None }
+    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    ci: ir_rows_col_index(info, col_field)
+    if ci < 0 -> return None
+    table_slot: ir_expr(m, p, b, table)
+    if ir_failed(b) || table_slot < 0 -> return Val(-1)
+    col_slot: ir_member_read(m, b, table_slot, info.col_members[ci])
+    Val(ir_end_read_base(m, p, b, table_slot, col_slot, span))
+}
+
+// Fallback materialization of `table.__rows` as a `[T]` list if any code reads
+// the backing list directly outside `len`, `is_empty`, `push`, indexing, or
+// column views.
+ir_rows_materialize_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list_ty: Type, table: Int, info: IRRowsColumns, span: Span) -> Int Never! {
+    list_row: ir_value_type(m, p, list_ty) ?? return ir_type_fail(b, span, list_ty)
+    table_slot: ir_expr(m, p, b, table)
+    if ir_failed(b) || table_slot < 0 -> return -1
+    out: ir_fresh_temp(m, b, list_row)
+    ir_emit(b.f, IROp.StackAddress, out, 24, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, out, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, out, 8, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, out, 16, zero, b.line)
+    col0: ir_member_read(m, b, table_slot, info.col_members[0])
+    length: ir_list_length(m, b, col0)
+    idx: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    ir_open(b.f, IROp.Block, b.line)
+    ir_open(b.f, IROp.Loop, b.line)
+    done: ir_bool_op(m, b, IROp.Ge, idx, length)
+    ir_emit(b.f, IROp.BrIf, -1, done, 1, -1, b.line)
+    row_tmp: ir_fresh_temp(m, b, info.elem_row)
+    ir_emit(b.f, IROp.StackAddress, row_tmp, m.types[info.elem_row].size, 8, -1, b.line)
+    loop i in 0..<info.col_members.len() {
+        col_i: ir_member_read(m, b, table_slot, info.col_members[i])
+        data: ir_list_data(m, b, col_i)
+        stride: ir_list_stride(m, info.elem_members[i].ty)
+        elem_addr: ir_element_address(m, b, data, idx, stride)
+        val_i: ir_load_at(m, b, elem_addr, 0, info.elem_members[i].ty)
+        ir_member_write(m, p, b, row_tmp, info.elem_members[i], val_i, -1)
+    }
+    ir_list_push(m, p, b, out, info.elem_row, row_tmp)
+    ir_release(m, b, row_tmp)
+    ir_emit(b.f, IROp.Add, idx, idx, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_release(m, b, table_slot)
+    out
+}
+
+// Transposes a comptime `Rows<T>{__rows: [...]}` value into per-column
+// `[F_i]` comptime fields matching the columnar IR layout. None if `ty` is not
+// a columnar `Rows<T>` or `fields` does not hold `__rows`.
+ir_rows_comptime_fields: fn(m: &IRModule, p: IRProgram, ty: Type, fields: [TComptimeField]) -> [TComptimeField]? Never! {
+    if fields.len() != 1 || fields[0].name != "__rows" -> return None
+    info: ir_rows_columnar(m, p, ty) ?? return None
+    if fields[0].value == .List(items) {
+        columns := [[TComptimeValue]]{}
+        loop _ in info.col_members -> columns.push([TComptimeValue]{})
+        loop item in items {
+            if item == .Struct(_, row_fields) {
+                loop ci in 0..<info.col_members.len() {
+                    col_name: info.col_members[ci].name
+                    found := false
+                    loop rf in row_fields {
+                        if rf.name == col_name {
+                            columns[ci].push(rf.value)
+                            found = true
+                            break
+                        }
+                    }
+                    if !found -> return None
+                }
+            } else { return None }
+        }
+        out := [TComptimeField]{}
+        loop ci in 0..<info.col_members.len() {
+            out.push(TComptimeField{name: info.col_members[ci].name, value: TComptimeValue.List{values: columns[ci]}})
+        }
+        return Val(out)
+    }
+    None
+}
+
+ir_rows_test_struct: fn(name: String, generic: [String], fields: [TypeTupleField]) -> TTypeDef Never! {
+    params := [TGenericParam]{}
+    loop param in generic -> params.push(TGenericParam{name: param, bounds: [SymbolID]{}})
+    TTypeDef{
+        module_identity: module_none(),
+        key: name,
+        name: name,
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        generic_params: params,
+        derives: [String]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        serde: [TSerdeAttribute]{},
+        cli_bindings: [TCLIBinding]{},
+        ownership: TDeclarationOwnership.Owned,
+        boxed_edges: [String]{},
+        compiler_builtin: None,
+        kind: TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}},
+    }
+}
+
+#Test("Rows<T> lays out as one 24-byte column list per field of struct T and falls back for non-structs") {
+    t_param: Type.Named{name: "T"}
+    rows_def: ir_rows_test_struct("core.collections.Rows", [String]{"T"}, [TypeTupleField]{TypeTupleField{name: "__rows", ty: Type.List{element: t_param}}})
+    user_rows_def: ir_rows_test_struct("engine.Rows", [String]{"T"}, [TypeTupleField]{TypeTupleField{name: "items", ty: Type.List{element: t_param}}})
+    node_def: ir_rows_test_struct("Node", [String]{}, [TypeTupleField]{TypeTupleField{name: "line", ty: Type.Int}, TypeTupleField{name: "kind", ty: Type.Int}})
+    ty_def: ir_rows_test_struct("Ty", [String]{}, [TypeTupleField]{TypeTupleField{name: "size", ty: Type.Int}})
+    p: ir_program_declared([TTypeDef]{rows_def, user_rows_def, node_def, ty_def}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    m := ir_module_new()
+
+    assert(ir_rows_is_core_def(p, 0), "core.collections.Rows is recognized as Core Rows")
+    assert(!ir_rows_is_core_def(p, 1), "user struct with field `items` is not Core Rows")
+
+    node_ty: Type.Named{name: "Node"}
+    rows_node_ty: Type.Apply{name: "core.collections.Rows", args: [Type]{node_ty}}
+    rows_node_row: ir_value_type(m, p, rows_node_ty) ?? -1
+    assert(rows_node_row >= 0, "Rows<Node> lays out")
+    assert_eq(m.types[rows_node_row].size, 48)
+    info: ir_rows_columnar(m, p, rows_node_ty) ?? panic("Rows<Node> should be columnar")
+    assert_eq(info.col_members.len(), 2)
+    assert_eq(info.col_members[0].name, "line")
+    assert_eq(info.col_members[0].offset, 0)
+    assert_eq(info.col_members[1].name, "kind")
+    assert_eq(info.col_members[1].offset, 24)
+    assert_eq(m.types[info.col_members[0].ty].size, 24)
+    assert_eq(m.types[info.col_members[1].ty].size, 24)
+
+    ty_struct: Type.Named{name: "Ty"}
+    rows_ty: Type.Apply{name: "core.collections.Rows", args: [Type]{ty_struct}}
+    rows_ty_row: ir_value_type(m, p, rows_ty) ?? -1
+    assert(rows_ty_row >= 0, "Rows<Ty> lays out")
+    assert_eq(m.types[rows_ty_row].size, 24)
+
+    rows_int: Type.Apply{name: "core.collections.Rows", args: [Type]{Type.Int}}
+    rows_int_row: ir_value_type(m, p, rows_int) ?? -1
+    assert(rows_int_row >= 0, "Rows<Int> lays out with fallback")
+    assert_eq(m.types[rows_int_row].size, 24)
+    assert(ir_rows_columnar(m, p, rows_int) == None, "Rows<Int> falls back to single list")
+
+    // Comptime transposition turns Rows<Node>{__rows: [Node{...}, ...]} into per-column lists.
+    row0: TComptimeValue.Struct{type_name: "Node", fields: [TComptimeField]{TComptimeField{name: "line", value: TComptimeValue.Int{value: 3}}, TComptimeField{name: "kind", value: TComptimeValue.Int{value: 1}}}}
+    row1: TComptimeValue.Struct{type_name: "Node", fields: [TComptimeField]{TComptimeField{name: "line", value: TComptimeValue.Int{value: 7}}, TComptimeField{name: "kind", value: TComptimeValue.Int{value: 2}}}}
+    ct_rows: [TComptimeField]{TComptimeField{name: "__rows", value: TComptimeValue.List{values: [TComptimeValue]{row0, row1}}}}
+    cols: ir_rows_comptime_fields(m, p, rows_node_ty, ct_rows) ?? panic("comptime Rows<Node> should transpose")
+    assert_eq(cols.len(), 2)
+    assert_eq(cols[0].name, "line")
+    assert_eq(cols[1].name, "kind")
+}

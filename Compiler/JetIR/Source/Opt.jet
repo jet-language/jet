@@ -509,6 +509,10 @@ ir_opt_bodies: fn(view: IRModule, functions: &[IRFunction], work: IROptBodyWork,
         }
         return
     }
+    if options.level == 0 {
+        ir_opt_bodies_partitioned(view, functions, weights, workers, work, options, lint, pass, report, found)
+        return
+    }
     claims: IROptClaims{cells: ir_opt_cells(functions), order: compiler_threads_heaviest_first(weights), next: 0}
     parts := ir_opt_body_claimers(view, claims, work, options, lint, pass, workers) ?? panic("the IR body threads failed")
     loop id in 0..<count -> functions.push(ir_opt_cell_take(claims.cells[id]))
@@ -526,6 +530,68 @@ ir_opt_bodies: fn(view: IRModule, functions: &[IRFunction], work: IROptBodyWork,
         ir_opt_report_add(report, kept[row].report)
         found.extend(compiler_take_rows<IRLintFinding>(kept[row].found))
     }
+}
+
+IROptPartitionDone: struct {
+    functions: [IRFunction],
+    report: IROptReport,
+    found: [IRLintFinding],
+}
+
+// Lock-free weight-balanced contiguous partitions for O0 parallel body passes:
+// one slice per worker, zero Shared cells, zero per-function report structs,
+// joined in deterministic part order.
+ir_opt_bodies_partitioned: fn(view: IRModule, functions: &[IRFunction], weights: [Int], workers: Int, work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, report: &IROptReport, found: &[IRLintFinding]) Never! {
+    bounds: compiler_threads_partition(weights, workers)
+    parts := [[IRFunction]]{}
+    part := workers - 1
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        rows.try_reserve(functions.len() - bounds[part]) ?? panic("reserve failed")
+        loop functions.len() > bounds[part] {
+            row: functions.pop() ?? panic("the IR optimizer lost a function")
+            rows.push(row)
+        }
+        rows.reverse()
+        parts.push(rows.move())
+        part -= 1
+    }
+    parts.reverse()
+    done := ir_opt_bodies_part_threads(view, parts, work, options, lint, pass, 0)
+    loop at in 0..<done.len() {
+        functions.extend(compiler_take_rows<IRFunction>(done[at].functions))
+        ir_opt_report_add(report, done[at].report)
+        found.extend(compiler_take_rows<IRLintFinding>(done[at].found))
+    }
+}
+
+ir_opt_bodies_part_threads: fn(view: IRModule, parts: &[[IRFunction]], work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String, at: Int) -> [IROptPartitionDone] Never! {
+    done := [IROptPartitionDone]{}
+    if at >= parts.len() -> return done
+    if at == parts.len() - 1 {
+        done.push(ir_opt_bodies_part_run(view, compiler_take_rows<IRFunction>(parts[at]), work, options, lint, pass))
+        return done
+    }
+    head_rows: compiler_take_rows<IRFunction>(parts[at])
+    task.group ir_opt_part_threads {
+        head: task &&head_rows {
+            ir_opt_bodies_part_run(view, head_rows, work, options, lint, pass)
+        }
+        rest: ir_opt_bodies_part_threads(view, parts, work, options, lint, pass, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest.move() -> done.push(item)
+    }
+    done
+}
+
+ir_opt_bodies_part_run: fn(view: IRModule, functions: &&[IRFunction], work: IROptBodyWork, options: IROptOptions, lint: IRLintContext, pass: String) -> IROptPartitionDone Never! {
+    rows := functions.move()
+    part_report := ir_opt_report(options.level)
+    part_found := [IRLintFinding]{}
+    loop id in 0..<rows.len() {
+        ir_opt_body_run(view, work, options, lint, pass, rows[id], part_report, part_found)
+    }
+    IROptPartitionDone{functions: rows.move(), report: part_report, found: part_found}
 }
 
 // Runs `tasks` claiming threads, one task each; returns each one's part.
