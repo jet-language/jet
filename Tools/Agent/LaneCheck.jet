@@ -709,9 +709,7 @@ core_probe_source: fn(name: String) -> String Never! {
 // checks the bodies a program importing it alone reaches, then as `jet check
 // Core`, which checks every Core body, called or not.
 core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    // Asked from Compiler/, a package: a jet built before `--core` stopped
-    // resolving the inspect target refuses it where no package.jet is found.
-    asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd("{repo}/Compiler").env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure --core --json` could not start: {err}\n"}
+    asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure --core --json` could not start: {err}\n"}
     if asked.code != 0 || asked.signal != None {
         return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure --core --json` failed\n"}
     }

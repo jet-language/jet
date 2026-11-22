@@ -3747,14 +3747,12 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 // ---- Ledger -------------------------------------------------------------------
 
 // The compiler's Core structure (`jet inspect structure --core --json`, run by
-// $JET, else `jet` on PATH, from `root`'s Compiler/ package, since a jet built
-// before `--core` stopped resolving the inspect target refuses it where no
-// package.jet is found): Core.rows's modules and the Core sources the compiler
-// loads, as the build computed them.
-core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
+// $JET, else `jet` on PATH): Core.rows's modules and the Core sources the
+// compiler loads, as the build computed them.
+core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
     argv: [String]{jet, "inspect", "structure", "--core", "--json"}
-    spec: process.cmd(argv).cwd("{root}/Compiler").stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
+    spec: process.cmd(argv).stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     receipt: ran[0] ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     // `--json` prints the refusal's report on stdout.
@@ -3843,7 +3841,7 @@ Built: struct {
 build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built LedgerError! {
     entries_in: load_surfaces(root) ?? return Err(err)
     containers: canonical_containers(entries_in)
-    core: core_structure(root) ?? return Err(err)
+    core: core_structure() ?? return Err(err)
     facts: core_module_inventory(core)
     modules: module_facts(facts)
     inventory: core_surface_inventory(root, modules, core_module_paths(core)) ?? return Err(err)
