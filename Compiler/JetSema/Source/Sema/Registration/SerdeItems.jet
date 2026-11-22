@@ -2387,6 +2387,30 @@ sema_demand_capture_replay: fn(graph: SemaRegistrationGraph, codecs: [String], d
     if derived.len() > 0 -> sema_derive_demand_add(graph.derive_demand, derived)
 }
 
+// Drains all recorded codec and derive demand from a thread-local graph copy
+// and clears its dedupe maps so a later module on the same worker records
+// fresh demand without interfering with inner per-function captures.
+sema_demand_drain: fn(graph: SemaRegistrationGraph) -> SemaDemandCapture {
+    codecs := sema_codec_demand_drain(graph)
+    derived := sema_derive_demand_drain(graph)
+    SemaDemandCapture{codecs: codecs.move(), derived: derived.move()}
+}
+
+sema_codec_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
+    permit := graph.codec_demand.guard_edit()
+    keys := compiler_take_rows<String>(permit.value.order)
+    permit.value.keys.clear()
+    keys
+}
+
+sema_derive_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
+    permit := graph.derive_demand.guard_edit()
+    keys := [String]{}
+    loop (key, _) in permit.value.keys -> keys.push(key)
+    permit.value.keys.clear()
+    keys
+}
+
 sema_codec_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [String] {
     permit := graph.codec_demand.guard_edit()
     permit.value.capturing = capturing

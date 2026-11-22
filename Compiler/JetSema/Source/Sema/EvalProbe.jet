@@ -428,12 +428,13 @@ sema_eval_probe_effect_refusals: fn(answer: SemaEvalProbeAnswer, nodes: [SemaEff
     if answer.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
     sema_eval_probe_row_refusals(own, "this expression", answer.span, refusals)
     seen := (loop _ in nodes -> false)
+    visited := [Int]{}
     loop edge in answer.effects.call_edges {
         if edge == "__jet_panic__" -> next
         target: sema_effect_node_index(calls.node_by_key, edge) ?? next
         callee: "`{nodes[target].display_key}`"
         sema_eval_probe_row_refusals(solved[target], callee, answer.span, refusals)
-        path: sema_effect_state_writer_path(nodes, target, seen)
+        path: sema_effect_state_writer_path(nodes, target, seen, visited)
         if path.len() > 0 {
             writer: nodes[path[path.len() - 1]]
             writes: writer.rare ?? SEMA_EFFECT_NODE_NO_RARE
