@@ -976,6 +976,10 @@ CSVReader: struct<R: Reader> {
     // `allocation` once), and how many of them `byte` has taken.
     buffer: [U8],
     buffered: Int,
+    priv plain_chunk: String,
+    priv plain_start: Int,
+    priv plain_end: Int,
+    priv plain_checked: Bool,
 
     path: fn(self) -> String Never! { "$[{self.record - 1}][{self.fields.len()}]" }
 
@@ -995,6 +999,7 @@ CSVReader: struct<R: Reader> {
             }
             self.buffer.clear()
             self.buffered = 0
+            self.plain_checked = false
             // A Reader may grow the buffer past its reserve (FileReader keeps
             // its error words there); the growth is charged like any other.
             capacity: mem.__list_capacity<U8>(self.buffer)
@@ -1307,9 +1312,95 @@ CSVReader: struct<R: Reader> {
         Ok(None)
     }
 
+    __finish_plain_chunk: fn(&self) {
+        consumed: self.buffered - self.plain_start
+        self.total += consumed
+        self.offset += consumed
+        self.line = self.record_line
+        self.parser_line = self.record_line
+        self.column = 1
+        self.parser_column = 0
+        self.saw_input = true
+        self.ended_record = true
+        self.record_has_content = false
+        self.char0 = U8{10}
+        self.char_width = 1
+        self.plain_end = 0
+        self.plain_start = 0
+        self.plain_chunk = ""
+    }
+
+    // When the remaining bytes in `self.buffer` are pure ASCII with no quotes
+    // or carriage returns and fit within the reader's item/total/heap budgets,
+    // convert the buffer to one String once and slice plain fields directly
+    // from it up to the last LF in the buffer.
+    __prime_plain_chunk: fn(&self) {
+        if self.quoted || self.pending_cr || self.field.len() != 0 || self.fields.len() != 0 {
+            return
+        }
+        self.plain_checked = true
+        self.plain_end = 0
+        if self.delimiter >= 128 {
+            return
+        }
+        buf_len: self.buffer.len()
+        remaining: buf_len - self.buffered
+        if remaining <= 1 -> return
+        if self.limits.max_total_bytes == .Val(limit) && self.total + remaining > limit -> return
+        if remaining > self.limits.max_item_bytes -> return
+        if self.allocation.used + remaining * 4 > self.allocation.limit -> return
+        last_lf := buf_len - 1
+        loop last_lf >= self.buffered && self.buffer[last_lf] != 10 -> last_lf -= 1
+        if last_lf < self.buffered -> return
+        chunk: String.from_bytes(self.buffer) ?? return
+        if chunk.len() != buf_len || chunk.contains("\"") || chunk.contains("\r") -> return
+        self.plain_chunk = chunk
+        self.plain_start = self.buffered
+        self.plain_end = last_lf + 1
+    }
+
+    __next_plain_row: fn(&self) -> CSVRow? {
+        delim: U8{self.delimiter}
+        loop self.buffered < self.plain_end {
+            line_start: self.buffered
+            number: self.record
+            line_num: self.record_line
+            self.record = number + 1
+            self.record_line = line_num + 1
+            if self.header && number == 1 {
+                pos := line_start
+                loop self.buffer[pos] != 10 -> pos += 1
+                self.buffered = pos + 1
+                if self.buffered >= self.plain_end -> self.__finish_plain_chunk()
+                next
+            }
+            if self.skip_blank && self.buffer[line_start] == 10 {
+                self.buffered = line_start + 1
+                if self.buffered >= self.plain_end -> self.__finish_plain_chunk()
+                next
+            }
+            pos := line_start
+            parts: csv_plain_fields(self.buffer, self.plain_chunk, pos, delim, self.record_width)
+            self.buffered = pos
+            self.record_width = parts.len()
+            if pos >= self.plain_end -> self.__finish_plain_chunk()
+            return Val(csv_row(line_num, parts.move()))
+        }
+        None
+    }
+
     next_inner: fn(&self) -[IO]> CSVRow? EncodingError! {
         if self.eof -> return Ok(None)
         loop {
+            if self.buffered < self.plain_end {
+                if self.__next_plain_row() == .Val(row) -> return Ok(Val(row))
+            }
+            if !self.plain_checked && self.buffered < self.buffer.len() {
+                self.__prime_plain_chunk()
+                if self.buffered < self.plain_end {
+                    if self.__next_plain_row() == .Val(row) -> return Ok(Val(row))
+                }
+            }
             plain: if self.__take_plain() == {
                 .Ok(record) -> record
                 .Err(error) -> {
@@ -1348,6 +1439,9 @@ CSVReader: struct<R: Reader> {
     }
 
     next: fn(&self) -[IO]> CSVRow? EncodingError! {
+        if self.buffered < self.plain_end {
+            if self.__next_plain_row() == .Val(row) -> return Ok(Val(row))
+        }
         if self.terminal == .Val(error) -> return Err(error)
         result: if self.next_inner() == {
             .Ok(row) -> row
@@ -1357,6 +1451,52 @@ CSVReader: struct<R: Reader> {
             }
         }
         Ok(result)
+    }
+}
+
+priv csv_plain_fields: fn(buffer: [U8], chunk: String, pos: &Int, delim: U8, width: Int) -> [String] Never! {
+    parts := [String]{}
+    if width > 0 {
+        _: mem.__list_reserve_exact<String>(parts, width)
+    }
+    start := pos
+    i := pos
+    // For any delimiter above LF (comma is 44), any byte > delim is plain data.
+    if delim > 10 {
+        loop {
+            b: buffer[i]
+            if b > delim {
+                i += 1
+                next
+            }
+            if b == delim {
+                parts.push(chunk.slice(start..<i))
+                i += 1
+                start = i
+                next
+            }
+            if b == 10 {
+                parts.push(chunk.slice(start..<i))
+                pos = i + 1
+                return parts
+            }
+            i += 1
+        }
+    }
+    loop {
+        b: buffer[i]
+        if b == delim {
+            parts.push(chunk.slice(start..<i))
+            i += 1
+            start = i
+            next
+        }
+        if b == 10 {
+            parts.push(chunk.slice(start..<i))
+            pos = i + 1
+            return parts
+        }
+        i += 1
     }
 }
 
@@ -1378,7 +1518,7 @@ reader: fn<R: Reader>(source: &&R, limits: EncodingLimits{EncodingLimits.safe()}
     loop b in 0..<256 {
         stops.push(if b >= 128 || b == 34 || b == 13 || b == 10 || b == code -> U8{1} else -> U8{0})
     }
-    Ok(CSVReader<R>{input: source.move(), limits: limits, delimiter: code, stops: stops, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, record_width: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
+    Ok(CSVReader<R>{input: source.move(), limits: limits, delimiter: code, stops: stops, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, record_width: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0, plain_chunk: "", plain_start: 0, plain_end: 0, plain_checked: false})
 }
 
 #Test("typed CSV whole records preserve blank rows, doubled quotes and Unicode columns") {

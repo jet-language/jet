@@ -792,32 +792,92 @@
       "source": 2265
     }
   },
+  "peer_floor_workloads": {
+    "schema": "jet.gauntlet.peer-floor-workloads.v1",
+    "version": 1,
+    "comparator": { "win": "<1", "loss": ">=1" },
+    "required_peers": ["rust", "c", "zig", "go"],
+    "workloads": [
+      {
+        "id": "wordfreq-10k",
+        "entry": "wordfreq",
+        "cell": "text.kernel",
+        "fixture": {
+          "generator": "Tools/Gauntlet/Entries/Wordfreq/Fixtures/gen.py",
+          "input_sha256": "4e31e330854a4893cf4ff1e9c7266051c8ddb9d8db9c176124442d2ad42b40a0",
+          "expected": "Tools/Gauntlet/Entries/Wordfreq/expected.out"
+        },
+        "jet": "Tools/Gauntlet/Entries/Wordfreq/Jet/run.jet",
+        "peers": {
+          "rust": "Tools/Gauntlet/Entries/Wordfreq/Rust/main.rs",
+          "c": "Tools/Gauntlet/Entries/Wordfreq/C/main.c",
+          "zig": "Tools/Gauntlet/Entries/Wordfreq/Zig/main.zig",
+          "go": "Tools/Gauntlet/Entries/Wordfreq/Go/main.go",
+          "python": "Tools/Gauntlet/Entries/Wordfreq/Python/main.py"
+        }
+      },
+      {
+        "id": "wordfreq-200k",
+        "entry": "wordfreq",
+        "cell": "text.kernel",
+        "fixture": {
+          "generator": "Tools/Gauntlet/Entries/Wordfreq/Fixtures/gen200k.py",
+          "input_sha256": "43e32cccaa98ad2112c0f65d227173cc4d4fac6a826c40c781f4f0a4343040bf"
+        },
+        "jet": "Tools/Gauntlet/Entries/Wordfreq/Jet/run.jet",
+        "peers": {
+          "rust": "Tools/Gauntlet/Entries/Wordfreq/Rust/main.rs",
+          "c": "Tools/Gauntlet/Entries/Wordfreq/C/main.c",
+          "zig": "Tools/Gauntlet/Entries/Wordfreq/Zig/main.zig",
+          "go": "Tools/Gauntlet/Entries/Wordfreq/Go/main.go",
+          "python": "Tools/Gauntlet/Entries/Wordfreq/Python/main.py"
+        }
+      },
+      {
+        "id": "cat",
+        "entry": null,
+        "cell": "text.kernel",
+        "fixture": {
+          "generator": "Tools/Gauntlet/FloorCells/Cat/Fixtures/gen.py",
+          "input_sha256": "ca1e5ac6ec14f849a6478c3ced7ef03dbed73fcb1fb05588c197677425899f43"
+        },
+        "jet": "Tools/Gauntlet/FloorCells/Cat/Jet/run.jet",
+        "peers": {
+          "rust": "Tools/Gauntlet/FloorCells/Cat/Rust/main.rs",
+          "c": "Tools/Gauntlet/FloorCells/Cat/C/main.c",
+          "zig": "Tools/Gauntlet/FloorCells/Cat/Zig/main.zig",
+          "go": "Tools/Gauntlet/FloorCells/Cat/Go/main.go",
+          "python": "Tools/Gauntlet/FloorCells/Cat/Python/main.py"
+        }
+      }
+    ]
+  },
   "entries": [
-    { "name": "binparse", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "bulkrename", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "concurrency-service", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "csvtransform", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "datasummary", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "embedded-data", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "embedded-sensor-ring", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "fft-4096", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "game-frame", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "hello", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "http-client", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "http-service", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "logreport", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "nbody", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "parallel-grep", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "procpipe", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "regex-find-all-4mb", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "regex-logscan", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "sieve", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "taskfile-cli", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "tensor-map-4k", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "text-script", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "tzreport", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "web-app", "jet": "Jet/run.jet", "python": "Python/main.py" },
-    { "name": "web-widget", "jet": "Jet/run.jet", "python": null },
-    { "name": "wordfreq", "jet": "Jet/run.jet", "python": "Python/main.py" }
+    { "name": "binparse", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "bulkrename", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "concurrency-service", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "csvtransform", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "datasummary", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "embedded-data", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "embedded-sensor-ring", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "fft-4096", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "game-frame", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "hello", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "http-client", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "http-service", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "logreport", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "nbody", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "parallel-grep", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "procpipe", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "regex-find-all-4mb", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "regex-logscan", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "sieve", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "taskfile-cli", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "tensor-map-4k", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "text-script", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "tzreport", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "web-app", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "web-widget", "jet": "Jet/run.jet", "python": null, "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" },
+    { "name": "wordfreq", "jet": "Jet/run.jet", "python": "Python/main.py", "rust": "Rust/main.rs", "c": "C/main.c", "zig": "Zig/main.zig", "go": "Go/main.go" }
   ]
 }

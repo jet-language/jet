@@ -58,6 +58,7 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
     allowed: items_at(manifest, "corpus/allowed_uncovered_cells")
     canonical: inputs.filter(fn(result) { value_at(result, "entry") == .Val(.Object(_)) || value_at(result, "entry") == .Val(.Array(_)) })
     owners: member(manifest, "loss_owners") ?? Dyn.object()
+    manifest_entries: items_at(manifest, "entries")
     state: tower ?? TowerState.Unavailable("Tower state is missing")
     matrix_cells: items_at(matrix, "cells")
     required: required_policy_cells(member(matrix, "strict_performance_policy") ?? Dyn.Null, matrix_cells.map(fn(cell) { value_at(cell, "id") ?? Dyn.Null }))
@@ -68,7 +69,7 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
     unmeasured_required := 0
     loop cell in matrix_cells {
         id: value_at(cell, "id")
-        record: cell_record(cell, matrix, canonical, allowed, required, owners, state, references, measurements)
+        record: cell_record(cell, matrix, canonical, allowed, required, owners, manifest_entries, state, references, measurements)
         if text_at(record, "verdict") == Val("unmeasured") {
             if {
                 listed(allowed, id) -> unmeasured_allowed += 1
@@ -147,14 +148,14 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
 // and the owners of its losses. A cell needs exactly one entry unless
 // `allowed` lists it as allowed to stay uncovered; `required` lists the
 // cells the strict performance policy requires.
-cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], required: [Dyn], owners: Dyn, tower: TowerState, references: Dyn, measurements: Dyn) -> Dyn {
+cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], required: [Dyn], owners: Dyn, manifest_entries: [Dyn], tower: TowerState, references: Dyn, measurements: Dyn) -> Dyn {
     id: value_at(cell, "id")
     uncovered_ok: listed(allowed, id)
     records := [Dyn]{}
     loop result in canonical {
         loop declared in items_at(value_at(result, "entry") ?? Dyn.Null, "cells") {
             if strictly_equal(Val(declared), id) {
-                records.push(entry_record(result, matrix, owners, tower))
+                records.push(entry_record(result, matrix, owners, manifest_entries, tower))
             }
         }
     }
@@ -243,7 +244,7 @@ missing_cell_failures: fn(matrix: Dyn, cell: Dyn) -> [Dyn] {
 // metric verdicts and failures and the owners of its losses. It wins only
 // when Jet's row and every required tier are ready and every metric wins
 // against every applicable peer.
-entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dyn {
+entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, manifest_entries: [Dyn], tower: TowerState) -> Dyn {
     entry: value_at(result, "entry") ?? Dyn.Null
     rows: value_at(result, "rows") ?? Dyn.Null
     jet_tiers: value_at(result, "jet_tiers") ?? Dyn.Null
@@ -254,10 +255,22 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     declared: texts_at(entry, "languages").filter(fn(language) { language != "jet" && language != "jet-expert" })
     known: declared.copy()
     missing_run_peers: if rules.any(fn(rule) { rule.tier == "run" }) -> texts_at(matrix, "rails/run").filter(fn(language) { !known.contains(language) }) else -> [String]{}
+    missing_peers := missing_run_peers.copy()
+    if text_at(entry, "name") == .Val(entry_name) {
+        loop row in manifest_entries {
+            if text_at(row, "name") != Val(entry_name) -> next
+            loop peer in ["python", "rust", "c", "zig", "go"] {
+                if text_at(row, peer) == .Val(source) && source.len() > 0 && !known.contains(peer) && !missing_peers.contains(peer) {
+                    missing_peers.push(peer.copy())
+                }
+            }
+            break
+        }
+    }
     compared: peer_comparisons(entry, value_at(entry, "languages") ?? Dyn.Null, rows, jet_tiers)
     entry_owners: (if text_at(entry, "name") == .Val(name) -> owners.get(name) else -> None) ?? Dyn.Null
     peers := [Dyn]{}
-    loop language in declared.concat(missing_run_peers) {
+    loop language in declared.concat(missing_peers) {
         peers.push(peer_record(entry, language, compared.get(language) ?? Dyn.Null, rows, metric, metrics, entry_owners, tower))
     }
     shown_tiers := Dyn.object()

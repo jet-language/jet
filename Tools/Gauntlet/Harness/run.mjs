@@ -188,6 +188,8 @@ const STRUCTURAL_NOT_APPLICABLE_BASES = new Set(["no_compile_phase", "no_wasm_ar
 // finish within `run_reference_margin_seconds` of that program in every gated
 // cache state.
 const RUN_TIER_PEERS = Object.freeze(["lua", "luajit", "python", "node"]);
+const MANIFEST_PEER_SLOTS = Object.freeze(["python", "rust", "c", "zig", "go"]);
+const REQUIRED_PEER_FLOOR_WORKLOADS = Object.freeze(["wordfreq-10k", "wordfreq-200k", "cat"]);
 const RUN_CACHE_STATES = Object.freeze({ gated: Object.freeze(["edited", "repeat"]), reported: Object.freeze(["fresh_install"]) });
 const PEER_MEASUREMENT_POLICY = {
   ratio_tiers: ["aot", "run"],
@@ -1252,6 +1254,74 @@ async function manifestSourceMetrics(entryDir, relative) {
   return sourceMetrics(path.dirname(source), path.basename(source));
 }
 
+async function peerFloorWorkloadIssues(manifest, root = repoDir) {
+  const issues = [];
+  const section = manifest?.peer_floor_workloads;
+  if (!isObject(section)) {
+    issues.push("measurement-manifest.json peer_floor_workloads is missing");
+    return issues;
+  }
+  if (section.schema !== "jet.gauntlet.peer-floor-workloads.v1") {
+    issues.push("peer_floor_workloads.schema must be jet.gauntlet.peer-floor-workloads.v1");
+  }
+  if (section.version !== 1) issues.push("peer_floor_workloads.version must be 1");
+  if (JSON.stringify(section.comparator) !== JSON.stringify(RATIO_VERDICTS)) {
+    issues.push("peer_floor_workloads.comparator must match the AGENTS.md <1 comparator");
+  }
+  const requiredPeers = ["rust", "c", "zig", "go"];
+  if (!equalStringArrays(section.required_peers ?? [], requiredPeers)) {
+    issues.push(`peer_floor_workloads.required_peers must be ${requiredPeers.join(", ")}`);
+  }
+  const workloads = Array.isArray(section.workloads) ? section.workloads : [];
+  const byId = new Map();
+  for (const item of workloads) {
+    if (!isObject(item) || typeof item.id !== "string" || item.id.length === 0) {
+      issues.push("peer_floor_workloads contains an unnamed workload");
+      continue;
+    }
+    if (byId.has(item.id)) issues.push(`${item.id}: duplicate peer_floor_workloads entry`);
+    byId.set(item.id, item);
+    const checkRepoFile = async (label, relative) => {
+      if (typeof relative !== "string" || relative.length === 0 || path.isAbsolute(relative)) {
+        issues.push(`${item.id}/${label}: invalid source path`);
+        return;
+      }
+      const resolved = path.resolve(root, relative);
+      const remainder = path.relative(root, resolved);
+      if (!remainder || remainder.startsWith("..") || path.isAbsolute(remainder)) {
+        issues.push(`${item.id}/${label}: path escapes repository root`);
+        return;
+      }
+      if (!(await exists(resolved))) issues.push(`${item.id}/${label}: missing ${relative}`);
+    };
+    await checkRepoFile("jet", item.jet);
+    if (!isObject(item.fixture) || typeof item.fixture.input_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(item.fixture.input_sha256)) {
+      issues.push(`${item.id}: fixture must declare a 64-hex input_sha256`);
+    }
+    await checkRepoFile("fixture.generator", item.fixture?.generator);
+    if (item.fixture?.expected !== undefined) await checkRepoFile("fixture.expected", item.fixture.expected);
+    if (!isObject(item.peers)) {
+      issues.push(`${item.id}: missing peers map`);
+      continue;
+    }
+    for (const peer of requiredPeers) {
+      if (typeof item.peers[peer] !== "string" || item.peers[peer].length === 0) {
+        issues.push(`${item.id}/${peer}: missing required matched peer`);
+      } else {
+        await checkRepoFile(peer, item.peers[peer]);
+      }
+    }
+    for (const [peer, relative] of Object.entries(item.peers)) {
+      if (requiredPeers.includes(peer)) continue;
+      if (relative !== null) await checkRepoFile(peer, relative);
+    }
+  }
+  for (const requiredId of REQUIRED_PEER_FLOOR_WORKLOADS) {
+    if (!byId.has(requiredId)) issues.push(`peer_floor_workloads is missing required workload ${requiredId}`);
+  }
+  return issues;
+}
+
 async function measureSourceManifest(entriesDir, manifest, matrix = null) {
   if (manifest?.version !== 1 || !manifest.contract || !Array.isArray(manifest.entries)) {
     throw new Error("invalid gauntlet measurement manifest");
@@ -1345,15 +1415,29 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
       throw new Error("measurement manifest allows an unknown uncovered matrix cell");
     }
   }
+  const floorIssues = await peerFloorWorkloadIssues(manifest);
+  if (floorIssues.length) {
+    throw new Error(`measurement manifest peer_floor_workloads is invalid: ${floorIssues.join("; ")}`);
+  }
   const { loaded, tools } = await loadEntries(entriesDir, null);
   const entryDirs = new Map([...loaded, ...tools].map((item) => [item.entry.name, item.dir]));
   const entries = [];
   for (const row of manifest.entries) {
-    if (typeof row.name !== "string" || !Object.hasOwn(row, "python") || typeof row.jet !== "string") throw new Error("measurement manifest row is incomplete");
+    if (typeof row.name !== "string" || typeof row.jet !== "string" ||
+      MANIFEST_PEER_SLOTS.some((peer) => !Object.hasOwn(row, peer))) {
+      throw new Error("measurement manifest row is incomplete");
+    }
     const entryDir = entryDirs.get(row.name);
     if (!entryDir) throw new Error(`measurement manifest names no entry: ${row.name}`);
     const jet = await manifestSourceMetrics(entryDir, row.jet);
     const python = row.python === null ? null : await manifestSourceMetrics(entryDir, row.python);
+    for (const peer of MANIFEST_PEER_SLOTS) {
+      if (peer === "python" || row[peer] === null) continue;
+      if (typeof row[peer] !== "string" || row[peer].length === 0) {
+        throw new Error(`measurement manifest ${row.name}/${peer} path is invalid`);
+      }
+      await manifestSourceMetrics(entryDir, row[peer]);
+    }
     const comparison = python ? {
       loc_ratio: python.loc === 0 ? null : jet.loc / python.loc,
       source_token_delta: jet.source_tokens - python.source_tokens,
@@ -1525,8 +1609,19 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
       issues.push(`${item.entry.name}: missing measurement manifest row`);
       continue;
     }
-    if ((row.python === null) !== !(item.entry.languages ?? []).includes("python")) {
-      issues.push(`${item.entry.name}: Python manifest pairing disagrees with declared rails`);
+    for (const peer of MANIFEST_PEER_SLOTS) {
+      if (!Object.hasOwn(row, peer)) {
+        issues.push(`${item.entry.name}: measurement manifest is missing ${peer} peer slot`);
+        continue;
+      }
+      const applies = (item.entry.languages ?? []).includes(peer) && !item.entry.non_applicable?.[peer];
+      if ((row[peer] !== null) !== applies) {
+        issues.push(`${item.entry.name}: ${peer} manifest pairing disagrees with declared rails`);
+        continue;
+      }
+      if (row[peer] !== null && !(await exists(path.join(item.dir, row[peer])))) {
+        issues.push(`${item.entry.name}/${peer}: manifest source ${row[peer]} is missing`);
+      }
     }
     for (const language of item.entry.languages ?? []) {
       if (item.entry.non_applicable?.[language]) continue;
@@ -1534,6 +1629,7 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
       if (!(await exists(path.join(item.dir, LANGUAGE_SOURCE_DIRS[language] ?? language, sourceFile)))) issues.push(`${item.entry.name}/${language}: declared source is missing`);
     }
   }
+  issues.push(...(await peerFloorWorkloadIssues(manifest)));
   return issues;
 }
 
@@ -3726,7 +3822,14 @@ function buildScoreboard(matrix, results, manifest, tower, ceiling = { reference
       const missingRunPeers = Object.hasOwn(jetTierPolicy, "run")
         ? runRail.filter((language) => !declaredLanguages.includes(language))
         : [];
-      const peers = [...declaredLanguages, ...missingRunPeers]
+      const manifestRow = Array.isArray(manifest?.entries)
+        ? manifest.entries.find((row) => row?.name === result.entry.name)
+        : null;
+      const missingManifestPeers = manifestRow
+        ? MANIFEST_PEER_SLOTS.filter((peer) => typeof manifestRow[peer] === "string" && manifestRow[peer].length > 0 && !declaredLanguages.includes(peer))
+        : [];
+      const missingPeers = [...new Set([...missingRunPeers, ...missingManifestPeers])];
+      const peers = [...declaredLanguages, ...missingPeers]
         .map((language) => {
           const comparison = result.comparisons?.[language];
           const comparisonPolicy = comparison?.tier_policy ?? peerTierPolicy(result.entry, language);
@@ -5144,6 +5247,8 @@ export {
   ceilingReferenceIssues,
   matrixPeerLanguages,
   LOSS_OWNER_CATEGORY_BY_METRIC,
+  MANIFEST_PEER_SLOTS,
+  peerFloorWorkloadIssues,
   standingsPlans,
   elfLinkage,
 };
