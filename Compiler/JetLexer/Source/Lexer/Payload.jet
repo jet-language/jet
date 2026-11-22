@@ -542,6 +542,12 @@ lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_sur
         if fixed_spelling_kind(kind) {
             text: intern_token_source(tables, kind, source, start, end)
             tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
+        } else if kind == K_IDENT {
+            text: intern_source(tables, source, start, end)
+            if !allow_reserved_identifiers && end - start >= 2 && source[start] == (U8{95}) && source[start + 1] == (U8{95}) {
+                _ := identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics)
+            }
+            tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: text, literal: -1})
         } else {
             text: intern_source(tables, source, start, end)
             built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
@@ -1065,11 +1071,61 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
     String.from_bytes(out) ?? ""
 }
 
+// Parse an integer literal directly from `source[start..<end]` without allocating
+// temporary Strings or underscore-stripped byte buffers.
+parse_integer_bytes: fn(source: [U8], start: Int, end: Int) -> Int? {
+    if start >= end -> return None
+    radix := 10
+    limit := 922337203685477580
+    rest := 7
+    i := start
+    if end - start > 1 && source[start] == (U8{48}) {
+        marker: Int{source[start + 1]}
+        if marker == {
+            120 | 88 -> {
+                radix = 16
+                limit = 576460752303423487
+                rest = 15
+                i = start + 2
+            }
+            111 | 79 -> {
+                radix = 8
+                limit = 1152921504606846975
+                rest = 7
+                i = start + 2
+            }
+            98 | 66 -> {
+                radix = 2
+                limit = 4611686018427387903
+                rest = 1
+                i = start + 2
+            }
+            else -> {}
+        }
+    }
+    saw_digit := false
+    value := 0
+    loop i < end {
+        b: Int{source[i]}
+        if b == 95 {
+            i += 1
+            next
+        }
+        digit: digit_value(b)
+        if digit < 0 || digit >= radix -> return None
+        if value > limit || (value == limit && digit > rest) -> return None
+        value = value * radix + digit
+        saw_digit = true
+        i += 1
+    }
+    if !saw_digit -> return None
+    Val(value)
+}
+
 numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> {decoded: Name, literal: Int} {
     numeric_end: scan_numeric_end(source, start)
     bounded_end := numeric_end
     if bounded_end < start || bounded_end > end -> bounded_end = end
-    number_text: foundation_byte_text(source, start, bounded_end)
     suffix := name_empty()
     if kind == K_UNIT_NUMBER -> suffix = intern_source(tables, source, bounded_end, end)
     marker: byte_at(source, start + 1)
@@ -1099,11 +1155,12 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &Toke
         else -> false
     }
     if is_float {
+        number_text: foundation_byte_text(source, start, bounded_end)
         decoded: name_intern(tables.names, decimal_number_spelling(number_text))
         return {decoded: decoded, literal: literal_row(tables, number_literal(None, Val(parse_float_literal(number_text) ?? Float{0}), suffix))}
     }
-    decoded: if kind == K_UNIT_NUMBER -> name_intern(tables.names, decimal_number_spelling(number_text)) else -> intern_source(tables, source, start, bounded_end)
-    {decoded: decoded, literal: literal_row(tables, number_literal(Val(parse_integer_literal(number_text) ?? 0), None, suffix))}
+    decoded: if kind == K_UNIT_NUMBER -> name_intern(tables.names, decimal_number_spelling(foundation_byte_text(source, start, bounded_end))) else -> intern_source(tables, source, start, bounded_end)
+    {decoded: decoded, literal: literal_row(tables, number_literal(Val(parse_integer_bytes(source, start, bounded_end) ?? 0), None, suffix))}
 }
 
 // Identifier check: reserved double-underscore names. No identifier is

@@ -209,42 +209,46 @@ sema_typestate_check_module: fn(graph: SemaRegistrationGraph, table: SemaStateTa
             open_switches.push(span.copy())
         }
     }
+    body_by_start := [Int:Int]{}
+    loop (idx, fn_body) in module_row.functions {
+        if body_by_start.get(fn_body.source_span.start) == None {
+            body_by_start[fn_body.source_span.start] = idx
+        }
+    }
+    empty_tree: body_tree_new()
     walk := SemaStateWalk{tables: graph.modules[registration].program.tables, table: table.copy(), locals: name_table_sized(64), current: sema_state_no_facts(), ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
     loop item in graph.modules[registration].program.items {
         if item == {
-            .Func(function) -> { sema_state_check_function(walk, function, module_row.functions) }
+            .Func(function) -> { sema_state_check_function(walk, function, module_row.functions, body_by_start, empty_tree) }
             .Impl(implementation) -> {
                 loop method in implementation.methods {
-                    sema_state_check_function(walk, method, module_row.functions)
+                    sema_state_check_function(walk, method, module_row.functions, body_by_start, empty_tree)
                 }
             }
             .Struct(definition) -> {
                 loop method in definition.methods {
-                    sema_state_check_function(walk, method, module_row.functions)
+                    sema_state_check_function(walk, method, module_row.functions, body_by_start, empty_tree)
                 }
                 loop block in definition.trait_impls {
                     loop method in block.methods {
-                        sema_state_check_function(walk, method, module_row.functions)
+                        sema_state_check_function(walk, method, module_row.functions, body_by_start, empty_tree)
                     }
                 }
             }
             .Enum(definition) -> {
                 loop method in definition.methods {
-                    sema_state_check_function(walk, method, module_row.functions)
+                    sema_state_check_function(walk, method, module_row.functions, body_by_start, empty_tree)
                 }
             }
             .Test(test) -> {
                 sema_state_start(walk)
-                walk.typed = false
-                tree := body_tree_new()
-                loop function in module_row.functions {
-                    if function.source_span == test.span {
-                        tree = function.tree
-                        walk.typed = true
-                        break
-                    }
+                body_idx := sema_state_body_index(module_row.functions, body_by_start, test.span)
+                walk.typed = body_idx >= 0
+                if body_idx >= 0 {
+                    sema_state_block(walk, module_row.functions[body_idx].tree, test.body)
+                } else {
+                    sema_state_block(walk, empty_tree, test.body)
                 }
-                sema_state_block(walk, tree, test.body)
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -256,6 +260,16 @@ sema_typestate_check_module: fn(graph: SemaRegistrationGraph, table: SemaStateTa
     found
 }
 
+sema_state_body_index: fn(bodies: [FnBody], body_by_start: [Int:Int], span: Span) -> Int Never! {
+    if body_by_start.get(span.start) == .Val(idx) && bodies[idx].source_span == span {
+        return idx
+    }
+    loop (idx, body) in bodies {
+        if body.source_span == span -> return idx
+    }
+    -1
+}
+
 // A body starts with no facts, on a path that has not left it.
 sema_state_start: fn(walk: &SemaStateWalk) Never! {
     walk.current = sema_state_no_facts()
@@ -265,23 +279,20 @@ sema_state_start: fn(walk: &SemaStateWalk) Never! {
 
 // `self` and every other parameter typed by states start in them, so a chain
 // of moves on `self` checks.
-sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, bodies: [FnBody]) Never! {
+sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, bodies: [FnBody], body_by_start: [Int:Int], empty_tree: BodyTree) Never! {
     sema_state_start(walk)
-    walk.typed = false
-    tree := body_tree_new()
-    loop body in bodies {
-        if body.source_span == function.span {
-            tree = body.tree
-            walk.typed = true
-            break
-        }
-    }
+    body_idx: sema_state_body_index(bodies, body_by_start, function.span)
+    walk.typed = body_idx >= 0
     loop typed in function.state_types {
         if typed.position < 0 || typed.position >= function.params.len() -> next
         id: sema_state_local_id(walk, function.params[typed.position].name)
         sema_state_put_known(walk.current, id, sema_state_set_value(typed.states))
     }
-    sema_state_block(walk, tree, function.body)
+    if body_idx >= 0 {
+        sema_state_block(walk, bodies[body_idx].tree, function.body)
+    } else {
+        sema_state_block(walk, empty_tree, function.body)
+    }
 }
 
 // A state set as one tracked value: its names joined by `|`.
@@ -951,7 +962,9 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             sema_state_expr(walk, tree, receiver)
             loop arg in args -> sema_state_expr(walk, tree, arg.expr)
-            sema_state_method(walk, tree, receiver, method, method_span, loop arg in args -> arg.expr)
+            if !sema_state_table_empty(walk.table) || walk.current.states.len() > 1 {
+                sema_state_method(walk, tree, receiver, method, method_span, loop arg in args -> arg.expr)
+            }
         }
         .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             sema_state_expr(walk, tree, receiver)
@@ -959,7 +972,7 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
         }
         .Call(call, _) -> {
             loop arg in call.args -> sema_state_expr(walk, tree, arg.expr)
-            if call.args.len() > 0 {
+            if call.args.len() > 0 && !sema_state_table_empty(walk.table) {
                 sema_state_call(walk, tree, call.name, loop arg in call.args -> arg.expr)
             }
         }

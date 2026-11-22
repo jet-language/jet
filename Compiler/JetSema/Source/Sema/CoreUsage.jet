@@ -595,12 +595,13 @@ sema_expand_core_reachable_closure: fn(roots: [String], layer: &RuntimeLayer) ->
 }
 
 sema_core_note_builtin_math_type: fn(name: String, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+    if !(sema_core_is_math_type(name) || sema_core_is_geometry_type(name)) {
+        return
+    }
     if sema_core_registered_type(registered, name) {
         return
     }
-    if sema_core_is_math_type(name) || sema_core_is_geometry_type(name) {
-        sema_core_note_usage(used, spans, "core.math.__mathtypes__", span)
-    }
+    sema_core_note_usage(used, spans, "core.math.__mathtypes__", span)
 }
 
 sema_core_is_math_type: fn(name: String) -> Bool Never! {
@@ -640,14 +641,19 @@ sema_core_is_data_type: fn(name: String) -> Bool Never! {
 }
 
 sema_core_note_type_modules: fn(name: String, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+    modules: core_type_modules(name)
+    is_ptr: name == "Ptr" || name.ends_with(".Ptr")
+    if modules.len() == 0 && !is_ptr {
+        return
+    }
     if sema_core_registered_type(registered, name) {
         return
     }
-    loop module_name in core_type_modules(name) {
+    loop module_name in modules {
         sema_core_note_usage(used, spans, "{module_name}.__type__", span)
     }
     // These are semantic runtime seams rather than ordinary generated exports.
-    if name == "Ptr" || name.ends_with(".Ptr") -> sema_core_note_usage(used, spans, "core.mem.__type__", span)
+    if is_ptr -> sema_core_note_usage(used, spans, "core.mem.__type__", span)
 }
 
 sema_core_collect_type: fn(ty: Type, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
