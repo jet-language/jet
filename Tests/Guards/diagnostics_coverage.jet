@@ -5,13 +5,13 @@
 use dc_files: core.files
 
 // rustc's codes, kept only to classify foreign compiler output
-// (tests/diagnostics_coverage.rs:1230-1243). The census never counts them as
+// The census never counts them as
 // emitted (Tools/Agent/DiagnosticCensus.jet RUSTC_CODES); the i2 test below
 // keeps them out of raise sites and reports.
 DC_RUSTC_CODES: [String]{"E0061", "E0277", "E0425"}
 
 // The active rows the compiler emits nothing for yet, each staged on its
-// owning card (tests/diagnostics_coverage.rs:2005-2055). Rows the registry
+// owning card . Rows the registry
 // marks `retired` stay explainable without an emitter and are not listed.
 DC_SPEC_AHEAD_OF_IMPL: [{code: String, reason: String}]{
     // Jetos rows, on the owner-frozen card that builds jetos.
@@ -156,7 +156,7 @@ dc_contains_any: fn(text: String, needles: [String]) -> Bool {
     false
 }
 
-// tests/diagnostics_coverage.rs:1128-1168: every user-facing rendered snapshot.
+// every user-facing rendered snapshot
 dc_snapshot_texts: fn() -> [{path: String, text: String}] {
     out := [{path: String, text: String}]{}
     loop directory in
@@ -201,7 +201,7 @@ dc_report_codes: fn(text: String) -> [String] {
     codes
 }
 
-// tests/diagnostics_coverage.rs:1698 (I4a): every code the compiler sources
+// (I4a): every code the compiler sources
 // emit has a typed registry row.
 #Test("every_emitted_code_has_typed_row") {
     guards_enter_root()
@@ -214,7 +214,7 @@ dc_report_codes: fn(text: String) -> [String] {
     assert_eq(missing.join(" "), "")
 }
 
-// tests/diagnostics_coverage.rs:740-784: compare the one expected-unimplemented
+// compare the one expected-unimplemented
 // baseline with the registry projection. A listed code that is now emitted
 // leaves the list; a listed code that is neither unimplemented nor emitted
 // (its row was retired, reserved or deleted) is a missing baseline entry; an
@@ -247,7 +247,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     failures.join("\n")
 }
 
-// tests/diagnostics_coverage.rs:2003: a registered row that is neither
+// a registered row that is neither
 // reserved nor retired in the registry and that no source emits is listed
 // with a `staged #<card>` reason, and a listed code that is now emitted must
 // leave the list.
@@ -275,7 +275,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     assert_eq(dc_baseline_failure(DC_SPEC_AHEAD_OF_IMPL.map(fn(row) { row.code }), unimplemented, emitted), "")
 }
 
-// tests/diagnostics_coverage.rs:790: the baseline comparison refuses a
+// the baseline comparison refuses a
 // removed entry, an added row and a substitution, and passes when they agree.
 #Test("coverage_baseline_rejects_removal_addition_and_substitution") {
     guards_enter_root()
@@ -288,7 +288,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     assert_eq(dc_baseline_failure(baseline, ["E2101"], ["E3001"]), "DC_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  E3001")
 }
 
-// tests/diagnostics_coverage.rs:1525 (I2): rustc codes never become Jet
+// (I2): rustc codes never become Jet
 // diagnostics, neither at a raise site nor as a rendered report opener.
 #Test("i2_rustc_codes_do_not_leak_as_jet_diagnostics") {
     guards_enter_root()
@@ -314,7 +314,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     assert_eq(failures.join("\n"), "")
 }
 
-// tests/diagnostics_coverage.rs:1586: rendered diagnostics never leak host
+// rendered diagnostics never leak host
 // runtime or backend voice. `ffi_bad_path.stderr` keeps the backend's own
 // rejection by design.
 #Test("diagnostic_snapshots_do_not_leak_runtime_or_backend_voice") {
@@ -332,7 +332,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     assert_eq(failures.join("\n"), "")
 }
 
-// tests/diagnostics_coverage.rs:1614: placeholder consumer text,
+// placeholder consumer text
 // raw byte offsets, and the lexer's synthetic terminator never render.
 #Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
     guards_enter_root()
@@ -360,7 +360,7 @@ dc_raw_code_panic: fn(line: String) -> Bool {
     }
 }
 
-// tests/diagnostics_coverage.rs:1636: the runtime library reports Jet error
+// the runtime library reports Jet error
 // codes through Jet-owned report helpers, never a raw panic carrying the code.
 // The Rust gate scanned the Rust Prelude; its replacement is Jet source.
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
@@ -383,7 +383,7 @@ dc_raw_code_panic: fn(line: String) -> Bool {
     assert_eq(failures.join("\n"), "")
 }
 
-// tests/marker_registry_coverage.rs:665-696.
+// Jet test fixture.
 dc_marker_literal_offenders: fn(sources: [{path: String, text: String}], names: [String]) -> [String] {
     offenders := [String]{}
     loop source in sources {
@@ -414,7 +414,7 @@ dc_marker_names: fn() -> [String] {
     names
 }
 
-// tests/marker_registry_coverage.rs:713 (D-VERDICT-1455-1): the lexer, parser
+// (D-VERDICT-1455-1): the lexer, parser
 // and checker ask the registry about markers; they grow no second string
 // vocabulary of marker names.
 #Test("marker_name_literals_stay_in_the_registry") {

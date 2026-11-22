@@ -51,7 +51,7 @@ policy_split_whitespace: fn(text: String) -> [String] {
     words
 }
 
-// tests/truthfulness.rs:1911-1928. Strip one leading/trailing pipe, not all pipes.
+// Strip one leading/trailing pipe, not all pipes
 audit_table_cells: fn(raw: String) -> [String] {
     line := raw.trim()
     if line.starts_with("|") -> line = policy_slice_bytes(line, 1, line.bytes().len())
@@ -110,7 +110,7 @@ audit_board_cards: fn(path: String) -> [Int] {
     nums
 }
 
-// Exact table predicates from tests/truthfulness.rs:1771-1908; the argument is the board.
+// Exact table predicates ; the argument is the board
 run: fn() {
     board: audit_board_cards(audit_process.args()[0])
     text: audit_files.read("Docs/Audits/cli-diagnostics-accessibility.md") ?? panic("CLI accessibility audit is readable")

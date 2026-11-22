@@ -87,7 +87,7 @@ s5_pty_state: fn(name: String) -> Int {
     } else if phase == "request" {
         _: s5_web_get(s5_web_port(), "/app.js", None) ?? panic("request while verbose")
     } else if phase == "error" { _: s5_pty_status(context, "pty-tab", "error", 10000) } else if phase == "collapsed" {
-        // ORACLE-PORT web_dev.rs:1430: exact original text.matches(ESC3r).count().
+        // ORACLE-PORT : exact original text.matches(ESC3r).count()
         files.write(files.join(s5_pty_root(), "collapsed-count"), "{s5_pty_count(s5_pty_text())}") ?? panic("collapsed count")
     } else if phase == "before-eof" {
         before: s5_pty_state("collapsed-count")
