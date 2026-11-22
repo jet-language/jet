@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113116,
+    "rev": 113122,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -38092,11 +38092,11 @@
         {
           "n": 3,
           "text": "`strictness: .Script | .App | .Library | .Hardened` in package.jet is one table over the existing policy keys; `jet new` writes no strictness, and the cli and web templates write `.App` (D-STRICT-DIAL1=A). Proof: `jet test Compiler --profile cases --filter strictness_levels` (one case per level and one per template).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:29:51.830Z"
+          "evidence": "Landed in dev 635625cc85. Added strictness: .Script | .App | .Library | .Hardened in Jetpack/PackageModel (PackageStrictness backed by single pkg_strictness_table(), requiring authority.allow on .App/.Library/.Hardened, bundling harden/sentries/unsafe and hardened test profile on .Hardened, refusing loosening) and Loader.jet; jet new writes no strictness, cli and web templates write strictness: .App; jet explain strictness prints the single table. Verified: Jetpack/PackageModel/Tests/Manifest.jet 481/481 PASS, Tests/Cases/Strictness/strictness_levels.case PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T10:56:13.931Z"
         }
       ],
       "refs": [],
@@ -38107,8 +38107,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:01.776Z",
-      "updated": "2026-11-22T02:10:23.713Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-22T10:56:13.931Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
     {
@@ -41928,11 +41928,11 @@
         {
           "n": 4,
           "text": "L0529 and L0302 are each re-registered under D-NO-WARNINGS1 (a jet fmt rewrite or a registered error with what/why/fix and a UI snapshot on O0, O1 and O2) with a Jet emitter, or are retired in one cutover if the ratified state-machine design supersedes them. Proof: `jet test Compiler --profile ui --filter L0529` and `--filter L0302` show the registered errors, or `git grep -n -E \"L0529|L0302\" -- Compiler` prints nothing after the cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:44:42.340Z"
+          "evidence": "Verified on dev 635625cc85: L0529 (Jet.StateLoopUnchanged) is retired under D-NO-WARNINGS1 and replaced by E0513 (Jet.StateLoopNeverAdvances, Tests/UI/state_loop_never_advances.jet PASS); L0302 (Jet.SameEnumGuardTable) has a Jet emitter at Statements.jet:4350 in DiagnosticTier.Report, proven by Tests/UI/LintPolicyL0302/run.jet PASS, Tests/UILint/subjectless_guard_enum_dispatch.jet PASS, and DiagnosticsCoverage/rendered_lint_keeps_code_beside_name.case PASS.",
+          "at": "2026-11-22T10:56:11.443Z"
         },
         {
           "n": 5,
@@ -41947,11 +41947,11 @@
         {
           "n": 6,
           "text": "A parameter or result carries its typestate, and calling another state's method through it is refused (probe t06 of the typestate-holes study, $JET_SCRATCH_ROOT/lanes/Main/prep/). Whether a parameter or result carries its state (D-STATE-PARAM1) is on Main's ballot list (2026-11-15).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:33:47.148Z",
+          "evidence": "Landed in dev 89ab1b3b37 (merged 635625cc85). Added Tests/UI/Typestate/typestate_parameter_carries_state.jet and .stderr covering consuming, group, and borrowed state parameters plus direct and bound call results, all emitting Error: Jet.TypestateWrongState (E0150). Verified PASS on built compiler.",
+          "at": "2026-11-22T10:56:12.732Z",
           "proof": {
             "profile": "ui",
             "filter": "typestate_parameter_carries_state"
@@ -42001,8 +42001,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-22T02:10:23.715Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-22T10:56:12.732Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 10
     },
     {
@@ -53727,7 +53727,7 @@
       "track": "epoch",
       "epoch": "G6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -53764,11 +53764,11 @@
         {
           "n": 2,
           "text": "Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects, counting the policies' statements. A policy whose reads are key lookups compiles into the query as a join; other policies run per row, memoized per key in the transaction, and jet inspect choices names them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:06.963Z",
+          "evidence": "Landed in dev 89ab1b3b37 (merged 635625cc85). Query<T>.count_by(group) compiles to one SQL GROUP BY query with policy included; DBPolicySQL.jet compiles key-lookup row policies into EXISTS semi-joins and memoizes non-joinable policies per transaction; jet inspect choices reports joined and per-row policies. Verified on built compiler: Tests/Cases/DB/count_by_is_one_query.case PASS (O0, O1, O2, inspect choices), Core/Data 13/13 PASS, Core/DB 23/23 PASS, Tests/Guards 211/211 PASS.",
+          "at": "2026-11-22T10:55:30.884Z",
           "proof": {
             "profile": "cases",
             "filter": "DB/count_by_is_one_query"
@@ -53793,9 +53793,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:20.796Z",
-      "updated": "2026-11-22T02:10:23.720Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 3
+      "updated": "2026-11-22T10:56:10.399Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-22T10:56:10.399Z"
     },
     {
       "id": "c0e5gz4o",
@@ -56890,6 +56891,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-22",
+          "by": "agent",
+          "text": "Checked c14 on dev 635625cc85: Core/ currently declares 363 public top-level __* items across 40 files (308 tracked by core_builtins_door.jet CBD_CEILING = 308). c14 (making every __* item in Core package-private) is structurally sequenced after c13 (CBD_CEILING -> 0)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "c3 needs an owner ballot: Http Body's static constructors (text/json/form/reader) share names with its reading methods; options are a rename, static and instance members with the same name, or free constructors. GoalsA-1-4 drafts it; the card moves on to #6847. c11, c13 and c14 depend on MemKernel-6's __-helper codemod."
@@ -57126,8 +57132,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-22T09:34:43.051Z",
-      "updatedBy": "Orchestrator",
+      "updated": "2026-11-22T10:56:15.104Z",
+      "updatedBy": "agent",
       "criteriaLastN": 21
     },
     {
@@ -133466,6 +133472,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-22T10:56:15.104Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-22T10:56:13.931Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qz3x03",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-22T10:56:12.732Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06he0ee",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-22T10:56:11.443Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06he0ee",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-22T10:56:10.399Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0w7y8wz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-22T10:55:30.884Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0w7y8wz",
+      "note": "#2"
+    },
     {
       "at": "2026-11-22T10:23:35.360Z",
       "by": "agent",
