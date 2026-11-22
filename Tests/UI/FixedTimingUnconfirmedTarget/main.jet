@@ -1,0 +1,21 @@
+// @web_target
+// A `policy.harden` package holding `timing: .Fixed` values is refused on web
+// targets with E0744 before code selection.
+use sys: core.sys
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse],
+        timing: .Fixed
+    }
+}
+
+#Scrub(Key) reveal: fn(value: #Key U64) -> U64 { value }
+
+pick: fn(k: #Key U64, a: U64, b: U64) -> U64 { if k == (U64{1}) -> a else -> b }
+
+run: fn() -[Env, IO]> {
+    _: sys.timing_host()
+    print("{reveal(pick(#Key U64{1}, U64{7}, U64{9}))}")
+}

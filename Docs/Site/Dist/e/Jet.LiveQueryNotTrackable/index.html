@@ -36,7 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use `data.track(rows, fn(row) { key })` before `query(...).watch()`, and avoid effectful callbacks or unsafe Float reassociation.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this diagnostic.</p>
+<p>First UI snapshot mentioning <code>Jet.LiveQueryNotTrackable</code>: <code>Tests/UI/live_query_callback_not_replay_safe.stderr</code>.</p>
+<pre class="diag">Error: Jet.LiveQueryNotTrackable: Live query callback `map` is not replay-safe
+  --&gt; Tests/UI/live_query_callback_not_replay_safe.jet:11:29
+    |
+ 11 |     _: data.query(rows).map(pick_x)
+    |                             ^^^^^^
+ Why: A maintained query replays callbacks after each source delta, so the callback must have an explicit empty effect bound
+ Fix: Remove the effectful operation, or declare/use a pure callback over the tracked row
+More: jet-lang.dev/e/Jet.LiveQueryNotTrackable
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

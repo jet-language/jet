@@ -1,0 +1,19 @@
+#Error
+Bad: enum {
+    Fail,
+}
+
+fallible: fn(n: Int) -> Int Bad! {
+    if n < 0 -> return Err(Bad.Fail)
+    Ok(n)
+}
+
+take_int: fn(n: Int) -> Int { n }
+
+use_fallible: fn(r: Int Bad!) -> Int {
+    take_int(r)
+}
+
+run: fn() {
+    _: use_fallible(fallible(1))
+}
