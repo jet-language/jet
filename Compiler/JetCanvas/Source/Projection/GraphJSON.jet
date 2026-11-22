@@ -155,13 +155,21 @@ next_function_start: fn(src: String, offset: Int) -> Int Never! {
     loop cursor < bytes.len() {
         line_end := cursor
         loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
-        if line_end < bytes.len() -> line_end += 1
-        line: foundation_byte_text(bytes, cursor, line_end)
-        trimmed: line.trim_start()
-        if trimmed.split_once(": fn") == .Val(parts) && parts.before.len() > 0 && is_identifier_text(parts.before) {
-            return cursor + line.count_bytes() - trimmed.count_bytes()
+        start := cursor
+        loop start < line_end && (bytes[start] == (U8{32}) || bytes[start] == (U8{9}) || bytes[start] == (U8{13})) {
+            start += 1
         }
-        cursor = line_end
+        ident_end := start
+        loop ident_end < line_end {
+            b: Int{bytes[ident_end]}
+            if (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 {
+                ident_end += 1
+            } else { break }
+        }
+        if ident_end > start && ident_end + 4 <= line_end && bytes[ident_end] == (U8{58}) && bytes[ident_end + 1] == (U8{32}) && bytes[ident_end + 2] == (U8{102}) && bytes[ident_end + 3] == (U8{110}) {
+            return start
+        }
+        cursor = if line_end < bytes.len() -> line_end + 1 else -> bytes.len()
     }
     bytes.len()
 }
