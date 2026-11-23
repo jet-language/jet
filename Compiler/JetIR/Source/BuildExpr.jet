@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
-    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
+    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
@@ -9005,7 +9005,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         returned = fn_ret
     } else { return ir_fail_slot(b, span, "named function as a value of {ir_type_name(ty)}") }
     adapter_key: "{key}#value<{type_carrier_identity(signature)}>"
-    adapter := name_rows_value(m.function_rows, adapter_key) ?? -1
+    adapter := ir_keyed_function(m, adapter_key) ?? -1
     if adapter < 0 {
         function_row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "named function {key} outside the checked program")
         if p.functions[function_row].generic_params.len() > 0 {
@@ -9046,7 +9046,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "named function {p.functions[function_row].name} as a value")
         adapter = m.functions.len()
         m.functions.push(ir_hashed_function("{p.functions[function_row].name}.value", adapter_key, "{ir_symbol_name(p.functions[function_row])}__value_", p.functions[function_row].source_file, p.functions[function_row].line))
-        name_rows_set(m.function_rows, adapter_key, adapter)
+        ir_function_bind(m, adapter_key, adapter)
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = p.functions[function_row].line
         _: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))

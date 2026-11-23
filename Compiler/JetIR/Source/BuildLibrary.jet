@@ -10,7 +10,7 @@
 // builds each call of one as its machine operation (ir_intrinsic_call).
 use {
     jet_backend.[LINK_FAULT_REPORT, X64DataExport, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_EVAL_STORAGE, X64_OBSERVE_ROOT_SYMBOL, x64_debug_eval_symbol]
-    jet_foundation.[Interner, AccessConvention, CompilerThreads, DeclTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
+    jet_foundation.[Interner, AccessConvention, CompilerThreads, DeclTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_column_get, name_column_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -357,7 +357,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     // Each export's function in the merged module.
     roots := [Int]{}
     loop row in exports {
-        id: name_rows_get_text(m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
+        id: name_column_get(m.function_rows_keys, m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
         roots.push(id)
     }
     // No export reaches its own runtime route: that would be a construct in
@@ -432,7 +432,7 @@ ir_library_failed: fn(errors: [String]) -> IRLibraryResult Never! {
 
 // Whether IR function `id` has a CallRuntime of `symbol`.
 ir_calls_own_route: fn(m: IRModule, id: Int, symbol: String) -> Bool Never! {
-    own: name_rows_value(m.name_rows, symbol) ?? return false
+    own: ir_interned_name(m, symbol) ?? return false
     f: m.functions[id]
     loop at in 0..<f.op.len() {
         if f.op[at] == .CallRuntime && f.a[at] == own -> return true
@@ -673,7 +673,7 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     // C symbol).
     name_callees := loop _ in m.names -> -1
     loop row in exports {
-        if name_rows_value(m.name_rows, row.symbol) == .Val(at) -> name_callees[at] = row.function
+        if ir_interned_name(m, row.symbol) == .Val(at) -> name_callees[at] = row.function
     }
     writes: loop f in m.functions -> ir_slot_writes(f)
     // Per function and parameter, the uses of the code word passed there,
@@ -943,7 +943,7 @@ ir_lifecycle_guard: fn(m: IRModule, p: IRProgram, name: String) -> Int Never! {
     loop definition in p.constant_defs {
         if !definition.is_storage || definition.name != name -> next
         if found != -1 -> return -1
-        found = name_rows_value(m.constant_rows, "storage:{definition.key}") ?? -2
+        found = name_column_value(m.constant_rows_keys, m.constant_rows, "storage:{definition.key}") ?? -2
     }
     if found < 0 -> return -1
     found

@@ -19,13 +19,13 @@
 // copies and moves of scalars and the runtime's Int clone, none of which
 // writes a parameter or can publish a stop. E is the edge as built: drops
 // and Returns, no branch, so its nesting one level deeper changes nothing.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[Type, compiler_threads_single]
 
 // The most instructions a head (its test, If, arm and Return) may have.
 IR_OPT_ENTRY_LIMIT: 8
 
 ir_opt_entry: fn(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
-    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
     guards := [[IRFunction]]{}
     any := false
     loop id in 0..<functions.len() {
@@ -290,7 +290,7 @@ ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, a
         _ := ir_emit(g, IROp.Return, -1, sum, -1, -1, 3)
         ir_opt_compact(g)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true

@@ -100,7 +100,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 use {
-    jet_foundation.[Interner, InternerDelta, NameRows, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, name_table_sized, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
+    jet_foundation.[Interner, InternerDelta, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_column, name_column_get_hashed, name_column_set, name_column_set_hashed, name_column_table, name_column_value, name_table_sized, name_text_hash, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
     jet_backend.[X64DebugSource]
 }
 
@@ -550,9 +550,10 @@ IRDataReloc: struct {
 }
 
 // The program: interned types and names, read-only data rows, functions.
-// Every String-keyed table is a hashed `NameRows` (JetFoundation AST/Names:
-// one hash and one compare per lookup); a table whose values are lists keys
-// an index into a list column beside it.
+// Every String-keyed table is a NameTable of its keys and an id-indexed
+// column beside it (`<table>_keys` and `<table>`; JetFoundation AST/Names
+// name_column: one hash and one compare per lookup); a table whose values
+// are lists keys an index into a list column beside it.
 // `type_keys[row]` is type row `row`'s intern key (ir_row_key);
 // `key_rows` indexes `key_lists`, the rows ir_intern_type gave each display
 // key (they differ in layout), so a repeated intern compares layouts, not keys.
@@ -632,17 +633,23 @@ IRDataReloc: struct {
 IRModule: struct {
     types: [IRType],
     type_keys: [String],
-    type_rows: NameRows,
-    key_rows: NameRows,
+    type_rows_keys: NameTable{name_column_table()},
+    type_rows: [Int]{name_column()},
+    key_rows_keys: NameTable{name_column_table()},
+    key_rows: [Int]{name_column()},
     key_lists: [[Int]],
     names: [String],
-    name_rows: NameRows,
+    name_rows_keys: NameTable{name_column_table()},
+    name_rows: [Int]{name_column()},
     data: [[U8]],
-    data_rows: NameRows,
+    data_rows_keys: NameTable{name_column_table()},
+    data_rows: [Int]{name_column()},
     data_relocs: [Int:[IRDataReloc]],
-    constant_rows: NameRows,
+    constant_rows_keys: NameTable{name_column_table()},
+    constant_rows: [Int]{name_column()},
     functions: [IRFunction],
-    function_rows: NameRows,
+    function_rows_keys: NameTable{name_column_table()},
+    function_rows: [Int]{name_column()},
     entry: Int,
     // The rows `dead_code: keep` builds as roots beside `entry`
     // (ir_build_program): the object keeps them though nothing calls them.
@@ -651,13 +658,18 @@ IRModule: struct {
     // a kept row too: the object makes each a global symbol (ir_x64_object),
     // so the link binds the runtime's calls of the hook to it.
     hooks: [IRLibraryExport]{[IRLibraryExport]{}},
-    layouts: NameRows,
+    layouts_keys: NameTable{name_column_table()},
+    layouts: [Int]{name_column()},
     layout_low: Int,
-    struct_members: NameRows,
-    variant_members: NameRows,
+    struct_members_keys: NameTable{name_column_table()},
+    struct_members: [Int]{name_column()},
+    variant_members_keys: NameTable{name_column_table()},
+    variant_members: [Int]{name_column()},
     member_lists: [[IRMember]],
-    enum_sizes: NameRows,
-    handle_rows: NameRows,
+    enum_sizes_keys: NameTable{name_column_table()},
+    enum_sizes: [Int]{name_column()},
+    handle_rows_keys: NameTable{name_column_table()},
+    handle_rows: [Int]{name_column()},
     // The module's Interner, once it has one: the program's, moved in when a
     // build finishes (ir_module_finalize_interner, ir_merge_with), or a
     // standalone module's own (ir_module_intern_tid). A shard building
@@ -672,11 +684,14 @@ IRModule: struct {
     close_free: [Int:Bool],
     scalar_rows: [Int],
     ids: [Int],
-    instances: NameRows,
+    instances_keys: NameTable{name_column_table()},
+    instances: [Int]{name_column()},
     queue: [IRQueued],
     lambdas: [IRLambdaJob],
-    close_glue: NameRows,
-    helper_errors: NameRows,
+    close_glue_keys: NameTable{name_column_table()},
+    close_glue: [Int]{name_column()},
+    helper_errors_keys: NameTable{name_column_table()},
+    helper_errors: [Int]{name_column()},
     helper_messages: [String],
     stop_points: Bool{false},
     quiet_routes: NameTable{name_table_sized(2)},
@@ -738,7 +753,7 @@ IRModule: struct {
 }
 
 ir_module_new: fn() -> IRModule Never! {
-    IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}}
+    IRModule{types: [IRType]{}, type_keys: [String]{}, key_lists: [[Int]]{}, names: [String]{}, data: [[U8]]{}, data_relocs: [Int:[IRDataReloc]]{}, functions: [IRFunction]{}, entry: -1, layout_low: 0, member_lists: [[IRMember]]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, helper_messages: [String]{}}
 }
 
 // Whether `table` holds the compilation's rows (interner()), rather than
@@ -815,26 +830,39 @@ ir_module_finalize_interner: fn(m: &IRModule, base: &&Interner) Never! {
 // except functions, types, names, data, debug metadata, host_literals, and
 // function_rows for drop-glue lookup).
 ir_module_drop_build_memos: fn(m: &IRModule) Never! {
-    m.type_rows = name_rows()
-    m.key_rows = name_rows()
+    m.type_rows_keys = name_column_table()
+    m.type_rows = name_column()
+    m.key_rows_keys = name_column_table()
+    m.key_rows = name_column()
     m.key_lists = [[Int]]{}
-    m.name_rows = name_rows()
-    m.data_rows = name_rows()
-    m.constant_rows = name_rows()
-    m.layouts = name_rows()
-    m.struct_members = name_rows()
-    m.variant_members = name_rows()
-    m.enum_sizes = name_rows()
-    m.handle_rows = name_rows()
+    m.name_rows_keys = name_column_table()
+    m.name_rows = name_column()
+    m.data_rows_keys = name_column_table()
+    m.data_rows = name_column()
+    m.constant_rows_keys = name_column_table()
+    m.constant_rows = name_column()
+    m.layouts_keys = name_column_table()
+    m.layouts = name_column()
+    m.struct_members_keys = name_column_table()
+    m.struct_members = name_column()
+    m.variant_members_keys = name_column_table()
+    m.variant_members = name_column()
+    m.enum_sizes_keys = name_column_table()
+    m.enum_sizes = name_column()
+    m.handle_rows_keys = name_column_table()
+    m.handle_rows = name_column()
     m.value_rows = [Int]{}
     m.close_free = [Int:Bool]{}
     m.scalar_rows = [Int]{}
     m.ids = [Int]{}
-    m.instances = name_rows()
+    m.instances_keys = name_column_table()
+    m.instances = name_column()
     m.queue = [IRQueued]{}
     m.lambdas = [IRLambdaJob]{}
-    m.close_glue = name_rows()
-    m.helper_errors = name_rows()
+    m.close_glue_keys = name_column_table()
+    m.close_glue = name_column()
+    m.helper_errors_keys = name_column_table()
+    m.helper_errors = name_column()
     m.helper_messages = [String]{}
     m.quiet_routes = name_table_sized(2)
     m.quiet_exports = [U8]{}
@@ -859,8 +887,8 @@ ir_kind_name: fn(kind: IRTypeKind) -> String Never! {
 
 // The row of `row`'s type, interned by its kind, layout and display key.
 ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
-    hash: name_rows_hash(key)
-    listed: name_rows_get(m.key_rows, key, hash) ?? -1
+    hash: name_text_hash(key)
+    listed: name_column_get_hashed(m.key_rows_keys, m.key_rows, key, hash) ?? -1
     if listed >= 0 {
         loop index in m.key_lists[listed] {
             if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed {
@@ -869,16 +897,16 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
         }
     }
     full := "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
-    full_hash: name_rows_hash(full)
-    found := name_rows_get(m.type_rows, full, full_hash) ?? -1
+    full_hash: name_text_hash(full)
+    found := name_column_get_hashed(m.type_rows_keys, m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
         m.types.push(row.copy())
-        name_rows_set_hashed(m.type_rows, full, full_hash, found)
+        name_column_set_hashed(m.type_rows_keys, m.type_rows, full, full_hash, found)
         m.type_keys.push(full.move())
     }
     if listed >= 0 -> m.key_lists[listed].push(found) else {
-        name_rows_set_hashed(m.key_rows, key, hash, m.key_lists.len())
+        name_column_set_hashed(m.key_rows_keys, m.key_rows, key, hash, m.key_lists.len())
         m.key_lists.push([Int]{found})
     }
     found
@@ -911,23 +939,23 @@ ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: S
 }
 
 ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
-    hash: name_rows_hash(text)
-    found: name_rows_get(m.name_rows, text, hash) ?? -1
+    hash: name_text_hash(text)
+    found: name_column_get_hashed(m.name_rows_keys, m.name_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id: m.names.len()
-    name_rows_set_hashed(m.name_rows, text, hash, id)
+    name_column_set_hashed(m.name_rows_keys, m.name_rows, text, hash, id)
     m.names.push(text.copy())
     id
 }
 
 // A read-only data row holding `text`'s bytes (shared by equal texts).
 ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
-    hash: name_rows_hash(text)
-    found: name_rows_get(m.data_rows, text, hash) ?? -1
+    hash: name_text_hash(text)
+    found: name_column_get_hashed(m.data_rows_keys, m.data_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id: m.data.len()
     m.data.push(text.bytes())
-    name_rows_set_hashed(m.data_rows, text, hash, id)
+    name_column_set_hashed(m.data_rows_keys, m.data_rows, text, hash, id)
     id
 }
 
@@ -935,32 +963,48 @@ ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
 // by length and digest, linear in the bytes however large the table).
 ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
     key: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
-    hash: name_rows_hash(key)
-    found: name_rows_get(m.data_rows, key, hash) ?? -1
+    hash: name_text_hash(key)
+    found: name_column_get_hashed(m.data_rows_keys, m.data_rows, key, hash) ?? -1
     if found >= 0 -> return found
     id: m.data.len()
     m.data.push(bytes.copy())
-    name_rows_set_hashed(m.data_rows, key, hash, id)
+    name_column_set_hashed(m.data_rows_keys, m.data_rows, key, hash, id)
     id
 }
 
 // Records `message` as the failure of helper `key`, which every later use
 // of the helper reports again (ir_helper_error).
 ir_helper_failed: fn(m: &IRModule, key: String, message: String) Never! {
-    name_rows_set(m.helper_errors, key, m.helper_messages.len())
+    name_column_set(m.helper_errors_keys, m.helper_errors, key, m.helper_messages.len())
     m.helper_messages.push(message.copy())
 }
 
 ir_helper_error: fn(m: IRModule, key: String) -> String? Never! {
-    index: name_rows_value(m.helper_errors, key) ?? return None
+    index: name_column_value(m.helper_errors_keys, m.helper_errors, key) ?? return None
     Val(m.helper_messages[index].copy())
 }
 
 // The members memoized under `memo` in `table` (an index into
-// m.member_lists), if any.
-ir_members_memo: fn(m: IRModule, table: NameRows, memo: String) -> [IRMember]? Never! {
-    index: name_rows_value(table, memo) ?? return None
+// m.member_lists, at the memo's id in `keys`), if any.
+ir_members_memo: fn(m: IRModule, keys: NameTable, table: [Int], memo: String) -> [IRMember]? Never! {
+    index: name_column_value(keys, table, memo) ?? return None
     Val(m.member_lists[index].copy())
+}
+
+// The function id `m` binds to `key`, whatever its sign (the builder keeps
+// markers of its own below 0), if `m` ever bound it.
+ir_keyed_function: fn(m: IRModule, key: String) -> Int? Never! {
+    name_column_value(m.function_rows_keys, m.function_rows, key)
+}
+
+// Binds function `key` to `id` in `m`, replacing any earlier id.
+ir_function_bind: fn(m: &IRModule, key: String, id: Int) Never! {
+    name_column_set(m.function_rows_keys, m.function_rows, key, id)
+}
+
+// The id `m` interned name `text` under (ir_intern_name), if it did.
+ir_interned_name: fn(m: IRModule, text: String) -> Int? Never! {
+    name_column_value(m.name_rows_keys, m.name_rows, text)
 }
 
 ir_function_new: fn(name: String, key: String, symbol: String, source_file: String, line: Int) -> IRFunction Never! {

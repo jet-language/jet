@@ -29,7 +29,7 @@
 // hot path proved them inline. Eq and Ne against a constant compare words.
 use {
     core.collections.[Rows]
-    jet_foundation.[Type, name_rows_value]
+    jet_foundation.[Type]
     jet_backend.[
         X64Alu,
         X64CallArgument,
@@ -2083,8 +2083,8 @@ IRX64Region: struct {
 // site. A `zones: strip` module keeps none.
 ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll_in: Int{-2}, trap_in: Int{-2}, turn_in: Int{-2}, zone_plot_in: Int{-2}, zone_frame_in: Int{-2}) -> [Int] Never! {
     if m.zones_stripped -> return [Int]{}
-    zone_plot: if zone_plot_in >= -1 -> zone_plot_in else -> (name_rows_value(m.name_rows, "jet_perf_plot_float") ?? -1)
-    zone_frame: if zone_frame_in >= -1 -> zone_frame_in else -> (name_rows_value(m.name_rows, "jet_perf_frame") ?? -1)
+    zone_plot: if zone_plot_in >= -1 -> zone_plot_in else -> (ir_interned_name(m, "jet_perf_plot_float") ?? -1)
+    zone_frame: if zone_frame_in >= -1 -> zone_frame_in else -> (ir_interned_name(m, "jet_perf_frame") ?? -1)
     if zone_plot < 0 && zone_frame < 0 -> return [Int]{}
     has_zone := false
     loop at in 0..<f.op.len() {
@@ -2100,9 +2100,9 @@ ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll_in
     sunk := [Int]{}
     sunk.try_reserve(f.op.len()) ?? panic("reserve failed")
     loop _ in 0..<f.op.len() -> sunk.push(-1)
-    poll: if poll_in >= -1 -> poll_in else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
-    trap: if trap_in >= -1 -> trap_in else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
-    turn: if turn_in >= -1 -> turn_in else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
+    poll: if poll_in >= -1 -> poll_in else -> (ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1)
+    trap: if trap_in >= -1 -> trap_in else -> (ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1)
+    turn: if turn_in >= -1 -> turn_in else -> (ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1)
     points: [Int]{poll, trap, turn}
     parents: ir_x64_parents(f)
     first := -1
@@ -3757,7 +3757,7 @@ ir_x64_drop: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     }
     // A drop routine the module builds itself (the ScopeGuard drop) is
     // registered under its symbol.
-    if name_rows_value(m.function_rows, drop) == .Val(id) {
+    if ir_keyed_function(m, drop) == .Val(id) {
         return ir_x64_call(e, m, f, al, x64_reloc_function(0, id), -1, [Int]{slot}, 0, 1, -1, 0)
     }
     ir_x64_call(e, m, f, al, x64_reloc_runtime(0, drop), -1, [Int]{slot}, 0, 1, -1, 0)
@@ -5572,15 +5572,15 @@ ir_x64_select_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, name
     if m.fast_o0 {
         f: m.functions[row]
         if f.frame_bound < 0 && f.asm == None && !ir_stop_key(f.key) && !ir_timing_marked(f) && (names.len() == 0 || !ir_x64_log_names(f, names)) {
-            p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
-            p_trap: if trap != -2 -> trap else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
-            p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
+            p_poll: if poll != -2 -> poll else -> (ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1)
+            p_trap: if trap != -2 -> trap else -> (ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1)
+            p_turn: if turn != -2 -> turn else -> (ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1)
             return ir_x64_patch_function_in(m, fast, row, p_poll, p_trap, p_turn, patch)
         }
         if !m.dropped_early && f.asm == None && !ir_stop_key(f.key) {
-            p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
-            p_trap: if trap != -2 -> trap else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
-            p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
+            p_poll: if poll != -2 -> poll else -> (ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1)
+            p_trap: if trap != -2 -> trap else -> (ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1)
+            p_turn: if turn != -2 -> turn else -> (ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1)
             plan := ir_drop_plan(m, f, p_poll, p_trap, p_turn)
             if plan.slots.len() > 0 {
                 fc := f
@@ -6282,9 +6282,9 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     // the function's own line until a body line replaces it.
     body: e.code.bytes.len()
     if f.line > 0 -> lines.push(X64LineRow{at: body, line: f.line})
-    poll: if poll_in != -2 -> poll_in else -> name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: if trap_in != -2 -> trap_in else -> name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: if turn_in != -2 -> turn_in else -> name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: if poll_in != -2 -> poll_in else -> ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+    trap: if trap_in != -2 -> trap_in else -> ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
+    turn: if turn_in != -2 -> turn_in else -> ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
     // The slow paths of the instruction before `at` start at colds[traps].
     traps := 0
     at := wrap

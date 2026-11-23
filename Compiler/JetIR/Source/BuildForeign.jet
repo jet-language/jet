@@ -6,7 +6,7 @@
 // is its assembled template.
 use {
     jet_backend.[x64_assemble_template]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, name_rows_set, name_rows_value, type_carrier_identity]
+    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, type_carrier_identity]
     jet_sema.[SEMA_GUEST_RUNTIME_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
 }
 
@@ -110,12 +110,12 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
         return ir_intern_type(m, identity, ir_layout(IRTypeKind.Pointer, bare_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     }
     symbol: if c_symbol != "" -> "jet_ir_ffi_close_{c_symbol}" else -> ir_hashed_function("ffi.handle.close", handle.close_function ?? "", "jet_ir_ffi_close_fn_", "", 0).symbol
-    if name_rows_value(m.function_rows, symbol) == None {
+    if ir_keyed_function(m, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function (as ir_scope_guard_row).
         id: m.functions.len()
         m.functions.push(ir_function_new("ffi.handle.close", symbol, symbol, "", 0))
-        name_rows_set(m.function_rows, symbol, id)
+        ir_function_bind(m, symbol, id)
         a := ir_builder_new(m.functions[id].copy())
         pointer_row: ir_pointer_row(m)
         held: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
@@ -801,7 +801,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
     }
     problem: ir_asm_leaf(m, p, foreign, leaf_params, leaf_result)
     if problem != "" -> return ir_fail_slot(b, span, problem)
-    leaf: name_rows_value(m.function_rows, "{ir_symbol_key(p, foreign.symbol_id)}#asm") ?? return ir_fail_slot(b, span, "inline asm leaf of {foreign.name} was not built")
+    leaf: ir_keyed_function(m, "{ir_symbol_key(p, foreign.symbol_id)}#asm") ?? return ir_fail_slot(b, span, "inline asm leaf of {foreign.name} was not built")
     values := [Int]{}
     lowered := [Int]{}
     loop (index, arg) in args {
@@ -834,7 +834,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
 // when the template is missing or does not assemble, else "".
 ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
     key: "{ir_symbol_key(p, foreign.symbol_id)}#asm"
-    if name_rows_value(m.function_rows, key) != None -> return ""
+    if ir_keyed_function(m, key) != None -> return ""
     source: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
     names: loop param in foreign.params -> param.name
     assembled: x64_assemble_template(source, names, result >= 0, p.asm_rails)
@@ -854,7 +854,7 @@ ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction,
     f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result, quiet: assembled.quiet, syscalls: assembled.syscalls})
     id: m.functions.len()
     m.functions.push(f)
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     ""
 }
 

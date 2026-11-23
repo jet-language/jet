@@ -33,7 +33,7 @@
 //   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
 //   happen (JetRuntime TestContracts.jet).
 use {
-    jet_foundation.[Interner, BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
+    jet_foundation.[Interner, BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, symbol_none]
     jet_sema.[SemaCheckedForeignFunction, sema_type_def_instance_type]
 }
 
@@ -175,7 +175,7 @@ ir_test_function: fn(m: &IRModule, name: String, from: Int, suffix: String) -> I
     id: m.functions.len()
     function: ir_function_new(name, key, symbol, source_file, line)
     m.functions.push(function)
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     id
 }
 

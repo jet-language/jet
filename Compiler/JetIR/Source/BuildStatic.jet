@@ -20,7 +20,7 @@
 // read, and module storage on its start helper, built once on first use
 // (ir_storage_start).
 use {
-    jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value, sha256_hex]
+    jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeValue, TConstantDef, Type, name_column_set, name_column_value, name_count, sha256_hex]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -135,7 +135,7 @@ ir_static_constant: fn(m: &IRModule, p: IRProgram, ty: Type, key: String, value:
     kind: m.types[row].kind
     if kind != .Aggregate && kind != .Pointer -> return -1
     memo: "{key}|{ir_row_key(m, row)}"
-    known: name_rows_value(m.constant_rows, memo) ?? -2
+    known: name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -2
     if known != -2 -> return known
     s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
     root := -1
@@ -147,11 +147,11 @@ ir_static_constant: fn(m: &IRModule, p: IRProgram, ty: Type, key: String, value:
         if word.local && word.addend == IR_STATIC_BOX_HEADER -> root = word.target
     }
     if root < 0 {
-        name_rows_set(m.constant_rows, memo, -1)
+        name_column_set(m.constant_rows_keys, m.constant_rows, memo, -1)
         return -1
     }
     base: ir_static_commit(m, s.move())
-    name_rows_set(m.constant_rows, memo, base + root)
+    name_column_set(m.constant_rows_keys, m.constant_rows, memo, base + root)
     base + root
 }
 
@@ -229,12 +229,12 @@ ir_static_edge: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, r
 // The address past its count word, -1 when the value does not freeze.
 ir_static_wrapper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, key: String, value: TComptimeValue) -> Int Never! {
     memo: "wrapper:{key}|{ir_row_key(m, row)}"
-    object := name_rows_value(m.constant_rows, memo) ?? -2
+    object := name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -2
     if object == -2 {
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         wrapper: ir_static_box(s, m.types[row].size)
         object = if ir_static_into(m, p, s, wrapper, IR_STATIC_BOX_HEADER, ty, row, value) -> ir_static_commit(m, s.move()) + wrapper else -> -1
-        name_rows_set(m.constant_rows, memo, object)
+        name_column_set(m.constant_rows_keys, m.constant_rows, memo, object)
     }
     if object < 0 -> return -1
     pointer_row: ir_pointer_row(m)
@@ -264,7 +264,7 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
     }
     memo: "storage:{definition.key}"
     deferred: "storage-start:{definition.key}"
-    object := name_rows_value(m.constant_rows, memo) ?? -1
+    object := name_column_value(m.constant_rows_keys, m.constant_rows, memo) ?? -1
     if object < 0 {
         size: if kind == .Aggregate -> ir_align8(m.types[row].size) else -> 8
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
@@ -279,15 +279,15 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
             _: ir_static_new(s, size)
             // The mark names no data row (-1), so a merge shares no row by
             // it (BuildMerge.jet ir_merge_prepare).
-            name_rows_set(m.constant_rows, deferred, -1)
+            name_column_set(m.constant_rows_keys, m.constant_rows, deferred, -1)
         }
         object = ir_static_commit(m, s.move()) + cell
-        name_rows_set(m.constant_rows, memo, object)
+        name_column_set(m.constant_rows_keys, m.constant_rows, memo, object)
     }
     pointer: ir_pointer_row(m)
     address: ir_temp(m, b, pointer)
     ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)
-    if name_rows_value(m.constant_rows, deferred) != None {
+    if name_column_value(m.constant_rows_keys, m.constant_rows, deferred) != None {
         if !ir_storage_start(m, p, b, definition, object, span) -> return -1
     }
     address
@@ -319,11 +319,11 @@ ir_storage_start: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCon
 // any other caller waits for the 1. -1 when its body cannot be built.
 ir_storage_start_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, object: Int, span: Span) -> Int Never! {
     helper_key: "#storage.start<{definition.key}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("storage.start", helper_key, "jet_ir_storage_start_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     word_row: ir_word_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -364,7 +364,7 @@ ir_storage_start_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definitio
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, span, a.error)
         return -1
     }
@@ -737,10 +737,10 @@ ir_static_own_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     }
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
-    if p.render_impls.rows.len() > 0 {
-        type_key: ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))
-        if name_rows_value(p.render_impls, "KeyBy|{type_key}") != None -> return true
-        if name_rows_value(p.render_impls, "Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic {
+    if name_count(p.render_impls_keys) > 1 {
+        type_key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))
+        if name_column_value(p.render_impls_keys, p.render_impls, "KeyBy|{type_key}") != None -> return true
+        if name_column_value(p.render_impls_keys, p.render_impls, "Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic {
             return true
         }
     }
@@ -812,7 +812,7 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
             // (ir_compare_impl): a derived impl compares the declared fields
             // in order; a written one runs code this does not. With none, the
             // order helper compares the members in turn (ir_order_nominal).
-            selected: if p.render_impls.rows.len() == 0 -> None else -> name_rows_value(p.render_impls, "Comparable|{ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))}")
+            selected: if name_count(p.render_impls_keys) <= 1 -> None else -> name_column_value(p.render_impls_keys, p.render_impls, "Comparable|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))}")
             if selected == .Val(index) {
                 if !p.functions[index].synthetic -> return false
                 if p.types[definition].kind == .Struct(declared, _) {

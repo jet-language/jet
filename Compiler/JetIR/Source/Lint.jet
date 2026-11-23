@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_rows_value, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -530,7 +530,7 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
     drop_functions := [Int]{}
     loop ty in m.types {
         kind_bits.push(ir_lint_kind_bit(ty.kind))
-        drop_functions.push(if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1)
+        drop_functions.push(if ty.drop == "" -> -1 else -> ir_keyed_function(m, ty.drop) ?? -1)
     }
     data_texts := [Int]{}
     loop _ in 0..<m.data.len() -> data_texts.push(IR_LINT_ROW_UNCHECKED)

@@ -51,7 +51,7 @@
 // `sub rsp` for the frame homes, StackAddress storage and the result storage
 // of calls that return an aggregate, rounded so rsp stays 16-byte aligned
 // at every call.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set]
+use jet_foundation.[Type, compiler_threads_single]
 
 // Callee-saved registers handed to General slots, in preference order.
 IR_X64_SLOT_REGISTERS: [Int]{3, 12, 13, 14, 15}
@@ -2416,7 +2416,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     g.result = word
     _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 1)
     g_row: m.functions.len()
-    name_rows_set(m.function_rows, g.key, g_row)
+    ir_function_bind(m, g.key, g_row)
     m.functions.push(g)
     f := ir_function_new("f", "test:share.jet.f", "", "share.jet", 3)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 3)
@@ -2449,7 +2449,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         n: ir_slot(filler, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
         filler.result = int_row
         _ := ir_emit(filler, IROp.Return, -1, n, -1, -1, 1)
-        name_rows_set(m.function_rows, filler.key, m.functions.len())
+        ir_function_bind(m, filler.key, m.functions.len())
         m.functions.push(filler)
     }
     callee: m.functions.len() - 1
@@ -2636,7 +2636,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         _ := ir_emit(make, IROp.Store, -1, built, 8, x, 2)
         _ := ir_emit(make, IROp.Return, -1, built, -1, -1, 2)
         make_row: m.functions.len()
-        name_rows_set(m.function_rows, make.key, make_row)
+        ir_function_bind(m, make.key, make_row)
         m.functions.push(make)
         swap := ir_function_new("swap", "test:pair.jet.swap", "", "pair.jet", 4)
         p: ir_slot(swap, pair, IRSlotKind.Param, ir_intern_name(m, "p"), 4)
@@ -2651,7 +2651,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         _ := ir_emit(swap, IROp.Store, -1, swapped, 8, left, 5)
         _ := ir_emit(swap, IROp.Return, -1, swapped, -1, -1, 5)
         swap_row: m.functions.len()
-        name_rows_set(m.function_rows, swap.key, swap_row)
+        ir_function_bind(m, swap.key, swap_row)
         m.functions.push(swap)
         run := ir_function_new("run", "test:pair.jet.run", "", "pair.jet", 7)
         seed: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
@@ -2664,7 +2664,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         _ := ir_emit(run, IROp.Call, turned, swap_row, swap_args, 1, 9)
         _ := ir_emit(run, IROp.Return, -1, -1, -1, -1, 10)
         m.entry = m.functions.len()
-        name_rows_set(m.function_rows, run.key, m.entry)
+        ir_function_bind(m, run.key, m.entry)
         m.functions.push(run)
         if level > 0 {
             options := ir_opt_options(level)

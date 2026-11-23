@@ -15,7 +15,7 @@
 //   already loaded unconditionally at the loop header).
 // - Only instructions at top level of the loop (not inside an If or inner Loop)
 //   are hoisted, so cold error/bounds-stop paths never move into hot preheaders.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[Type, compiler_threads_single]
 
 // Whether `op` is a pure non-trapping operation whose value depends only on
 // its operands (never traps, never reads memory, never has side effects).
@@ -81,7 +81,7 @@ ir_licm_safe_routes: fn(m: IRModule) -> [Int] Never! {
     }
     ids := [Int]{}
     loop name in names {
-        id: name_rows_value(m.name_rows, name) ?? -2
+        id: ir_interned_name(m, name) ?? -2
         if id >= 0 -> ids.push(id)
     }
     ids
@@ -143,7 +143,7 @@ ir_opt_licm: fn(m: IRModule, stop_keys: [Bool], f: &IRFunction) -> Int Never! {
     }
     if !has_loop -> return 0
     safe_routes: ir_licm_safe_routes(m)
-    char_len_route: name_rows_value(m.name_rows, "jet_char_len") ?? -2
+    char_len_route: ir_interned_name(m, "jet_char_len") ?? -2
     ir_opt_licm_with(m, stop_keys, safe_routes, char_len_route, f)
 }
 
@@ -357,7 +357,7 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     ir_end(g, 4)
     _ := ir_emit(g, IROp.Return, -1, acc, -1, -1, 5)
     m.entry = 0
-    name_rows_set(m.function_rows, g.key, 0)
+    ir_function_bind(m, g.key, 0)
     m.functions.push(g)
     options := ir_opt_options(2)
     options.verify = true
@@ -411,7 +411,7 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     ir_end(g, 4)
     _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
     m.entry = 0
-    name_rows_set(m.function_rows, g.key, 0)
+    ir_function_bind(m, g.key, 0)
     m.functions.push(g)
     options := ir_opt_options(2)
     options.verify = true
@@ -456,7 +456,7 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
     ir_end(g, 4)
     _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
     m.entry = 0
-    name_rows_set(m.function_rows, g.key, 0)
+    ir_function_bind(m, g.key, 0)
     m.functions.push(g)
     options := ir_opt_options(2)
     options.verify = true

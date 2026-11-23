@@ -10,7 +10,7 @@
 // leaving the block (ir_tx_unwind) and a stop (a panic, a cancellation,
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, name_rows_set, name_rows_value, stable_id, StmtKind]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, stable_id, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
@@ -70,12 +70,12 @@ IRTxSnapshot: struct {
 
 ir_transaction_row: fn(m: &IRModule, p: IRProgram) -> Int Never! {
     symbol: "jet_ir_transaction_drop"
-    if name_rows_value(m.function_rows, symbol) == None {
+    if ir_keyed_function(m, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
         id: m.functions.len()
         m.functions.push(ir_function_new("transaction.drop", symbol, symbol, "", 0))
-        name_rows_set(m.function_rows, symbol, id)
+        ir_function_bind(m, symbol, id)
         a := ir_builder_new(m.functions[id].copy())
         ir_transaction_drop_body(m, p, a)
         m.functions[id] = a.f.move()
@@ -169,11 +169,11 @@ ir_transaction_hook_call: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, node: In
 // edge leaves before the drop. One per result row.
 ir_transaction_hook_runner: fn(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
     key: "#transaction.hook.run<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, key) ?? -1
+    known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("transaction.hook.run", key, "jet_ir_transaction_hook_run_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     boxed: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "boxed"))
     result: ir_call_closure(m, p, a, boxed, [Int]{}, row)

@@ -57,7 +57,7 @@
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
-use jet_foundation.[CompilerThreads, Type, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set]
 
 IR_OPT_INLINE_CALLEE_O1: 40
 
@@ -161,7 +161,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     loop value in caller.args -> out.args.push(value)
     loop value in caller.binds -> out.binds.push(value)
     loop value in caller.scattered -> out.scattered.push(value)
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
     // The stop point after a quiet site goes (its poll through its If's End).
     skip_from := -1
     skip_to := -1
@@ -254,9 +254,9 @@ ir_opt_inline_rows_fit: fn(m: IRModule, callee: IRFunction, row: Int, wanted: In
 // pass through the code runs them, so a small checked helper costs what its
 // hot path does. ir_opt_inline_build caps the real growth they add.
 ir_opt_inline_cost: fn(m: IRModule, f: IRFunction) -> Int Never! {
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
-    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
-    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
+    trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -2
+    turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -2
     cost := 0
     at := 0
     loop at < f.op.len() {
@@ -759,7 +759,7 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
 #Test("The inline cost leaves out fail arms and stop edges, not other Ifs") {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
-    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     f := ir_function_new("f", "test:cost.jet.f", "", "cost.jet", 1)
@@ -795,7 +795,7 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
 ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
-    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     g := ir_function_new("g", "test:quiet.jet.g", "", "quiet.jet", 1)
@@ -841,7 +841,7 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
 #Test("An inlined glue leaves the stop point after it to the call before the Drop") {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
-    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
     text: ir_type_row(m, Type.String) ?? panic("no String row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     zone_tid: ir_module_intern_tid(m, Type.Named{name: "Zone"})
@@ -1130,8 +1130,8 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
         _ := ir_emit(f, IROp.Call, got, 0, passed, 1, 7)
         _ := ir_emit(f, IROp.Return, -1, got, -1, -1, 7)
         m.entry = 1
-        name_rows_set(m.function_rows, g.key, 0)
-        name_rows_set(m.function_rows, f.key, 1)
+        ir_function_bind(m, g.key, 0)
+        ir_function_bind(m, f.key, 1)
         m.functions.push(g)
         m.functions.push(f)
         options := ir_opt_options(level)
@@ -1193,8 +1193,8 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
         _ := ir_emit(f, IROp.End, -1, 2, -1, -1, 5)
         _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 9)
         m.entry = 1
-        name_rows_set(m.function_rows, g.key, 0)
-        name_rows_set(m.function_rows, f.key, 1)
+        ir_function_bind(m, g.key, 0)
+        ir_function_bind(m, f.key, 1)
         m.functions.push(g)
         m.functions.push(f)
         options := ir_opt_options(level)

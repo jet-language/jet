@@ -48,15 +48,15 @@
 // them once per function, last (ir_opt_sink_addresses).
 use {
     jet_backend.[X64_RDI, X64_RSI]
-    jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+    jet_foundation.[Type, compiler_threads_single]
 }
 
 IR_OPT_SIMPLIFY_ROUNDS: 8
 
 ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
-    fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
-    texts: OptTextRoutes{clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2, scalars: name_rows_value(m.name_rows, "jet_char_len") ?? -2}
+    fixed: ir_interned_name(m, "jet_int_checked_fixed") ?? -2
+    texts: OptTextRoutes{clone: ir_interned_name(m, "jet_rt_string_clone") ?? -2, scalars: ir_interned_name(m, "jet_char_len") ?? -2}
     // The facts stay true until a sweep changes the function, so they are
     // computed again (in place, their buffers reused) only after one does
     // (most sweeps change nothing, and the last round none). `fresh` says
@@ -1461,9 +1461,9 @@ ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: &OptFacts, report: &IROptRep
 
 ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
     removed := 0
-    clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2
-    enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -2
-    leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -2
+    clone: ir_interned_name(m, "jet_rt_string_clone") ?? -2
+    enter: ir_interned_name(m, "jet_rt_cleanup_enter") ?? -2
+    leave: ir_interned_name(m, "jet_rt_cleanup_leave") ?? -2
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Drop {
@@ -1645,7 +1645,7 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_emit(g, IROp.Drop, -1, twice, -1, -1, 2)
         _ := ir_emit(g, IROp.Return, -1, same, -1, -1, 2)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
@@ -1717,7 +1717,7 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_emit(g, IROp.Mul, out, sums[0], root, -1, 2)
         _ := ir_emit(g, IROp.Return, -1, out, -1, -1, 2)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
@@ -1773,7 +1773,7 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 4)
         _ := ir_emit(g, IROp.Return, -1, zero, -1, -1, 4)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
@@ -1825,7 +1825,7 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 3)
         _ := ir_emit(g, IROp.Return, -1, zero, -1, -1, 3)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
@@ -1870,9 +1870,9 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_slot(put, word, IRSlotKind.Param, ir_intern_name(m, "value"), 1)
         put.asm = Val(IRAsmLeaf{code: [U8]{0x48, 0x89, 0x37}, regs: [Int]{X64_RDI, X64_RSI}, result: -1})
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
-        name_rows_set(m.function_rows, put.key, 1)
+        ir_function_bind(m, put.key, 1)
         m.functions.push(put)
         options := ir_opt_options(level)
         options.verify = true
@@ -1921,7 +1921,7 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
         _ := ir_emit(g, IROp.Add, both, first, second, IR_OVERFLOW_WRAP, 3)
         _ := ir_emit(g, IROp.Return, -1, both, -1, -1, 3)
         m.entry = 0
-        name_rows_set(m.function_rows, g.key, 0)
+        ir_function_bind(m, g.key, 0)
         m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true

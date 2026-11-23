@@ -29,7 +29,7 @@
 //   - a result that is not a plain value (a raw address, String data, a view).
 // So a String whose address `mem.address_of` or a string-data leaf takes
 // lives until its block ends.
-use jet_foundation.[CompilerThreads, Type, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_failure_text, compiler_threads_partition]
 
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
@@ -58,9 +58,9 @@ ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
         return
     }
     m.dropped_early = true
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+    trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
+    turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
     count: m.functions.len()
     weights := [Int]{}
     total := 0

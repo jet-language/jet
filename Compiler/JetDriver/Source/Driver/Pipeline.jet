@@ -292,12 +292,10 @@ use {
         interner_empty,
         interner_merge_delta,
         type_syntax,
-        name_rows,
         name_column,
         name_column_get_hashed,
         name_column_set_hashed,
         name_column_table,
-        name_rows_get_text,
         name_text_hash,
         Name,
         NameTable,
@@ -330,7 +328,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, IRReachHeld, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic]
+    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_function_rows_get, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -7494,7 +7492,7 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
     // Each key's first row: a hashed map, only looked up.
     by_key: ir_first_function_rows(functions)
     pending := [Int]{}
-    if name_rows_get_text(by_key, entry_key) == .Val(entry) -> pending.push(entry)
+    if ir_function_rows_get(by_key, entry_key) == .Val(entry) -> pending.push(entry)
     seen := (loop _ in functions -> false)
     parser := -1
     required := [String]{}
@@ -7507,7 +7505,7 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
             loop effect_name in functions[index].effects.direct -> required.push(effect_name.copy())
         }
         loop edge in functions[index].effects.call_edges {
-            callee: name_rows_get_text(by_key, edge) ?? next
+            callee: ir_function_rows_get(by_key, edge) ?? next
             if jet_driver_toolchain_env_read(functions[callee]) -> next
             if cli && functions[callee].module_name.starts_with("core.") -> next
             if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") {
@@ -7516,7 +7514,7 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
             pending.push(callee)
         }
         loop edge in functions[index].effects.value_edges {
-            callee: name_rows_get_text(by_key, edge) ?? next
+            callee: ir_function_rows_get(by_key, edge) ?? next
             if jet_driver_toolchain_env_read(functions[callee]) -> next
             if cli && functions[callee].module_name.starts_with("core.") -> next
             if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") {
@@ -7824,7 +7822,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     dep_names := JetDriverDependencyNames{}
     dep_roots := jet_driver_dependency_roots(load, dep_names)
     if dep_roots.len() == 0 && jet_driver_effect_budget_root(load) == None -> return None
-    by_key := name_rows()
+    by_key := IRFunctionRows{keys: name_column_table(), rows: name_column()}
     program := EffectBudgetProgram{entry: -1, modules: [EffectBudgetModule]{}, dep_roots: dep_roots.move(), selected_output: None}
     module_identities := [ModuleID]{}
     module_rows := [U32:Int]{}
@@ -7856,7 +7854,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         loop function in functions -> rows.push(module_rows.get(function.module_identity.id) ?? -1)
         by_key = t_keys.join() ?? panic(compiler_threads_failure_text(err))
     }
-    entry_row: name_rows_get_text(by_key, entry_key) ?? return None
+    entry_row: ir_function_rows_get(by_key, entry_key) ?? return None
     if rows[entry_row] < 0 -> return None
     // The functions the entry reaches along call and value edges, in
     // discovery order.
@@ -7886,12 +7884,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                     e := [Int]{}
                     has_row: rows[idx] >= 0
                     loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(edge_idx) }
                     }
                     loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(-(edge_idx + 1)) }
                     }
@@ -7910,12 +7908,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                     e := [Int]{}
                     has_row: rows[idx] >= 0
                     loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(edge_idx) }
                     }
                     loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(-(edge_idx + 1)) }
                     }
@@ -7934,12 +7932,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                     e := [Int]{}
                     has_row: rows[idx] >= 0
                     loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(edge_idx) }
                     }
                     loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(-(edge_idx + 1)) }
                     }
@@ -7958,12 +7956,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                     e := [Int]{}
                     has_row: rows[idx] >= 0
                     loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(edge_idx) }
                     }
                     loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(-(edge_idx + 1)) }
                     }
@@ -7982,12 +7980,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                     e := [Int]{}
                     has_row: rows[idx] >= 0
                     loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(edge_idx) }
                     }
                     loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                        if name_rows_get_text(by_key, edge) == .Val(callee) {
+                        if ir_function_rows_get(by_key, edge) == .Val(callee) {
                             if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                         } else if has_row { e.push(-(edge_idx + 1)) }
                     }
@@ -8005,12 +8003,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 e := [Int]{}
                 has_row: rows[idx] >= 0
                 loop (edge_idx, edge) in functions[idx].effects.call_edges {
-                    if name_rows_get_text(by_key, edge) == .Val(callee) {
+                    if ir_function_rows_get(by_key, edge) == .Val(callee) {
                         if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                     } else if has_row { e.push(edge_idx) }
                 }
                 loop (edge_idx, edge) in functions[idx].effects.value_edges {
-                    if name_rows_get_text(by_key, edge) == .Val(callee) {
+                    if ir_function_rows_get(by_key, edge) == .Val(callee) {
                         if !jet_driver_toolchain_env_read(functions[callee]) -> c.push(callee)
                     } else if has_row { e.push(-(edge_idx + 1)) }
                 }
@@ -8049,14 +8047,14 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             order.push(index)
             has_row: rows[index] >= 0
             loop (edge_idx, edge) in functions[index].effects.call_edges {
-                if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if ir_function_rows_get(by_key, edge) == .Val(callee) {
                     if jet_driver_toolchain_env_read(functions[callee]) -> next
                     callees[index].push(callee)
                     pending.push(callee)
                 } else if has_row { extra_edges[index].push(edge_idx) }
             }
             loop (edge_idx, edge) in functions[index].effects.value_edges {
-                if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if ir_function_rows_get(by_key, edge) == .Val(callee) {
                     if jet_driver_toolchain_env_read(functions[callee]) -> next
                     callees[index].push(callee)
                     pending.push(callee)

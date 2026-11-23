@@ -38,13 +38,13 @@
 // reachable together. The heap's payload is not zeroed either, so a Load
 // before any Store reads unknown bytes in both forms. Scalar replacement
 // (OptScalar.jet) then puts the storage's fields in registers.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[Type, compiler_threads_single]
 
 // Turns each local box of `f` into frame storage; returns how many.
 ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     if f.asm != None || f.op.len() == 0 -> return 0
-    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? -2
-    value: name_rows_value(m.name_rows, "jet_rt_alloc_value") ?? -2
+    alloc: ir_interned_name(m, "jet_rt_alloc") ?? -2
+    value: ir_interned_name(m, "jet_rt_alloc_value") ?? -2
     if alloc == -2 && value == -2 -> return 0
     has_alloc := false
     loop at in 0..<f.op.len() {
@@ -54,9 +54,9 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         }
     }
     if !has_alloc -> return 0
-    unique: name_rows_value(m.name_rows, "jet_rt_block_unique") ?? -2
-    release: name_rows_value(m.name_rows, "jet_rt_block_release") ?? -2
-    free: name_rows_value(m.name_rows, "jet_rt_free") ?? -2
+    unique: ir_interned_name(m, "jet_rt_block_unique") ?? -2
+    release: ir_interned_name(m, "jet_rt_block_release") ?? -2
+    free: ir_interned_name(m, "jet_rt_free") ?? -2
     facts: ir_opt_facts(f)
     count: f.slot_type.len()
     // Each candidate slot's box size (-1: not a local box).
@@ -339,7 +339,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
     _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 7)
     ir_opt_compact(run)
     m.entry = 0
-    name_rows_set(m.function_rows, run.key, 0)
+    ir_function_bind(m, run.key, 0)
     m.functions.push(run)
     m
 }
@@ -455,7 +455,7 @@ ir_opt_local_box_join_test_module: fn(escape: Bool) -> IRModule Never! {
     _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 6)
     ir_opt_compact(run)
     m.entry = 0
-    name_rows_set(m.function_rows, run.key, 0)
+    ir_function_bind(m, run.key, 0)
     m.functions.push(run)
     m
 }

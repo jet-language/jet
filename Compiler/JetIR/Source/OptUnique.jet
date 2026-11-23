@@ -1,4 +1,4 @@
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows]
 
 // Uniqueness hoisting (O1, O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
@@ -397,9 +397,9 @@ ir_opt_unique_to_callers: fn(m: &IRModule, functions: &[IRFunction], keys: &[Str
     }
     addressed[m.entry] = true
     loop ty in m.types {
-        drop: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
+        drop: if ty.drop == "" -> -1 else -> ir_keyed_function(m, ty.drop) ?? -1
         if drop >= 0 && drop < count -> addressed[drop] = true
-        clone: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
+        clone: if ty.clone == "" -> -1 else -> ir_keyed_function(m, ty.clone) ?? -1
         if clone >= 0 && clone < count -> addressed[clone] = true
     }
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)

@@ -22,7 +22,7 @@
 // read never writes the Map. A frozen buffer (capacity 0: static, empty)
 // has no trailer: its entries are all in order, found by binary search, as
 // every Map of other keys is.
-use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, symbol_none, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_column_set, name_column_value, symbol_none, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 ir_map_entry_type: fn(ty: Type) -> Type? Never! {
@@ -152,12 +152,12 @@ ir_keyed_shape: fn(m: &IRModule, p: IRProgram, row: Int) -> IRMapShape? Never! {
 // built on first use.
 ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, map_row))}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
+    if ir_keyed_function(m, key) == .Val(known) -> return known
     shape: ir_keyed_shape(m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
     id: m.functions.len()
     symbol: ir_map_helper_symbol(name)
     m.functions.push(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     map: ir_new_slot(a, map_row, IRSlotKind.Param, ir_intern_name(m, "map"))
     if name == "map.order" -> ir_map_order_body(m, p, a, shape, map_row, map) else if name == "map.settle" {
@@ -2178,7 +2178,7 @@ ir_map_walk_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, span: 
 // (ir_close_glue) closes them; -1 when nothing in an entry closes.
 ir_map_rest_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape: IRMapShape, span: Span) -> Int Never! {
     key: "#close.rest<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.close_glue, key) ?? -3
+    known: name_column_value(m.close_glue_keys, m.close_glue, key) ?? -3
     if known == -2 {
         message: ir_helper_error(m, key) ?? panic("a failed close glue lost its message")
         ir_fail(b, span, message)
@@ -2187,13 +2187,13 @@ ir_map_rest_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape:
     if known != -3 -> return known
     entry: ir_close_glue(m, p, b, shape.entry, false, span)
     if entry < 0 {
-        name_rows_set(m.close_glue, key, -1)
+        name_column_set(m.close_glue_keys, m.close_glue, key, -1)
         return -1
     }
     id: m.functions.len()
     m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    name_rows_set(m.function_rows, key, id)
-    name_rows_set(m.close_glue, key, id)
+    ir_function_bind(m, key, id)
+    name_column_set(m.close_glue_keys, m.close_glue, key, id)
     a := ir_builder_new(m.functions[id].copy())
     value_name: ir_intern_name(m, "value")
     value: ir_new_slot(a, row, IRSlotKind.Param, value_name)
@@ -2218,7 +2218,7 @@ ir_map_rest_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape:
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         failure: a.error.copy()
         m.functions[id] = a.f.move()
-        name_rows_set(m.close_glue, key, -2)
+        name_column_set(m.close_glue_keys, m.close_glue, key, -2)
         ir_helper_failed(m, key, failure.copy())
         ir_fail(b, span, failure)
         return -1

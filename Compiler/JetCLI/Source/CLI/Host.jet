@@ -178,7 +178,6 @@ use {
         NameTable,
         name_find,
         name_intern,
-        name_rows_value,
         name_table_sized,
         TConstantDef,
         TImplDef,
@@ -192,6 +191,7 @@ use {
     ]
     jet_ir.[
         IRFunction,
+        ir_keyed_function,
         IROp,
         IROutputCheck,
         IRChecks,
@@ -677,7 +677,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
         jet_cli_finish(jet_cli_ice("the Jet evaluator failed on `{file}`: {jet_driver_ice_text(census)}"))
     }
     jet_plugin_link(built.program, jet_driver_entry_root_path(snapshot), jet_cli_plugin_needs(result))
-    entry: name_rows_value(built.program.function_rows, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
+    entry: ir_keyed_function(built.program, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.runtime_execution = true
     // A program run has no step budget, like a built binary.
@@ -1044,7 +1044,7 @@ jet_cli_ice_trap: fn(census: &[JetDriverIceRow], program: &IRModule, key: String
         jet_driver_ice_record(census, "-", pass, rule, message)
         return
     }
-    id: name_rows_value(program.function_rows, key) ?? {
+    id: ir_keyed_function(program, key) ?? {
         jet_driver_ice_record(census, "[{key}]", pass, rule, message)
         return
     }

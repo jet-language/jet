@@ -30,7 +30,7 @@ use {
         core_identity_in_module,
         foundation_byte_text,
     ]
-    jet_foundation.[DeclTable, Interner, ModuleID, NameRows, NameTable, Span, SymbolTable, Type, TypeID, decl_table_find, decl_table_key, interner_empty, module_is_core, name_count, name_find, name_index, name_intern, name_rows, name_rows_get_text, name_rows_set_first, name_table_sized, symbol_key, type_syntax]
+    jet_foundation.[DeclTable, Interner, ModuleID, NameTable, Span, SymbolTable, Type, TypeID, decl_table_find, decl_table_key, interner_empty, module_is_core, name_column, name_column_set_first, name_column_table, name_count, name_find, name_index, name_intern, name_table_sized, symbol_key, type_syntax]
 }
 
 ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
@@ -853,7 +853,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     core_modules := [U32:Bool]{}
     loop identity in core_module_identities -> core_modules[identity.id] = true
     // Each candidate key's first row (a hashed map: only looked up).
-    by_key := name_rows()
+    by_key := IRFunctionRows{keys: name_column_table(), rows: name_column()}
     reachable := [Bool]{}
     roots := [Int]{}
     weights := [Int]{}
@@ -875,7 +875,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 next
             }
             candidate_count += 1
-            name_rows_set_first(by_key, function.key, index)
+            name_column_set_first(by_key.keys, by_key.rows, function.key, index)
             if decl_table_find(decls, symbols[0], function.key) == .Val(id) {
                 if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
             }
@@ -901,7 +901,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                     next
                 }
                 candidate_count += 1
-                name_rows_set_first(by_key, function.key, index)
+                name_column_set_first(by_key.keys, by_key.rows, function.key, index)
                 core: module_is_core(function.module_identity)
                 if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) {
                     ir_core_reach_source_set(source_keys, function.name, function.key)
@@ -925,11 +925,11 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     // Each function a held constant names, as its candidate row (-1: none).
     held_rows := [Int]{}
     loop key in held.functions {
-        target := name_rows_get_text(by_key, key)
-        if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
+        target := ir_function_rows_get(by_key, key)
+        if target == None -> target = ir_function_rows_get(by_key, ir_core_reach_template_key(key))
         held_rows.push(target ?? -1)
     }
-    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), interners: compiler_take_rows<Interner>(interners), by_key: [NameRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), held: [IRReachHeld]{held}, held_rows: held_rows.move()}}
+    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), interners: compiler_take_rows<Interner>(interners), by_key: [IRFunctionRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), held: [IRReachHeld]{held}, held_rows: held_rows.move()}}
     read := 0
     loop {
         reached := [Int]{}
@@ -1086,7 +1086,7 @@ IRReachShared: struct {
     functions: [[FnBody]],
     symbols: [SymbolTable],
     interners: [Interner],
-    by_key: [NameRows],
+    by_key: [IRFunctionRows],
     source_keys: [IRReachSources],
     decl_rows: [Int],
     held: [IRReachHeld],
@@ -1198,10 +1198,10 @@ ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: 
 // DeclID row; others by key, or by their generic declaration's key), and
 // the candidate rows (`held_rows`) of the functions held by each constant
 // it reads (`held`), appended to `targets`.
-ir_core_reach_row_targets: fn(interner: Interner, functions: [FnBody], symbols: SymbolTable, by_key: NameRows, source_keys: IRReachSources, decl_rows: [Int], held: IRReachHeld, held_rows: [Int], row: Int, targets: &[Int]) Never! {
+ir_core_reach_row_targets: fn(interner: Interner, functions: [FnBody], symbols: SymbolTable, by_key: IRFunctionRows, source_keys: IRReachSources, decl_rows: [Int], held: IRReachHeld, held_rows: [Int], row: Int, targets: &[Int]) Never! {
     loop key in ir_core_reach_function_keys(interner, functions[row], functions, symbols, source_keys, decl_rows, targets) {
-        target := name_rows_get_text(by_key, key)
-        if target == None -> target = name_rows_get_text(by_key, ir_core_reach_template_key(key))
+        target := ir_function_rows_get(by_key, key)
+        if target == None -> target = ir_function_rows_get(by_key, ir_core_reach_template_key(key))
         if target == .Val(found) -> targets.push(found)
         constant: ir_reach_held_row(held, key)
         if constant < 0 -> next

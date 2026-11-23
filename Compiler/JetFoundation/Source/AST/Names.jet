@@ -481,6 +481,17 @@ name_column_set_first: fn(names: &NameTable, rows: &[Int], text: String, row: In
     if rows[id] < 0 -> rows[id] = row
 }
 
+// The keys `rows` binds to a row >= 0 and their rows, in ascending key
+// order.
+name_column_sorted: fn(names: NameTable, rows: [Int]) -> [{key: String, local: Int}] Never! {
+    run := [{key: String, local: Int}]{}
+    loop id in 0..<rows.len() {
+        if rows[id] >= 0 -> run.push({key: names.texts[id].copy(), local: rows[id]})
+    }
+    run.sort()
+    run
+}
+
 #Test("a name column binds, replaces, keeps a first row and reads markers") {
     names := name_column_table()
     rows := name_column()
@@ -632,16 +643,6 @@ name_rows_value: fn(map: NameRows, text: String) -> Int? Never! {
     if map.texts.len() == 0 -> return None
     key: name_rows_key(map, text, name_rows_hash(text)) ?? return None
     Val(map.rows[key])
-}
-
-// The bound keys and values in ascending key order (removed keys left out).
-name_rows_sorted: fn(map: NameRows) -> [{key: String, local: Int}] Never! {
-    run := [{key: String, local: Int}]{}
-    loop (key, text) in map.texts {
-        if map.rows[key] >= 0 -> run.push({key: text.copy(), local: map.rows[key]})
-    }
-    run.sort()
-    run
 }
 
 // Unbinds `text`; its key stays for a later `name_rows_set`.

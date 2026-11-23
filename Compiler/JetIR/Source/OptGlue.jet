@@ -11,7 +11,7 @@
 // stops of the code before it (OptInline.jet ir_opt_inline_build keeps
 // it). After inlining, a Call of a glue left in place is a Drop again,
 // which scalar replacement lends storage to (OptScalar.jet).
-use jet_foundation.[Type, compiler_threads_single, name_rows_set]
+use jet_foundation.[Type, compiler_threads_single]
 
 // `glue` is ir_opt_glue_table's: per type row, its glue function or -1;
 // `light` ir_opt_glue_light's.
@@ -128,11 +128,11 @@ ir_opt_glue_drops: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     _ := ir_emit(keep, IROp.Drop, -1, z, -1, -1, 2)
     _ := ir_emit(keep, IROp.Drop, -1, r, -1, -1, 3)
     _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 3)
-    name_rows_set(m.function_rows, "#drop<Zone>", 0)
+    ir_function_bind(m, "#drop<Zone>", 0)
     m.functions.push(light)
-    name_rows_set(m.function_rows, "#drop<Res>", 1)
+    ir_function_bind(m, "#drop<Res>", 1)
     m.functions.push(heavy)
-    name_rows_set(m.function_rows, "test:glue.jet.keep", 2)
+    ir_function_bind(m, "test:glue.jet.keep", 2)
     m.functions.push(keep)
     options := ir_opt_options(1)
     options.verify = true

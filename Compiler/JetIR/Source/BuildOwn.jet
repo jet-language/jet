@@ -1,7 +1,7 @@
 // The IR builder's value ownership beyond a runtime drop: a copy that owns
 // every buffer of its own, and the close of a Close value, or of a value
 // holding one, when the variable that owns it goes out of scope.
-use jet_foundation.[Span, Type, name_rows_set, name_rows_value]
+use jet_foundation.[Span, Type, name_column_set, name_column_value]
 
 // The element row of a type row whose value is a List-shaped buffer header
 // (a List, a View, a Map's entries), None for any other.
@@ -494,11 +494,11 @@ ir_box_shapes_drop: fn(m: IRModule, shapes: [IRBoxShape]) -> Bool Never! {
 // inlined (OptInline.jet), so the drop sites share one copy.
 ir_box_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shapes: [IRBoxShape]) -> Int Never! {
     helper_key: "#box.last<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     loop shape in shapes {
@@ -545,7 +545,7 @@ ir_last_helper_finish: fn(m: &IRModule, b: &IRBuilder, a: &&IRBuilder, id: Int, 
     if built.error != "" {
         ir_emit(built.f, IROp.Unreachable, -1, -1, -1, -1, built.line)
         m.functions[id] = built.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, built.error_span, built.error)
         return -1
     }
@@ -570,11 +570,11 @@ ir_last_owner_call: fn(b: &IRBuilder, helper: Int, values: [Int]) Never! {
 // box loses one.
 ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#box.unique<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_box_unique_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     boxed: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "boxed"))
     a.f.result = row
@@ -629,7 +629,7 @@ ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, a.error_span, a.error)
         return -1
     }
@@ -745,7 +745,7 @@ ir_drop_glues: fn(m: &IRModule, p: IRProgram) Never! {
     row := 0
     loop row < m.types.len() {
         drop: m.types[row].drop
-        if drop != "" && drop == ir_drop_key(m, row) && name_rows_value(m.function_rows, drop) == None {
+        if drop != "" && drop == ir_drop_key(m, row) && ir_keyed_function(m, drop) == None {
             ir_drop_glue(m, p, row)
         }
         row += 1
@@ -761,7 +761,7 @@ ir_drop_glue: fn(m: &IRModule, p: IRProgram, row: Int) Never! {
     key: ir_drop_key(m, row)
     id: m.functions.len()
     m.functions.push(ir_hashed_function("drop", key, "jet_ir_drop_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if ir_box_row(m, row) -> ir_box_drop_body(m, p, a, row, at) else if ir_trait_row(m, row) {
@@ -840,11 +840,11 @@ ir_release_buffer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry
 // (OptInline.jet), so the release sites share one copy.
 ir_buffer_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int) -> Int Never! {
     helper_key: "#buffer.last<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     word_row: ir_word_row(m)
     data: ir_new_slot(a, word_row, IRSlotKind.Param, ir_intern_name(m, "data"))
@@ -929,12 +929,12 @@ ir_make_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never
 // when frozen) whose elements gain an owner, and the old buffer loses one.
 ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#unique<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     entry: ir_counted_entry(m, p, row) ?? return -1
     id: m.functions.len()
     m.functions.push(ir_hashed_function("unique", helper_key, "jet_ir_unique_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     header: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "header"))
     length: ir_load_word(m, a, header, 0)
@@ -1019,7 +1019,7 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, a.error_span, a.error)
         return -1
     }
@@ -1059,18 +1059,18 @@ ir_copy_fixup_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: 
 // be built, which a later use builds again to report the same failure).
 ir_copy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#copy<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("copy", helper_key, "jet_ir_copy_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     ir_copy_fixup_body(m, p, a, row, at)
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, a.error_span, a.error)
         return -1
     }
@@ -1140,8 +1140,8 @@ IR_CLOSE_PARTS: 61
 
 // The selected Close method (a p.functions row) of type row `row`, -1 for none.
 ir_close_method: fn(m: IRModule, p: IRProgram, row: Int) -> Int Never! {
-    key: ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))
-    name_rows_value(p.close_methods, key) ?? -1
+    key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))
+    name_column_value(p.close_methods_keys, p.close_methods, key) ?? -1
 }
 
 // Whether type row `row` is a value that only moves and has a drop (a
@@ -1267,7 +1267,7 @@ ir_close_parts_reach: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // nothing in the value closes or its glue cannot be built.
 ir_close_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_only: Bool, span: Span) -> Int Never! {
     key: if members_only -> "#close.members<{ir_row_key(m, row)}>" else -> "#close<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.close_glue, key) ?? -3
+    known: name_column_value(m.close_glue_keys, m.close_glue, key) ?? -3
     if known == -2 {
         message: ir_helper_error(m, key) ?? panic("a failed close glue lost its message")
         ir_fail(b, span, message)
@@ -1276,13 +1276,13 @@ ir_close_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_o
     if known != -3 -> return known
     method: if members_only -> -1 else -> ir_close_method(m, p, row)
     if method < 0 && !ir_close_parts_reach(m, p, row) {
-        name_rows_set(m.close_glue, key, -1)
+        name_column_set(m.close_glue_keys, m.close_glue, key, -1)
         return -1
     }
     id: m.functions.len()
     m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    name_rows_set(m.function_rows, key, id)
-    name_rows_set(m.close_glue, key, id)
+    ir_function_bind(m, key, id)
+    name_column_set(m.close_glue_keys, m.close_glue, key, id)
     a := ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     if method >= 0 {
@@ -1299,7 +1299,7 @@ ir_close_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, members_o
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.close_glue, key, -2)
+        name_column_set(m.close_glue_keys, m.close_glue, key, -2)
         ir_helper_failed(m, key, a.error.copy())
         ir_fail(b, span, a.error)
         return -1
@@ -1538,7 +1538,7 @@ ir_part_close_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, me
         loop step in part.path -> key = "{key}:{step.selector}/{step.offset}"
     }
     key = "{key}>"
-    known: name_rows_value(m.close_glue, key) ?? -3
+    known: name_column_value(m.close_glue_keys, m.close_glue, key) ?? -3
     if known == -2 {
         message: ir_helper_error(m, key) ?? panic("a failed partial close lost its message")
         ir_fail(b, span, message)
@@ -1547,8 +1547,8 @@ ir_part_close_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, me
     if known != -3 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("close", key, "jet_ir_close_", "", 0))
-    name_rows_set(m.function_rows, key, id)
-    name_rows_set(m.close_glue, key, id)
+    ir_function_bind(m, key, id)
+    name_column_set(m.close_glue_keys, m.close_glue, key, id)
     a := ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     armed: ir_new_slot(a, ir_word_row(m), IRSlotKind.Param, ir_intern_name(m, "armed"))
@@ -1556,7 +1556,7 @@ ir_part_close_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, me
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.close_glue, key, -2)
+        name_column_set(m.close_glue_keys, m.close_glue, key, -2)
         ir_helper_failed(m, key, a.error.copy())
         ir_fail(b, span, a.error)
         return -1

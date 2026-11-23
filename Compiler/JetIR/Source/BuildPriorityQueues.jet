@@ -14,7 +14,7 @@
 // not order after it, pop takes index 0, and canonical order is storage
 // order. The same helpers branch on the order word, so a queue's operations
 // never depend on which constructor made it.
-use jet_foundation.[Span, TBuiltinOp, Type, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, TBuiltinOp, Type, type_carrier_identity]
 
 // The element of a `PriorityQueue<T>`.
 ir_priority_queue_element: fn(ty: Type) -> Type? Never! {
@@ -49,12 +49,12 @@ ir_heap_kind: fn(m: IRModule, p: IRProgram, elem_row: Int) -> String Never! {
 // calls (a user Comparable implementation) resolve before it is stored.
 ir_heap_helper: fn(m: &IRModule, p: IRProgram, row: Int, elem_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, row))}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
+    if ir_keyed_function(m, key) == .Val(known) -> return known
     kind: ir_heap_kind(m, p, elem_row)
     id: m.functions.len()
     symbol: name.split(".").to_list().join("_")
     m.functions.push(ir_hashed_function(name, key, "jet_ir_{symbol}_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     heap: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "heap"))
     if name == "priority_queue.push" {
@@ -565,10 +565,10 @@ ir_key_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: Int, elem_row: 
 // One per key function type and direction.
 ir_key_order_helper: fn(m: &IRModule, p: IRProgram, closure_ty: Type, elem_row: Int, key_row: Int, descending: Bool) -> Int Never! {
     key: "key_order.before<{type_carrier_identity(closure_ty)}|{if descending -> "desc" else -> "asc"}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
+    if ir_keyed_function(m, key) == .Val(known) -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("key_order.before", key, "jet_ir_key_order_before_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0

@@ -18,7 +18,7 @@
 //
 // A Set of a small fieldless enum has no header: it is stored as bits
 // (ir_bit_set_def, at the end of this file).
-use jet_foundation.[Span, Type, jet_layout_one_bit_shift, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, Type, jet_layout_one_bit_shift, type_carrier_identity]
 
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
@@ -178,12 +178,12 @@ ir_set_empty_like: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, l
 // The id of Set helper `name` of the Set type row `set_row`, built on first use.
 ir_set_helper: fn(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, set_row))}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) -> return known
+    if ir_keyed_function(m, key) == .Val(known) -> return known
     shape: ir_set_shape(m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
     id: m.functions.len()
     symbol: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
     m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     set: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "set"))
     if name == "set.equal" {

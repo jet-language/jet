@@ -38,7 +38,7 @@
 // image's, or jet_core.o's in a full link (JetCLI Host.jet).
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[Interner, CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_index, name_intern, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, name_table_sized, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[Interner, CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_column_get, name_column_set, name_column_sorted, name_index, name_intern, name_table_sized, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -168,7 +168,7 @@ ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
     symbols := name_table_sized(64)
     ids := [Int]{}
     counts := [Int]{0}
-    loop cell in name_rows_sorted(m.constant_rows) {
+    loop cell in name_column_sorted(m.constant_rows_keys, m.constant_rows) {
         if cell.local < 0 || !ir_core_cell_key(cell.key) || m.core_cells.get(cell.local) != None {
             next
         }
@@ -341,7 +341,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
     rows := [IRCoreExport]{}
     errors := [String]{}
     loop key in keys {
-        id: name_rows_get_text(m.function_rows, key) ?? {
+        id: name_column_get(m.function_rows_keys, m.function_rows, key) ?? {
             errors.push("Core function {key} was rooted but not built")
             next
         }
@@ -358,7 +358,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
         rows.push(IRCoreExport{symbol: symbol, key: key, signature: ir_core_signature(m, id)})
     }
     data := [X64DataExport]{}
-    loop cell in name_rows_sorted(m.constant_rows) {
+    loop cell in name_column_sorted(m.constant_rows_keys, m.constant_rows) {
         if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
         symbol: ir_core_cell_symbol(cell.key)
         data.push(X64DataExport{data: cell.local, symbol: symbol})
@@ -461,7 +461,7 @@ ir_core_callers: fn(m: IRModule) -> [[Int]] Never! {
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
             if op == .Drop && f.a[at] >= 0 && f.a[at] < f.slot_type.len() {
                 glue: m.types[f.slot_type[f.a[at]]].drop
-                if glue != "" -> callee = name_rows_value(m.function_rows, glue) ?? -1
+                if glue != "" -> callee = ir_keyed_function(m, glue) ?? -1
             }
             if callee >= 0 && callee < count -> callers[callee].push(id)
         }
@@ -669,12 +669,13 @@ ir_held_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args
 // each writable Core cell (ir_core_cell_key) the image exports under its
 // key, so the code the program builds and the image's code share one.
 ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
-    loop cell in name_rows_sorted(m.constant_rows) {
-        if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
-        symbol: ir_core_cell_symbol(cell.key)
+    loop id in 0..<m.constant_rows.len() {
+        local: m.constant_rows[id]
+        if local < 0 || !ir_core_cell_key(m.constant_rows_keys.texts[id]) -> next
+        symbol: ir_core_cell_symbol(m.constant_rows_keys.texts[id])
         found: ir_core_image_row(image.exports, symbol) ?? next
-        if found.key == cell.key && found.signature == IR_CORE_DATA {
-            m.core_cells[cell.local] = symbol
+        if found.key == m.constant_rows_keys.texts[id] && found.signature == IR_CORE_DATA {
+            m.core_cells[local] = symbol
         }
     }
 }
@@ -698,9 +699,9 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
 
 #Test("a debuggable image names its own writable cells, and an evaluation binds them by those names") {
     m := ir_module_new()
-    name_rows_set(m.constant_rows, "storage:app.count", 0)
-    name_rows_set(m.constant_rows, "storage:app.level", 1)
-    name_rows_set(m.constant_rows, "const:app.limit", 2)
+    name_column_set(m.constant_rows_keys, m.constant_rows, "storage:app.count", 0)
+    name_column_set(m.constant_rows_keys, m.constant_rows, "storage:app.level", 1)
+    name_column_set(m.constant_rows_keys, m.constant_rows, "const:app.limit", 2)
     m.core_cells[1] = ir_core_cell_symbol("storage:app.level")
     exports: ir_debug_cell_exports(m)
     count: ir_core_symbol_in(IR_DEBUG_CELL_PREFIX, "storage:app.count")

@@ -5,7 +5,7 @@
 // para_fold, whose ranges are exactly its 64-item chunks; the
 // helper reads its inputs through a frame env the caller lends until every
 // worker has joined, and writes disjoint output slots.
-use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, type_carrier_identity]
 
 // A callback's parameter types and the value its call hands over: a
 // `T Never!` callback (a named function's value) hands over its `T`
@@ -27,13 +27,13 @@ ir_para_signature: fn(ty: Type) -> IRParaSignature? Never! {
 // failed when its body cannot be built.
 ir_para_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
     key: "para.{role}<{type_carrier_identity(ty)}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) {
+    if ir_keyed_function(m, key) == .Val(known) {
         if known < 0 -> return ir_fail_slot(b, span, "para.{role} of {ir_type_name(ty)}")
         return known
     }
     id: m.functions.len()
     m.functions.push(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     if role == "map" -> ir_para_map_body(m, p, a, ty, span) else {
         ir_para_fold_body(m, p, a, ty, span)
@@ -42,7 +42,7 @@ ir_para_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     message: a.error.copy()
     m.functions[id] = a.f.move()
     if failed {
-        name_rows_set(m.function_rows, key, -1)
+        ir_function_bind(m, key, -1)
         return ir_fail_slot(b, span, message)
     }
     id

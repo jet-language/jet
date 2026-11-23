@@ -2,17 +2,18 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameRows, Span, SymbolID, TYPE_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_column_set, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
 // A rendered type's identity: its declaration key when it names one (every
-// instance of a generic declaration shares it).
-ir_render_type_key: fn(type_rows: NameRows, types: [TTypeDef], ty: Type) -> String Never! {
+// instance of a generic declaration shares it). `type_rows` holds each
+// declaration row at its key's or name's id in `type_rows_keys`.
+ir_render_type_key: fn(type_rows_keys: NameTable, type_rows: [Int], types: [TTypeDef], ty: Type) -> String Never! {
     plain: ir_untag(ty)
     name: ir_nominal_name(plain) ?? return type_carrier_identity(plain)
-    if name_rows_value(type_rows, name) == .Val(row) -> return "decl:{types[row].key}"
+    if name_column_value(type_rows_keys, type_rows, name) == .Val(row) -> return "decl:{types[row].key}"
     type_carrier_identity(plain)
 }
 
@@ -666,7 +667,7 @@ ir_struct_row: fn(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], 
         return None
     }
     memo: "struct:{identity}"
-    known: name_rows_value(m.layouts, memo) ?? -2
+    known: name_column_value(m.layouts_keys, m.layouts, memo) ?? -2
     if known >= 0 -> return Val(known)
     if known == -1 -> return None
     depth: laying.len()
@@ -675,7 +676,7 @@ ir_struct_row: fn(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], 
     found: ir_struct_row_laid(m, p, ty, row, args, identity, laying)
     touched: m.layout_low
     m.layout_low = if touched < outer -> touched else -> outer
-    if touched >= depth -> name_rows_set(m.layouts, memo, found ?? -1)
+    if touched >= depth -> name_column_set(m.layouts_keys, m.layouts, memo, found ?? -1)
     found
 }
 
@@ -772,11 +773,11 @@ ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
 // any type the program lays out itself. It rests on `name` alone (the row
 // interns under its runtime's key), so it is kept in m.handle_rows.
 ir_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
-    known: name_rows_value(m.handle_rows, name) ?? -2
+    known: name_column_value(m.handle_rows_keys, m.handle_rows, name) ?? -2
     if known >= 0 -> return Val(known)
     if known == -1 -> return None
     found: ir_handle_row_laid(m, p, ty, name)
-    name_rows_set(m.handle_rows, name, found ?? -1)
+    name_column_set(m.handle_rows_keys, m.handle_rows, name, found ?? -1)
     found
 }
 
@@ -1179,7 +1180,7 @@ ir_record_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: In
 ir_record_in_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     helper_key: "#record.in<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known == -2 {
         message: ir_helper_error(m, helper_key) ?? panic("a failed record helper lost its message")
         return ir_fail_slot(b, span, message)
@@ -1187,7 +1188,7 @@ ir_record_in_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, spa
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("record.in", helper_key, "jet_ir_record_in_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
     handle: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
@@ -1196,7 +1197,7 @@ ir_record_in_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, spa
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -2)
+        ir_function_bind(m, helper_key, -2)
         ir_helper_failed(m, helper_key, a.error.copy())
         ir_fail(b, span, a.error)
         return -1
@@ -1858,7 +1859,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         // unit type, not the slot's row.
         if ir_kind_of(m, b, slot) == .Float {
             trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
-            if name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, ty)}") == .Val(row) {
+            if name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ty)}") == .Val(row) {
                 return ir_render_impl_call(m, p, b, slot, row, trait_short)
             }
             text: ir_unit_text(m, p, b, ty, slot)
@@ -1956,21 +1957,21 @@ ir_render_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: I
 // implementation makes of `slot` (Debug never uses one), or -1 when none is
 // selected.
 ir_render_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
-    if mode == .Debug || p.render_impls.rows.len() == 0 -> return -1
+    if mode == .Debug || name_count(p.render_impls_keys) <= 1 -> return -1
     trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
     receiver_ty: ir_row_ty(m, p, b.f.slot_type[slot])
-    row: name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
+    row: name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, receiver_ty)}") ?? return -1
     ir_render_impl_call(m, p, b, slot, row, trait_short)
 }
 
 // Whether a Display implementation is selected for `slot`'s type, or for its
 // checked type `ty` (a unit type lays out as its Float magnitude).
 ir_render_has_display: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slot: Int) -> Bool Never! {
-    if slot < 0 || p.render_impls.rows.len() == 0 -> return false
-    if name_rows_value(p.render_impls, "Display|{ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, b.f.slot_type[slot]))}") != None {
+    if slot < 0 || name_count(p.render_impls_keys) <= 1 -> return false
+    if name_column_value(p.render_impls_keys, p.render_impls, "Display|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, b.f.slot_type[slot]))}") != None {
         return true
     }
-    name_rows_value(p.render_impls, "Display|{ir_render_type_key(p.type_rows, p.types, ty)}") != None
+    name_column_value(p.render_impls_keys, p.render_impls, "Display|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ty)}") != None
 }
 
 // The owned String the user Debug implementation makes of `slot`, -1 when its
@@ -1981,11 +1982,11 @@ ir_render_debug_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -
     candidates: p.trait_methods.get("Debug|debug") ?? return -1
     receiver_ty: ir_row_ty(m, p, b.f.slot_type[slot])
     if ir_nominal_name(ir_untag(receiver_ty)) == None -> return -1
-    key: ir_render_type_key(p.type_rows, p.types, receiver_ty)
+    key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, receiver_ty)
     loop row in candidates {
         matched: if p.functions[row].kind == {
-            .TraitMethod(_, convention, owner_type, _, _) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
-            .Method(convention, owner_type) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
+            .TraitMethod(_, convention, owner_type, _, _) -> convention != None && ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, owner_type) == key
+            .Method(convention, owner_type) -> convention != None && ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, owner_type) == key
             .TopLevel -> false
         }
         if matched -> return ir_render_impl_call(m, p, b, slot, row, "Debug")
@@ -2202,7 +2203,7 @@ ir_render_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builde
         .Print -> "print"
     }
     helper_key: "#render.{mode_name}<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known == -2 {
         message: ir_helper_error(m, helper_key) ?? panic("a failed render helper lost its message")
         ir_fail(b, span, message)
@@ -2211,7 +2212,7 @@ ir_render_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builde
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("render", helper_key, "jet_ir_render_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     builder: ir_new_slot(a, builder_row, IRSlotKind.Param, ir_intern_name(m, "builder"))
@@ -2222,7 +2223,7 @@ ir_render_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builde
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -2)
+        ir_function_bind(m, helper_key, -2)
         ir_helper_failed(m, helper_key, a.error.copy())
         ir_fail(b, span, a.error)
         return -1
@@ -2334,9 +2335,9 @@ ir_struct_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IR
     // being built, as its member types are laid out.
     bound: args.copy()
     memo: ir_instance_identity(p.types[row].key, bound)
-    if ir_members_memo(m, m.struct_members, memo) == .Val(known) -> return Val(known)
+    if ir_members_memo(m, m.struct_members_keys, m.struct_members, memo) == .Val(known) -> return Val(known)
     found: ir_struct_members_in(m, p, row, bound, [String]{}, true) ?? return None
-    name_rows_set(m.struct_members, memo, m.member_lists.len())
+    name_column_set(m.struct_members_keys, m.struct_members, memo, m.member_lists.len())
     m.member_lists.push(found.copy())
     Val(found)
 }
@@ -2643,8 +2644,8 @@ ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, l
             return -1
         }
     }
-    if p.render_impls.rows.len() == 0 -> return -1
-    index: name_rows_value(p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows, p.types, right_ty)}") ?? return -1
+    if name_count(p.render_impls_keys) <= 1 -> return -1
+    index: name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, right_ty)}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic {trait_short} implementation {function.name}")
@@ -2927,8 +2928,8 @@ ir_order_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int
 // The Ordering a selected user Comparable implementation (`compare`) gives
 // `left` against `right` of type row `row`, or -1 when none is selected.
 ir_compare_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, span: Span) -> Int Never! {
-    if p.render_impls.rows.len() == 0 -> return -1
-    index: name_rows_value(p.render_impls, "Comparable|{ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))}") ?? return -1
+    if name_count(p.render_impls_keys) <= 1 -> return -1
+    index: name_column_value(p.render_impls_keys, p.render_impls, "Comparable|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic Comparable implementation {function.name}")
@@ -2946,8 +2947,8 @@ ir_compare_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: I
 // The key a selected KeyBy implementation (`key`) gives `value` of type row
 // `row`, as a fresh temporary, or -1 when the type has none.
 ir_key_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
-    if p.render_impls.rows.len() == 0 -> return -1
-    index: name_rows_value(p.render_impls, "KeyBy|{ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))}") ?? return -1
+    if name_count(p.render_impls_keys) <= 1 -> return -1
+    index: name_column_value(p.render_impls_keys, p.render_impls, "KeyBy|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, ir_row_ty(m, p, row))}") ?? return -1
     function: p.functions[index]
     if function.generic_params.len() > 0 {
         return ir_fail_slot(b, span, "generic KeyBy implementation {function.name}")
@@ -2968,11 +2969,11 @@ ir_key_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int,
 // body cannot be built.
 ir_order_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
     helper_key: "#order<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("order", helper_key, "jet_ir_order_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     left: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "left"))
     right: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "right"))
@@ -2986,7 +2987,7 @@ ir_order_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: S
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, span, a.error)
         return -1
     }
@@ -3363,11 +3364,11 @@ ir_equal_members: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMemb
 // again to report the same failure).
 ir_equal_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
     helper_key: "#equal<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("equal", helper_key, "jet_ir_equal_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     left: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "left"))
     right: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "right"))
@@ -3376,7 +3377,7 @@ ir_equal_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: S
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, span, a.error)
         return -1
     }
@@ -3499,9 +3500,9 @@ ir_add_union_types: fn(types: &[TTypeDef], functions: [FnBody], interner: Intern
 }
 
 // Adds the structural enum of each union type `functions`' signatures name
-// that `types` lacks (`type_rows`: its rows by key and name, which the
-// added ones join; a union's key is its name).
-ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows: &NameRows, functions: [FnBody], interner: Interner) Never! {
+// that `types` lacks (`type_rows`: its rows by key and name, at their ids in
+// `type_rows_keys`, which the added ones join; a union's key is its name).
+ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows_keys: &NameTable, type_rows: &[Int], functions: [FnBody], interner: Interner) Never! {
     if types.len() == 0 {
         return
     }
@@ -3510,9 +3511,9 @@ ir_add_signature_union_types: fn(types: &[TTypeDef], type_rows: &NameRows, funct
     module_identity: types[0].module_identity.copy()
     loop ty in found {
         key: ir_union_key(ty)
-        if name_rows_value(type_rows, key) != None -> next
+        if name_column_value(type_rows_keys, type_rows, key) != None -> next
         if ty == .Union(members) {
-            name_rows_set(type_rows, key, types.len())
+            name_column_set(type_rows_keys, type_rows, key, types.len())
             types.push(ir_union_def(module_identity, key, members))
         }
     }
@@ -4198,9 +4199,9 @@ ir_variant_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index
 
 ir_variant_members_bound: fn(m: &IRModule, p: IRProgram, row: Int, bound: [Type], identity: String, index: Int) -> [IRMember]? Never! {
     memo: "{identity}#{index}"
-    if ir_members_memo(m, m.variant_members, memo) == .Val(known) -> return Val(known)
+    if ir_members_memo(m, m.variant_members_keys, m.variant_members, memo) == .Val(known) -> return Val(known)
     found: ir_variant_members_laid(m, p, row, bound, index) ?? return None
-    name_rows_set(m.variant_members, memo, m.member_lists.len())
+    name_column_set(m.variant_members_keys, m.variant_members, memo, m.member_lists.len())
     m.member_lists.push(found.copy())
     Val(found)
 }
@@ -4265,7 +4266,7 @@ ir_variant_member_outsized: fn(m: IRModule, definition: TTypeDef, ty: Int) -> Bo
 ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
     bound: args.copy()
     identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
-    if name_rows_value(m.enum_sizes, identity) == .Val(known) -> return Val(known)
+    if name_column_value(m.enum_sizes_keys, m.enum_sizes, identity) == .Val(known) -> return Val(known)
     end := 8
     if p.types[row].kind == .Enum(variants, _) {
         loop index in 0..<variants.len() {
@@ -4277,7 +4278,7 @@ ir_enum_box_size: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int?
         }
     }
     size: ir_align8(end)
-    name_rows_set(m.enum_sizes, identity, size)
+    name_column_set(m.enum_sizes_keys, m.enum_sizes, identity, size)
     Val(size)
 }
 
