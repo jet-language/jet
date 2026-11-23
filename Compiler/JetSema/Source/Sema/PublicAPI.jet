@@ -654,7 +654,7 @@ priv sema_public_api_inline_reexports: fn(graph: SemaRegistrationGraph, result: 
 // binds to the member `original` of `declaration`, under the module `path`;
 // none when the binding names no function or value of a module row.
 priv sema_public_api_inline_reexport: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, surface: Int, declaration: ImportDecl, local: &&String, original: String, path: String, public: Bool, reexports: &[SemaPublicAPIReexport]) -[]> {
-    bound: graph.modules[module_index].inline_bindings.modules[surface].reexports.get(local) ?? return
+    bound: sema_inline_target_of(graph.modules[module_index].inline_bindings.modules[surface].reexports, local) ?? return
     found: sema_public_api_inline_target(graph, module_index, bound) ?? return
     owner: sema_registration_module_index(graph, found.source_module_identity) ?? return
     position: found.declaration_position ?? return

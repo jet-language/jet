@@ -3183,19 +3183,19 @@ sema_checked_computed_alias: fn(graph: SemaRegistrationGraph, module_row: SemaRe
         diagnostics.push(sema_error("E0301", definition.target_span, "the computed alias bound `{type_name(definition.target)}` is not a trait", "every type a computed alias chooses implements its bound, a trait", "write a trait between `:` and `#run`"))
         return
     }
-    numbers := [String:Type]{}
+    numbers := SemaInlineTypes{}
     loop param in definition.type_params {
-        if param.prep != None -> numbers[param.name] = Type.Int
+        if param.prep != None -> sema_inline_type_put(numbers, param.name, Type.Int)
     }
     module_index: sema_registration_module_index(graph, module_row.module_identity) ?? -1
     loop name in sema_type_alias_constant_names(definition) {
         if sema_type_measure_constant(graph, module_index, name, 0) != None {
-            numbers[name] = Type.Int
+            sema_inline_type_put(numbers, name, Type.Int)
         }
     }
     loop choice in definition.choices {
         if choice.cond == .Val(cond) {
-            decided: sema_genmod_value_type(cond, numbers, [String:Bool]{})
+            decided: sema_genmod_value_type(cond, numbers, SemaGenericModuleEnums{})
             if decided != .Val(Type.Bool) {
                 diagnostics.push(sema_error("E0391", expr_span(cond), "this condition isn't a `Bool` decided while building", "a computed alias chooses its type while building, from its number parameters and the module's constants", "compare the `Int` parameters with literals or constants, such as `N <= 16`"))
             }

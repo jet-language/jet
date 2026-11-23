@@ -1643,7 +1643,7 @@ sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, de
     values: sema_type_alias_number_values(graph, module_index, definition, args)
     loop choice in definition.choices {
         cond: choice.cond ?? return Val(sema_inference_substitute_type(choice.target, names, args))
-        folded: sema_genmod_fold(cond, values, [String:Bool]{}) ?? return None
+        folded: sema_genmod_fold(cond, values, SemaGenericModuleEnums{}) ?? return None
         if folded == .Bool(holds, _, _) {
             if holds -> return Val(sema_inference_substitute_type(choice.target, names, args))
         } else { return None }
@@ -1654,19 +1654,19 @@ sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, de
 // The whole numbers a computed alias's conditions fold over: its number
 // parameters bound to the literals in `args`, and the module constants the
 // conditions name. A parameter shadows a constant of the same name.
-sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> [String:Expr] Never! {
-    values := [String:Expr]{}
+sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> SemaInlineValues Never! {
+    values := SemaInlineValues{}
     loop (index, param) in definition.type_params {
         if index >= args.len() -> break
         if args[index] == .Measure(measure) {
             if measure_literal_value(measure) == .Val(number) {
-                values[param.name] = Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+                sema_inline_value_put(values, param.name, Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED})
             }
         }
     }
     loop name in sema_type_alias_constant_names(definition) {
         if sema_type_measure_constant(graph, module_index, name, 0) == .Val(number) {
-            values[name] = Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+            sema_inline_value_put(values, name, Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED})
         }
     }
     values

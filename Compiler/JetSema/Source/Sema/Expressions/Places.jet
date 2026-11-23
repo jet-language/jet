@@ -55,6 +55,7 @@ use {
         Measure,
         TypedLitBody,
         measure_literal_value,
+        name_find,
         PipeStep,
         expr_source_start,
         pipe_value_name,
@@ -1204,7 +1205,7 @@ sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: St
     module_id: sema_registration_module_id(graph, imported.module_identity)
     module_index: sema_registration_module_index(graph, module_id) ?? return None
     loop surface in graph.modules[module_index].inline_bindings.modules {
-        if surface.name != member || surface.private_to != None || surface.constants.get(SEMA_MODULE_META) == None {
+        if surface.name != member || surface.private_to != None || name_find(surface.constants, SEMA_MODULE_META) == None {
             next
         }
         return sema_registration_lookup_name(graph, module_id, sema_inline_member_name(surface.path, SEMA_MODULE_META))

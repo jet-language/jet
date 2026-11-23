@@ -3450,7 +3450,7 @@ sema_derive_computed_getters: fn(items: &[Item]) {
             rewrite := sema_inline_rewrite_empty()
             loop field in definition.fields {
                 receiver: Expr.Ident{name: "self", span: field.name_span, id: AST_NODE_GENERATED}
-                rewrite.values[field.name] = Expr.Field{base: receiver, member: field.name, span: field.name_span, id: AST_NODE_GENERATED}
+                sema_inline_value_put(rewrite.values, field.name, Expr.Field{base: receiver, member: field.name, span: field.name_span, id: AST_NODE_GENERATED})
             }
             getters := [Func]{}
             loop field in definition.fields {

@@ -135,7 +135,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
     source_name := String?{None}
     resolved := SemaRegistrationResolvedSymbol?{None}
     if entry == .Ident(name, span, _) {
-        if owner.inline_bindings.imports.get(name) == .Val(binding) {
+        if sema_inline_binding_of(owner.inline_bindings.imports, name) == .Val(binding) {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, binding.semantic_name)
             source_name = Val(name.copy())
             references.push(sema_output_import_reference(graph, owner, owner.module_identity, name, binding.span, binding.visibility))
@@ -173,7 +173,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 return None
             }
             registered := SemaRegistrationResolvedSymbol?{None}
-            if surface.reexports.get(path.members[0].name) == .Val(target) {
+            if sema_inline_target_of(surface.reexports, path.members[0].name) == .Val(target) {
                 // Consume the existing binder's authenticated target, not the
                 // exported spelling as a second invented function identity.
                 if target.qualified {
@@ -192,10 +192,6 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(target.module_alias, target.member))
                 }
             } else {
-                if surface.functions.get(path.members[0].name) == (Val(false)) {
-                    diagnostics.push(sema_output_error(path.members[0].span, "function `{path.root}.{path.members[0].name}` is private", "an Output can only invoke code visible from its declaring module", "remove `priv` from `{path.members[0].name}: fn` in module `{path.root}`"))
-                    return None
-                }
                 registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
             }
             callable: if registered == .Val(found) -> sema_registration_callable_row_of(graph, sema_resolved_id(graph, found)) else -> None
