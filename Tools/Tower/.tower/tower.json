@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113325,
+    "rev": 113350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52462,6 +52462,21 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Batch 6 full suite done on the -O1 batch-6 compiler (c2k): golden 0 new failures, ui 0 new failures, cases 0 new failures vs batch 5 (4953 pass); long_chain_100000_terms_check_and_run passes again at -O1. c2k (0b62f91531) stands."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Batch 6 landed: 0b62f91531 (c2k, well-known TypeID constants), 3019343199 (Jetpack area check fixes: Parser Entry.jet unused binding, Federation TextReports.jet raw_line). Batch-6 compiler (dev 072d0666ce + c2k, -O1): golden 5049 pass / 0 new failures vs batch 5; ui 0 new failures; Jetpack --area Engine check went from 157 errors to 0. CompilerData --check ok (300 text-keyed lookups); DiagnosticRows --check passed. Cases profile still running."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed c2a-c2j on dev (513255e576 through 5eb6938dec, ledgers 5eed140a7d): compiler text-keyed lookups fall from 1034 to 300. Tested in batch 4: golden, ui and cases show no new failure from them. long_chain_100000_terms failed only because the batch compiler was built at O0 (the Expr drop glue takes a 3.2 KB frame per level there); the same source built at O1 or O2 passes, so it is not a c2 defect. c2k (the TYPE_STRING rename that unblocks the Jetpack areas check) goes in the next batch."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Decision (c2): JetWasm Text.jet's 14 WAT name maps move to NameTable through a new path dependency jet_wasm -> jet_foundation. c2 requires zero String-keyed maps in compiler data from one interner per id space; a wasm-local interner would be a second mechanism. c2i staged for the next landing batch."
         },
         {
@@ -52578,7 +52593,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-23T17:47:24.793Z",
+      "updated": "2026-11-23T20:13:52.033Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -52600,6 +52615,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed on dev: 5fa9c6500c (guard fixes: closed_lists row for JetCLIBuildDone, the parallel parse moves instead of copying), 952ad6c16e (B1: b.jet_built_from, b.source_key, the source key), 929c537b86 (E1: on a same-source build the Core check takes the carried pack; its gain needs B2), 5050e48ec3 (S3: streamed load, -0.21 s on jet-bare's load). Tested in batch 4: golden, ui and cases show no new failure from them. B2 waits on a seed admitted from a compiler that includes B1. Per owner order (2026-11-23), architecture work stops here; the lane moves to G1."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52690,7 +52710,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T17:42:08.545Z",
+      "updated": "2026-11-23T18:57:16.418Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -52712,6 +52732,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Jetpack areas root found (by the #6794 lane): the 157 UseAfterMove/ReadOnlyValueNotOwned/UntypedNone/InvalidStatement errors in the assembled unit all cascade from one Jet.DuplicateDefinition of TYPE_STRING (TypeIDs.jet against the syntax registry's spelling constant). The rename is with the #6793 lane. Defect recorded, not scheduled: a blocking registration error in a one-module unit unsettles that module (sema_registration_settle_modules), so sema_copy_nominal_has_impl reports known=false and every unmarked move-to-share of a nominal becomes a false UseAfterMove. Collect-all output should report the one root error, not 157 consequences."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52795,7 +52820,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-23T18:02:41.286Z",
+      "updated": "2026-11-23T18:07:08.827Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -56925,6 +56950,16 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "c12 S1 decisions: (1) the private integer storage in jet_builtins is spelled builtin.Word<bits> (floats builtin.Float<e, f>) because Bits is already the public bitset collection and Core types are bare-named; jet_builtins is Core's private door (D-CORE-BUILTINS1), so this is not user surface. (2) E0324 AliasWithoutParameters admits a parameterless alias whose target is an applied generic in any package (its own rationale: aliases shorten generic spellings), so I8: Signed<8> needs no Core-only exception; an alias of a plain non-generic type stays E0324."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 plan (D-CORE-NUMFAMILY1=A), ranked by site share (1557 Type.IntN/Float32 sites, 236 name-string sites): S1 Core families Bits<bits>/Float<e,f>, Signed/Unsigned/IEEE plus aliases and foundation_family_type (~3%, UI snapshot shows U8 for Unsigned<8>); S2 names resolve through Core aliases, width arms and IntegerKinds deleted (~8%); S3 from_<source> conversions from one family rule (~4%); S4 Foundation representation collapse to Type.Apply with accessors type_fixed_int/type_ieee (234 sites); S5-S8 Sema (~215 each); S9-S10 IR (323); S11 remaining packages (~140); S12 Core per-width impls to one impl per family. Proof each slice: golden Basics/ at o0/o1/o2 plus touched package unit tests. F16/BF16/I128/U128 stay on the paired card. Batch 7 landed c8r (b7986f520d), c9r (6bcfb66b1f), add_struct wording (d8063248ea); c6r and c10r fixture failures went back to the worker, c5r/c7 held behind them."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Rebased the Antigravity c11-c13 patch onto dev and split it. c11 (Toolchain/CompilerValueMethods.jet generator, its build.jet step and JetEval test; generator output equals the committed file) is in batch 3. c13 (generated modules load under jet check and jet run: InspectBuild.jet, Request.jet jet_cli_compile_prepared, EntityBuckets.case, build_fn_generated_modules_load_across_run_check_and_build) is held as $JET_SCRATCH_ROOT/tmp/orch/land/6846-c13.patch. It regresses 5 cases: jet_cli_compile_prepared now runs the entry package's build fn for every check, fix and explain, so the build fn's reports and pinned fetches fail  (program_info_effects_tell_the_written_row_from_the_solved_row, program_info_groups_a_two_module_package_into_one_package_record, program_info_uses_qualified_collision_free_type_function_and_method_identities, keep_going_trap_keys_failed_function_references, explain_effects_reaches_comptime_inputs; A/B: pass without it, fail with it). Fix direction: under check, fix and explain, fold in only the modules the build fn generates, without making its reports or input fetches the check's outcome."
         },
         {
@@ -57041,11 +57076,11 @@
         {
           "n": 9,
           "text": "When a promised generated output is missing, the error names its producer and its consumer, and an unrelated unknown name is not reported as a generation promise.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "Landed 6bcfb66b1f (c9r). Batch-7 -O1 compiler (dev 3019343199 + stack): jet test Compiler --profile ui passes Tests/UI/generate_promise_missing_names_producer_and_consumer.jet; ui suite 0 new failures from c9r.",
+          "at": "2026-11-23T20:41:52.881Z",
           "proof": {
             "profile": "ui",
             "filter": "generate_promise_missing"
@@ -57067,11 +57102,11 @@
         {
           "n": 11,
           "text": "The Compiler value's method list is generated from Core declarations: Compiler/JetEval/Source/CompilerValueMethods.jet no longer lists records and fields by hand, so a new field on `CompilerChecked` appears with no evaluator edit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:20.775Z",
+          "evidence": "Landed dev de08daf13a. On a dev-built compiler at de08daf13a: 'jet Toolchain/CompilerValueMethods.jet --check' (from Compiler/) prints 'compiler value methods check passed'; 'jet test JetEval/Tests/CompilerValueMethods.jet' 2 passed, 0 failed, including 'generated compiler value methods accept CoreRecordRows fields and project values'. build.jet's compiler-value-methods step regenerates the file from CoreRecordRows on every jet build Compiler, so a new Compiler record field needs no evaluator edit.",
+          "at": "2026-11-23T18:08:54.210Z",
           "proof": {
             "profile": "cases",
             "filter": "compiler_value_new_field_visible"
@@ -57089,11 +57124,24 @@
         {
           "n": 13,
           "text": "Modules a package's build: fn adds load the same way under jet run, jet check and jet build (I9): today only jet build loads them (found 2026-11-15 by GoalsA-1-4 on the EntityBuckets example, whose sidecar case runs jet build then the built program as a workaround). Proof: a case that adds a module from build: fn and runs it with jet run, jet check and jet build, with one output.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "Landed dev 50b6a396d2. On a dev-built compiler (dev 1422e2ebd7 + this patch): Tests/Cases/BuildEntry/build_fn_generated_modules_load_across_run_check_and_build.case PASS (one module added by a package's build: fn loads the same way under jet run, jet check and jet build), Examples/Metaprogramming/Reflection/EntityBuckets golden PASS at o0/o1/o2, and the program_info_*, keep_going_trap_keys_failed_function_references and explain_effects_reaches_comptime_inputs cases PASS; golden, ui and cases show no new failure from it.",
+          "at": "2026-11-23T19:42:17.206Z"
+        },
+        {
+          "n": 14,
+          "text": "meta.events handlers a package's build: fn registers (call watches, lint findings) run under jet check and jet run the same as under jet build (I9, the c13 rule for generated modules). Found 2026-11-23 on the batch-7 compiler: Examples/Modules/Packages/NoPrintInLib reports lints.NoPrintInLib in its golden, but jet check . prints OK and jet run . runs with no finding; a .Calls{to: helper} watch whose handler panics stops jet build but not jet check.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T15:22:05.900Z"
+          "at": "2026-11-23T20:13:57.601Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "meta_events_run_under_check_and_run"
+          }
         }
       ],
       "refs": [],
@@ -57105,9 +57153,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-23T16:55:45.493Z",
+      "updated": "2026-11-23T20:50:07.968Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c0n7zpy3",
@@ -57352,6 +57400,36 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "D-CORE-CHECK1 posted for the owner after a second review pass by Main on the revision: rules run under check/run/build/LSP (depends on #6846 c14); batched calls through the one comptime child with a 1 us per-call budget (54 us today); a rejection replaces ordinary checks; 45 codes and 10,390 lines; option E (checked parameter types via a Literal.String hook) added as a possible hybrid; Roslyn, Swift macros, C++ consteval and TS template-literal comparisons added. c3-c6 stay owner-gated on it."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "D-CORE-CHECK1 adversarial review landed: Docs/Audits/2026-11-23-d-core-check1-review.md (2541ece0b1). Verdict: A stays the strongest direction but the draft cannot post. Claim 3 (cost) fails: a .Calls watch costs about 54 us per heard call today (21,211-line probe, cold build 0.80 s to 1.89 s), so batching and a per-call budget must be part of the design. Claim 5 fails: checked parameter types (C++ consteval, Zig comptime shape) are missing as an option or hybrid. Claims 1, 2, 4 hold only if call rules run under check/run/build/LSP (meta.events runs only under build today, #6846 c14), 'Core rules ship compiled' is replaced by batched calls through the one comptime child, and a rejection replaces the call's ordinary checks. E1301-E1304 retire under #6852 c7, so the code count changes. Draft goes back to its author for revision."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Owner ballot D-CORE-CHECK1 drafted for the c3-c6 gate, and it passes Validate.jet: A call rules (a marker check runs at each call and rejects with a registered code at a site; recommended), B error contracts on #Pre, C retire the codes into general ones, D keep the checks in Sema. It posts after the required fresh adversarial review pass, which runs in the next free agent slot."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c4-c6 share the c3 owner gate. Every remaining checker raises its own registered codes with UI snapshots (ProcessHandles E1301-E1304, StreamHandles E2501, UIHandles E2910/E2911/E2822/E2930/E2931, TimeHandles E0205, Hardware E0204/E0904, Data 20+ codes, Geometry E2520/E2521, Services E0112, TaskGroups E11xx). Moving them to plain Core declarations would turn those codes into generic arity, type or missing-method errors, breaking I4. The one missing mechanism: a Core declaration attaches a registered diagnostic and a check-time validation of a call's static arguments or type state. It needs an owner ballot (D-META-REG1 covers only marker facts, D-CORE-ROLE1 only lowering roles). Until then c3 (routing and web.form), c4, c5 and c6 hold. c3a (Body and Headers) and c3b (the configured Client as Core source, with send kept unbuilt under E2104) are in landing batch 5."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Owner gate found (c3, and probably parts of c4-c6): no ratified mechanism lets a Core declaration run a check-time validation of a call's static argument (route patterns: E2804, E2805, E2808) or a type-driven derivation (web.form: E2474, E0904). D-META-REG1 declares only marker attachment and argument facts; D-CORE-ROLE1 only locates a Core function for lowering; build-entry b.error refuses compiler codes (E3530). Calls/HTTPRouting.jet and the web-form part of Calls/HTTP.jet stay until a ballot on a declared check-time validation mechanism is ratified. All other parts proceed: c3a (Body and Headers construction) is staged, then c3b and the parts of c4-c6 that need no new mechanism."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Decisions (c3): (1) The configured HTTP client (#3665, specified in core-library.md but unbuilt) is declared in Core/HTTP/Client.jet as Core source with send in CORE_UNBUILT_ROWS (E2104), not deleted; the Calls/HTTP.jet client handle typing goes. (2) The route-pattern (E2804/E2805/E2808), OpenAPI and web.form (E2474/E0904) checks move to Core only on a ratified mechanism; the worker checks the D-META-REG1 marker-rule registry and D-CORE-ROLE1 declared roles first, and a remaining gap goes to an owner ballot rather than an ad-hoc mechanism. Body/Headers construction (c3a) is in progress."
+        },
+        {
           "at": "2026-11-22",
           "by": "agent",
           "text": "Checked c14 on dev 635625cc85: Core/ currently declares 363 public top-level __* items across 40 files (308 tracked by core_builtins_door.jet CBD_CEILING = 308). c14 (making every __* item in Core package-private) is structurally sequenced after c13 (CBD_CEILING -> 0)."
@@ -57593,8 +57671,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-22T10:56:15.104Z",
-      "updatedBy": "agent",
+      "updated": "2026-11-23T20:50:56.041Z",
+      "updatedBy": "owner",
       "criteriaLastN": 21
     },
     {
@@ -57615,6 +57693,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Decision (c7, Reader/Cursor family): Reader.read_*/peek/seek/skip/take and Cursor.take_until move into Core declarations and fail with Err instead of a plain String. The ratified rule E2417 (a failure domain must be an error type) already forbids the String domain, which existed only through the compiler-owned path, so this is a defect fix under the greenfield cutover, not a new surface; every caller migrates to err.message in the same cutover. ReaderTakePattern and CursorTakePattern are match-pattern lowerings and stay in IR. Args family (26 variants) goes first; E1301-E1304 retire and become ordinary method-arity errors."
+        },
         {
           "at": "2026-11-18",
           "by": "Main",
@@ -57777,8 +57860,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-22T02:10:23.721Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T20:09:23.447Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 11
     },
     {
@@ -57887,11 +57970,11 @@
         {
           "n": 7,
           "text": "Growing public enums: adding a member to an enum carrying the growth marker breaks no caller, because a match on it from outside its package needs an `else` arm. The growth marker is on Main's ballot list (2026-11-15).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:13.521Z",
+          "evidence": "Landed dev 61b25d4de8 (D-GROWING-ENUM1 ratified). On the batch-4 compiler (dev 48ff031e20 + #6793 c2a-j, #6794 B1/E1/S3): golden Examples/Modules/Packages/OpenEnum/run.jet PASS at o0, o1 and o2 (an external match on a growing enum needs an else arm, and adding a member breaks no caller); ui Tests/UI/OpenEnumExternalNoElse and Tests/UI/OpenEnumNestedNoCatchAll PASS (E1137 snapshots).",
+          "at": "2026-11-23T18:57:15.601Z",
           "proof": {
             "profile": "ui",
             "filter": "growing_enum_requires_else"
@@ -57925,7 +58008,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-23T16:16:16.030Z",
+      "updated": "2026-11-23T18:57:15.601Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -71806,6 +71889,15 @@
             "profile": "cases",
             "filter": "Runtime/thread_stack_default"
           }
+        },
+        {
+          "n": 5,
+          "text": "A compiler built at O0 checks the 100,000-term chain of Tests/Cases/CompilerStack/long_chain_100000_terms_check_and_run.case: today the parser Expr's drop glue (jet_ir_last / jet_ir_drop) recurses once per level with a 3,232-byte O0 frame, about 330 MB for 100,000 levels, over the 192 MiB compile stack, and dies with Jet.StackOverflow on task 2 (jet_cli_execute_compiling). Release deep owned trees without recursion, so the frame size at any level stops mattering. Proof: that case passes against a jet build -O0 Compiler image.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T19:05:35.631Z"
         }
       ],
       "refs": [],
@@ -71817,8 +71909,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:39:10.355Z",
-      "updated": "2026-11-22T02:10:23.729Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-23T19:05:35.631Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 5
     },
     {
       "id": "c0pwthed",
@@ -74188,6 +74281,33 @@
           "verifiedBy": null,
           "evidence": "4b896b057d: native_line_file_match longest-suffix absolute path matching + JetDebug unit test + Tests/Cases/Debug/absolute_and_relative_break_stop_in_same_function.case PASS",
           "at": "2026-11-22T03:09:05.347Z"
+        },
+        {
+          "n": 34,
+          "text": "jet debug: bt prints at most 256 frames with no way to see the outermost ones, so a stack overflow's caller (the frame that starts the recursion) is unreachable; bt must reach every frame, with an outermost selector. Repro: generate Tests/Cases/CompilerStack/LongChainScale.fixture/gen.jet 100000, then jet debug JET --do continue --do bt -- check sum.jet against a compiler that overflows on it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T18:58:56.455Z"
+        },
+        {
+          "n": 35,
+          "text": "jet debug: compiler-generated drop glue (jet_ir_drop_HASH, jet_ir_last_HASH) shows no type or source, so a frame cannot be tied to the type being dropped; glue frames must name the dropped type. Repro: generate Tests/Cases/CompilerStack/LongChainScale.fixture/gen.jet 100000, then jet debug JET --do continue --do bt -- check sum.jet against a compiler that overflows on it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T18:58:57.504Z"
+        },
+        {
+          "n": 36,
+          "text": "jet debug console: no thread or task listing (threads is an unknown command) and no run alias at the start stop, so a crash on a worker task cannot be placed among the tasks. Repro: generate Tests/Cases/CompilerStack/LongChainScale.fixture/gen.jet 100000, then jet debug JET --do continue --do bt -- check sum.jet against a compiler that overflows on it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T18:58:58.404Z"
         }
       ],
       "refs": [],
@@ -74195,9 +74315,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-22T12:47:01.395Z",
+      "updated": "2026-11-23T18:58:58.404Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 33,
+      "criteriaLastN": 36,
       "completedAt": "2026-11-22T12:47:01.395Z"
     },
     {
@@ -132588,6 +132708,272 @@
       "created": "2026-11-22T20:37:15.755Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-22"
+    },
+    {
+      "id": "D-CORE-CHECK1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a library declaration attaches its own build-time check and registered error to each call",
+      "situation": "Some library calls need a check that types alone cannot make. A web route such as \"/users/{id}\" must follow the route grammar, and writing to a file opened for reading must fail. Today the compiler holds these checks itself: about 10,000 lines in eleven files that know Core functions by name. Each check prints its own registered error with a tested message. So a package author can never give their own library errors that good, and every Core change waits on a compiler change. You are asked how a declaration, in Core or in any package, attaches such a check and its error, so those files can go with every error unchanged. We recommend letting a marker rule also run at each call of the marked declaration and report its registered error there.",
+      "gist": "How does a library function attach its own build-time check and registered error to each call of it?",
+      "lesson": "A marker is a tag on a declaration, like `#RoutePath`. Its rule is a small function the library writes, and it runs while the program is built. Today a rule runs once, where the tag is written. This choice adds a second moment: every call of the tagged function. There the rule reads the call and can stop the build with the library's own error type.",
+      "explainer": "Think of a post office counter. Today every special parcel rule is taped inside the sorting machine, so only the factory can add one. With call rules, each parcel type carries its own rule card, and the machine reads the card at the counter. A sender sees the same refusal slip either way, but anyone who makes a parcel type can now write its card.",
+      "story": "Ana maintains the HTTP router in Core. To tighten the route grammar she must edit the compiler, wait for a new compiler build, and keep two copies of the rules in step. Ben writes a GraphQL package. He wants the same exact error for a bad query string, but no package can add a compiler check, so his users get a run-time failure instead.",
+      "inWild": "// Zig: a comptime parameter lets the callee check a literal while compiling.\nfn route(comptime path: []const u8) void {\n    if (std.mem.indexOfScalar(u8, path, '{') != null) @compileError(\"braces are not route markers\");\n}\n// Rust: a library words the error for a missing trait (a state the type is not in).\n#[diagnostic::on_unimplemented(message = \"`{Self}` is not open for writing\")]\ntrait Writable {}",
+      "detail": "Current code. Eleven files under Compiler/JetSema/Source/Sema/Calls hold the checks. They are ProcessHandles, StreamHandles, UIHandles, TimeHandles, Hardware, Data, Geometry, Services, TaskGroups, HTTPRouting and the web-form part of HTTP. Together they are 10,390 lines and raise 45 distinct registered codes. The count was 49 until #6852 c7 moved the Args family into Core source and retired E1301 to E1304 into ordinary method arity errors. Card #6851 criteria c3 to c6 delete the files, and each remaining code must keep its UI snapshot (I4).\n\nWhat is already built. Every diagnostic is a type with an `impl Diagnostic` (D-MARKER-DIAG1=A). A marker's `expand` rule raises one with `reject(Value)`, reported at the marker's use site; `reject` anywhere else is E0962. `#Pre(#run …)` decides a contract at each call while building, from the call's argument facts, and fails with E0180. A root build's `meta.events(watch: .Calls{to: f})` hears each call as a `CompilerCall`, under `jet build` alone today (#6846 c14). D-META-REG1=A keeps marker rules in one registration table.\n\nWhat is missing. No rule runs at each call of a declaration and reports a registered type at a chosen argument. `#Pre(#run …)` alone falls short in three places. A call with the wrong argument count never binds, so no contract runs (E2911). A method the type lacks has no declaration to carry a contract (E2501). And a path known only at run time reports E0180, not the route's own E2805.\n\nEdge cases for the recommendation. A value known only at run time reaches the rule as None. The rule then chooses: refuse it (a router path), or allow it and let the function check at run time (an App route). Ownership that spans statements, such as a DMA buffer held until `wait`, needs no rule: `start` borrows the buffer, and the ordinary check reports E0204.\n\nCoordinate spaces (E2520, E2521) compare argument types in the rule. An asset check (E2822) reads the file as a recorded build input, so changing the file reruns it. Lint findings (E2930, E2931) keep `#Allow` by name. Where today's message and the registered wording differ, the error type gains the field its text varies on, so no snapshot changes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Call rules: a marker rule also runs at each call",
+          "detail": "A marker's `impl Marker` block may add `check: fn(self, call: CompilerCall)`. While building, the compiler runs it once for each call of a function, method or type that carries the marker. The rule reads the call: each argument's type, its value when the build knows it, and the written name. It raises the library's own error with `reject(Finding{…}, at: …)`, underlining the call, its name or one argument. A rule that rejects nothing leaves the call to the ordinary checks.\n\nA rule that rejects replaces that call's ordinary checks, so each bad call still shows one error, as today's snapshots do. Rules run with one meaning wherever Jet checks a program: `jet check`, `jet run`, `jet build` and the editor's language server.\n\nUsers write nothing new and see the same errors as today. A package author's first step stays `#Pre(cond, \"message\")`; a rule is the expert step.",
+          "technical": "The `Marker` trait gains `check: fn(self, call: CompilerCall)` beside `expand`. `CompilerCall`, the value call watches already hear, gains `name` (the written callee or member), `args: [CompilerArg]` in written order and `receiver: CompilerArg?`. A `CompilerArg` has `label`, `type` (a TypeId), `value` (a `Dyn?`, None when only the run knows it) and `function` (a `FunctionInfo?` for a function or lambda argument). `reject(value, at: part)` takes `call`, `call.name` or an argument, and `at:` defaults to the call.\n\nA rule runs before argument binding, so a wrong-count call reaches it with its written arguments. A `.Type` rule also hears calls of members the type lacks, before E0311. A rejection ends that call's checking: no arity, type or E0311 report follows it. `#Pre(#run …)` becomes a Prelude marker whose `check` rejects E0180, so one mechanism checks calls while building.\n\nRules run under `jet check`, `jet run`, `jet build` and the language server with one meaning. This depends on #6846 c14, which makes `meta.events` call watches run under every command that checks; today they run under `jet build` alone.\n\nCost. Every package's rules, Core's included, are compiled into the one comptime child at O0, so no rule has a privileged path. A call watch today costs about 54 µs per heard call, one exchange with the child per call. In the review's probe, 20,000 calls added 1.09 s to a 0.80 s cold build of 21,211 lines.\n\nRule calls are therefore batched: every rule call of one checking wave goes to the child in one batch, settled once per wave. The budget is at most 1 µs per rule call, checked by rerunning that probe with a rule in place of the watch.\n\nA rule runs only at calls of marked declarations. A rule that panics is E3010 at the call, and its steps count toward E0952.",
+          "code": "// app.jet: what a user writes, the same under every option\nuse {\n    files: core.files\n    http: core.http\n    server: core.http.server\n}\n\nshow: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, \"ok\")) }\n\ngo: fn() -> Int IOError! {\n    router: http.router()\n    router.get(\"/users/{id}\", show)   // E2805 Jet.InvalidRoute, under the path\n    log: files.open(\"app.log\")\n    log.write_line(\"hello\")           // E2501 Jet.FileHandleDirectionMismatch, under write_line\n    0\n}\n\nrun: fn() { print(go() ?? 1) }\n\n// Core/HTTP/Router.jet under A: the route check leaves the compiler.\n// A marker rule's `check` runs at each call of the method it marks.\nRoutePath: struct {\n    impl Marker {\n        sites: [.Method],\n\n        check: fn(self, call: CompilerCall) {\n            path: call.args[0]\n            // value: the argument as the build knows it; None when only the run knows it\n            if path.value == .Val(.Text(text)) {\n                if route_problem(text) == .Val(reason) -> reject(InvalidRoute{pattern: text, reason: reason}, at: path)\n            } else {\n                // Today's \"route path must be a static String or Path\" wording:\n                // InvalidRoute gains the field this text varies on, so the snapshot holds.\n                reject(InvalidRoute{pattern: \"\", reason: \"not known while building\"}, at: path)\n            }\n        }\n    }\n}\n\n#RoutePath\nget: fn(&self, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!) { … }\n\n// Core/Files/Files.jet under A: a rule on a type hears every method call on it,\n// a method the type lacks included, before the general \"no such method\" error.\nReadOnly: struct {\n    impl Marker {\n        sites: [.Type],\n\n        check: fn(self, call: CompilerCall) {\n            if WRITE_METHODS.contains(call.name.text) {\n                reject(FileHandleDirectionMismatch{method: call.name.text, direction: \"read-only\"}, at: call.name)\n            }\n        }\n    }\n}\n\n#ReadOnly\nFileReader: struct { … }\n\n// The error types already exist (Compiler/Prelude/Diagnostics.jet), unchanged:\n// InvalidRoute is E2805 and FileHandleDirectionMismatch is E2501."
+        },
+        {
+          "key": "B",
+          "name": "Error contracts: `#Pre(#run …)` may name a registered error",
+          "detail": "A `#run` contract keeps its condition, and its message slot may hold an error value instead of text. When the condition is false for a call, that error is reported, not E0180. It is the smallest change, but a contract only runs for a call that binds to a declaration. Wrong-count calls, methods a type lacks, and lambda shapes still need the compiler, so part of the eleven files stays.",
+          "technical": "The `Pre` marker's `message` field accepts a `String` or a value whose type implements `Diagnostic`. The error underlines the call. A condition that cannot be decided while building still reports E0180. Kept in Sema: E2910, E2911, E2501 and the static-path form of E2805.",
+          "code": "// app.jet: what a user writes, the same under every option\nuse {\n    files: core.files\n    http: core.http\n    server: core.http.server\n}\n\nshow: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, \"ok\")) }\n\ngo: fn() -> Int IOError! {\n    router: http.router()\n    router.get(\"/users/{id}\", show)   // E2805 Jet.InvalidRoute, under the path\n    log: files.open(\"app.log\")\n    log.write_line(\"hello\")           // E2501 Jet.FileHandleDirectionMismatch, under write_line\n    0\n}\n\nrun: fn() { print(go() ?? 1) }\n\n// Core/HTTP/Router.jet under B: a #run contract names a registered error.\n// It runs at each call that binds, from the call's argument values.\n#Pre(#run route_problem(path) == None, InvalidRoute{pattern: path, reason: route_problem(path) ?? \"\"})\nget: fn(&self, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!) { … }\n\n// Core/Files/Files.jet under B: FileReader declares no write_line, so no\n// contract exists to run. E2501 stays in the compiler (StreamHandles.jet),\n// as do lambda shapes (E2910, E2911).\nFileReader: struct { … }"
+        },
+        {
+          "key": "C",
+          "name": "Retire the special errors into general ones",
+          "detail": "Move every API to plain declarations and let the general checks report: E0104 for a wrong count, E0112 for a wrong type, E0180 for a false contract, E0311 for a missing method. The eleven files go with no new feature. Beginners lose the exact wording and fix for each API, and 45 tested messages change.",
+          "technical": "The 45 codes become retired rows. Each UI snapshot is re-recorded with a general code, which breaks the rule that a moved check keeps its snapshot (I4).",
+          "code": "// app.jet: what a user writes, the same under every option\nuse {\n    files: core.files\n    http: core.http\n    server: core.http.server\n}\n\nshow: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, \"ok\")) }\n\ngo: fn() -> Int IOError! {\n    router: http.router()\n    router.get(\"/users/{id}\", show)   // E2805 Jet.InvalidRoute, under the path\n    log: files.open(\"app.log\")\n    log.write_line(\"hello\")           // E2501 Jet.FileHandleDirectionMismatch, under write_line\n    0\n}\n\nrun: fn() { print(go() ?? 1) }\n\n// Core under C: plain declarations, no special errors.\n#Pre(#run route_problem(path) == None, \"invalid route\")\nget: fn(&self, path: String, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!) { … }\n\nFileReader: struct { … }   // declares no write_line\n\n// $ jet check app.jet\n// Error: Jet.RequiredContractNotTrue: `get`'s `#Pre` condition is false for this call while building\n// Error: Jet.UnknownMethod: This value does not provide the requested method, ...\n// E2805 and E2501 retire with 43 other codes, and their tested messages change."
+        },
+        {
+          "key": "D",
+          "name": "Keep the checks in the compiler (today)",
+          "detail": "Nothing changes. The compiler keeps about 10,000 lines that know Core functions by name. Each Core API change waits for a compiler change and a new compiler build. A package can never give its users errors as good as Core's, and criteria c3 to c6 of card #6851 stay open.",
+          "technical": "The eleven Sema/Calls files stay, with their name lists in Tests/Guards/closed_lists/baseline.tsv. #6853 (\"no compiler file recognizes a Core member by name\") cannot close for these members.",
+          "code": "// app.jet: what a user writes, the same under every option\nuse {\n    files: core.files\n    http: core.http\n    server: core.http.server\n}\n\nshow: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, \"ok\")) }\n\ngo: fn() -> Int IOError! {\n    router: http.router()\n    router.get(\"/users/{id}\", show)   // E2805 Jet.InvalidRoute, under the path\n    log: files.open(\"app.log\")\n    log.write_line(\"hello\")           // E2501 Jet.FileHandleDirectionMismatch, under write_line\n    0\n}\n\nrun: fn() { print(go() ?? 1) }\n\n// Today, and under D: the compiler holds the checks.\n// Compiler/JetSema/Source/Sema/Calls/HTTPRouting.jet\nsema_http_route_invalid_diagnostic: fn(pattern: String, reason: String, span: Span) -> Diagnostic {\n    sema_error(\"E2805\", span, \"invalid HTTP route `{pattern}`: {reason}\", \"route patterns use one canonical grammar; …\", \"use `:name` for one segment …\")\n}\n\n// Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet\ndiagnostics.push(sema_error(\"E2501\", span, \"`{method}` is not available on a read-only file handle\", \"`files.open` returns a read-only handle; …\", \"use `files.create` or `files.append` …\"))"
+        },
+        {
+          "key": "E",
+          "name": "Checked parameter types: a literal hook rejects a bad literal",
+          "detail": "A parameter takes a checking type such as `RoutePath` instead of `String`. A written literal becomes that type through its build-time literal hook, which may reject it with the library's registered error. The check runs once per literal, not once per call, which suits the literal-grammar family: routes, format strings, queries and asset paths.\n\nIt cannot see typestate, methods a type lacks or lambda shapes, so E2501 and its kin would stay in the compiler. Alone it is weaker than A. As a hybrid, it could carry the literals while A's `.Type` rules carry typestate, which lowers the number of calls that run a rule.",
+          "technical": "Literal hooks exist for `Literal.Int` and `Literal.Float` (`#run from_literal`, run while building for each literal). E adds `Literal.String` and lets a hook call `reject(value)` with a registered type, which today is E0962 outside a marker's `expand`. A run-time String argument has no literal, so a checked parameter refuses it unless the API also takes the plain type. This is the C++ `consteval` and Zig `comptime` parameter shape.",
+          "code": "// app.jet: what a user writes, the same under every option\nuse {\n    files: core.files\n    http: core.http\n    server: core.http.server\n}\n\nshow: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, \"ok\")) }\n\ngo: fn() -> Int IOError! {\n    router: http.router()\n    router.get(\"/users/{id}\", show)   // E2805 Jet.InvalidRoute, under the path\n    log: files.open(\"app.log\")\n    log.write_line(\"hello\")           // E2501 Jet.FileHandleDirectionMismatch, under write_line\n    0\n}\n\nrun: fn() { print(go() ?? 1) }\n\n// Core/HTTP/Router.jet under E: the parameter's type checks the literal.\n// Literal hooks (`Literal.Int`, `Literal.Float`) already run while building, once per literal.\n// E adds `Literal.String` and lets a hook raise a registered error with `reject`.\nRoutePath: struct {\n    text: String,\n\n    impl Literal.String {\n        #run from_literal: fn(text: String) -> RoutePath {\n            if route_problem(text) == .Val(reason) -> reject(InvalidRoute{pattern: text, reason: reason})\n            RoutePath{text: text}\n        }\n    }\n}\n\nget: fn(&self, path: RoutePath, handler: fn(HTTPRequest) -> HTTPResponse HTTPError!) { … }\n\n// Core/Files/Files.jet under E: no literal is involved, so E2501 stays in\n// the compiler, as do missing methods and lambda shapes, unless a call rule (A) carries them.\nFileReader: struct { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "A `comptime` parameter plus `@compileError` lets any library check a literal while compiling, with its own text but no stable error code.",
+          "code": "fn route(comptime path: []const u8) void {\n    if (std.mem.indexOfScalar(u8, path, '{') != null) @compileError(\"braces are not route markers\");\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "`#[diagnostic::on_unimplemented]` lets a library word the error for a missing trait, which is how typestate APIs teach. It changes text only and cannot check values.",
+          "code": "#[diagnostic::on_unimplemented(message = \"`{Self}` is not open for writing\")]\ntrait Writable {}"
+        },
+        {
+          "lang": "C#",
+          "note": "Roslyn analyzers ship in a NuGet package and run inside the compiler and the IDE. Each finding has the package's own stable ID, severity, suppression and code fix. Roslyn reports time per analyzer, because analyzers slow every build and keystroke.",
+          "code": "[DiagnosticAnalyzer(LanguageNames.CSharp)]\npublic sealed class RouteAnalyzer : DiagnosticAnalyzer {\n    static readonly DiagnosticDescriptor Rule = new(\"RT0001\", \"Invalid route\",\n        \"Route '{0}' is invalid: {1}\", \"Routing\", DiagnosticSeverity.Error, true);\n    public override void Initialize(AnalysisContext context) =>\n        context.RegisterOperationAction(CheckCall, OperationKind.Invocation);\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "A package's macro runs in a separate plugin process and can emit diagnostics with fix-its at chosen nodes. That is the same process boundary as Jet's comptime child, and Swift has had to tune its launch and message cost.",
+          "code": "@freestanding(expression)\npublic macro route(_ path: String) -> Route =\n    #externalMacro(module: \"RouteMacros\", type: \"RouteMacro\")\n\n// RouteMacro.expansion runs in the plugin and may call\n// context.diagnose(Diagnostic(node: path, message: InvalidRoute()))\nlet users = #route(\"/users/{id}\")"
+        },
+        {
+          "lang": "C++",
+          "note": "A C++20 `consteval` constructor checks a literal while compiling, as `std::format_string` does. The check rides on the parameter type, so no per-call hook exists, and an argument that is not a constant fails to compile.",
+          "code": "struct route_path {\n    consteval route_path(const char* text) : text(text) {\n        if (!valid_route(text)) throw \"invalid route\";  // a compile error here\n    }\n    const char* text;\n};\nvoid get(route_path path, handler h);\nget(\"/users/{id}\", show);"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Template-literal types let Hono and tRPC check route grammar and parameter names in the type system, with no user code running at all.",
+          "code": "type Params<P> = P extends `${string}:${infer Name}/${infer Rest}`\n    ? Name | Params<`/${Rest}`>\n    : P extends `${string}:${infer Name}` ? Name : never;\n\napp.get(\"/users/:id\", (c) => c.req.param(\"id\"));  // \"id\" must name a path parameter"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Call rules let Core and every package keep their exact error at each call, using marker rules that Jet already has. The eleven compiler files go, and no error a user sees changes.",
+        "gains": [
+          "Every one of the 45 remaining codes keeps its tested message, under every command that checks.",
+          "Packages get the same check power as Core.",
+          "Core API changes no longer wait for a compiler build."
+        ],
+        "losses": [
+          {
+            "loss": "Rules run while building, and a call watch costs about 54 µs per call today, more than doubling a 21,211-line build.",
+            "mitigation": "Rule calls of one wave go to the comptime child in one batch, for Core and packages alike, within 1 µs per call."
+          },
+          {
+            "loss": "`#Pre(#run …)` and rules could become two ways to check.",
+            "mitigation": "`#Pre` becomes a Prelude marker written with the same rule, so one way remains."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Contracts never run for calls that do not bind or for missing methods, so part of the compiler checks stays."
+          },
+          {
+            "key": "C",
+            "reason": "Replaces 45 exact errors with general ones, so beginners lose the precise fix."
+          },
+          {
+            "key": "D",
+            "reason": "Keeps 10,390 compiler lines that name Core functions, and packages can never match Core."
+          },
+          {
+            "key": "E",
+            "reason": "Checks literals only, so typestate (E2501), missing methods and lambda shapes stay in the compiler; it can later join A for literal grammars."
+          }
+        ],
+        "tradeoff": "Library authors learn one more rule moment, `check`, beside `expand`, while users see no change."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. The review found call watches skipped by `jet check`, a measured 54 µs per call, and a missing option, so claims 3 and 5 failed. This revision runs rules under every command, batches them within 1 µs per call, lets a rejection replace the ordinary checks, counts 45 codes and adds option E."
+      },
+      "checkInstructions": "Check the claims against Core/Prelude/Prelude.jet (Marker, Diagnostic, CompilerCall), Compiler/Prelude/Markers.jet (Pre) and Compiler/Prelude/Diagnostics.jet (InvalidRoute, FileHandleDirectionMismatch). Check `reject` and its E0962 rule in Docs/Spec/diagnostics.md, and the snapshots Tests/UI/http_route_invalid_literal.stderr and Tests/UI/e2501_bad_handle_method.stderr. Check literal hooks in Docs/Spec/Reference/metaprogramming.md and Compiler/Prelude/Traits.jet, and the review's measurements in Docs/Audits/2026-11-23-d-core-check1-review.md.",
+      "surface": {
+        "gist": "How does a library function attach its own build-time check and registered error to each call of it?",
+        "lesson": "A marker is a tag on a declaration, like `#RoutePath`. Its rule is a small function the library writes, run while building. Today a rule runs once, where the tag is written. This adds a second moment: every call of the tagged function, where the rule can stop the build with the library's own error.",
+        "trio": {
+          "current": {
+            "note": "Today the compiler itself checks Core calls by name, in eleven files. Packages cannot do the same.",
+            "code": "// Compiler/JetSema/Source/Sema/Calls/HTTPRouting.jet\nsema_error(\"E2805\", span, \"invalid HTTP route `{pattern}`: {reason}\", …)\n// Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet\nsema_error(\"E2501\", span, \"`{method}` is not available on a read-only file handle\", …)"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig lets a library check a literal while compiling, with its own message.",
+            "code": "fn route(comptime path: []const u8) void {\n    if (std.mem.indexOfScalar(u8, path, '{') != null) @compileError(\"braces are not route markers\");\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Call rules",
+            "gist": "A marker rule also runs at each call and reports the library's own error.",
+            "gains": [
+              "Every error keeps its exact tested message.",
+              "Packages get the same power as Core."
+            ],
+            "losses": [
+              "Library authors learn one more rule moment.",
+              "Rule calls cost build time, so they run in batches."
+            ],
+            "proposed": {
+              "code": "RoutePath: struct {\n    impl Marker {\n        sites: [.Method],\n        check: fn(self, call: CompilerCall) {\n            path: call.args[0]\n            if path.value == .Val(.Text(text)) && route_problem(text) == .Val(reason) {\n                reject(InvalidRoute{pattern: text, reason: reason}, at: path)\n            }\n        }\n    }\n}\n\n#RoutePath\nget: fn(&self, path: String, handler: Handler) { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Error contracts",
+            "gist": "A build-time `#Pre` contract may name a registered error.",
+            "gains": [
+              "Smallest change to what exists."
+            ],
+            "losses": [
+              "Cannot see wrong-count calls or missing methods.",
+              "Part of the compiler checks stays."
+            ],
+            "proposed": {
+              "code": "#Pre(#run route_problem(path) == None, InvalidRoute{pattern: path, reason: route_problem(path) ?? \"\"})\nget: fn(&self, path: String, handler: Handler) { … }\n\n// FileReader has no write_line, so E2501 stays in the compiler."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Retire special errors",
+            "gist": "Use plain declarations and let general errors report.",
+            "gains": [
+              "No new feature to learn."
+            ],
+            "losses": [
+              "45 exact errors become general ones.",
+              "Beginners lose the precise fix."
+            ],
+            "proposed": {
+              "code": "#Pre(#run route_problem(path) == None, \"invalid route\")\nget: fn(&self, path: String, handler: Handler) { … }\n\n// Error: Jet.RequiredContractNotTrue instead of Jet.InvalidRoute\n// Error: Jet.UnknownMethod instead of Jet.FileHandleDirectionMismatch"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep checks in the compiler",
+            "gist": "Change nothing; the compiler keeps its own checks.",
+            "gains": [
+              "No work now."
+            ],
+            "losses": [
+              "10,000 compiler lines keep naming Core functions.",
+              "Packages can never match Core's errors."
+            ],
+            "proposed": {
+              "code": "// Compiler/JetSema/Source/Sema/Calls/HTTPRouting.jet stays\nsema_error(\"E2805\", span, \"invalid HTTP route `{pattern}`: {reason}\", …)"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Checked parameter types",
+            "gist": "A parameter type checks each written literal while building.",
+            "gains": [
+              "Runs once per literal, not per call."
+            ],
+            "losses": [
+              "Cannot see typestate or missing methods.",
+              "Part of the compiler checks stays."
+            ],
+            "proposed": {
+              "code": "RoutePath: struct {\n    text: String,\n    impl Literal.String {\n        #run from_literal: fn(text: String) -> RoutePath {\n            if route_problem(text) == .Val(reason) -> reject(InvalidRoute{pattern: text, reason: reason})\n            RoutePath{text: text}\n        }\n    }\n}\n\nget: fn(&self, path: RoutePath, handler: Handler) { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Call rules keep every exact error at each call, using marker rules Jet already has. The eleven compiler files go, and users see no change.",
+          "gains": [
+            "All 45 codes keep their message under every command.",
+            "Packages get the same check power as Core.",
+            "Core changes stop waiting on compiler builds."
+          ],
+          "losses": [
+            {
+              "loss": "Rules run while building.",
+              "mitigation": "Rule calls go to the build-time process in batches, within 1 µs per call; today one costs 54 µs."
+            },
+            {
+              "loss": "Two ways to check a call.",
+              "mitigation": "`#Pre` becomes a marker written with the same rule."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Contracts miss unbound calls and missing methods, so compiler checks stay."
+            },
+            {
+              "key": "C",
+              "reason": "Exact errors become general ones, and beginners lose the fix."
+            },
+            {
+              "key": "D",
+              "reason": "Compiler keeps naming Core functions; packages can never match Core."
+            },
+            {
+              "key": "E",
+              "reason": "Checks literals only; typestate and missing methods stay in the compiler."
+            }
+          ],
+          "tradeoff": "Library authors learn one more rule moment, `check`, while users see no change."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-23T20:48:12.722Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-23"
     }
   ],
   "questions": [
@@ -134921,6 +135307,209 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T20:50:56.041Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CORE-CHECK1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-23T20:50:07.968Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:48:19.296Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:48:12.722Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-CORE-CHECK1",
+      "note": "How a library declaration attaches its own build-time check and registered error to each call"
+    },
+    {
+      "at": "2026-11-23T20:43:45.668Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:41:52.881Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-23T20:41:46.733Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:13:57.601Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0r6d7ja",
+      "note": "14 criteria, soft limit 6: same owner as c13 (build fn parity across commands); a regression found by sweep belongs on its owning card"
+    },
+    {
+      "at": "2026-11-23T20:13:57.601Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0r6d7ja",
+      "note": "#14 meta.events handlers a package's build: fn registers (call w"
+    },
+    {
+      "at": "2026-11-23T20:13:52.034Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:09:23.447Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:08:33.981Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T19:42:17.206Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-23T19:14:59.434Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T19:05:35.631Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c01642i8",
+      "note": "#5 A compiler built at O0 checks the 100,000-term chain of Test"
+    },
+    {
+      "at": "2026-11-23T19:05:25.352Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T19:03:39.016Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T18:58:58.404Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "34 criteria, soft limit 6: the AGENTS.md dogfooding order puts every jet debug friction on this card"
+    },
+    {
+      "at": "2026-11-23T18:58:58.404Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#36 jet debug console: no thread or task listing (threads is an "
+    },
+    {
+      "at": "2026-11-23T18:58:57.504Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "33 criteria, soft limit 6: the AGENTS.md dogfooding order puts every jet debug friction on this card"
+    },
+    {
+      "at": "2026-11-23T18:58:57.504Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#35 jet debug: compiler-generated drop glue (jet_ir_drop_HASH, j"
+    },
+    {
+      "at": "2026-11-23T18:58:56.455Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "32 criteria, soft limit 6: the AGENTS.md dogfooding order puts every jet debug friction on this card"
+    },
+    {
+      "at": "2026-11-23T18:58:56.455Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#34 jet debug: bt prints at most 256 frames with no way to see t"
+    },
+    {
+      "at": "2026-11-23T18:57:16.418Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T18:57:15.601Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06r6neu",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-23T18:27:16.704Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T18:14:43.188Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T18:08:54.210Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-23T18:07:08.827Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T18:02:41.286Z",
       "by": "Orchestrator",
