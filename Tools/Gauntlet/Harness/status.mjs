@@ -854,7 +854,7 @@ async function loadReportFile(file) {
   return { report, reportPath: file };
 }
 
-export async function rebuildStatusFromResults(directory = path.join(repoDir, "Tools/Gauntlet/results")) {
+export async function rebuildStatusFromResults(directory = path.join(repoDir, "Tools/Gauntlet/Results")) {
   const files = await reportFiles(directory);
   if (!files.length) throw new Error("no gauntlet report files found");
   const reports = [];
@@ -1144,13 +1144,13 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node Tools/Gauntlet/Harness/status.mjs [--merge Tools/Gauntlet/results] [--from Tools/Gauntlet/results/YYYY-MM-DD.json]");
+      console.log("usage: node Tools/Gauntlet/Harness/status.mjs [--merge Tools/Gauntlet/Results] [--from Tools/Gauntlet/Results/YYYY-MM-DD.json]");
       return null;
     }
     throw new Error(`unknown argument: ${arg}`);
   }
   if (from && merge) throw new Error("--from and --merge are mutually exclusive");
-  return { from, merge: merge ?? "Tools/Gauntlet/results" };
+  return { from, merge: merge ?? "Tools/Gauntlet/Results" };
 }
 
 async function reportFiles(directory) {

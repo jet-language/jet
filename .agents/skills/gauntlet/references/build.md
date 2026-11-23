@@ -51,7 +51,7 @@ one run:
 - authoring cost.
 
 Comparisons use same-run ratios. Raw times are machine-local. A full run emits
-`Tools/Gauntlet/results/<date>.json`; `--entry` and `--axis` emit
+`Tools/Gauntlet/Results/<date>.json`; `--entry` and `--axis` emit
 `<date>-<entry>.json` and `<date>-axis-<axis>.json`, so they do not overwrite
 the day's full report. These files are gitignored, and
 `Tools/Gauntlet/Harness/status.mjs --merge` folds them into `status.json`.
