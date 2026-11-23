@@ -233,7 +233,7 @@ sema_trait_instances_note: fn(instances: &SemaTraitInstances, written: String, s
         return
     }
     rewrite := sema_inline_rewrite_empty()
-    loop (index, param) in template.type_params -> rewrite.types[param.name] = arguments[index]
+    loop (index, param) in template.type_params -> sema_inline_type_put(rewrite.types, param.name, arguments[index])
     made := sema_inline_rewrite_trait(rewrite, template)
     made.name = written
     made.type_params = [TypeParam]{}

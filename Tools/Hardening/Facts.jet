@@ -9,8 +9,8 @@
 use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
-    jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
+    jet_ir.[IRCompilerOwnedCore, IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_cases, ir_host_value_name, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -438,7 +438,7 @@ receiver_row: fn(id: String, owner: String, member: String, symbol: String, targ
     unrouted(id, "receiver_method", owner, member, "no Core source declares {declared}, no IR handle route answers it and {shown} has no IR dispatcher arm", declared_aot: declared_aot)
 }
 
-field_row: fn(id: String, owner: String, field: String, compiler_fields: [String:[TypeTupleField]], core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
+field_row: fn(id: String, owner: String, field: String, compiler_fields: IRCompilerOwnedCore, core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
     if ir_compiler_owned_record_fields(owner, compiler_fields) == .Val(fields) {
         loop known in fields {
             if known.name == field {

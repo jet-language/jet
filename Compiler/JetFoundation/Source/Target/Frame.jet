@@ -30,18 +30,20 @@ JET_FRAME_CARRIER_BYTES: 32
 // once: >= 0 exact bytes, -1 unknown or cyclic, -2 generic.
 JetFrameTypes: struct {
     defs: [TTypeDef],
-    rows: NameRows,
+    keys: NameTable,
+    rows: [Int],
     fixed_storage: [Int],
 }
 
 jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
     owned := defs.move()
-    rows := name_rows(owned.len() * 2 + 1)
+    keys := name_column_table(owned.len() * 2)
+    rows := name_column(owned.len() * 2)
     loop (index, definition) in owned {
-        name_rows_set_first(rows, definition.key, index)
+        name_column_set_first(keys, rows, definition.key, index)
     }
     loop (index, definition) in owned {
-        name_rows_set_first(rows, definition.name, index)
+        name_column_set_first(keys, rows, definition.name, index)
     }
     // -3 not yet computed, -2 generic, -1 unknown/cycle, >= 0 cached storage bytes.
     fixed := [Int]{}
@@ -49,7 +51,7 @@ jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
     loop definition in owned {
         fixed.push(if definition.generic_params.len() > 0 -> -2 else -> -3)
     }
-    types := JetFrameTypes{defs: owned.move(), rows: rows.move(), fixed_storage: fixed.move()}
+    types := JetFrameTypes{defs: owned.move(), keys: keys.move(), rows: rows.move(), fixed_storage: fixed.move()}
     // Precompute every non-generic declaration's storage once.
     laying := [Int]{}
     loop row in 0..<types.defs.len() {
@@ -128,7 +130,7 @@ jet_frame_precompute_type: fn(types: &JetFrameTypes, ty: Type, laying: &[Int]) -
         }
         .Named(name) -> {
             if name == "Unit" || name == "()" || name == "Never" -> return 0
-            row: name_rows_get_text(types.rows, name) ?? return -1
+            row: name_column_get(types.keys, types.rows, name) ?? return -1
             if types.fixed_storage[row] == -2 -> return -1
             jet_frame_precompute_row(types, row, laying)
         }
@@ -138,7 +140,7 @@ jet_frame_precompute_type: fn(types: &JetFrameTypes, ty: Type, laying: &[Int]) -
                 if captured < 0 -> return -1
                 return 16 + jet_frame_member_bytes(captured)
             }
-            if name_rows_get_text(types.rows, name) == None -> return JET_FRAME_CARRIER_BYTES
+            if name_column_get(types.keys, types.rows, name) == None -> return JET_FRAME_CARRIER_BYTES
             active_keys := [String]{}
             loop idx in laying -> active_keys.push(types.defs[idx].key)
             jet_frame_nominal(types, name, args, [String:Int]{}, active_keys) ?? -1
@@ -157,7 +159,7 @@ jet_frame_storage_fast: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
         .Tagged(_, inner) -> jet_frame_storage_fast(types, inner)
         .Named(name) -> {
             if name == "Unit" || name == "()" || name == "Never" -> return Val(0)
-            row: name_rows_get_text(types.rows, name) ?? return None
+            row: name_column_get(types.keys, types.rows, name) ?? return None
             cached: types.fixed_storage[row]
             if cached >= 0 -> Val(cached) else -> None
         }
@@ -182,7 +184,7 @@ jet_frame_storage_fast: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
                 captured: jet_frame_storage_fast(types, args[1]) ?? return None
                 return Val(16 + jet_frame_member_bytes(captured))
             }
-            if name_rows_get_text(types.rows, name) == None -> return Val(JET_FRAME_CARRIER_BYTES)
+            if name_column_get(types.keys, types.rows, name) == None -> return Val(JET_FRAME_CARRIER_BYTES)
             jet_frame_nominal(types, name, args, [String:Int]{}, [String]{})
         }
     }
@@ -280,7 +282,7 @@ jet_frame_nominal: fn(types: JetFrameTypes, name: String, args: [Type], env: [St
         captured: jet_frame_storage_bytes(types, args[1], env, laying) ?? return None
         return Val(16 + jet_frame_member_bytes(captured))
     }
-    row: name_rows_get_text(types.rows, name) ?? {
+    row: name_column_get(types.keys, types.rows, name) ?? {
         if args.len() == 0 -> return None
         return Val(JET_FRAME_CARRIER_BYTES)
     }

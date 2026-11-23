@@ -29,6 +29,7 @@ use jet_foundation.[
     TEffectSpan,
     decl_id_index,
     decl_table_find,
+    name_find,
     symbol_table_key,
 ]
 
@@ -421,7 +422,7 @@ SemaCoreStandIn: struct {
 // stand-in lines in the run's seal (graph.core_stand_ins).
 sema_core_stand_in: fn(program: SemaProgramTables, key: String, span: Span) -> SemaCoreStandIn? Never! {
     if program.registration_graph == .Val(graph) {
-        if !graph.core_stand_in_wave || graph.core_wave_rows.get(key) == None -> return None
+        if !graph.core_stand_in_wave || name_find(graph.core_wave_rows, key) == None -> return None
         if graph.core_stand_ins == .Val(seal) {
             line: sema_core_seal_stand_in(seal, key) ?? return None
             return Val(SemaCoreStandIn{effects: sema_core_seal_stand_in_effects(line, key, span), failure: sema_core_seal_stand_in_failure(line, key)})

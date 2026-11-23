@@ -67,7 +67,6 @@
 // dominating it decide (ir_range_implied), becomes its constant. Returns
 // the rewritten instructions; `f` and `s` stay one SSA form but for the
 // stop points gone (Opt.jet ir_opt_ssa then ranges the function once more).
-use jet_foundation.[name_rows_value]
 
 // The sentinels: the ends of the inline Ints.
 IR_RANGE_LOW: -4611686018427387904
@@ -218,10 +217,10 @@ ir_range_wanted: fn(m: IRModule, f: IRFunction) -> Bool Never! {
         }
     }
     if !has_numeric -> return false
-    to_i64: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
-    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
-    fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
-    native: name_rows_value(m.name_rows, "jet_int_native_i64_at") ?? -2
+    to_i64: ir_interned_name(m, "jet_int_owned_to_i64") ?? -2
+    clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
+    fixed: ir_interned_name(m, "jet_int_checked_fixed") ?? -2
+    native: ir_interned_name(m, "jet_int_native_i64_at") ?? -2
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .IntBig -> return true
@@ -302,8 +301,8 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     r.home.try_reserve(count) ?? panic("reserve failed")
     r.tested.try_reserve(count) ?? panic("reserve failed")
     r.lengths.try_reserve(count) ?? panic("reserve failed")
-    char_len_id: name_rows_value(m.name_rows, "jet_char_len") ?? -2
-    string_bytes_id: name_rows_value(m.name_rows, "jet_string_bytes") ?? -2
+    char_len_id: ir_interned_name(m, "jet_char_len") ?? -2
+    string_bytes_id: ir_interned_name(m, "jet_string_bytes") ?? -2
     any := false
     loop value in 0..<count {
         type_row: f.slot_type[s.val_slot[value]]
@@ -1240,12 +1239,12 @@ ir_range_open: fn(a: IRRange) -> IRRange Never! {
 
 // The rewrites the ranges prove (the header comment).
 ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int Never! {
-    to_i64: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
-    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
-    fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
-    native: name_rows_value(m.name_rows, "jet_int_native_i64_at") ?? -2
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
-    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
+    to_i64: ir_interned_name(m, "jet_int_owned_to_i64") ?? -2
+    clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
+    fixed: ir_interned_name(m, "jet_int_checked_fixed") ?? -2
+    native: ir_interned_name(m, "jet_int_native_i64_at") ?? -2
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
+    trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -2
     rewritten := 0
     // Per value, the first load of the same read-only parameter word (-1:
     // none), built at the first comparison the ranges leave open.
@@ -1582,9 +1581,9 @@ ir_range_unique_call: fn(m: IRModule, f: IRFunction, s: IRSsa, at: Int, base: In
         return false
     }
     row: f.slot_type[f.args[f.b[at]]]
-    helper := name_rows_value(m.name_rows, "#unique@{row}") ?? -1
+    helper := ir_interned_name(m, "#unique@{row}") ?? -1
     if helper < 0 && row < m.type_keys.len() {
-        helper = name_rows_value(m.function_rows, "#unique<{ir_row_key(m, row)}>") ?? -1
+        helper = ir_keyed_function(m, "#unique<{ir_row_key(m, row)}>") ?? -1
     }
     helper >= 0 && helper == f.a[at]
 }
@@ -1803,9 +1802,9 @@ ir_range_drop_point: fn(f: &IRFunction, key: Int, at: Int) Never! {
 
 // How many stop points (calls of the trap or a stop poll) `f` has.
 ir_range_traps: fn(m: IRModule, f: IRFunction) -> Int Never! {
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
-    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
-    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
+    trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -2
+    turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -2
     count := 0
     loop at in 0..<f.op.len() {
         if f.op[at] == .Call && (f.a[at] == trap || f.a[at] == poll || f.a[at] == turn) {

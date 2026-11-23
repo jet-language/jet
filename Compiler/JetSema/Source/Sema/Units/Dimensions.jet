@@ -1,4 +1,4 @@
-use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply]
+use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Name, NameTable, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply, name_column, name_column_get, name_column_set, name_column_table, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
 
 // `DimensionLookup` and resolve_dimension_expression.
 SemaUnitDimensionLookup: enum {
@@ -16,21 +16,36 @@ SemaUnitDimensionDeclaration: struct {
     preset: Dimension?,
 }
 
+// Dimension family name -> declaration index, at the name's id in `names`.
+SemaUnitDimensionRows: struct {
+    names: NameTable{name_column_table()},
+    rows: [Int]{name_column()},
+}
+
+// Imported dimension family name -> every declaration index it can name.
+SemaUnitDimensionCandidates: struct {
+    names: NameTable{name_table_sized(2)},
+    rows: [[Int]]{[[Int]]{[Int]{}}},
+}
+
 SemaUnitDimensionVisibility: struct {
-    local: [String:Int],
-    imported: [String:[Int]],
-    qualified: [String:Int],
-    aliases: [String:Int],
+    local: SemaUnitDimensionRows,
+    imported: SemaUnitDimensionCandidates,
+    // `{alias}|{name}` -> the declaration index the alias's module exports.
+    qualified: SemaUnitDimensionRows,
+    // The import aliases of the module.
+    aliases: NameTable{name_table_sized(2)},
 }
 
 sema_units_dimension_target: fn(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> {target: Int?, ambiguous: Bool} Never! {
     if qualifier == .Val(alias) {
-        return {ambiguous: false, target: visible.qualified.get("{alias}|{name}")}
+        return {ambiguous: false, target: name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}")}
     }
-    if visible.local.get(name) == .Val(index) -> return {ambiguous: false, target: Val(index)}
-    candidates: visible.imported.get(name) ?? [Int]{}
-    if candidates.len() > 1 -> return {ambiguous: true, target: None}
-    if candidates.len() == 1 -> return {ambiguous: false, target: Val(candidates[0])}
+    if name_column_get(visible.local.names, visible.local.rows, name) == .Val(index) -> return {ambiguous: false, target: Val(index)}
+    id: name_find(visible.imported.names, name) ?? return {ambiguous: false, target: Int?{None}}
+    row: name_index(id)
+    if visible.imported.rows[row].len() > 1 -> return {ambiguous: true, target: None}
+    if visible.imported.rows[row].len() == 1 -> return {ambiguous: false, target: Val(visible.imported.rows[row][0])}
     {ambiguous: false, target: Int?{None}}
 }
 
@@ -91,10 +106,10 @@ sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never!
 // dependencies. Repeated references to one declaration count only once.
 // Rust dimension_aliases visits field bases even when the outer expression
 // is not a valid dimension expression. Unqualified names never visit a field.
-sema_units_dimension_aliases: fn(expression: Expr, aliases: &[String:Bool]) Never! {
+sema_units_dimension_aliases: fn(expression: Expr, aliases: &NameTable) Never! {
     if expression == {
         .Field(base, _, _, _) -> {
-            if base == .Ident(alias, _, _) -> aliases[alias] = true
+            if base == .Ident(alias, _, _) -> _ := name_intern(aliases, alias)
             sema_units_dimension_aliases(base, aliases)
         }
         .Binary(_, left, right, _, _) -> {
@@ -105,19 +120,21 @@ sema_units_dimension_aliases: fn(expression: Expr, aliases: &[String:Bool]) Neve
     }
 }
 
-sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: &[Int:Bool], aliases: &[String:Bool]) Never! {
+sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisibility, dependencies: &[Int:Bool], aliases: &NameTable) Never! {
     if expression == {
         .Ident(name, _, _) -> {
             target: sema_units_dimension_target(visible, None, name)
             if target.target == .Val(index) -> dependencies[index] = true
-            if visible.local.get(name) == None {
-                candidates: visible.imported.get(name) ?? [Int]{}
-                loop (alias, _) in visible.aliases {
-                    loop candidate in candidates {
-                        // Declaration indices belong to their import module;
-                        // qualified entries encode the exact family visibility.
-                        if visible.qualified.get("{alias}|{name}") == (Val(candidate)) {
-                            aliases[alias] = true
+            if name_column_get(visible.local.names, visible.local.rows, name) == None {
+                if name_find(visible.imported.names, name) == .Val(candidates) {
+                    loop alias_id in 1..<name_count(visible.aliases) {
+                        alias: name_text(visible.aliases, Name{id: U32{alias_id}})
+                        loop candidate in visible.imported.rows[name_index(candidates)] {
+                            // Declaration indices belong to their import module;
+                            // qualified entries encode the exact family visibility.
+                            if name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}") == (Val(candidate)) {
+                                _ := name_intern(aliases, alias)
+                            }
                         }
                     }
                 }
@@ -125,8 +142,8 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
         }
         .Field(base, name, _, _) -> {
             if base == .Ident(alias, _, _) {
-                aliases[alias] = true
-                if visible.qualified.get("{alias}|{name}") == .Val(index) {
+                _ := name_intern(aliases, alias)
+                if name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}") == .Val(index) {
                     dependencies[index] = true
                 }
             }
@@ -148,15 +165,15 @@ sema_units_owner: fn(input: SemaRegistrationModuleInput) -> {package: String, mo
 }
 
 sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
-    local := [String:Int]{}
+    local := SemaUnitDimensionRows{}
     known := [Int:Dimension]{}
     loop (index, family) in prelude {
-        local[family.family] = index
+        name_column_set(local.names, local.rows, family.family, index)
         if family.dimension == .Val(claim) {
             if claim == .Base(_) -> known[index] = dimension_base("core.units.{family.family}")
         }
     }
-    visible: SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}}
+    visible: SemaUnitDimensionVisibility{local: local, imported: SemaUnitDimensionCandidates{}, qualified: SemaUnitDimensionRows{}}
     loop {
         progress := false
         loop index in 0..<prelude.len() {
@@ -185,30 +202,28 @@ sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
 sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
     declarations := [SemaUnitDimensionDeclaration]{}
     module_rows := [U32:Int]{}
-    locals := [[String:Int]]{}
-    exports := [[String:Int]]{}
-    sema_units_dimension_declarations(inputs, declarations, module_rows, locals, exports)
+    visibility := [SemaUnitDimensionVisibility]{}
+    exports := [SemaUnitDimensionRows]{}
+    sema_units_dimension_declarations(inputs, declarations, module_rows, visibility, exports)
     if declarations.len() == 0 {
         return
-    }
-    visibility := [SemaUnitDimensionVisibility]{}
-    loop local in locals {
-        visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
     }
     loop edge in edges {
         source: module_rows.get(edge.source_module_identity.id) ?? next
         target: module_rows.get(edge.target_module_identity.id) ?? next
         alias: edge.declaration.alias
-        visibility[source].aliases[alias] = target
-        loop (name, index) in exports[target] {
-            visibility[source].qualified["{alias}|{name}"] = index
-            candidates := visibility[source].imported.get(name) ?? [Int]{}
+        _ := name_intern(visibility[source].aliases, alias)
+        loop id in 1..<name_count(exports[target].names) {
+            name: name_text(exports[target].names, Name{id: U32{id}})
+            index: exports[target].rows[id]
+            name_column_set(visibility[source].qualified.names, visibility[source].qualified.rows, "{alias}|{name}", index)
+            row: name_index(name_intern(visibility[source].imported.names, name))
+            if row == visibility[source].imported.rows.len() -> visibility[source].imported.rows.push([Int]{})
             seen := false
-            loop candidate in candidates {
+            loop candidate in visibility[source].imported.rows[row] {
                 if candidate == index -> seen = true
             }
-            if !seen -> candidates.push(index)
-            visibility[source].imported[name] = candidates
+            if !seen -> visibility[source].imported.rows[row].push(index)
         }
     }
     known := [Int:Dimension]{}
@@ -227,11 +242,12 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     loop (index, declaration) in declarations {
         if declaration.claim == .Derived(expression) {
             dependencies := [Int:Bool]{}
-            aliases := [String:Bool]{}
+            aliases := name_table_sized(2)
             sema_units_dimension_reads(expression, visibility[declaration.module_index], dependencies, aliases)
             sema_units_dimension_aliases(expression, aliases)
-            loop (alias, _) in aliases {
-                if visibility[declaration.module_index].aliases.get(alias) != None {
+            loop alias_id in 1..<name_count(aliases) {
+                alias: name_text(aliases, Name{id: U32{alias_id}})
+                if name_find(visibility[declaration.module_index].aliases, alias) != None {
                     // The same source ledger used by L0103 and NameFacts.
                     used := false
                     loop name in inputs[declaration.module_index].program.used_import_names {
@@ -299,22 +315,22 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
 
 // Every unit family of `inputs` that claims a dimension, with each module's
 // local and exported family rows; each input is read in place.
-sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[U32:Int], locals: &[[String:Int]], exports: &[[String:Int]]) Never! {
+sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[U32:Int], visibility: &[SemaUnitDimensionVisibility], exports: &[SemaUnitDimensionRows]) Never! {
     loop (module_index, input) in inputs {
         module_rows[input.module_identity.id] = module_index
-        local := [String:Int]{}
-        public := [String:Int]{}
+        local := SemaUnitDimensionRows{}
+        public := SemaUnitDimensionRows{}
         loop (item, value) in input.program.items {
             if value == .UnitFamily(family) {
                 if family.dimension == .Val(claim) {
                     index: declarations.len()
-                    local[family.family] = index
-                    if family.is_pub -> public[family.family] = index
+                    name_column_set(local.names, local.rows, family.family, index)
+                    if family.is_pub -> name_column_set(public.names, public.rows, family.family, index)
                     declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
                 }
             }
         }
-        locals.push(local)
-        exports.push(public)
+        visibility.push(SemaUnitDimensionVisibility{local: local.move(), imported: SemaUnitDimensionCandidates{}, qualified: SemaUnitDimensionRows{}})
+        exports.push(public.move())
     }
 }

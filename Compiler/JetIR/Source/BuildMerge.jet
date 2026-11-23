@@ -26,7 +26,7 @@
 // steps through those short lists instead of every function's instructions;
 // a row's second use in a function finds its number already given, so the
 // numbering is the same.
-use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_rows_set, name_rows_sorted, name_rows_value, type_id_remap]
+use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_column_get, name_column_set, name_column_sorted, name_column_value, type_id_remap]
 
 // A function the walk starts from: function `local` of part `part`.
 IRMergeRoot: struct {
@@ -334,20 +334,23 @@ ir_merge_rows: fn(out: &IRModule, parts: &[IRModule], g: IRMerge, roots: [IRMerg
     }
     loop group in 0..<g.data_texts {
         row: g.data_ids[group]
-        if row >= 0 -> name_rows_set(out.data_rows, g.data_keys[group], row)
+        if row >= 0 -> name_column_set(out.data_rows_keys, out.data_rows, g.data_keys[group], row)
     }
     // A constant's static object (and a storage, memo or Shared site cell)
     // keeps its key: the runtime library finds its lifecycle guards and the
     // Core library its cells by it (m.constant_rows).
     loop group in g.data_texts..<g.data_keys.len() {
         row: g.data_ids[group]
-        if row >= 0 -> name_rows_set(out.constant_rows, g.data_keys[group], row)
+        if row >= 0 -> name_column_set(out.constant_rows_keys, out.constant_rows, g.data_keys[group], row)
     }
     // A host literal's key names its function and a slot of its body, so the
     // parts that built one function hold the one value under it.
     loop part in 0..<parts.len() {
-        loop (key, value) in parts[part].host_literals {
-            if out.host_literals.get(key) == None -> out.host_literals[key.copy()] = value.copy()
+        loop key in parts[part].host_literals_keys.texts {
+            row: name_column_get(parts[part].host_literals_keys, parts[part].host_literals, key) ?? next
+            if name_column_get(out.host_literals_keys, out.host_literals, key) != None -> next
+            name_column_set(out.host_literals_keys, out.host_literals, key, out.host_literal_values.len())
+            out.host_literal_values.push(parts[part].host_literal_values[row].copy())
         }
     }
 }
@@ -356,13 +359,13 @@ ir_merge_rows: fn(out: &IRModule, parts: &[IRModule], g: IRMerge, roots: [IRMerg
 // two function keys hash alike.
 ir_merge_key_rows: fn(out: &IRModule, g: IRMerge) Never! {
     loop (group, id) in g.type_ids {
-        if id >= 0 -> name_rows_set(out.type_rows, g.type_keys[group], id)
+        if id >= 0 -> name_column_set(out.type_rows_keys, out.type_rows, g.type_keys[group], id)
     }
     loop (group, id) in g.name_ids {
-        if id >= 0 -> name_rows_set(out.name_rows, g.name_keys[group], id)
+        if id >= 0 -> name_column_set(out.name_rows_keys, out.name_rows, g.name_keys[group], id)
     }
     loop (group, id) in g.function_ids {
-        if id >= 0 -> name_rows_set(out.function_rows, g.function_keys[group], id)
+        if id >= 0 -> ir_function_bind(out, g.function_keys[group], id)
     }
     // A hashed symbol ends with its key's 64-bit stable id (IR.jet
     // ir_hashed_function). Two keys can hash alike, which would name two
@@ -529,7 +532,7 @@ ir_merge_new: fn(parts: [IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRo
 // Part `m`'s merge input (IRMergePrep), made on the thread that built it:
 // its key runs as ir_merge_new groups them (each sorted; a constant whose
 // value is built at each read (-1) shares no row, so its run leaves it out:
-// name_rows_sorted keeps rows >= 0) and its functions' uses (ir_merge_uses).
+// name_column_sorted keeps rows >= 0) and its functions' uses (ir_merge_uses).
 ir_merge_prepare: fn(m: IRModule) -> IRMergePrep Never! {
     functions := [{key: String, local: Int}]{}
     loop (local, f) in m.functions -> functions.push({key: f.key.copy(), local: local})
@@ -553,7 +556,7 @@ ir_merge_prepare: fn(m: IRModule) -> IRMergePrep Never! {
     use_starts.push(uses.len())
     call_starts.push(calls.len())
     addr_starts.push(addrs.len())
-    IRMergePrep{functions: functions.move(), types: name_rows_sorted(m.type_rows), names: name_rows_sorted(m.name_rows), texts: name_rows_sorted(m.data_rows), constants: name_rows_sorted(m.constant_rows), use_starts: use_starts.move(), uses: uses.move(), call_starts: call_starts.move(), calls: calls.move(), addr_starts: addr_starts.move(), addrs: addrs.move(), has_entry_check: has_entry_check}
+    IRMergePrep{functions: functions.move(), types: name_column_sorted(m.type_rows_keys, m.type_rows), names: name_column_sorted(m.name_rows_keys, m.name_rows), texts: name_column_sorted(m.data_rows_keys, m.data_rows), constants: name_column_sorted(m.constant_rows_keys, m.constant_rows), use_starts: use_starts.move(), uses: uses.move(), call_starts: call_starts.move(), calls: calls.move(), addr_starts: addr_starts.move(), addrs: addrs.move(), has_entry_check: has_entry_check}
 }
 
 // What function `local` (`f`) uses, in the walk's order (ir_merge_scan
@@ -775,7 +778,7 @@ ir_merge_type: fn(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Ne
     g.sides[part].type_new[row] = added
     drop: parts[part].types[row].drop
     if drop != "" {
-        glue: name_rows_value(parts[part].function_rows, drop) ?? -1
+        glue: ir_keyed_function(parts[part], drop) ?? -1
         _: ir_merge_function(g, parts, part, glue)
     }
     added
@@ -1113,7 +1116,7 @@ ir_merge_rewrite_part: fn(functions: &&[IRFunction], side: IRMergeSide, ids: &&[
         loop key in keys {
             row: m.data.len()
             m.data.push([U8]{U8{0}})
-            name_rows_set(m.constant_rows, key, row)
+            name_column_set(m.constant_rows_keys, m.constant_rows, key, row)
             _: ir_emit(f, IROp.DataAddress, -1, row, -1, -1, 1)
         }
         m.functions.push(f)
@@ -1123,9 +1126,9 @@ ir_merge_rewrite_part: fn(functions: &&[IRFunction], side: IRMergeSide, ids: &&[
     loop m in parts -> preps.push(ir_merge_prepare(m))
     merged: ir_merge(parts, preps, [IRMergeRoot]{IRMergeRoot{part: 0, local: 0}, IRMergeRoot{part: 1, local: 0}}, -1, interner_empty(), None)
     assert_eq(merged.data.len(), 3)
-    shared: name_rows_value(merged.constant_rows, "storage:shared") ?? -1
-    own0: name_rows_value(merged.constant_rows, "storage:own0") ?? -1
-    own1: name_rows_value(merged.constant_rows, "storage:own1") ?? -1
+    shared: name_column_value(merged.constant_rows_keys, merged.constant_rows, "storage:shared") ?? -1
+    own0: name_column_value(merged.constant_rows_keys, merged.constant_rows, "storage:own0") ?? -1
+    own1: name_column_value(merged.constant_rows_keys, merged.constant_rows, "storage:own1") ?? -1
     assert(shared >= 0 && own0 >= 0 && own1 >= 0, "every keyed data row keeps its key")
     assert(shared != own0 && shared != own1 && own0 != own1, "each key names its own merged row")
     assert_eq(merged.functions[0].a[0], shared)

@@ -13,7 +13,7 @@
 // site's owner outlives any `#Context(allocator:)` block, so its candidate is
 // built in the program heap, its destination's allocator (jet_rt_move_enter
 // of 0 and jet_rt_move_leave).
-use jet_foundation.[DeclID, SharedLifetime, Span, TConstantDef, Type, name_rows_set, name_rows_value]
+use jet_foundation.[DeclID, SharedLifetime, Span, TConstantDef, Type, name_column_set, name_column_value]
 
 IR_SHARED_SITE_BYTES: 8
 
@@ -168,7 +168,7 @@ ir_process_cell_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, site: Int, h
 // `key`.
 ir_shared_site_word: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
     object_key: "shared-site:{key}"
-    object := name_rows_value(m.constant_rows, object_key) ?? -1
+    object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
         object = m.data.len()
         word := [U8]{}
@@ -176,7 +176,7 @@ ir_shared_site_word: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! 
         m.data.push(word)
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
-        name_rows_set(m.constant_rows, object_key, object)
+        name_column_set(m.constant_rows_keys, m.constant_rows, object_key, object)
     }
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)

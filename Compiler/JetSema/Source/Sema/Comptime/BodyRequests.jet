@@ -11,6 +11,10 @@ use jet_foundation.[
     TComptimeReport,
     TComptimeValue,
     Type,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
 ]
 
 sema_comptime_body_destination_key: fn(function_key: String, source_span: Span, site_span: Span) -> String Never! {
@@ -25,10 +29,32 @@ sema_comptime_body_source_key: fn(module_identity: ModuleID, function_key: Strin
 // module's slot at its ModuleID row (module_index), -1 for a module without
 // one. Reads return only Int rows; no lookup materializes an owning map,
 // expression, or staged value.
-sema_comptime_index_module_slot: fn(modules: &[Int], rows: &[[String:Int]], module_identity: ModuleID) -> Int Never! {
+sema_comptime_index_module_slot: fn(modules: &[Int], rows: &[SemaComptimeKeyRows], module_identity: ModuleID) -> Int Never! {
     slot: sema_comptime_claim_module_slot(modules, module_identity, rows.len())
-    if slot == rows.len() -> rows.push([String:Int]{})
+    if slot == rows.len() -> rows.push(sema_comptime_key_rows())
     slot
+}
+
+// A module's staged keys start few: its key table starts small.
+SEMA_COMPTIME_KEY_SLOTS: 16
+
+sema_comptime_key_rows: fn() -> SemaComptimeKeyRows Never! {
+    SemaComptimeKeyRows{keys: name_table_sized(SEMA_COMPTIME_KEY_SLOTS), rows: [Int]{-1}}
+}
+
+// The id of `key` in `index`, interned on first use with no row.
+sema_comptime_key_id: fn(index: &SemaComptimeKeyRows, key: String) -> Int Never! {
+    id: name_index(name_intern(index.keys, key))
+    if id == index.rows.len() -> index.rows.push(-1)
+    id
+}
+
+// The row `key` names in `index`, if any.
+sema_comptime_key_row: fn(index: SemaComptimeKeyRows, key: String) -> Int? Never! {
+    id: name_find(index.keys, key) ?? return None
+    row: index.rows[name_index(id)]
+    if row < 0 -> return None
+    Val(row)
 }
 
 // The slot of `module_identity` in `modules`; a module without one takes
@@ -49,14 +75,13 @@ sema_comptime_module_slot: fn(modules: [Int], module_identity: ModuleID) -> Int?
 
 sema_comptime_body_source_index: fn(context: &SemaCheckContext, row: Int) Never! {
     slot: sema_comptime_index_module_slot(context.comptime_body_source_modules, context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
-    if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None {
-        context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
-    }
+    id: sema_comptime_key_id(context.comptime_body_source_rows[slot], context.comptime_body_sources[row].key)
+    if context.comptime_body_source_rows[slot].rows[id] < 0 -> context.comptime_body_source_rows[slot].rows[id] = row
 }
 
 sema_comptime_body_sources_index: fn(context: &SemaCheckContext) Never! {
     context.comptime_body_source_modules = [Int]{}
-    context.comptime_body_source_rows = [[String:Int]]{}
+    context.comptime_body_source_rows = [SemaComptimeKeyRows]{}
     loop row in 0..<context.comptime_body_sources.len() {
         sema_comptime_body_source_index(context, row)
     }
@@ -74,18 +99,21 @@ sema_comptime_body_sources_truncate: fn(context: &SemaCheckContext, length: Int)
     loop context.comptime_body_sources.len() > length {
         row: context.comptime_body_sources.len() - 1
         slot: sema_comptime_module_slot(context.comptime_body_source_modules, context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == (Val(row)) {
-            _ := context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
+        id: name_find(context.comptime_body_source_rows[slot].keys, context.comptime_body_sources[row].key) ?? panic("an indexed body source lost its key")
+        if context.comptime_body_source_rows[slot].rows[name_index(id)] == row {
+            context.comptime_body_source_rows[slot].rows[name_index(id)] = -1
         }
         _ := context.comptime_body_sources.pop()
     }
 }
 
-sema_comptime_body_value_index_row: fn(modules: &[Int], first_rows: &[[String:Int]], second_rows: &[[String:Int]], module_identity: ModuleID, key: String, row: Int) Never! {
+sema_comptime_body_value_index_row: fn(modules: &[Int], first_rows: &[SemaComptimeKeyRows], second_rows: &[[Int]], module_identity: ModuleID, key: String, row: Int) Never! {
     slot: sema_comptime_index_module_slot(modules, first_rows, module_identity)
-    if second_rows.len() < first_rows.len() -> second_rows.push([String:Int]{})
-    if first_rows[slot].get(key) == None -> first_rows[slot][key] = row else if second_rows[slot].get(key) == None {
-        second_rows[slot][key] = row
+    if second_rows.len() < first_rows.len() -> second_rows.push([Int]{-1})
+    id: sema_comptime_key_id(first_rows[slot], key)
+    if id == second_rows[slot].len() -> second_rows[slot].push(-1)
+    if first_rows[slot].rows[id] < 0 -> first_rows[slot].rows[id] = row else if second_rows[slot][id] < 0 {
+        second_rows[slot][id] = row
     }
 }
 
@@ -94,8 +122,8 @@ sema_comptime_body_value_index_row: fn(modules: &[Int], first_rows: &[[String:In
 sema_comptime_body_values_freeze: fn(values: &&[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
     length: values.len()
     modules := [Int]{}
-    first_rows := [[String:Int]]{}
-    second_rows := [[String:Int]]{}
+    first_rows := [SemaComptimeKeyRows]{}
+    second_rows := [[Int]]{}
     indexed_rows := 0
     index_key_utf8_bytes := 0
     loop row in 0..<length {
@@ -148,7 +176,7 @@ sema_comptime_body_values_append_items: fn(publication: &SemaComptimeBodyValues,
     new_generation: if publication.facts == .Val(_) -> false else -> true
     if new_generation {
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
-        publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0}})
+        publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [Int]{}, first_rows: [SemaComptimeKeyRows]{}, second_rows: [[Int]]{}, indexed_rows: 0}})
     }
     // copy: a handle copy (Shared facts, refcount bump): the append runs through `facts` while the
     // write-borrowed publication still owns its handle.
@@ -298,7 +326,7 @@ sema_comptime_body_capture_site: fn(
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
-        if context.comptime_body_source_rows[slot].get(key) == .Val(row) {
+        if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) == .Val(row) {
             return context.comptime_body_sources[row]
         }
     }
@@ -384,12 +412,12 @@ sema_comptime_body_value_find: fn(
     slot: sema_comptime_module_slot(permit.value.modules, module_identity) ?? return None
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.FirstRowProbe)
-    row: permit.value.first_rows[slot].get(key) ?? return None
-    if row >= context.comptime_body_values.length -> return None
+    id: name_find(permit.value.first_rows[slot].keys, key) ?? return None
+    row: permit.value.first_rows[slot].rows[name_index(id)]
+    if row < 0 || row >= context.comptime_body_values.length -> return None
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.SecondRowProbe)
-    if permit.value.second_rows[slot].get(key) == .Val(second) {
-        if second < context.comptime_body_values.length -> return None
-    }
+    second: permit.value.second_rows[slot][name_index(id)]
+    if second >= 0 && second < context.comptime_body_values.length -> return None
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
     // copy: the caller gets an owned body value, while the published row stays in the shared facts
     // for every other reader. It is reachable only through this read guard.

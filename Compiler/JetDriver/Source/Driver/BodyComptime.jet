@@ -7,8 +7,13 @@ use {
         Diagnostic,
         FnBody,
         ModuleTable,
+        NameTable,
         compiler_take_rows,
         module_text,
+        name_column_table,
+        name_find,
+        name_intern,
+        name_table_sized,
     ]
     jet_sema.[
         SemaComptimeBodySource,
@@ -129,12 +134,12 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [D
     if incoming.len() == 0 {
         return
     }
-    seen := [String:Bool]{}
-    loop existing in diagnostics -> seen[jet_driver_comptime_diagnostic_key(existing)] = true
+    seen := name_column_table(diagnostics.len() + incoming.len())
+    loop existing in diagnostics -> _ := name_intern(seen, jet_driver_comptime_diagnostic_key(existing))
     loop diagnostic in incoming {
         key: jet_driver_comptime_diagnostic_key(diagnostic)
-        if seen.get(key) != None -> next
-        seen[key] = true
+        if name_find(seen, key) != None -> next
+        _ := name_intern(seen, key)
         diagnostics.push(diagnostic.copy())
     }
 }
@@ -148,26 +153,26 @@ jet_driver_comptime_take_registration: fn(finished: &&SemaRegistrationGraph?, pa
 // `known` holds the `module\nkey` of every source already added.
 jet_driver_comptime_body_source_add: fn(
     sources: &[SemaComptimeItemSource],
-    known: &[String:Bool],
+    known: &NameTable,
     source: SemaComptimeBodySource,
 ) Never! {
     item := sema_comptime_body_item_source(source)
     key: "{item.module_identity.id}\n{item.key}"
-    if known.get(key) != None {
+    if name_find(known, key) != None {
         return
     }
-    known[key] = true
+    _ := name_intern(known, key)
     sources.push(item)
 }
 
 jet_driver_comptime_body_sources: fn(modules: [SemaGraphModuleResult]) -> [SemaComptimeBodySource] Never! {
     sources := [SemaComptimeBodySource]{}
-    seen := [String:Bool]{}
+    seen := name_table_sized(2)
     loop graph_module in modules {
         loop source in graph_module.comptime_body_sources {
             key: "{source.module_identity.id}\n{source.key}"
-            if seen.get(key) != None -> next
-            seen[key] = true
+            if name_find(seen, key) != None -> next
+            _ := name_intern(seen, key)
             sources.push(source.copy())
         }
     }
@@ -180,15 +185,15 @@ jet_driver_pending_comptime_body_sources: fn(
 ) -> [SemaComptimeBodySource] Never! {
     // The `module\nkey` of every staged body value, collected once rather
     // than rescanning every value per source.
-    present := [String:Bool]{}
+    present := name_column_table(values.len())
     loop value in values {
         if value.kind == SemaComptimeItemKind.BodyExpression {
-            present["{value.module_identity.id}\n{value.key}"] = true
+            _ := name_intern(present, "{value.module_identity.id}\n{value.key}")
         }
     }
     pending := [SemaComptimeBodySource]{}
     loop source in jet_driver_comptime_body_sources(modules) {
-        if present.get("{source.module_identity.id}\n{source.key}") == None -> pending.push(source)
+        if name_find(present, "{source.module_identity.id}\n{source.key}") == None -> pending.push(source)
     }
     pending
 }
@@ -324,7 +329,7 @@ jet_driver_comptime_body_pass: fn(
         )
     }
     body_sources := [SemaComptimeItemSource]{}
-    known := [String:Bool]{}
+    known := name_column_table(pending.len())
     loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
     memory_plan := [SemaFunctionMemoryPlan]{}
@@ -496,10 +501,10 @@ jet_driver_recheck_diagnostic_difference: fn(ours: [Diagnostic], theirs: [Diagno
 // The first diagnostic of `diagnostics` that `others` lacks, by code, span
 // and text; "none" when there is none.
 jet_driver_recheck_first_missing: fn(diagnostics: [Diagnostic], others: [Diagnostic]) -> String Never! {
-    present := [String:Bool]{}
-    loop diagnostic in others -> present["{diagnostic:Debug}"] = true
+    present := name_column_table(others.len())
+    loop diagnostic in others -> _ := name_intern(present, "{diagnostic:Debug}")
     loop diagnostic in diagnostics {
-        if present.get("{diagnostic:Debug}") == None {
+        if name_find(present, "{diagnostic:Debug}") == None {
             return "{diagnostic.code} at {diagnostic.span:Debug}: {diagnostic.what}"
         }
     }
@@ -525,17 +530,17 @@ jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [F
         }
         return
     }
-    rechecked := [String:Bool]{}
-    loop function in theirs -> rechecked[function.key] = true
-    kept := [String:Bool]{}
+    rechecked := name_column_table(theirs.len())
+    loop function in theirs -> _ := name_intern(rechecked, function.key)
+    kept := name_column_table(ours.len())
     loop function in ours {
-        kept[function.key] = true
-        if rechecked.get(function.key) == None {
+        _ := name_intern(kept, function.key)
+        if name_find(rechecked, function.key) == None {
             differences.push("{name}: body {function.key} checked only in the splice")
         }
     }
     loop function in theirs {
-        if kept.get(function.key) == None {
+        if name_find(kept, function.key) == None {
             differences.push("{name}: body {function.key} checked only in the recheck")
         }
     }
@@ -556,7 +561,7 @@ jet_driver_validate_checked_text: fn(
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
     sources := [SemaComptimeItemSource]{}
-    known := [String:Bool]{}
+    known := name_table_sized(2)
     loop module_index in 0..<initial_graph.modules.len() {
         loop call in initial_graph.modules[module_index].comptime_requests {
             if call.checked_text == .Val(evaluation) {
@@ -690,7 +695,7 @@ jet_driver_land_local_values: fn(
 ) -> SemaRegistrationGraph {
     registration := graph.move()
     if landing.stopped -> return registration
-    tried := [String:Bool]{}
+    tried := name_table_sized(2)
     loop {
         // Every exit but the one with no site pending stops the landing.
         // The trace times the landing's steps on this thread
@@ -709,8 +714,8 @@ jet_driver_land_local_values: fn(
         again := false
         loop source in pending {
             site: "{source.module_identity.id}\n{source.key}"
-            if tried.get(site) != None -> again = true
-            tried[site] = true
+            if name_find(tried, site) != None -> again = true
+            _ := name_intern(tried, site)
         }
         if again -> break
         // The sites whose values the comptime phase computed ahead land
@@ -719,7 +724,7 @@ jet_driver_land_local_values: fn(
         ahead := sema_comptime_local_values_ahead(values, pending)
         body_sources := [SemaComptimeItemSource]{}
         run_sources := [SemaComptimeItemSource]{}
-        known := [String:Bool]{}
+        known := name_column_table(pending.len())
         loop index in 0..<pending.len() {
             added: body_sources.len()
             jet_driver_comptime_body_source_add(body_sources, known, pending[index])

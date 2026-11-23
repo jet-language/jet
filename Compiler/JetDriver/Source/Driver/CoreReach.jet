@@ -44,7 +44,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
     jet_lexer.[
         Lexed,
@@ -132,14 +132,20 @@ JetDriverCoreImplRow: struct {
 // and each owned trait reached code names or calls a method of (`Decode`).
 // An owned trait the compiler calls without a name (any but a codec trait)
 // is always reached.
-jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameRows) -> Bool Never! {
-    if row.type_module != "" && name_rows_get_text(reached, row.type_module) == None && name_rows_get_text(reached, "{row.type_module}.{row.type_name}") == None {
+jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameTable) -> Bool Never! {
+    if row.type_module != "" && !jet_driver_reach_holds(reached, row.type_module) && !jet_driver_reach_holds(reached, "{row.type_module}.{row.type_name}") {
         return false
     }
     if row.trait_module == "" {
-        return !owned_trait_codec(row.trait_name) || name_rows_get_text(reached, row.trait_name) != None
+        return !owned_trait_codec(row.trait_name) || jet_driver_reach_holds(reached, row.trait_name)
     }
-    name_rows_get_text(reached, row.trait_module) != None || name_rows_get_text(reached, "{row.trait_module}.{row.trait_name}") != None
+    jet_driver_reach_holds(reached, row.trait_module) || jet_driver_reach_holds(reached, "{row.trait_module}.{row.trait_name}")
+}
+
+// Whether `reached` holds `text`; the table's id 0 is the empty text, which
+// it never holds.
+jet_driver_reach_holds: fn(reached: NameTable, text: String) -> Bool Never! {
+    text != "" && name_find(reached, text) != None
 }
 
 // Whether a Core implementation of `trait_name` (as written) is a lazy row:
@@ -1107,7 +1113,7 @@ JetDriverReach: struct {
     items: [JetDriverReachItem],
     by_name: [[Int]],
     impls: [JetDriverReachImpl],
-    reached: NameRows,
+    reached: NameTable,
     edges: [JetDriverReachEdge],
     demands: [JetDriverReachDemand],
     open_names: [String],
@@ -1115,7 +1121,7 @@ JetDriverReach: struct {
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
-    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_rows(), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
+    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_table_sized(64), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
 }
 
 jet_driver_reach_has: fn(flags: [Bool], id: Int) -> Bool Never! { id < flags.len() && flags[id] }
@@ -1151,7 +1157,7 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
     reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), local: [Int:Bool]{}, dotted: [Int:Bool]{}, heads: [Int:Bool]{}})
-    name_rows_set(reach.reached, module_name, 1)
+    _: name_intern(reach.reached, module_name)
     loop at in 0..<reach.impls.len() {
         index: reach.impls[at].item
         if !reach.items[index].live && reach.impls[at].row.trait_module == module_name {
@@ -1450,7 +1456,7 @@ jet_driver_reach_spelled: fn(reach: &JetDriverReach, id: Int) Never! {
 jet_driver_reach_impl_live: fn(reach: &JetDriverReach, at: Int) -> Bool Never! {
     loop trigger in reach.impls[at].triggers {
         if jet_driver_reach_has(reach.spelled, trigger) {
-            name_rows_set(reach.reached, reach.impls[at].row.trait_name, 1)
+            _: name_intern(reach.reached, reach.impls[at].row.trait_name)
             break
         }
     }

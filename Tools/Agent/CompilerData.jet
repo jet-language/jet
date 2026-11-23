@@ -3,13 +3,13 @@
 // The compile pipeline's packages move their data to id-keyed columns, so
 // each of their source files may hold no more text-keyed lookups, `Shared<`
 // cells and payload enums than its ledger row names, and a file with no row
-// holds none. A text-keyed lookup is a map, set or tally keyed by `String`,
-// or a NameRows (the String -> row map). A payload enum is an enum
-// declaration with a variant that carries a payload: each of its values is
-// a counted heap box. Counts are of the source text, comments included, so
-// a count falls only when the code changes. A count never rises: `--check`
-// refuses a file above its row, and a file below its row until the row is
-// lowered; `--write` lowers the rows to the counts and refuses a rise.
+// holds none. A text-keyed lookup is a map, set or tally keyed by `String`.
+// A payload enum is an enum declaration with a variant that carries a
+// payload: each of its values is a counted heap box. Counts are of the
+// source text, comments included, so a count falls only when the code
+// changes. A count never rises: `--check` refuses a file above its row, and
+// a file below its row until the row is lowered; `--write` lowers the rows
+// to the counts and refuses a rise.
 //
 // Usage (from the repository root):
 //   jet Tools/Agent/CompilerData.jet [--check]   compare the tree with the ledger
@@ -25,7 +25,7 @@ COMPILER_DATA_PACKAGES: [String]{"JetLexer", "JetParser", "JetFoundation", "JetS
 
 COMPILER_DATA_LEDGER: "Tests/compiler_data.tsv"
 
-COMPILER_DATA_TEXT_KEYS: [String]{"[String:", "Set<String", "Tally<String", "NameRows"}
+COMPILER_DATA_TEXT_KEYS: [String]{"[String:", "Set<String", "Tally<String"}
 
 COMPILER_DATA_SHARED: "Shared<"
 
@@ -515,9 +515,9 @@ run: fn() {
 }
 
 #Test("the census counts text-keyed lookups, Shared cells and payload enums") {
-    text: "A: struct {{\n    by_name: [String:Int],\n    rows: NameRows,\n    seen: Set<String>,\n    cell: Shared<X>,\n}}\nKind: enum {{\n    Plain,\n    // Boxed(note)\n}}\nNode<T>: enum {{\n    Leaf,\n    Pair(left: T, right: T),\n}}\nm: module {{\n    Inner: enum {{\n        Boxed(x: Int),\n    }}\n}}\npriv Hidden: enum {{\n    Boxed(x: Int),\n}}\nNOTE: \"Fake: enum {{ Boxed(x: Int) }}\"\n"
+    text: "A: struct {{\n    by_name: [String:Int],\n    rows: [Int],\n    seen: Set<String>,\n    cell: Shared<X>,\n}}\nKind: enum {{\n    Plain,\n    // Boxed(note)\n}}\nNode<T>: enum {{\n    Leaf,\n    Pair(left: T, right: T),\n}}\nm: module {{\n    Inner: enum {{\n        Boxed(x: Int),\n    }}\n}}\npriv Hidden: enum {{\n    Boxed(x: Int),\n}}\nNOTE: \"Fake: enum {{ Boxed(x: Int) }}\"\n"
     counts: compiler_data_counts(text)
-    assert_eq(counts.text_keys, 3)
+    assert_eq(counts.text_keys, 2)
     assert_eq(counts.shared, 1)
     assert_eq(counts.payload_enums, 1)
 }

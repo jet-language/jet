@@ -32,7 +32,7 @@
 // would run that Drop before the callee instead of after it,
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, name_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, name_column, name_column_set, name_column_table, name_column_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
 IR_TAIL_JUMP: 1
@@ -81,8 +81,8 @@ ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     if count == 0 {
         return
     }
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+    trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
     workers: compiler_threads_admit(threads, count, count, IR_TAIL_CALLS_MIN_FUNCTIONS_PER_THREAD, 0, 0)
     candidates := [Int]{}
     if {
@@ -121,14 +121,15 @@ ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     variant_sources := [Int]{}
     variant_masks := [Int]{}
     variant_plans := [IRTailPlan]{}
-    rows := name_rows()
+    keys := name_column_table()
+    rows := name_column()
     loop idx in 0..<found.len() {
-        ir_tail_targets(found[idx].plan, rows, count, variant_sources, variant_masks)
+        ir_tail_targets(found[idx].plan, keys, rows, count, variant_sources, variant_masks)
     }
     item := 0
     loop item < variant_sources.len() {
         plan := ir_tail_sites(m, m.functions[variant_sources[item]], variant_masks[item], poll, trap, ownable)
-        ir_tail_targets(plan, rows, count, variant_sources, variant_masks)
+        ir_tail_targets(plan, keys, rows, count, variant_sources, variant_masks)
         variant_plans.push(plan.move())
         item += 1
     }
@@ -141,7 +142,7 @@ ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
         v.symbol = "{base}.own{variant_masks[variant]}"
         v.symbol_hash = U64{0}
         ir_tail_rewrite(v, variant_plans[variant], variant_masks[variant])
-        name_rows_set(m.function_rows, v.key, m.functions.len())
+        ir_function_bind(m, v.key, m.functions.len())
         m.functions.push(v)
     }
     loop idx in 0..<found.len() { ir_tail_rewrite(m.functions[found[idx].id], found[idx].plan, 0) }
@@ -261,18 +262,18 @@ ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, 
 
 // Points each call of `plan` handing values over at the variant of its
 // callee owning them, queued as a work item when new.
-ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, base_count: Int, sources: &[Int], masks: &[Int]) Never! {
+ir_tail_targets: fn(plan: &IRTailPlan, keys: &NameTable, rows: &[Int], base_count: Int, sources: &[Int], masks: &[Int]) Never! {
     loop site in 0..<plan.calls.len() {
         mask: plan.masks[site]
         if mask == 0 -> next
         callee: plan.targets[site]
         key: "{callee}#{mask}"
-        target := name_rows_value(rows, key) ?? -1
+        target := name_column_value(keys, rows, key) ?? -1
         if target < 0 {
             target = base_count + sources.len()
             sources.push(callee)
             masks.push(mask)
-            name_rows_set(rows, key, target)
+            name_column_set(keys, rows, key, target)
         }
         plan.targets[site] = target
     }

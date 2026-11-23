@@ -413,155 +413,97 @@ module_text: fn(table: ModuleTable, module_id: ModuleID) -> String Never! {
     table.identities.texts[module_index(module_id)]
 }
 
-// The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
-// A lookup computes it once (in place, no byte copy) and passes it with the
-// spelling to every `NameRows` it visits.
-name_rows_hash: fn(text: String) -> Int Never! { Int{text.hash() & U64{0x3fffffff}} }
+// A pass's own text-keyed column (Docs/Spec/compiler-data.md, Lookups): a
+// pass that matches text no compilation table holds interns each key into a
+// NameTable of its own and keeps the key's row at that id in an `[Int]`
+// column; several columns may share one table. NAME_COLUMN_UNBOUND marks an
+// id the column never bound (id 0, the empty spelling, starts unbound). A
+// negative row reads as unbound to name_column_get and as itself to
+// name_column_value, so -1 unbinds a key and a pass may keep markers of its
+// own below 0.
+NAME_COLUMN_UNBOUND: -4611686018427387904
 
-// A String -> Int map (A1): open addressing over each key's `s.hash()`.
-// A lookup hashes its key once and compares one candidate instead of
-// binary-searching String keys, and one hash serves every map a lookup
-// visits. Values are non-negative rows; -1 marks a removed key.
-NameRows: struct {
-    texts: [String],
-    hashes: [Int],
-    rows: [Int],
-    // Open-addressing slots: 0 is empty, otherwise the key index plus one.
-    slots: [Int],
-    mask: Int,
-}
-
-NAME_ROWS_INITIAL_SLOTS: 16
-
-name_rows: fn(expected: Int{0}) -> NameRows Never! {
-    capacity := NAME_ROWS_INITIAL_SLOTS
-    needed: expected * 2 + 2
-    loop capacity < needed -> capacity = capacity * 2
-    slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
-    loop _ in 0..<capacity -> slots.push(0)
-    texts := [String]{}
-    hashes := [Int]{}
+// An empty column for a table expected to hold about `expected` keys.
+name_column: fn(expected: Int{0}) -> [Int] Never! {
     rows := [Int]{}
-    if expected > 0 {
-        texts.try_reserve(expected) ?? panic("reserve failed")
-        hashes.try_reserve(expected) ?? panic("reserve failed")
-        rows.try_reserve(expected) ?? panic("reserve failed")
-    }
-    NameRows{texts: texts, hashes: hashes, rows: rows, slots: slots, mask: capacity - 1}
+    if expected > 0 -> rows.try_reserve(expected + 1) ?? panic("reserve failed")
+    rows.push(NAME_COLUMN_UNBOUND)
+    rows
 }
 
-// The key index of `text` (whose name_rows_hash is `hash`), if the map ever
-// held it. Each occupied slot packs `(hash << 32) | (key + 1)` so a probe
-// rejects mismatched hashes without touching `map.hashes`.
-name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
-    if map.texts.len() == 0 -> return None
-    mask: map.mask
-    slot := hash & mask
-    loop {
-        entry: map.slots[slot]
-        if entry == 0 -> break
-        if (entry >> 32) == hash {
-            key: (entry & 0xffffffff) - 1
-            if map.texts[key] == text -> return Val(key)
-        }
-        slot = (slot + 1) & mask
-    }
-    None
+// A NameTable sized for about `expected` keys, as name_column is.
+name_column_table: fn(expected: Int{0}) -> NameTable Never! { name_table_sized(expected * 2 + 2) }
+
+// The row `rows` binds at id `id`, whatever its sign; None when unbound.
+name_column_at: fn(rows: [Int], id: Int) -> Int? Never! {
+    if id >= rows.len() || rows[id] == NAME_COLUMN_UNBOUND -> return None
+    Val(rows[id])
 }
 
-// Binds `text` to `row`, replacing any earlier value. A negative `row` reads
-// as unbound to name_rows_get and as itself to name_rows_value.
-name_rows_set: fn(map: &NameRows, text: String, row: Int) Never! {
-    name_rows_set_hashed(map, text, name_rows_hash(text), row)
+// The row `rows` binds to `text` in `names` when it is not negative.
+name_column_get: fn(names: NameTable, rows: [Int], text: String) -> Int? Never! {
+    found: name_find(names, text) ?? return None
+    row: name_column_at(rows, name_index(found)) ?? return None
+    if row < 0 -> return None
+    Val(row)
 }
 
-// name_rows_set for a `text` whose name_rows_hash is `hash`.
-name_rows_set_hashed: fn(map: &NameRows, text: String, hash: Int, row: Int) Never! {
-    if name_rows_key(map, text, hash) == .Val(key) {
-        map.rows[key] = row
-        return
-    }
-    name_rows_append(map, text, hash, row)
+// name_column_get of a `text` whose name_text_hash is `hash`.
+name_column_get_hashed: fn(names: NameTable, rows: [Int], text: String, hash: Int) -> Int? Never! {
+    found: name_find_hashed(names, text, hash) ?? return None
+    row: name_column_at(rows, name_index(found)) ?? return None
+    if row < 0 -> return None
+    Val(row)
+}
+
+// The row `rows` binds to `text` whatever its sign, if `text` was ever bound.
+name_column_value: fn(names: NameTable, rows: [Int], text: String) -> Int? Never! {
+    found: name_find(names, text) ?? return None
+    name_column_at(rows, name_index(found))
+}
+
+// Binds `text` to `row`, replacing any earlier value.
+name_column_set: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+    name_column_set_hashed(names, rows, text, name_text_hash(text), row)
+}
+
+// name_column_set of a `text` whose name_text_hash is `hash`.
+name_column_set_hashed: fn(names: &NameTable, rows: &[Int], text: String, hash: Int, row: Int) Never! {
+    id: name_index(name_intern_hashed(names, text, hash))
+    loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
+    rows[id] = row
 }
 
 // Binds `text` to `row` (>= 0) unless it is bound: a key's first row stands.
-// One hash serves the probe and the insert.
-name_rows_set_first: fn(map: &NameRows, text: String, row: Int) Never! {
-    hash: name_rows_hash(text)
-    if name_rows_key(map, text, hash) == .Val(key) {
-        if map.rows[key] < 0 -> map.rows[key] = row
-        return
-    }
-    name_rows_append(map, text, hash, row)
+name_column_set_first: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+    id: name_index(name_intern(names, text))
+    loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
+    if rows[id] < 0 -> rows[id] = row
 }
 
-// Adds `text`, which the map never held, bound to `row`.
-name_rows_append: fn(map: &NameRows, text: String, hash: Int, row: Int) Never! {
-    key: map.texts.len()
-    // copy: the map keeps its own key; `text` stays with the caller.
-    map.texts.push(text.copy())
-    map.hashes.push(hash)
-    map.rows.push(row)
-    if (key + 1) * 2 > map.mask {
-        name_rows_grow(map)
-        return
-    }
-    slot := hash & map.mask
-    loop map.slots[slot] != 0 -> slot = (slot + 1) & map.mask
-    map.slots[slot] = (hash << 32) | (key + 1)
-}
-
-// Rebuilds the slots at twice the capacity from the stored hashes.
-name_rows_grow: fn(map: &NameRows) Never! {
-    capacity: (map.mask + 1) * 2
-    mask: capacity - 1
-    slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
-    loop _ in 0..<capacity -> slots.push(0)
-    loop key in 0..<map.texts.len() {
-        hash: map.hashes[key]
-        slot := hash & mask
-        loop slots[slot] != 0 -> slot = (slot + 1) & mask
-        slots[slot] = (hash << 32) | (key + 1)
-    }
-    map.slots = slots.move()
-    map.mask = mask
-}
-
-// The value of `text` (whose name_rows_hash is `hash`), if bound.
-name_rows_get: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
-    key: name_rows_key(map, text, hash) ?? return None
-    if map.rows[key] < 0 -> return None
-    Val(map.rows[key])
-}
-
-name_rows_get_text: fn(map: NameRows, text: String) -> Int? Never! {
-    if map.texts.len() == 0 -> return None
-    name_rows_get(map, text, name_rows_hash(text))
-}
-
-// The value bound to `text` whatever its sign, if `text` was ever bound: for
-// a map that removes no key and whose negative values are markers of its own
-// (the IR's key tables: a failed helper, a memo of "none").
-name_rows_value: fn(map: NameRows, text: String) -> Int? Never! {
-    if map.texts.len() == 0 -> return None
-    key: name_rows_key(map, text, name_rows_hash(text)) ?? return None
-    Val(map.rows[key])
-}
-
-// The bound keys and values in ascending key order (removed keys left out).
-name_rows_sorted: fn(map: NameRows) -> [{key: String, local: Int}] Never! {
+// The keys `rows` binds to a row >= 0 and their rows, in ascending key
+// order.
+name_column_sorted: fn(names: NameTable, rows: [Int]) -> [{key: String, local: Int}] Never! {
     run := [{key: String, local: Int}]{}
-    loop (key, text) in map.texts {
-        if map.rows[key] >= 0 -> run.push({key: text.copy(), local: map.rows[key]})
+    loop id in 0..<rows.len() {
+        if rows[id] >= 0 -> run.push({key: names.texts[id].copy(), local: rows[id]})
     }
     run.sort()
     run
 }
 
-// Unbinds `text`; its key stays for a later `name_rows_set`.
-name_rows_remove: fn(map: &NameRows, text: String) Never! {
-    key: name_rows_key(map, text, name_rows_hash(text)) ?? return
-    map.rows[key] = -1
+#Test("a name column binds, replaces, keeps a first row and reads markers") {
+    names := name_column_table()
+    rows := name_column()
+    assert_eq(name_column_get(names, rows, ""), None)
+    assert_eq(name_column_value(names, rows, "a"), None)
+    name_column_set(names, rows, "b", 2)
+    name_column_set(names, rows, "a", 1)
+    name_column_set_first(names, rows, "a", 5)
+    assert_eq(name_column_get(names, rows, "a"), Val(1))
+    name_column_set(names, rows, "b", -1)
+    assert_eq(name_column_get(names, rows, "b"), None)
+    assert_eq(name_column_value(names, rows, "b"), Val(-1))
+    name_column_set_first(names, rows, "b", 7)
+    assert_eq(name_column_get(names, rows, "b"), Val(7))
 }

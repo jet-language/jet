@@ -10,7 +10,7 @@
 // builds each call of one as its machine operation (ir_intrinsic_call).
 use {
     jet_backend.[LINK_FAULT_REPORT, X64DataExport, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_EVAL_STORAGE, X64_OBSERVE_ROOT_SYMBOL, x64_debug_eval_symbol]
-    jet_foundation.[Interner, AccessConvention, CompilerThreads, DeclTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
+    jet_foundation.[Interner, AccessConvention, CompilerThreads, DeclTable, NameTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_column, name_column_get, name_column_set, name_column_table, name_column_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -112,6 +112,34 @@ IRIntrinsicShape: enum {
     FaultReport,
 }
 
+// The intrinsics of a program by function key (IRProgram.intrinsics): each
+// key's row of `values` at its id in `keys`.
+IRIntrinsics: struct {
+    keys: NameTable,
+    rows: [Int],
+    values: [IRRuntimeIntrinsic],
+}
+
+ir_intrinsics: fn() -> IRIntrinsics Never! {
+    IRIntrinsics{keys: name_column_table(), rows: name_column(), values: [IRRuntimeIntrinsic]{}}
+}
+
+// Makes function `key` the intrinsic `intrinsic`, in place of any it was.
+ir_intrinsics_put: fn(table: &IRIntrinsics, key: String, intrinsic: &&IRRuntimeIntrinsic) Never! {
+    if name_column_get(table.keys, table.rows, key) == .Val(row) {
+        table.values[row] = intrinsic.move()
+        return
+    }
+    name_column_set(table.keys, table.rows, key, table.values.len())
+    table.values.push(intrinsic.move())
+}
+
+// The intrinsic function `key` of `p` is, if it is one.
+ir_intrinsic_of: fn(p: IRProgram, key: String) -> IRRuntimeIntrinsic? Never! {
+    row: name_column_get(p.intrinsics.keys, p.intrinsics.rows, key) ?? return None
+    Val(p.intrinsics.values[row])
+}
+
 IRIntrinsicSpec: struct {
     name: String,
     shape: IRIntrinsicShape,
@@ -121,6 +149,20 @@ IRLifecycle: struct {
     init_priority: Int,
     fini_priority: Int,
     guards: [String],
+}
+
+// The lifecycle rows by export symbol (ir_lifecycle_rows): each symbol's
+// row of `hooks` at its id in `keys`.
+IRLifecycles: struct {
+    keys: NameTable,
+    rows: [Int],
+    hooks: [IRLifecycle],
+}
+
+// The lifecycle row of export `symbol`, if it has one.
+ir_lifecycle_of: fn(lifecycle: IRLifecycles, symbol: String) -> IRLifecycle? Never! {
+    row: name_column_get(lifecycle.keys, lifecycle.rows, symbol) ?? return None
+    Val(lifecycle.hooks[row])
 }
 
 // The one reviewed recognizer table; every address row uses the same
@@ -224,7 +266,7 @@ ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
 // threads (ir_build_waves); the other inputs as ir_build_program's. A row
 // whose function does not satisfy the C export law is not an export.
 // `lifecycle_rows` are the lines of the lifecycle list (ir_lifecycle_rows).
-ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
+ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     ir_foreign_index(p, foreign, decls)
     p.stop_points = false
@@ -253,15 +295,17 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     }
     // Every export problem is collected, so one run lists them all.
     problems := [String]{}
-    export_symbols := [String:Bool]{}
-    keys := [String:Bool]{}
+    export_symbols_keys := name_column_table(exports.len())
+    export_symbols := name_column(exports.len())
+    export_keys_keys := name_column_table(exports.len())
+    export_keys := name_column(exports.len())
     loop (index, row) in exports {
-        if export_symbols.get(row.symbol) != None {
+        if name_column_get(export_symbols_keys, export_symbols, row.symbol) != None {
             problems.push("duplicate checked export symbol {row.symbol}")
-        } else { export_symbols[row.symbol] = true }
-        if keys.get(row.key) != None {
+        } else { name_column_set(export_symbols_keys, export_symbols, row.symbol, index) }
+        if name_column_get(export_keys_keys, export_keys, row.key) != None {
             problems.push("duplicate checked export function {row.symbol}")
-        } else { keys[row.key] = true }
+        } else { name_column_set(export_keys_keys, export_keys, row.key, index) }
         loop problem in ir_export_signature_problems(p.functions[export_rows[index]]) {
             problems.push("export {row.symbol} {problem}")
         }
@@ -270,18 +314,18 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         }
     }
     if problems.len() > 0 -> return ir_library_failed(problems)
-    lifecycle := [String:IRLifecycle]{}
+    lifecycle := IRLifecycles{keys: name_column_table(), rows: name_column(), hooks: [IRLifecycle]{}}
     lifecycle_problem: ir_lifecycle_rows(lifecycle_rows, lifecycle)
     if lifecycle_problem != "" -> return ir_library_failed([String]{lifecycle_problem})
     hooked := 0
     loop (index, row) in exports {
-        hook: lifecycle.get(row.symbol) ?? next
+        hook: ir_lifecycle_of(lifecycle, row.symbol) ?? next
         hooked += 1
         if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) {
             return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
         }
     }
-    if hooked != lifecycle.len() {
+    if hooked != lifecycle.hooks.len() {
         return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
     }
     intrinsics := p.intrinsics.move()
@@ -301,21 +345,21 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
                     if !ir_intrinsic_signature(function, 1) || function.params[0].convention != AccessConvention.Read || ir_untag(function.params[0].ty) != Type.String || !ir_i64_type(ir_executable_return(function)) {
                         return ir_library_failed([String]{"runtime intrinsic rt_static_text must read one String and return I64"})
                     }
-                    intrinsics[function.key] = IRRuntimeIntrinsic.StaticText
+                    ir_intrinsics_put(intrinsics, function.key, IRRuntimeIntrinsic.StaticText)
                 }
                 .FloatBits -> {
                     if !ir_bitcast_signature(function, true) {
                         return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
                     }
                     bits = true
-                    intrinsics[function.key] = IRRuntimeIntrinsic.FloatBits
+                    ir_intrinsics_put(intrinsics, function.key, IRRuntimeIntrinsic.FloatBits)
                 }
                 .FloatFromBits -> {
                     if !ir_bitcast_signature(function, false) {
                         return ir_library_failed([String]{"runtime bitcast {spec.name} has an invalid checked scalar signature"})
                     }
                     from_bits = true
-                    intrinsics[function.key] = IRRuntimeIntrinsic.FloatFromBits
+                    ir_intrinsics_put(intrinsics, function.key, IRRuntimeIntrinsic.FloatFromBits)
                 }
                 .FunctionAddress(symbol, arity) -> {
                     if !ir_intrinsic_signature(function, 0) || !ir_i64_type(ir_executable_return(function)) {
@@ -330,14 +374,14 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
                         target = Val(row.key)
                     }
                     key: target ?? return ir_library_failed([String]{"runtime intrinsic {spec.name} requires #Export(c) {symbol}"})
-                    intrinsics[function.key] = IRRuntimeIntrinsic.FunctionAddress{key: key}
+                    ir_intrinsics_put(intrinsics, function.key, IRRuntimeIntrinsic.FunctionAddress{key: key})
                     if symbol == "jet_rt_fiber_entry" -> rails = true
                 }
                 .FaultReport -> {
                     if !ir_address_target_signature(function, IR_X64_ARGUMENT_REGISTERS.len()) {
                         return ir_library_failed([String]{"runtime intrinsic {spec.name} must read six I64 values and return I64"})
                     }
-                    intrinsics[function.key] = IRRuntimeIntrinsic.FaultReport
+                    ir_intrinsics_put(intrinsics, function.key, IRRuntimeIntrinsic.FaultReport)
                 }
             }
         }
@@ -357,7 +401,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     // Each export's function in the merged module.
     roots := [Int]{}
     loop row in exports {
-        id: name_rows_get_text(m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
+        id: name_column_get(m.function_rows_keys, m.function_rows, row.key) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
         roots.push(id)
     }
     // No export reaches its own runtime route: that would be a construct in
@@ -375,7 +419,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     abis := [IRExportABI]{}
     guard_problems := [String]{}
     loop (index, row) in exports {
-        hook: lifecycle.get(row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1, guards: [String]{}}
+        hook: ir_lifecycle_of(lifecycle, row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1, guards: [String]{}}
         guards := [Int]{}
         loop name in hook.guards {
             guard: ir_lifecycle_guard(m, p, name)
@@ -432,7 +476,7 @@ ir_library_failed: fn(errors: [String]) -> IRLibraryResult Never! {
 
 // Whether IR function `id` has a CallRuntime of `symbol`.
 ir_calls_own_route: fn(m: IRModule, id: Int, symbol: String) -> Bool Never! {
-    own: name_rows_value(m.name_rows, symbol) ?? return false
+    own: ir_interned_name(m, symbol) ?? return false
     f: m.functions[id]
     loop at in 0..<f.op.len() {
         if f.op[at] == .CallRuntime && f.a[at] == own -> return true
@@ -493,8 +537,9 @@ IR_THREAD_START_SYMBOLS: [String]{"os_clone_i64", "signal", "dlopen"}
 // receipt again and no guard scans every DataAddress.
 ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]) -> [String] Never! {
     count: m.functions.len()
-    defined := [String:Int]{}
-    loop row in exports -> defined[row.symbol.copy()] = row.function
+    defined_keys := name_column_table(exports.len())
+    defined := name_column(exports.len())
+    loop row in exports -> name_column_set(defined_keys, defined, row.symbol, row.function)
     // Per name row, the export function a CallRuntime of it reaches (-1:
     // none; -2: not looked up yet) and whether it can start a thread.
     name_callees := [Int]{}
@@ -520,7 +565,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
                 if name_callees[name] == -2 {
                     text: m.names[name]
                     name_starts[name] = IR_THREAD_START_SYMBOLS.contains(text) || receipt.contains(text)
-                    name_callees[name] = defined.get(text) ?? -1
+                    name_callees[name] = name_column_get(defined_keys, defined, text) ?? -1
                 }
                 if name_starts[name] -> starts = true
                 callee = name_callees[name]
@@ -673,7 +718,7 @@ ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! 
     // C symbol).
     name_callees := loop _ in m.names -> -1
     loop row in exports {
-        if name_rows_value(m.name_rows, row.symbol) == .Val(at) -> name_callees[at] = row.function
+        if ir_interned_name(m, row.symbol) == .Val(at) -> name_callees[at] = row.function
     }
     writes: loop f in m.functions -> ir_slot_writes(f)
     // Per function and parameter, the uses of the code word passed there,
@@ -903,7 +948,7 @@ ir_code_flow: fn(f: IRFunction, id: Int, writes: [[Int]], slot: Int, role: Int, 
 // the hook exactly when it keeps one of them, once per
 // kept guard, so a guarded hook starts idempotently. Returns the first
 // problem, else "".
-ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> String Never! {
+ir_lifecycle_rows: fn(lines: [String], lifecycle: &IRLifecycles) -> String Never! {
     loop line in lines {
         text: line.trim()
         if text == "" || text.starts_with("#") -> next
@@ -918,7 +963,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> Stri
         if priority < 0 || priority > 65535 {
             return "runtime lifecycle priority must be in 0..65535 in `{text}`"
         }
-        if lifecycle.get(fields[0]) != None {
+        if name_column_get(lifecycle.keys, lifecycle.rows, fields[0]) != None {
             return "duplicate runtime lifecycle row `{fields[0]}`"
         }
         guards := [String]{}
@@ -930,7 +975,8 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> Stri
                 guards.push(name)
             }
         }
-        lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1, guards: guards} else -> IRLifecycle{init_priority: -1, fini_priority: priority, guards: guards}
+        name_column_set(lifecycle.keys, lifecycle.rows, fields[0], lifecycle.hooks.len())
+        lifecycle.hooks.push(if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1, guards: guards} else -> IRLifecycle{init_priority: -1, fini_priority: priority, guards: guards})
     }
     ""
 }
@@ -943,7 +989,7 @@ ir_lifecycle_guard: fn(m: IRModule, p: IRProgram, name: String) -> Int Never! {
     loop definition in p.constant_defs {
         if !definition.is_storage || definition.name != name -> next
         if found != -1 -> return -1
-        found = name_rows_value(m.constant_rows, "storage:{definition.key}") ?? -2
+        found = name_column_value(m.constant_rows_keys, m.constant_rows, "storage:{definition.key}") ?? -2
     }
     if found < 0 -> return -1
     found

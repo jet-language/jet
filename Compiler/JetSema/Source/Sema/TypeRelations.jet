@@ -57,8 +57,7 @@ use jet_foundation.[
     type_name,
     type_union_member_tag,
     type_unqualified_nominals,
-    name_rows_get_text,
-    name_rows_hash,
+    name_text_hash,
     core_identity_in_module,
     core_identity_is,
     MODULE_CORE_PREFIX,
@@ -888,7 +887,7 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
     // when the caller has no dotted local/import/namespace bindings.
     if name.contains(".") && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
         if graph.canonical_nominals == .Val(canonical_table) {
-            if sema_registration_canonical_nominal_row(canonical_table, name, name_rows_hash(name)) == .Val(row) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, name_text_hash(name)) == .Val(row) {
                 if canonical_table.is_plain_type[row] -> return Type.Named{name: name}
             }
         }
@@ -936,7 +935,7 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
 sema_type_graph_resolve_apply_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
     if name.contains(".") && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
         if graph.canonical_nominals == .Val(canonical_table) {
-            if sema_registration_canonical_nominal_row(canonical_table, name, name_rows_hash(name)) == .Val(row) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, name_text_hash(name)) == .Val(row) {
                 if canonical_table.is_plain_type[row] -> return if true -> name else -> ""
             }
         }
@@ -1644,7 +1643,7 @@ sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, de
     values: sema_type_alias_number_values(graph, module_index, definition, args)
     loop choice in definition.choices {
         cond: choice.cond ?? return Val(sema_inference_substitute_type(choice.target, names, args))
-        folded: sema_genmod_fold(cond, values, [String:Bool]{}) ?? return None
+        folded: sema_genmod_fold(cond, values, SemaGenericModuleEnums{}) ?? return None
         if folded == .Bool(holds, _, _) {
             if holds -> return Val(sema_inference_substitute_type(choice.target, names, args))
         } else { return None }
@@ -1655,19 +1654,19 @@ sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, de
 // The whole numbers a computed alias's conditions fold over: its number
 // parameters bound to the literals in `args`, and the module constants the
 // conditions name. A parameter shadows a constant of the same name.
-sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> [String:Expr] Never! {
-    values := [String:Expr]{}
+sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> SemaInlineValues Never! {
+    values := SemaInlineValues{}
     loop (index, param) in definition.type_params {
         if index >= args.len() -> break
         if args[index] == .Measure(measure) {
             if measure_literal_value(measure) == .Val(number) {
-                values[param.name] = Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+                sema_inline_value_put(values, param.name, Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED})
             }
         }
     }
     loop name in sema_type_alias_constant_names(definition) {
         if sema_type_measure_constant(graph, module_index, name, 0) == .Val(number) {
-            values[name] = Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+            sema_inline_value_put(values, name, Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED})
         }
     }
     values
@@ -1851,7 +1850,7 @@ sema_type_graph_lookup_symbol: fn(graph: SemaRegistrationGraph, module_identity:
 // sema_type_graph_lookup_symbol from the caller module's row `caller`. An
 // unregistered caller (-1) has no local names, imports or visible owners.
 sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> SemaRegistrationResolvedSymbol? {
-    hash: name_rows_hash(name)
+    hash: name_text_hash(name)
     has_dot: name.contains(".")
     if has_dot && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
         if graph.canonical_nominals == .Val(canonical_table) {

@@ -28,6 +28,7 @@ use {
         ir_args,
         ir_emit,
         ir_end,
+        ir_function_bind,
         ir_function_new,
         ir_intern_name,
         ir_intern_text,
@@ -46,7 +47,7 @@ use {
         ir_opt_report,
         ir_slot,
     ]
-    jet_foundation.[TYPE_BOOL, TYPE_FLOAT, TYPE_INT, TYPE_POINTER, TYPE_STRING, TYPE_U32, TYPE_U64, Type, compiler_threads_single, name_rows_set]
+    jet_foundation.[TYPE_BOOL, TYPE_FLOAT, TYPE_INT, TYPE_POINTER, TYPE_STRING, TYPE_U32, TYPE_U64, Type, compiler_threads_single]
     process: core.process
     files: core.files
 }
@@ -92,7 +93,7 @@ lp_types: fn(m: &IRModule) -> LPTypes {
 
 lp_add: fn(m: &IRModule, f: IRFunction) -> Int {
     row: m.functions.len()
-    name_rows_set(m.function_rows, f.key, row)
+    ir_function_bind(m, f.key, row)
     m.functions.push(f.copy())
     row
 }

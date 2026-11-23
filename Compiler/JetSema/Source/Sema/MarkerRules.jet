@@ -42,9 +42,14 @@ use jet_foundation.[
     symbol_table_key,
     type_name,
     module_text,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set_first,
+    NameTable,
+    name_column,
+    name_column_get,
+    name_column_set_first,
+    name_column_table,
+    name_find,
+    name_intern,
+    name_table_sized,
 ]
 
 SemaMarkerRuleArgumentObservation: struct {
@@ -1342,7 +1347,7 @@ sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnviro
 // literal decides: a non-literal category that may name a comptime constant is
 // left alone, and only an interpolated string is certainly not plain text.
 sema_marker_rules_check_local_meta: fn(marker: Marker, diagnostics: &[Diagnostic]) {
-    seen := [String:Bool]{}
+    seen := name_table_sized(2)
     loop index in 0..<marker.args.len() {
         expression: sema_marker_rules_marker_expression(marker, index) ?? next
         value_span: expr_span(expression)
@@ -1371,8 +1376,8 @@ sema_marker_rules_meta_literal_text: fn(expression: Expr) -> String? Never! {
 // Rust `check_meta_attr_fields` for one field: a repeat is E0346; a category
 // is E0348 when its text is empty and E0347 when `plain_required` and it has
 // no plain text.
-sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span: Span, category: String?, plain_required: Bool, seen: &[String:Bool], diagnostics: &[Diagnostic]) {
-    if seen.get(name) != None {
+sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span: Span, category: String?, plain_required: Bool, seen: &NameTable, diagnostics: &[Diagnostic]) {
+    if name_find(seen, name) != None {
         if name == {
             "category" -> {
                 diagnostics.push(sema_error("E0346", field_span, "`#Meta` repeats `category`", "`category` has one value; writing it twice would make tooling choose between two labels", "keep one `category: \"...\"` field"))
@@ -1386,7 +1391,7 @@ sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span
             else -> {}
         }
     }
-    seen[name] = true
+    _ := name_intern(seen, name)
     if name != "category" {
         return
     }
@@ -1585,35 +1590,41 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
 
 sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication] Never! {
     applications := program.rule_facts
-    recorded := [String:Bool]{}
-    loop fact in program.rule_facts -> recorded[sema_marker_rules_application_key(fact)] = true
+    recorded := name_table_sized(2)
+    loop fact in program.rule_facts -> _ := name_intern(recorded, sema_marker_rules_application_key(fact))
     collected := [AppliedRuleApplication]{}
     loop item in program.items -> sema_marker_rules_item_applications(item, collected)
     loop application in collected {
-        if recorded.get(sema_marker_rules_application_key(application)) == None {
+        if name_find(recorded, sema_marker_rules_application_key(application)) == None {
             applications.push(application)
         }
     }
     if program.applied_rules.len() == 0 -> return applications
-    present := [String:Bool]{}
+    present := name_table_sized(2)
     loop application in applications {
-        present[sema_marker_rules_application_key(application)] = true
+        _ := name_intern(present, sema_marker_rules_application_key(application))
     }
     loop application in program.applied_rules {
         key: sema_marker_rules_application_key(application)
-        if present.get(key) != None -> next
-        present[key] = true
+        if name_find(present, key) != None -> next
+        _ := name_intern(present, key)
         applications.push(application.copy())
     }
     applications
 }
 
-// Marker name and name span -> the first of `applications` there.
-sema_marker_rules_application_rows: fn(applications: [AppliedRuleApplication]) -> [String:Int] Never! {
-    rows := [String:Int]{}
+// Marker name and name span -> the first of `applications` there, at the
+// key's id in `keys`.
+SemaMarkerApplicationRows: struct {
+    keys: NameTable{name_column_table()},
+    rows: [Int]{name_column()},
+}
+
+sema_marker_rules_application_rows: fn(applications: [AppliedRuleApplication]) -> SemaMarkerApplicationRows Never! {
+    rows := SemaMarkerApplicationRows{keys: name_column_table(applications.len()), rows: name_column(applications.len())}
     loop (index, application) in applications {
         key: "{application.marker.name_span.start}:{application.marker.name_span.end}|{application.marker.name}"
-        if rows.get(key) == None -> rows[key] = index
+        name_column_set_first(rows.keys, rows.rows, key, index)
     }
     rows
 }
@@ -1794,13 +1805,13 @@ sema_marker_rules_collect_item: fn(item: Item, markers: &[Marker]) Never! {
 sema_marker_rules_collect_program: fn(program: Program) -> [Marker] Never! {
     markers := [Marker]{}
     loop item in program.items { sema_marker_rules_collect_item(item, markers) }
-    present := [String:Bool]{}
-    loop existing in markers -> present[sema_marker_rules_occurrence_key(existing)] = true
+    present := name_table_sized(markers.len())
+    loop existing in markers -> _ := name_intern(present, sema_marker_rules_occurrence_key(existing))
     loop application in sema_marker_rules_applications(program) {
         if application.target == None -> next
         key: sema_marker_rules_occurrence_key(application.marker)
-        if present.get(key) == None {
-            present[key] = true
+        if name_find(present, key) == None {
+            _ := name_intern(present, key)
             markers.push(application.marker)
         }
     }
@@ -1815,14 +1826,14 @@ sema_marker_rules_marker_is_known: fn(registry: SemaScopeMembersMarkerRegistry, 
 }
 
 sema_marker_rules_validate_vocabulary: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, markers: [Marker], diagnostics: &[Diagnostic]) {
-    seen := [String:Bool]{}
+    seen := name_table_sized(markers.len())
     applications: sema_marker_rules_applications(program)
     application_rows: sema_marker_rules_application_rows(applications)
     loop marker in markers {
         occurrence: sema_marker_rules_occurrence_key(marker)
-        if seen.get(occurrence) != None -> next
-        seen[occurrence] = true
-        application_row: application_rows.get("{marker.name_span.start}:{marker.name_span.end}|{marker.name}") ?? -1
+        if name_find(seen, occurrence) != None -> next
+        _ := name_intern(seen, occurrence)
+        application_row: name_column_get(application_rows.keys, application_rows.rows, "{marker.name_span.start}:{marker.name_span.end}|{marker.name}") ?? -1
         site := if application_row >= 0 -> applications[application_row].site else -> None
         if sema_marker_rules_is_guest_marker(marker, site) -> next
         if sema_marker_rules_builtin_index(registry, marker) == None && !sema_marker_rules_marker_is_known(registry, marker) {
@@ -1967,7 +1978,11 @@ sema_marker_rules_declared_kind: fn(ty: Type?) -> String? Never! {
 }
 
 sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    seen := [String:Marker]{}
+    // Declaration, site and target span -> the first marker applied there,
+    // a row of `seen_markers` at the key's id in `seen_keys`.
+    seen_keys := name_column_table()
+    seen_rows := name_column()
+    seen_markers := [Marker]{}
     loop application in sema_marker_rules_applications(program) {
         builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
         repeatable := false
@@ -1997,20 +2012,21 @@ sema_marker_rules_validate_repeatability: fn(registry: SemaScopeMembersMarkerReg
         if application.target == None -> next
         site: if application.site == .Val(value) -> sema_marker_rules_site_name(value) else -> ""
         key: "{sema_marker_rules_declaration_key(application.marker)}|{site}|{sema_marker_rules_span_key(application.target)}"
-        if seen.get(key) == .Val(first) {
-            diagnostics.push(sema_marker_rules_repeated_error(application.marker, first, application.site))
+        if name_column_get(seen_keys, seen_rows, key) == .Val(first) {
+            diagnostics.push(sema_marker_rules_repeated_error(application.marker, seen_markers[first], application.site))
             next
         }
-        seen[key] = application.marker
+        name_column_set_first(seen_keys, seen_rows, key, seen_markers.len())
+        seen_markers.push(application.marker)
     }
 }
 
 sema_marker_rules_validate_arguments: fn(registry: SemaScopeMembersMarkerRegistry, source_program: Program, markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], result: &SemaMarkerRulesCheckResult) {
-    seen := [String:Bool]{}
+    seen := name_table_sized(markers.len())
     loop marker in markers {
         occurrence: sema_marker_rules_occurrence_key(marker)
-        if seen.get(occurrence) != None -> next
-        seen[occurrence] = true
+        if name_find(seen, occurrence) != None -> next
+        _ := name_intern(seen, occurrence)
         builtin_index := sema_marker_rules_builtin_index(registry, marker)
         if builtin_index != None {
             rule := registry.applied_rules[builtin_index ?? 0]
@@ -2383,14 +2399,16 @@ SemaInlineAlwaysEdge: struct {
 // function's.
 sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
     // The marked functions, as module and function indexes into `modules`,
-    // and each marked key's first position in that list.
+    // and each marked key's first position in that list, at the key's id in
+    // `marked_names`.
     marked_modules := [Int]{}
     marked_functions := [Int]{}
-    marked_keys := name_rows()
+    marked_names := name_column_table()
+    marked_rows := name_column()
     loop (module_index, module_result) in modules {
         loop (function_index, function) in module_result.functions {
             if function.is_inline_always {
-                name_rows_set_first(marked_keys, function.key, marked_modules.len())
+                name_column_set_first(marked_names, marked_rows, function.key, marked_modules.len())
                 marked_modules.push(module_index)
                 marked_functions.push(function_index)
             }
@@ -2403,7 +2421,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         segments_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         start: diagnostics.len()
         loop fact in module_result.call_facts {
-            caller: name_rows_get_text(marked_keys, fact.caller_key) ?? next
+            caller: name_column_get(marked_names, marked_rows, fact.caller_key) ?? next
             name: modules[marked_modules[caller]].functions[marked_functions[caller]].name
             if fact.detail == .Val(detail) {
                 if detail.intrinsic_api == .Val(api) {
@@ -2413,7 +2431,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
                 }
             }
             callee_id: fact.callee ?? next
-            callee: name_rows_get_text(marked_keys, symbol_table_key(graph.symbols, callee_id)) ?? next
+            callee: name_column_get(marked_names, marked_rows, symbol_table_key(graph.symbols, callee_id)) ?? next
             // A direct call of itself is the local half's E0917.
             if callee != caller {
                 edges.push(SemaInlineAlwaysEdge{caller: caller, callee: callee, module: module_index, span: fact.span})

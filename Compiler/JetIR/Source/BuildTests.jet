@@ -33,7 +33,7 @@
 //   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
 //   happen (JetRuntime TestContracts.jet).
 use {
-    jet_foundation.[Interner, BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
+    jet_foundation.[Interner, BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, NameTable, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_column, name_column_get, name_column_set, name_column_table, symbol_none]
     jet_sema.[SemaCheckedForeignFunction, sema_type_def_instance_type]
 }
 
@@ -62,19 +62,35 @@ IROutputCheck: struct {
 // of `checks`. `serial` streams each test's record before spawning the next;
 // otherwise every test is spawned before any is joined. `stock`
 // (`--show-default`) never calls the package's `test: fn`. `coverage` (`jet
-// test --coverage`) names the functions whose entry records its line, by
-// checked key (IRProgram.coverage).
+// test --coverage`) names the functions whose entry records its line
+// (IRProgram.coverage).
 IRTestHarness: struct {
     tests: [IRTestCase],
     checks: [IROutputCheck],
     serial: Bool,
     stock: Bool{false},
-    coverage: [String:Int]{[String:Int]{}},
+    coverage: IRCoverage{ir_coverage()},
+}
+
+// The source line of each probed function, at its checked function key's
+// id in `keys`.
+IRCoverage: struct {
+    keys: NameTable,
+    lines: [Int],
+}
+
+ir_coverage: fn() -> IRCoverage Never! {
+    IRCoverage{keys: name_column_table(), lines: name_column()}
+}
+
+// Probes function `key` at source line `line`.
+ir_coverage_put: fn(coverage: &IRCoverage, key: String, line: Int) Never! {
+    name_column_set(coverage.keys, coverage.lines, key, line)
 }
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
-ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
+ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     p.checks = checks
     p.zone_table = true
@@ -125,7 +141,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
 // runtime (JetRuntime Coverage.jet), which records the first entry of each
 // line in the test process.
 ir_coverage_probe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
-    line: p.coverage.get(function.key) ?? return
+    line: name_column_get(p.coverage.keys, p.coverage.lines, function.key) ?? return
     word: ir_word_const(m, b, line)
     _: ir_runtime(m, b, "jet_rt_coverage_function", [Int]{word}, -1)
 }
@@ -175,7 +191,7 @@ ir_test_function: fn(m: &IRModule, name: String, from: Int, suffix: String) -> I
     id: m.functions.len()
     function: ir_function_new(name, key, symbol, source_file, line)
     m.functions.push(function)
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     id
 }
 

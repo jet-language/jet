@@ -1258,7 +1258,7 @@ sema_call_core_declared_effects: fn(record: CoreCallRecord, environment: SemaSco
     identity: sema_call_core_module_identity(environment, program, path.module_name) ?? return false
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, identity) ?? return false
-        position: graph.modules[module_index].declaration_positions.get(path.member) ?? return false
+        position: sema_registration_declaration_row(graph.modules[module_index], path.member) ?? return false
         if graph.modules[module_index].declarations[position] == .Func(function) {
             if function.declared_effects == .Val(row) {
                 loop entry in row -> effects.push(entry.name)

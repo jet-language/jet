@@ -9,6 +9,9 @@ use jet_foundation.[
     Pattern,
     PatSlot,
     Stmt,
+    name_find,
+    name_index,
+    name_intern,
 ]
 
 sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
@@ -274,7 +277,9 @@ sema_ownership_name_live_after: fn(name: String, tail_store: &SemaStatementTailS
 }
 
 sema_ownership_tail_last_read: fn(tail_store: &SemaStatementTailStore, body_id: Int, name: String) -> Int Never! {
-    if tail_store.bodies[body_id].last_reads.get(name) == .Val(known) -> return known
+    if name_find(tail_store.bodies[body_id].read_names, name) == .Val(known) {
+        return tail_store.bodies[body_id].last_reads[name_index(known)]
+    }
     // The body is read in place: binding it would copy the whole body.
     index := tail_store.bodies[body_id].statements.len() - 1
     loop index >= 0 {
@@ -283,7 +288,9 @@ sema_ownership_tail_last_read: fn(tail_store: &SemaStatementTailStore, body_id: 
         }
         index -= 1
     }
-    tail_store.bodies[body_id].last_reads[name] = index
+    // A new id is the next row of `last_reads`.
+    _ := name_intern(tail_store.bodies[body_id].read_names, name)
+    tail_store.bodies[body_id].last_reads.push(index)
     index
 }
 

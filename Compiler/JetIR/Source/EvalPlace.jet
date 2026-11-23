@@ -1,5 +1,3 @@
-use jet_foundation.[name_rows_value]
-
 // Whether the debugger may run a breakpoint's condition in the program
 // itself, at the breakpoint, rather than stopping the program to evaluate
 // it at each hit (JetDebug NativePlace.jet). The debugger places the
@@ -60,7 +58,7 @@ ir_eval_place_refusal: fn(m: IRModule, row: Int) -> String Never! {
                         // A drop routine the module builds (a List's, a
                         // box's) is placed and called as a function is.
                         if f.op[at] == .Drop && ty.drop != "" {
-                            if name_rows_value(m.function_rows, ty.drop) == .Val(glue) {
+                            if ir_keyed_function(m, ty.drop) == .Val(glue) {
                                 pending.push(glue)
                             }
                         }

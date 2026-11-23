@@ -5,39 +5,41 @@
 // per slot with `x` naming that slot. Calls in the declaring module are
 // renamed to their arity's function, and the arity functions replace the
 // declaration. A body of any other shape keeps the declaration for E1314.
-use jet_foundation.[AST_NODE_GENERATED, Expr, Func, Item, Param, ParamZone, Program, Span, Stmt, Type, TypeParam]
+use jet_foundation.[AST_NODE_GENERATED, Expr, Func, Item, NameTable, Param, ParamZone, Program, Span, Stmt, Type, TypeParam, name_column, name_column_get, name_column_set, name_column_table, name_count, name_find, name_index, name_intern, name_table_sized]
 
 // Expands `program`'s trait-bounded variadic functions in place; a program
 // without one is left untouched (not copied).
 sema_variadic_bounds_expand: fn(program: &Program) {
-    declared := [String:Bool]{}
+    declared := name_table_sized(2)
     loop item in program.items {
-        if item == .Trait(definition) -> declared[definition.name] = true
+        if item == .Trait(definition) -> _ := name_intern(declared, definition.name)
     }
-    fixed := [String:Int]{}
+    fixed_keys := name_column_table()
+    fixed := name_column()
     loop item in program.items {
         if item == .Func(function) {
             if sema_variadic_bound_traits(function, declared) != None {
-                fixed[function.name] = function.params.len() - 1
+                name_column_set(fixed_keys, fixed, function.name, function.params.len() - 1)
             }
         }
     }
-    if fixed.len() == 0 {
+    if name_count(fixed_keys) <= 1 {
         return
     }
     calls := sema_inline_rewrite_empty()
-    calls.variadic = fixed
+    calls.variadic_keys = fixed_keys.move()
+    calls.variadic = fixed.move()
     rewritten := [Item]{}
     loop item in program.items -> rewritten.push(sema_inline_rewrite_item(calls, item))
     expanded := [Item]{}
     loop item in rewritten {
         if item == .Func(function) {
-            if calls.variadic.get(function.name) != None {
+            if name_column_get(calls.variadic_keys, calls.variadic, function.name) != None {
                 bounds: sema_variadic_bound_traits(function, declared) ?? [String]{}
                 // A function nothing calls is still checked once against its
                 // bounds: its one-argument arity is a generic function, so it
                 // is type-checked but never instantiated (#6449).
-                arities: calls.variadic_arities.get(function.name) ?? [Int]{1}
+                arities: sema_inline_variadic_arities(calls, function.name) ?? [Int]{1}
                 loop arity in arities {
                     expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
                 }
@@ -51,7 +53,7 @@ sema_variadic_bounds_expand: fn(program: &Program) {
 
 // The traits bounding `function`'s trailing variadic, when it is one whose
 // body has the single direct `loop x in parts` shape.
-sema_variadic_bound_traits: fn(function: Func, declared: [String:Bool]) -> [String]? {
+sema_variadic_bound_traits: fn(function: Func, declared: NameTable) -> [String]? {
     if function.params.len() == 0 -> return None
     last: function.params[function.params.len() - 1]
     if !last.variadic -> return None
@@ -66,7 +68,7 @@ sema_variadic_bound_traits: fn(function: Func, declared: [String:Bool]) -> [Stri
         return Val(list.copy())
     }
     if last.ty == .Named(name) {
-        if declared.get(name) != None || sema_type_builtin_trait_symbol(name) != None {
+        if name_find(declared, name) != None || sema_type_builtin_trait_symbol(name) != None {
             return Val([String]{name.copy()})
         }
     }
@@ -76,13 +78,21 @@ sema_variadic_bound_traits: fn(function: Func, declared: [String:Bool]) -> [Stri
 // The arity function a call of variadic `name` with `arity` trailing
 // arguments names; the first call of each arity notes it.
 sema_inline_note_variadic_arity: fn(rewrite: &SemaInlineRewrite, name: String, arity: Int) -> String Never! {
-    arities := rewrite.variadic_arities.get(name) ?? [Int]{}
-    loop known in arities {
+    id: name_index(name_intern(rewrite.variadic_keys, name))
+    loop rewrite.variadic_arities.len() <= id -> rewrite.variadic_arities.push([Int]{})
+    loop known in rewrite.variadic_arities[id] {
         if known == arity -> return "{name}__va{arity}"
     }
-    arities.push(arity)
-    rewrite.variadic_arities[name] = arities.move()
+    rewrite.variadic_arities[id].push(arity)
     "{name}__va{arity}"
+}
+
+// The arities noted for calls of variadic `name`, in call order; None when
+// nothing calls it.
+sema_inline_variadic_arities: fn(rewrite: SemaInlineRewrite, name: String) -> [Int]? Never! {
+    id: name_index(name_find(rewrite.variadic_keys, name) ?? return None)
+    if id >= rewrite.variadic_arities.len() || rewrite.variadic_arities[id].len() == 0 -> return None
+    Val(rewrite.variadic_arities[id])
 }
 
 // The variadic parameter a slot's generated type parameter stands for
@@ -131,7 +141,7 @@ sema_variadic_bound_specialize: fn(function: Func, bounds: [String], arity: Int)
             if statement == .For(variable, variable_span, _, _, loop_body, _, _, _, _) {
                 loop index in 0..<arity {
                     slot := sema_inline_rewrite_empty()
-                    slot.values[variable] = Expr.Ident{name: sema_variadic_bound_slot_name(last.name, index), span: variable_span, id: AST_NODE_GENERATED}
+                    sema_inline_value_put(slot.values, variable, Expr.Ident{name: sema_variadic_bound_slot_name(last.name, index), span: variable_span, id: AST_NODE_GENERATED})
                     loop unrolled in sema_inline_rewrite_stmts(slot, loop_body) {
                         body.push(unrolled)
                     }

@@ -1,6 +1,6 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, name_rows_set, name_rows_value]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index]
 
 // A buffer of `bytes` bytes (a slot) for elements of row `element` to
 // replace the one of the List at `list`, null when `try` and refused. In a
@@ -7007,11 +7007,11 @@ IR_PLUGIN_GUEST_PREFIX: "#plugin.guest<"
 
 ir_plugin_guest: fn(m: &IRModule, artifact: String) -> Int Never! {
     key: "{IR_PLUGIN_GUEST_PREFIX}{artifact}>"
-    known: name_rows_value(m.function_rows, key) ?? -1
+    known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("plugin.guest", key, "jet_ir_plugin_guest_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     word_row: ir_word_row(m)
     a.f.result = word_row

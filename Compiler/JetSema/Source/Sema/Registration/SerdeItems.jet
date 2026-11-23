@@ -74,6 +74,12 @@ use jet_foundation.[
     owned_trait_codec,
     type_name,
     module_is_core,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
+    NameTable,
 ]
 
 // Rust `expand_builtin_serde_items`: selects each declaration's codecs from
@@ -82,8 +88,8 @@ use jet_foundation.[
 // question is keyed on `facts`, built once over the unchanged written items:
 // O(items + types × wire fields), not a rescan per type and field. `foreign`
 // holds the codecs other modules give the types these items hold
-// (sema_derive_foreign_codecs, sema_serde_graph_codecs).
-sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
+// ("{trait}|{leaf}"; sema_derive_foreign_codecs, sema_serde_graph_codecs).
+sema_serde_expand_builtin_items: fn(items: &[Item], foreign: NameTable) {
     facts: sema_derive_item_index(items)
     auto_encode: sema_derive_auto_selected(items, facts, "Encode", foreign)
     auto_decode: sema_derive_auto_selected(items, facts, "Decode", foreign)
@@ -96,8 +102,8 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
                 // A hand-written codec wins over the package default and
                 // either sign of the marker: `#Codable` beside a written
                 // `impl Encode` derives only the direction it lacks.
-                encode: !sema_serde_items_written(encode_impls) && (sema_derive_has_name(definition.derives, "Encode") || auto_encode.get(definition.name) != None)
-                decode: !sema_serde_items_written(decode_impls) && (sema_derive_has_name(definition.derives, "Decode") || auto_decode.get(definition.name) != None)
+                encode: !sema_serde_items_written(encode_impls) && (sema_derive_has_name(definition.derives, "Encode") || name_find(auto_encode, definition.name) != None)
+                decode: !sema_serde_items_written(decode_impls) && (sema_derive_has_name(definition.derives, "Decode") || name_find(auto_decode, definition.name) != None)
                 span: sema_serde_items_derive_span(definition.derives, definition.name_span)
                 // Rust `invalid_serde_derive_impls`: a requested codec whose
                 // field registration reports (E2411/E2415) is not generated,
@@ -117,8 +123,8 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
             .Enum(definition) -> {
                 encode_impls: sema_serde_items_impl_flags(facts, definition.name, "Encode")
                 decode_impls: sema_serde_items_impl_flags(facts, definition.name, "Decode")
-                encode: !sema_serde_items_written(encode_impls) && (sema_derive_has_name(definition.derives, "Encode") || auto_encode.get(definition.name) != None)
-                decode: !sema_serde_items_written(decode_impls) && (sema_derive_has_name(definition.derives, "Decode") || auto_decode.get(definition.name) != None)
+                encode: !sema_serde_items_written(encode_impls) && (sema_derive_has_name(definition.derives, "Encode") || name_find(auto_encode, definition.name) != None)
+                decode: !sema_serde_items_written(decode_impls) && (sema_derive_has_name(definition.derives, "Decode") || name_find(auto_decode, definition.name) != None)
                 span: sema_serde_items_derive_span(definition.derives, definition.name_span)
                 if encode && !sema_serde_items_generated(encode_impls) && sema_serde_items_enum_valid(items, facts, definition, "Encode", auto_encode) {
                     generated.push(sema_serde_items_enum_encode(definition, encode, decode, span))
@@ -136,7 +142,7 @@ sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
                 loop trait_name in codecs {
                     auto: if trait_name == "Encode" -> auto_encode else -> auto_decode
                     flags: sema_serde_items_impl_flags(facts, definition.name, trait_name)
-                    wanted: !sema_serde_items_written(flags) && (sema_derive_has_name(definition.derives, trait_name) || auto.get(definition.name) != None)
+                    wanted: !sema_serde_items_written(flags) && (sema_derive_has_name(definition.derives, trait_name) || name_find(auto, definition.name) != None)
                     if !wanted || sema_serde_items_generated(flags) || !sema_serde_items_codable(items, facts, definition.base, trait_name, auto) {
                         next
                     }
@@ -161,7 +167,7 @@ sema_serde_items_base_is_earlier_distinct: fn(items: [Item], at: Int, definition
 }
 
 // Rust `invalid_serde_derive_impls`, negated, for one declaration and codec.
-sema_serde_items_struct_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: StructDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+sema_serde_items_struct_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: StructDef, trait_name: String, auto: NameTable) -> Bool Never! {
     decode: trait_name == "Decode"
     loop field in definition.fields {
         if field.computed != None || sema_serde_items_skips(field) || sema_serde_items_flattens(field) {
@@ -175,7 +181,7 @@ sema_serde_items_struct_valid: fn(items: [Item], facts: SemaDeriveItemIndex, def
     true
 }
 
-sema_serde_items_enum_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: EnumDef, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+sema_serde_items_enum_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: EnumDef, trait_name: String, auto: NameTable) -> Bool Never! {
     decode: trait_name == "Decode"
     loop ty in sema_serde_items_enum_wire(definition) {
         if !sema_serde_items_codable(items, facts, ty, trait_name, auto) -> return false
@@ -195,10 +201,11 @@ sema_serde_items_union_shapes_invalid: fn(items: [Item], ty: Type, span: Span) -
 }
 
 // Rust `is_encodable_ty` / `is_decodable_ty` over this module's declarations
-// (`facts` is sema_derive_item_index of `items`): an imported (non-local)
-// nominal is trusted — its own declaration answers for its codec, and a use
-// site checks the bound (E0905).
-sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type, trait_name: String, auto: [String:Bool]) -> Bool Never! {
+// (`facts` is sema_derive_item_index of `items`, `auto` the names its
+// structural auto-derive selects): an imported (non-local) nominal is
+// trusted — its own declaration answers for its codec, and a use site checks
+// the bound (E0905).
+sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type, trait_name: String, auto: NameTable) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> true
         .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_items_codable(items, facts, inner, trait_name, auto)
@@ -237,8 +244,8 @@ sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type
 
 // The first local struct, enum, or distinct `name` answers; a name this
 // module does not declare is trusted.
-sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, name: String, trait_name: String, auto: [String:Bool]) -> Bool Never! {
-    position: facts.nominals.get(name) ?? return true
+sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, name: String, trait_name: String, auto: NameTable) -> Bool Never! {
+    position: sema_derive_nominal_row(facts, name) ?? return true
     if items[position] == {
         .Struct(definition) -> {
             if sema_derive_has_name(definition.derives, trait_name) -> return true
@@ -251,7 +258,7 @@ sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, 
         }
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
-    auto.get(name) != None || sema_serde_items_impl_flags(facts, name, trait_name) != 0
+    (name != "" && name_find(auto, name) != None) || sema_serde_items_impl_flags(facts, name, trait_name) != 0
 }
 
 // Rust `serde_wire_params`: for a local generic struct or enum, which type
@@ -259,7 +266,7 @@ sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, 
 // or enum `name` answers: normally the indexed position itself; only a
 // duplicate distinct declared first is stepped past.
 sema_serde_items_wire_params: fn(items: [Item], facts: SemaDeriveItemIndex, name: String) -> [Bool]? Never! {
-    position := facts.nominals.get(name) ?? return None
+    position := sema_derive_nominal_row(facts, name) ?? return None
     loop position < items.len() {
         if items[position] == {
             .Struct(definition) -> {
@@ -299,7 +306,7 @@ sema_serde_items_param_flags: fn(params: [TypeParam], wire: [Type]) -> [Bool]? N
 // (generated) for `type_name`'s `trait_name`: an impl item, or an inline trait
 // block of the declaration itself (sema_derive_impl_flags bits).
 sema_serde_items_impl_flags: fn(facts: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Int Never! {
-    facts.trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) ?? 0
+    facts.impl_flags[sema_derive_index_find(facts, sema_type_metadata_impl_key(type_name, trait_name))]
 }
 
 sema_serde_items_written: fn(flags: Int) -> Bool Never! { flags == 1 || flags == 3 }
@@ -2011,15 +2018,21 @@ sema_serde_items_result_switch: fn(subject: Expr, ok_binding: String, ok_body: [
 // codec call (sema_expr_record_call_fact), and the wire fields of a codec
 // whose body is generated (sema_codec_fill_demanded).
 
-// Every requirement once in `keys` ("{trait}|{type leaf}"); `order` holds the
-// keys the next codec wave has not taken yet. While `capturing`, `captured`
-// also gets every requirement a check records, met before or not
-// (sema_demand_capture_open).
+// Every requirement once in `keys` ("{trait}|{type leaf}"), `present` by id
+// while it stands (an undone codec body forgets its own,
+// sema_codec_undo_body); `order` holds the keys the next codec wave has not
+// taken yet. While `capturing`, `captured` also gets every requirement a
+// check records, met before or not (sema_demand_capture_open).
 SemaCodecDemand: struct {
-    keys: [String:Bool],
+    keys: NameTable,
+    present: [Bool],
     order: [String],
     capturing: Bool{false},
     captured: [String]{[String]{}},
+}
+
+sema_codec_demand_new: fn() -> SemaCodecDemand Never! {
+    SemaCodecDemand{keys: name_table_sized(16), present: [Bool]{false}, order: [String]{}}
 }
 
 // The generated codec methods by symbol key, so a checked call and a codec
@@ -2081,17 +2094,18 @@ sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
     }
 }
 
-// The codecs the graph's registered impls give the types `items` hold, as
-// sema_derive_foreign_codecs gives a module's own items before the graph
-// exists: the items a user template generates into a registered module.
-sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> [String:Bool] {
+// The codecs the graph's registered impls give the types `items` hold
+// ("{trait}|{leaf}"), as sema_derive_foreign_codecs gives a module's own items
+// before the graph exists: the items a user template generates into a
+// registered module.
+sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> NameTable {
     names := [String]{}
     loop item in items -> sema_derive_held_type_names(item, names)
-    codecs := [String:Bool]{}
+    codecs := name_table_sized(names.len() * 2 + 1)
     loop name in names {
         loop reference in sema_registration_impl_rows_named(graph, name) {
             trait_name: graph.modules[reference.module_index].impls[reference.row].trait_name ?? next
-            if owned_trait_codec(trait_name) -> codecs["{trait_name}|{name}"] = true
+            if owned_trait_codec(trait_name) -> _ := name_intern(codecs, "{trait_name}|{name}")
         }
     }
     codecs
@@ -2109,8 +2123,10 @@ sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, keys: [String]) {
     permit: demand.guard_edit()
     loop key in keys {
         if permit.value.capturing -> permit.value.captured.push(key.copy())
-        if permit.value.keys.get(key) != None -> next
-        permit.value.keys[key] = true
+        id: name_index(name_intern(permit.value.keys, key))
+        if id == permit.value.present.len() -> permit.value.present.push(false)
+        if permit.value.present[id] -> next
+        permit.value.present[id] = true
         permit.value.order.push(key.copy())
     }
 }
@@ -2172,9 +2188,10 @@ sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row
 sema_codec_generated_body: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, method: String) -> [Stmt]? Never! {
     if !graph.modules[module_index].impls[row].declaration.is_generated_serde -> return None
     trait_name: graph.modules[module_index].impls[row].trait_name ?? return None
-    positions := [String:Int]{}
-    sema_codec_index_module(graph.modules[module_index].program.items, module_index, positions)
-    position: positions.get("{module_index}|{graph.modules[module_index].impls[row].target_type_name}") ?? return None
+    keys := name_table_sized(64)
+    positions := [Int]{-1}
+    sema_codec_index_module(graph.modules[module_index].program.items, module_index, keys, positions)
+    position: sema_codec_position(keys, positions, "{module_index}|{graph.modules[module_index].impls[row].target_type_name}") ?? return None
     generated: sema_serde_items_codec_body(graph.modules[module_index].program.items, position, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? return None
     Val(sema_serde_items_method_body(generated, method))
 }
@@ -2202,9 +2219,10 @@ sema_codec_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: 
 // in first-demand order. A module's items are indexed once, on its first
 // pending codec (sema_codec_index_module), so each codec is keyed lookups.
 sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) -> [Int] {
-    wave := [String:Bool]{}
+    wave := [Int:Bool]{}
     modules := [Int]{}
-    positions := [String:Int]{}
+    position_keys := name_table_sized(64)
+    positions := [Int]{-1}
     indexed := [Int:Bool]{}
     loop {
         keys: sema_codec_demand_take(graph.codec_demand)
@@ -2220,16 +2238,16 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
                 if graph.modules[module_index].impls[row].trait_name != (Val(trait_name)) -> next
                 if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> next
                 if indexed.get(module_index) == None {
-                    sema_codec_index_module(graph.modules[module_index].program.items, module_index, positions)
+                    sema_codec_index_module(graph.modules[module_index].program.items, module_index, position_keys, positions)
                     indexed[module_index] = true
                 }
                 type_key: "{module_index}|{graph.modules[module_index].impls[row].target_type_name}"
-                declaration: positions.get(type_key) ?? next
+                declaration: sema_codec_position(position_keys, positions, type_key) ?? next
                 generated: sema_serde_items_codec_body(graph.modules[module_index].program.items, declaration, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? next
-                sema_codec_set_body(graph, module_index, row, generated, positions.get("{type_key}|{trait_name}"))
+                sema_codec_set_body(graph, module_index, row, generated, sema_codec_position(position_keys, positions, "{type_key}|{trait_name}"))
                 trail.entries.push(SemaGraphUndo.CodecBody{module_index: module_index, row: row})
                 if !modules.contains(module_index) -> modules.push(module_index)
-                wave["{module_index}:{row}"] = true
+                wave[sema_codec_wave_slot(module_index, row)] = true
                 loop ty in generated.wire -> sema_codec_demand_type(graph, trait_name, ty)
             }
         }
@@ -2238,11 +2256,25 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
     modules
 }
 
+// Impl row `row` of module `module_index` as one codec wave slot
+// (graph.codec_wave_rows): the module above the row's 32 bits.
+sema_codec_wave_slot: fn(module_index: Int, row: Int) -> Int Never! { (module_index << 32) | row }
+
+// The item position the codec fill indexed under `key`
+// (sema_codec_index_module), if any.
+sema_codec_position: fn(keys: NameTable, positions: [Int], key: String) -> Int? Never! {
+    name: name_find(keys, key) ?? return None
+    id: name_index(name)
+    if id == 0 -> return None
+    Val(positions[id])
+}
+
 // Module `module_index`'s item positions for the codec fill: its first struct,
 // enum or distinct per name ("{module}|{name}") and its first generated codec impl item
-// per type and trait ("{module}|{type}|{trait}"). Filling rewrites impl items
-// in place, so the positions hold for the whole fill.
-sema_codec_index_module: fn(items: [Item], module_index: Int, positions: &[String:Int]) Never! {
+// per type and trait ("{module}|{type}|{trait}"), each key interned in `keys`
+// and its position in `positions` by id. Filling rewrites impl items in
+// place, so the positions hold for the whole fill.
+sema_codec_index_module: fn(items: [Item], module_index: Int, keys: &NameTable, positions: &[Int]) Never! {
     loop (position, item) in items {
         key := ""
         if item == {
@@ -2258,7 +2290,8 @@ sema_codec_index_module: fn(items: [Item], module_index: Int, positions: &[Strin
                 next
             }
         }
-        if positions.get(key) == None -> positions[key] = position
+        id: name_index(name_intern(keys, key))
+        if id == positions.len() -> positions.push(position)
     }
 }
 
@@ -2304,7 +2337,7 @@ sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: 
     key: "{trait_name}|{graph.modules[module_index].impls[row].target_type_name}"
     demand := graph.codec_demand
     permit: demand.guard_edit()
-    _ := permit.value.keys.remove(key)
+    if name_find(permit.value.keys, key) == .Val(name) -> permit.value.present[name_index(name)] = false
 }
 
 // Demand-checked derives. A compiler-owned module (the Prelude error module,
@@ -2318,7 +2351,7 @@ sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: 
 // a compile that checks every Core body (`jet check Core`) demands them all.
 sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
     rows := [U32:SemaDeriveMethodRow]{}
-    types := [String:[String]]{}
+    types := SemaDeriveTypeMethods{leaves: name_table_sized(64), keys: [[String]]{[String]{}}}
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].source_file != SEMA_PRELUDE_ERROR_SOURCE_PATH && !module_is_core(graph.modules[module_index].module_identity) {
             next
@@ -2333,9 +2366,9 @@ sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
                 key: symbol_table_key(graph.symbols, id)
                 rows[id.id] = SemaDeriveMethodRow{module_index: module_index, nominal: nominal, method: method}
                 leaf: sema_serde_named_leaf(graph.modules[module_index].nominals[nominal].symbol.name)
-                keys := types.get(leaf) ?? [String]{}
-                keys.push(key.copy())
-                types[leaf] = keys.move()
+                leaf_id: name_index(name_intern(types.leaves, leaf))
+                if leaf_id == types.keys.len() -> types.keys.push([String]{})
+                types.keys[leaf_id].push(key.copy())
             }
         }
     }
@@ -2347,7 +2380,7 @@ sema_derive_demand_add: fn(demand: Shared<SemaDeriveDemand>, keys: [String]) {
     permit: demand.guard_edit()
     loop key in keys {
         if permit.value.capturing -> permit.value.captured.push(key.copy())
-        permit.value.keys[key] = true
+        _ := name_intern(permit.value.keys, key)
     }
 }
 
@@ -2395,15 +2428,19 @@ sema_demand_drain: fn(graph: SemaRegistrationGraph) -> SemaDemandCapture {
 sema_codec_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
     permit := graph.codec_demand.guard_edit()
     keys := compiler_take_rows<String>(permit.value.order)
-    permit.value.keys.clear()
+    permit.value.keys = name_table_sized(16)
+    permit.value.present = [Bool]{false}
     keys
 }
 
+// The derived method keys recorded since the last drain, in key order.
 sema_derive_demand_drain: fn(graph: SemaRegistrationGraph) -> [String] {
     permit := graph.derive_demand.guard_edit()
+    texts := compiler_take_rows<String>(permit.value.keys.texts)
+    permit.value.keys = name_table_sized(16)
     keys := [String]{}
-    loop (key, _) in permit.value.keys -> keys.push(key)
-    permit.value.keys.clear()
+    loop at in 1..<texts.len() -> keys.push(texts[at])
+    keys.sort()
     keys
 }
 
@@ -2436,13 +2473,15 @@ sema_derive_demand_call: fn(program: SemaProgramTables, callee: SymbolID?) {
 // An Equatable or Comparable bound is met at `ty`: every nominal inside it
 // may be compared through its derived method.
 sema_derive_demand_type: fn(graph: SemaRegistrationGraph, ty: Type) {
-    if graph.derive_type_methods.len() == 0 {
+    if graph.derive_type_methods.keys.len() <= 1 {
         return
     }
     names := [String]{}
     sema_codec_type_names(ty, names)
     loop name in names {
-        keys: graph.derive_type_methods.get(name) ?? next
+        leaf: name_find(graph.derive_type_methods.leaves, name) ?? next
+        keys: graph.derive_type_methods.keys[name_index(leaf)]
+        if keys.len() == 0 -> next
         sema_derive_demand_add(graph.derive_demand, keys)
     }
 }
@@ -2450,11 +2489,17 @@ sema_derive_demand_type: fn(graph: SemaRegistrationGraph, ty: Type) {
 // The demanded derived methods, in key order.
 sema_derive_demand_keys: fn(demand: Shared<SemaDeriveDemand>) -> [String] {
     permit: demand.guard_edit()
-    loop (key, _) in permit.value.keys -> key.copy()
+    keys := loop at in 1..<name_count(permit.value.keys) -> permit.value.keys.texts[at].copy()
+    keys.sort()
+    keys
 }
 
 // Forgets every demand, so a later pass over the same graph demands afresh.
 sema_derive_demand_reset: fn(demand: Shared<SemaDeriveDemand>) {
     permit: demand.guard_edit()
-    permit.value.keys = [String:Bool]{}
+    permit.value.keys = name_table_sized(16)
+}
+
+sema_derive_demand_new: fn() -> SemaDeriveDemand Never! {
+    SemaDeriveDemand{keys: name_table_sized(16)}
 }

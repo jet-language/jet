@@ -24,8 +24,13 @@ use jet_foundation.[
     Span,
     StrPart,
     Type,
+    NameTable,
     ast_const,
     module_is_core,
+    name_count,
+    name_find,
+    name_intern,
+    name_table_sized,
 ]
 
 // The generated constant holding a module's record.
@@ -48,7 +53,7 @@ SemaModuleMetaSource: struct {
     file: String{""},
     package: SemaModulePackage{SemaModulePackage{}},
     memory_kernel: Bool{false},
-    reads: [String:Bool]{[String:Bool]{}},
+    reads: NameTable{name_table_sized(2)},
 }
 
 // The file-level alias the generated records name core.meta through.
@@ -214,12 +219,12 @@ sema_module_meta_record: fn(items: &[Item], name: String, doc: String, source: S
 
 // Whether module `name`, whose body is `items`, carries a record: its body
 // sets a field, or a source reads it as a value.
-sema_module_meta_has_record: fn(items: [Item], name: String, reads: [String:Bool]) -> Bool Never! {
-    sema_module_meta_field_lines(items) > 0 || reads.get(name) != None
+sema_module_meta_has_record: fn(items: [Item], name: String, reads: NameTable) -> Bool Never! {
+    sema_module_meta_field_lines(items) > 0 || name_find(reads, name) != None
 }
 
 // Whether a module of `definition`'s tree, itself included, carries a record.
-sema_module_meta_tree_has_record: fn(definition: CodeModule, reads: [String:Bool]) -> Bool Never! {
+sema_module_meta_tree_has_record: fn(definition: CodeModule, reads: NameTable) -> Bool Never! {
     if definition.body == .Val(body) {
         if sema_module_meta_has_record(body, definition.name, reads) -> return true
         loop item in body {
@@ -242,7 +247,7 @@ sema_module_meta_leaf: fn(declared_module: String) -> String Never! {
 // (`declared_module`) or a module of an inline module body's tree, as
 // sema_module_meta_lower gives them. Only then does the compile need
 // core.meta.
-sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: [String:Bool]) -> Bool Never! {
+sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: NameTable) -> Bool Never! {
     if declared_module != "" && sema_module_meta_has_record(items, sema_module_meta_leaf(declared_module), reads) {
         return true
     }
@@ -301,11 +306,11 @@ sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_sour
 }
 
 // The inline module bodies of `items`, nested ones included, by name.
-sema_module_meta_names: fn(items: [Item], names: &[String:Bool]) Never! {
+sema_module_meta_names: fn(items: [Item], names: &NameTable) Never! {
     loop item in items {
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
-                names[definition.name.copy()] = true
+                _ := name_intern(names, definition.name)
                 sema_module_meta_names(body, names)
             }
         }
@@ -314,8 +319,8 @@ sema_module_meta_names: fn(items: [Item], names: &[String:Bool]) Never! {
 
 // The modules a source declares, by name: its file module, when
 // `declared_module` names one, and its inline module bodies.
-sema_module_meta_declared_names: fn(items: [Item], declared_module: String, names: &[String:Bool]) Never! {
-    if declared_module != "" -> names[sema_module_meta_leaf(declared_module)] = true
+sema_module_meta_declared_names: fn(items: [Item], declared_module: String, names: &NameTable) Never! {
+    if declared_module != "" -> _ := name_intern(names, sema_module_meta_leaf(declared_module))
     sema_module_meta_names(items, names)
 }
 
@@ -354,7 +359,7 @@ sema_module_meta_value_at: fn(bytes: [U8], end: Int) -> Bool Never! {
 // Each of `modules` that `text` reads as a value (sema_module_meta_value_at)
 // joins `reads`. A `//` comment reads nothing; a string may, which only
 // gives a module a record it doesn't use.
-sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[String:Bool]) Never! {
+sema_module_meta_value_reads: fn(text: String, modules: NameTable, reads: &NameTable) Never! {
     bytes: text.bytes()
     index := 0
     loop index < bytes.len() {
@@ -370,8 +375,8 @@ sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[
         start: index
         loop index < bytes.len() && sema_module_meta_word_byte(Int{bytes[index]}) -> index += 1
         word: String.from_bytes(bytes[start..<index]) ?? next
-        if modules.get(word) == None || reads.get(word) != None -> next
-        if sema_module_meta_value_at(bytes, index) -> reads[word] = true
+        if name_find(modules, word) == None || name_find(reads, word) != None -> next
+        if sema_module_meta_value_at(bytes, index) -> _ := name_intern(reads, word)
     }
 }
 
@@ -381,20 +386,20 @@ sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[
 // another file of the package), so every source is scanned for every
 // module. Core declares no record and reads none.
 sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
-    names := [String:Bool]{}
+    names := name_table_sized(2)
     loop input in inputs {
         if module_is_core(input.module_identity) -> next
         sema_module_meta_declared_names(input.program.items, input.declared_module, names)
     }
-    if names.len() == 0 {
+    if name_count(names) <= 1 {
         return
     }
-    reads := [String:Bool]{}
+    reads := name_table_sized(2)
     loop input in inputs {
         if module_is_core(input.module_identity) -> next
         sema_module_meta_value_reads(input.source, names, reads)
     }
-    if reads.len() == 0 {
+    if name_count(reads) <= 1 {
         return
     }
     loop index in 0..<inputs.len() {

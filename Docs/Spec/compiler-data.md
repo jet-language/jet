@@ -66,13 +66,13 @@ the tag.
 
 ## Lookups
 
-Compiler data holds no `String`-keyed map, set or tally, and no `NameRows`
-(a `String`-to-row map). A lookup by id indexes a column; a sparse lookup by
-id may use an id-keyed map. The interners are the only text-to-id lookups,
-and they hash the spelling's bytes once. A pass that matches text no
-compilation table holds (a dotted import path, a line of a diff) interns it
-into a `NameTable` of its own, dropped with the pass, and keys its columns
-by that table's ids.
+Compiler data holds no `String`-keyed map, set or tally. A lookup by id
+indexes a column; a sparse lookup by id may use an id-keyed map. The
+interners are the only text-to-id lookups, and they hash the spelling's
+bytes once. A pass that matches text no compilation table holds (a dotted
+import path, a line of a diff) interns it into a `NameTable` of its own,
+dropped with the pass, and keys its columns by that table's ids
+(`name_column_*`).
 
 ## Phase lifetimes
 

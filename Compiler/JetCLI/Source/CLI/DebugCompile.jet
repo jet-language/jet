@@ -47,7 +47,7 @@ use {
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_answer, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, Interner, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_failure_name, type_name, type_unqualified_nominals]
+    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, Interner, Name, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_column_get, name_count, name_text, type_failure_name, type_name, type_unqualified_nominals]
     jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_module_row_ty, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_held_set, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
@@ -1632,8 +1632,9 @@ jet_cli_debug_eval_held_source: fn(stamp: JetCLIDebugEvalHeldStamp, path: String
 // that names it (`util.jet` names `a/util.jet` too); "" for none.
 jet_cli_debug_eval_held_module: fn(eval: JetDriverHeldEval, path: String) -> String Never! {
     display := ""
-    loop (file, _) in eval.modules {
-        if file.len() > display.len() && debug_eval_path_same(file, path) -> display = "{file}"
+    loop id in 1..<name_count(eval.module_files) {
+        file: name_text(eval.module_files, Name{id: U32{id}})
+        if file.len() > display.len() && debug_eval_path_same(file, path) -> display = file
     }
     display
 }
@@ -1789,7 +1790,7 @@ jet_cli_debug_eval_stamp_take: fn(stamp: &&JetCLIDebugEvalHeldStamp?) -> JetCLID
 // result a `value`, lowered to the code the session places.
 jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], value: Type, text: String, threads: CompilerThreads) -[FS, Time]> NativeEval NativeEvalRefused! {
     program := built.move()
-    row: name_rows_get_text(program.function_rows, key) ?? return Err(jet_cli_debug_eval_refused("the built program has no function for it"))
+    row: name_column_get(program.function_rows_keys, program.function_rows, key) ?? return Err(jet_cli_debug_eval_refused("the built program has no function for it"))
     refusal: ir_eval_place_refusal(program, row)
     params := [Int]{}
     captures := [NativeEvalPart]{}

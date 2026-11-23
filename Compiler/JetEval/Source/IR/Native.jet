@@ -21,8 +21,8 @@
 // the same addresses (each batch has its own, above the last one).
 use {
     math: core.math
-    jet_foundation.[CompilerThreads, NameTable, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized]
-    jet_ir.[IRFunction, IRMember, IRModule, IROp, IRProgram, IRSlotKind, IRType, IRX64Program, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_module_new, ir_opt_inline_marked_module, ir_opt_report, ir_pointer_row, ir_row_ty, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object, ir_x64_program]
+    jet_foundation.[CompilerThreads, NameTable, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_table_sized]
+    jet_ir.[IRFunction, IRMember, IRModule, IROp, IRProgram, IRSlotKind, IRType, IRX64Program, ir_align8, ir_args, ir_emit, ir_function_bind, ir_function_new, ir_intern_name, ir_intern_text, ir_keyed_function, ir_module_new, ir_opt_inline_marked_module, ir_opt_report, ir_pointer_row, ir_row_ty, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object, ir_x64_program]
     jet_backend.[
         X64BindResult,
         X64ComptimeChild,
@@ -438,7 +438,7 @@ jet_eval_native_entry_module: fn() -> IRModule {
 jet_eval_native_add: fn(m: &IRModule, f: &&IRFunction) -> Int Never! {
     owned := f.move()
     id: m.functions.len()
-    name_rows_set(m.function_rows, owned.key, id)
+    ir_function_bind(m, owned.key, id)
     m.functions.push(owned)
     id
 }
@@ -511,7 +511,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
     none := ir_function_new("{JET_EVAL_NATIVE_PREFIX}none", "{JET_EVAL_NATIVE_PREFIX}none", "{JET_EVAL_NATIVE_PREFIX}none", "", 0)
     loop name in names {
         if name == "" -> next
-        target: name_rows_value(code.function_rows, name) ?? next
+        target: ir_keyed_function(code, name) ?? next
         address: ir_slot(none, pointer, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(none, IROp.FunctionAddress, address, target, -1, -1, 0)
     }

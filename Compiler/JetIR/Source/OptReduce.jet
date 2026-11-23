@@ -93,7 +93,7 @@
 // the total is inline, so the Loop's one pass leaves by its exit test.
 use {
     jet_backend.[X64_INT_SUM_DECLINED, X64_R8, X64_RAX, X64_RCX, X64_RDI, X64_RDX, X64_RSI, x64_count_code, x64_fill_code, x64_int_sum_code]
-    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, name_rows_set, name_rows_value]
+    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition]
 }
 
 // The leaves, as an IRReduceLoop's `kind`: the int sum; the counts of
@@ -305,7 +305,7 @@ ir_opt_reduce_changed: fn(taken: [[IRReduceLoop]]) -> [Int] Never! {
 ir_opt_reduce_leaves: fn(m: IRModule, taken: [[IRReduceLoop]]) -> [Int] Never! {
     leaves := [Int]{}
     loop kind in 0..<IR_REDUCE_KINDS {
-        leaves.push(name_rows_value(m.function_rows, ir_reduce_key(kind)) ?? -1)
+        leaves.push(ir_keyed_function(m, ir_reduce_key(kind)) ?? -1)
     }
     row := taken.len()
     loop plans in taken {
@@ -348,7 +348,7 @@ ir_opt_reduce_add_leaves: fn(m: &IRModule, functions: &[IRFunction], leaves: [In
             else -> x64_count_code(ir_reduce_width(kind), exact)
         }
         f.asm = Val(IRAsmLeaf{code: code, regs: regs, result: X64_RAX})
-        name_rows_set(m.function_rows, ir_reduce_key(kind), functions.len())
+        ir_function_bind(m, ir_reduce_key(kind), functions.len())
         functions.push(f)
     }
 }
@@ -584,8 +584,8 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     // The Ifs of stop points (a stop or turn poll's call, then an If with no
     // Else on what it returned), whose bodies are left out too.
     polls := [Int]{}
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
+    poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? ir_interned_name(m, IR_STOP_POLL_KEY) ?? -2
+    turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? ir_interned_name(m, IR_STOP_TURN_KEY) ?? -2
     loop k := at + 1, k < end - 1 {
         if f.op[k] == .Loop -> return ir_reduce_declined(IR_REDUCE_SUM, "-")
         body.push(k)

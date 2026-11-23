@@ -2,8 +2,8 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
-    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
-    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_key_names, symbol_none]
+    jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
     jet_sema.[sema_type_def_instance_type]
@@ -15,7 +15,7 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
         return ir_fail(b, function.source_span, "generic function without type arguments")
     }
     if function.foreign != None -> return ir_fail(b, function.source_span, "foreign function")
-    if p.intrinsics.get(function.key) != None {
+    if ir_intrinsic_of(p, function.key) != None {
         return ir_fail(b, function.source_span, "runtime intrinsic {function.name} is only called, never a function value")
     }
     b.failure = ir_fact_failure(p, b, function.failure_carrier, function.source_span)
@@ -1796,7 +1796,7 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
 // old one closes and drops (a static starting value's drop leaves it alone).
 ir_storage_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op: TBinaryOp?, value: Int, span: Span) Never! {
     value_ty: ir_ty(m, p, b, value)
-    at: p.constants.get(key) ?? return ir_fail(b, span, "storage: module {key} without a declaration")
+    at: ir_constant_row(p, key) ?? return ir_fail(b, span, "storage: module {key} without a declaration")
     definition: p.constant_defs[at]
     if !definition.is_storage {
         return ir_fail(b, span, "assignment to constant: module {definition.name}")
@@ -4420,10 +4420,10 @@ ir_print: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) 
 // cells back into their variables after the call. The result has the
 // callee's executable return type.
 ir_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
-    if p.intrinsics.get(key) == .Val(intrinsic) {
+    if ir_intrinsic_of(p, key) == .Val(intrinsic) {
         return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
     }
-    if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(m, p, b, foreign, args, span)
+    if ir_foreign_of(p, key) == .Val(foreign) -> return ir_foreign_call(m, p, b, foreign, args, span)
     row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "call of a function outside the checked program: {key}")
     ir_call_row(m, p, b, row, type_args, receiver, receiver_backs, args, span)
 }
@@ -4432,8 +4432,8 @@ ir_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [
 // foreign row or function row, read by its DeclID row, no key looked up.
 ir_call_decl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: DeclID, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     row: ir_decl_row(p, callee)
-    if row >= 0 && p.intrinsics.len() > 0 {
-        if p.intrinsics.get(p.functions[row].key) == .Val(intrinsic) {
+    if row >= 0 && p.intrinsics.values.len() > 0 {
+        if ir_intrinsic_of(p, p.functions[row].key) == .Val(intrinsic) {
             return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
         }
     }
@@ -5082,7 +5082,7 @@ ir_place_address_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, n
     // place (sema admits only `#Persist` module state as a write place).
     if node.kind == .ConstRef(symbol) {
         constant_key: ir_body_symbol_key(p, b, symbol)
-        at: p.constants.get(constant_key) ?? return ir_fail_slot(b, span, "constant {constant_key} without a declaration")
+        at: ir_constant_row(p, constant_key) ?? return ir_fail_slot(b, span, "constant {constant_key} without a declaration")
         if p.constant_defs[at].is_storage {
             definition: p.constant_defs[at]
             return ir_storage_address(m, p, b, definition, span)
@@ -8608,8 +8608,8 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
 // while edits above it move its source, and the compiler's list of hot
 // functions (Compiler/JetCLI/hot-text.list) keeps naming it.
 ir_closure_key: fn(b: &IRBuilder, kind: String) -> String Never! {
-    ordinal: b.lambdas.get(kind) ?? 0
-    b.lambdas[kind] = ordinal + 1
+    ordinal: name_column_get(b.lambdas_keys, b.lambdas, kind) ?? 0
+    name_column_set(b.lambdas_keys, b.lambdas, kind, ordinal + 1)
     "{b.f.key}#{kind}{ordinal}"
 }
 
@@ -8969,7 +8969,7 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // computed (ir_computed_constant_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(m, p, b, ty, key, span)
-    at: p.constants.get(key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
+    at: ir_constant_row(p, key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
     definition: p.constant_defs[at]
     if definition.item_function != "" {
         item: ir_function_row(p, definition.item_function) ?? return ir_fail_slot(b, span, "constant {key} computed by no item function of the program")
@@ -9005,7 +9005,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         returned = fn_ret
     } else { return ir_fail_slot(b, span, "named function as a value of {ir_type_name(ty)}") }
     adapter_key: "{key}#value<{type_carrier_identity(signature)}>"
-    adapter := name_rows_value(m.function_rows, adapter_key) ?? -1
+    adapter := ir_keyed_function(m, adapter_key) ?? -1
     if adapter < 0 {
         function_row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "named function {key} outside the checked program")
         if p.functions[function_row].generic_params.len() > 0 {
@@ -9046,7 +9046,7 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "named function {p.functions[function_row].name} as a value")
         adapter = m.functions.len()
         m.functions.push(ir_hashed_function("{p.functions[function_row].name}.value", adapter_key, "{ir_symbol_name(p.functions[function_row])}__value_", p.functions[function_row].source_file, p.functions[function_row].line))
-        name_rows_set(m.function_rows, adapter_key, adapter)
+        ir_function_bind(m, adapter_key, adapter)
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = p.functions[function_row].line
         _: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))

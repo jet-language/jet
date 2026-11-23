@@ -4,7 +4,7 @@
 // semantics; the builder only marshals typed slots through a nine-word
 // element descriptor and helper functions built once per type (lazy.clone,
 // lazy.drop, lazy.equal, lazy.show, lazy.compare, lazy.callback).
-use jet_foundation.[AccessConvention, BodyCallArg, Span, Type, TClosureOp, TLocal, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[AccessConvention, BodyCallArg, NameTable, Span, Type, TClosureOp, TLocal, TypeTupleField, name_column_table, name_find, name_intern, type_carrier_identity]
 
 // The C export of an Iter route symbol: `jet_iter_take` is
 // jet_rt_native_iter_take.
@@ -81,7 +81,7 @@ ir_lazy_can_clone_store: fn(m: &IRModule, row: Int, can_clone: Bool) Never! {
     m.lazy_can_clone[row] = if can_clone -> 1 else -> -1
 }
 
-ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]) -> Bool Never! {
+ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &NameTable) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .Option(inner) -> return ir_lazy_can_clone(m, p, inner, seen)
@@ -117,8 +117,8 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &[String:Bool]
         }
     }
     key: type_carrier_identity(ty)
-    if seen.get(key) != None -> return true
-    seen[key] = true
+    if name_find(seen, key) != None -> return true
+    _ := name_intern(seen, key)
     storage: ir_lazy_storage(p, ty)
     if storage == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
@@ -173,7 +173,7 @@ ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! 
         cached: ir_lazy_can_clone_cached(m, found)
         if cached != 0 -> return cached > 0
     }
-    seen := [String:Bool]{}
+    seen := name_column_table()
     result: ir_lazy_can_clone(m, p, ty, seen)
     ir_lazy_can_clone_store(m, row, result)
     result
@@ -187,13 +187,13 @@ ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! 
 // failed when its body cannot be built.
 ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
     key: "lazy.{role}<{type_carrier_identity(ty)}>"
-    if name_rows_value(m.function_rows, key) == .Val(known) {
+    if ir_keyed_function(m, key) == .Val(known) {
         if known < 0 -> return ir_fail_slot(b, span, "lazy.{role} of {ir_type_name(ty)}")
         return known
     }
     id: m.functions.len()
     m.functions.push(ir_hashed_function("lazy.{role}", key, "jet_ir_lazy_{role}_", "", 0))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     a := ir_builder_new(m.functions[id].copy())
     if role == "clone" -> ir_lazy_clone_body(m, p, a, ty, span) else if role == "drop" {
         ir_lazy_drop_body(m, p, a, ty, span)
@@ -215,7 +215,7 @@ ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     ir_resolve_deferred(m, p, a)
     m.functions[id] = a.f.move()
     if failed {
-        name_rows_set(m.function_rows, key, -1)
+        ir_function_bind(m, key, -1)
         return ir_fail_slot(b, span, message)
     }
     id

@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_rows_value, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -530,7 +530,7 @@ ir_lint_context: fn(m: IRModule) -> IRLintContext Never! {
     drop_functions := [Int]{}
     loop ty in m.types {
         kind_bits.push(ir_lint_kind_bit(ty.kind))
-        drop_functions.push(if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1)
+        drop_functions.push(if ty.drop == "" -> -1 else -> ir_keyed_function(m, ty.drop) ?? -1)
     }
     data_texts := [Int]{}
     loop _ in 0..<m.data.len() -> data_texts.push(IR_LINT_ROW_UNCHECKED)
@@ -1749,8 +1749,8 @@ ir_lint_core_routes: fn() -> [IRLintFinding] Never! {
 // for the census (LintPlanted.jet --route-gaps).
 ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
     out := ir_lint_core_routes()
-    exported := [String:Bool]{}
-    loop symbol in exports -> exported[symbol.copy()] = true
+    exported := name_column_table(exports.len())
+    loop symbol in exports -> _ := name_intern(exported, symbol)
     loop row in CORE_CALLS {
         symbol: if row.symbol == {
             .Prelude(name) -> name
@@ -1782,17 +1782,17 @@ ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
         }
     }
     loop route in IR_RUNTIME_ROUTES {
-        if ir_route_builder_lowered(route.symbol) || exported.get(route.export) != None -> next
+        if ir_route_builder_lowered(route.symbol) || name_find(exported, route.export) != None -> next
         out.push(IRLintFinding{function: route.symbol.copy(), key: "", pass: "route.table", rule: IR_LINT_ROUTE_EXPORT, message: "route {route.symbol}: the runtime exports no `{route.export}`"})
     }
-    missing := [String:Bool]{}
+    missing := name_column_table()
     loop handle in IR_RUNTIME_HANDLES {
         atom: runtime_abi_atom(handle.runtime)
         claims: [Bool]{true, handle.clone, handle.display, handle.show, handle.debug, handle.eq}
         loop (index, verb) in IR_LINT_HANDLE_VERBS {
             symbol: "jet_rt_handle_{verb}_{atom}"
-            if !claims[index] || exported.get(symbol) != None || missing.get(symbol) != None -> next
-            missing[symbol.copy()] = true
+            if !claims[index] || name_find(exported, symbol) != None || name_find(missing, symbol) != None -> next
+            _ := name_intern(missing, symbol)
             out.push(IRLintFinding{function: handle.jet_name.copy(), key: "", pass: "route.table", rule: IR_LINT_ROUTE_EXPORT, message: "handle {handle.jet_name}: the runtime exports no `{symbol}`"})
         }
     }

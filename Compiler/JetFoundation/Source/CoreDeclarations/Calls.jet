@@ -280,13 +280,13 @@ core_decl_rust_constant: fn(value: String) -> String? Never! {
 }
 
 // A Rust string literal or a Syntax string constant's name.
-core_decl_rust_string: fn(expression: String, context: String, constants: [String:String]) -> String CoreDeclarationError! {
+core_decl_rust_string: fn(expression: String, context: String, constants: CoreDeclTexts) -> String CoreDeclarationError! {
     value: expression.trim()
     if core_decl_quoted(value) == .Val(literal) {
         return core_decl_rust_string_text(literal, context)
     }
     name: core_decl_rust_constant(value) ?? return Err(core_decl_fail("unsupported Rust string value in {context}: {value}"))
-    if constants.get(name) == .Val(text) -> return Ok(text.copy())
+    if core_decl_text_of(constants, name) == .Val(text) -> return Ok(text.copy())
     Err(core_decl_fail("unknown Rust string constant `{value}` in {context}"))
 }
 
@@ -326,7 +326,7 @@ core_decl_rust_bools: fn(expression: String, context: String) -> [Bool] CoreDecl
     Ok(out)
 }
 
-core_decl_rust_strings: fn(expression: String, context: String, constants: [String:String]) -> [String] CoreDeclarationError! {
+core_decl_rust_strings: fn(expression: String, context: String, constants: CoreDeclTexts) -> [String] CoreDeclarationError! {
     out := [String]{}
     loop item in core_decl_rust_slice(expression, context) ?? return Err(err) {
         out.push(core_decl_rust_string(item, context, constants) ?? return Err(err))
@@ -335,7 +335,7 @@ core_decl_rust_strings: fn(expression: String, context: String, constants: [Stri
 }
 
 // `Some(<string>)`'s string.
-core_decl_rust_some_string: fn(expression: String, context: String, constants: [String:String]) -> String CoreDeclarationError! {
+core_decl_rust_some_string: fn(expression: String, context: String, constants: CoreDeclTexts) -> String CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "optional Rust string") ?? return Err(err)
     if call.name != "Some" || call.args.len() != 1 {
         return Err(core_decl_fail("unsupported optional Rust string in {context}: {expression.trim()}"))
@@ -418,7 +418,7 @@ core_decl_resource_access: fn(expression: String, context: String) -> CoreCallRe
     Ok(CoreCallResourceAccess{argument: core_decl_rust_int(call.args[0], context) ?? return Err(err), mode: mode})
 }
 
-core_decl_completion: fn(expression: String, context: String, constants: [String:String]) -> CoreCallCompletion CoreDeclarationError! {
+core_decl_completion: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreCallCompletion CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCallCompletion") ?? return Err(err)
     kind: if call.name == {
         "CoreCallCompletion.synchronous" -> if call.args.len() == 1 -> Val(CoreCallCompletionKind.Synchronous) else -> None
@@ -438,7 +438,7 @@ core_decl_pure_capability: fn() -> CoreCapabilityContract Never! {
     CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}
 }
 
-core_decl_capability: fn(expression: String, context: String, constants: [String:String]) -> CoreCapabilityContract CoreDeclarationError! {
+core_decl_capability: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreCapabilityContract CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCapabilityContract") ?? return Err(err)
     strings := [String]{}
     loop arg in call.args {
@@ -454,7 +454,7 @@ core_decl_capability: fn(expression: String, context: String, constants: [String
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
 }
 
-core_decl_marker: fn(expression: String, context: String, constants: [String:String]) -> CoreMarkerApplication CoreDeclarationError! {
+core_decl_marker: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreMarkerApplication CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreMarkerApplication") ?? return Err(err)
     if call.name != "CoreMarkerApplication.deprecated" || call.args.len() != 4 {
         return Err(core_decl_fail("unsupported CoreMarkerApplication in {context}"))
@@ -729,7 +729,7 @@ core_decl_require_jet_route: fn(argument: String, context: String) -> Bool CoreD
 
 // `CoreCallRecord.new(module, member, symbol, true, mask)`, with a sixth
 // CoreCallCoverage argument for `new_with_coverage`.
-core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, constants: [String:String]) -> CoreCallRecord CoreDeclarationError! {
+core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, constants: CoreDeclTexts) -> CoreCallRecord CoreDeclarationError! {
     core_decl_expect_args(call, count, context) ?? return Err(err)
     core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
     module_name: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)
@@ -740,7 +740,7 @@ core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, co
     Ok(record)
 }
 
-core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, constants: [String:String]) -> CoreCallRecord CoreDeclarationError! {
+core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, constants: CoreDeclTexts) -> CoreCallRecord CoreDeclarationError! {
     if call.name == {
         "CoreCallRecord.source_owned" -> {
             core_decl_expect_args(call, 3, context) ?? return Err(err)
@@ -766,7 +766,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
 }
 
 // `record` with the builder `.name(args)` applied.
-core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, context: String, constants: [String:String]) -> CoreCallRecord CoreDeclarationError! {
+core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, context: String, constants: CoreDeclTexts) -> CoreCallRecord CoreDeclarationError! {
     built := record
     if call.name == "without_direct_aot" || call.name == "with_native_int_result" || call.name == "with_source_owned" {
         core_decl_expect_args(call, 0, context) ?? return Err(err)
@@ -800,7 +800,7 @@ core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, cont
 }
 
 // One Rust CoreCallRecord builder chain evaluated into its record.
-core_decl_call_record: fn(expression: String, context: String, constants: [String:String]) -> CoreDeclarationCall CoreDeclarationError! {
+core_decl_call_record: fn(expression: String, context: String, constants: CoreDeclTexts) -> CoreDeclarationCall CoreDeclarationError! {
     value: expression.trim()
     root: core_decl_read_call(value, 0, context) ?? return Err(err)
     record := core_decl_constructor_record(root, context, constants) ?? return Err(err)

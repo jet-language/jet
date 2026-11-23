@@ -14,7 +14,7 @@
 // glue, so the classes start as one and split until no class holds bodies
 // that differ: copies that only reach copies of each other stay one. A
 // function whose address is taken keeps it.
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_hash, name_index, name_intern, name_rows_value, name_table]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_hash, name_index, name_intern, name_table]
 
 // Folds the copies among `m.functions`' bodies `functions`; returns how many
 // functions nothing reaches any more.
@@ -239,7 +239,7 @@ ir_opt_fold_bucket: fn(groups: IROptFoldGroups, bucket: Int) -> IROptFoldBucket 
 // one; a name of no function stays.
 ir_opt_fold_name: fn(m: IRModule, functions: [IRFunction], name: String, first: [Int]) -> String Never! {
     if name == "" -> return name.copy()
-    id: name_rows_value(m.function_rows, name) ?? return name.copy()
+    id: ir_keyed_function(m, name) ?? return name.copy()
     target: ir_opt_fold_callee(first, id)
     if target == id || target >= functions.len() -> return name.copy()
     functions[target].key.copy()
@@ -285,7 +285,7 @@ ir_opt_fold_row: fn(m: IRModule, ty: IRType) -> String Never! {
 // A routine symbol as a row names it: a runtime routine by its name, a
 // function of the module as one.
 ir_opt_fold_runtime: fn(m: IRModule, symbol: String) -> String Never! {
-    if name_rows_value(m.function_rows, symbol) != None -> return "#"
+    if ir_keyed_function(m, symbol) != None -> return "#"
     symbol.copy()
 }
 
@@ -322,7 +322,7 @@ ir_opt_fold_shape: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape
         parts.push("{ir_op_name(f.op[at])} {f.dst[at]} {a} {f.b[at]} {f.c[at]}")
         if f.op[at] == .Drop && a >= 0 {
             routine: m.types[f.slot_type[a]].drop
-            if name_rows_value(m.function_rows, routine) == {
+            if ir_keyed_function(m, routine) == {
                 .Val(id) -> {
                     parts.push("#")
                     reached.push(id)

@@ -44,6 +44,7 @@ use {
         jet_target_machine_hosted,
         module_intern,
         module_table,
+        name_count,
         name_mangle,
         name_table_sized,
         symbol_key_text,
@@ -379,7 +380,7 @@ output_fixture_run: fn(effects_source: String) Never! {
     output_fixture_case("inline authenticated re-export", "APP: Output.Executable{{name: \"a\", entry: bridge.launch}}\nbank: module {{ launch: fn() {{}} }}\nbridge: module {{ launch: bank.launch }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, failures)
     empty := output_fixture_graph("no-inline early return", "helper: fn() {{}}\n", effects_source, failures)
     if empty == .Val(graph) {
-        if graph.modules[0].inline_bindings.imports.len() != 0 || graph.modules[0].inline_bindings.modules.len() != 0 {
+        if name_count(graph.modules[0].inline_bindings.imports.names) > 1 || graph.modules[0].inline_bindings.modules.len() != 0 {
             failures.push("no-inline early return retains empty binder products")
         }
     }

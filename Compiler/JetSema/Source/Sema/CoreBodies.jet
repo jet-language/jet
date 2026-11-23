@@ -89,6 +89,7 @@ use jet_foundation.[
     module_find,
     module_is_core,
     module_text,
+    name_find,
     name_intern,
     name_table_sized,
     symbol_find,
@@ -589,7 +590,7 @@ sema_core_body_ahead_take: fn(hooks: &SemaRegistrationHostHooks, owner: SymbolID
 // Whether the current Core demand wave checks the function keyed `key` as a
 // stand-in (CoreSeal.jet sema_core_stand_in), by its signature alone.
 sema_core_body_stands_in: fn(graph: SemaRegistrationGraph, key: String) -> Bool Never! {
-    if !graph.core_stand_in_wave || graph.core_wave_rows.get(key) == None -> return false
+    if !graph.core_stand_in_wave || name_find(graph.core_wave_rows, key) == None -> return false
     if graph.core_stand_ins == .Val(seal) -> return sema_core_seal_stand_in(seal, key) != None
     false
 }

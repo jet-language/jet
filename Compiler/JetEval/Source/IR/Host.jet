@@ -13,8 +13,8 @@
 // and drops them as any other. Rows are read and interned in the batch's
 // own rows (host_types), whose existing rows are the module's.
 use {
-    jet_foundation.[Span, TComptimeValue, Type, name_rows_value, type_name]
-    jet_ir.[IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_align8, ir_comptime_answered_member, ir_default_err, ir_enum_def, ir_enum_variant_box_size, ir_fixed_shape, ir_host_value_row, ir_list_stride, ir_option_inline, ir_row_args, ir_row_ty, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+    jet_foundation.[Span, TComptimeValue, Type, name_column_value, type_name]
+    jet_ir.[IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_align8, ir_comptime_answered_member, ir_constant_row, ir_default_err, ir_enum_def, ir_enum_variant_box_size, ir_fixed_shape, ir_host_literal_row, ir_host_value_row, ir_list_stride, ir_option_inline, ir_row_args, ir_row_ty, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 }
 
 // The compiler value host word `word` holds.
@@ -158,7 +158,7 @@ jet_eval_ir_host_constant_route: fn(s: &JetEvalIRState, args: [Int], dst_row: In
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
     types := types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
-    at: layouts.value[0].constants.get(key) ?? {
+    at: ir_constant_row(layouts.value[0], key) ?? {
         jet_eval_ir_problem(s, "compiler value constant {key} has no constant row")
         return None
     }
@@ -176,12 +176,12 @@ jet_eval_ir_host_literal_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int
     layouts_cell: jet_eval_ir_host_layouts(s) ?? return None
     types := types_cell.guard_edit()
     layouts: layouts_cell.guard_read()
-    found: types.value.host_literals.get(key) ?? {
+    found: ir_host_literal_row(types.value, key) ?? {
         jet_eval_ir_problem(s, "compiler value literal {key} is not in the built module")
         return None
     }
-    // copy: the store below edits the module `found` reads
-    value: found.copy()
+    // copy: the store below edits the module the literal is read from
+    value: types.value.host_literal_values[found].copy()
     jet_eval_ir_host_store(types.value, layouts.value[0], s, value, dst_row, area)
 }
 
@@ -189,7 +189,7 @@ jet_eval_ir_host_literal_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int
 // builder's ir_host_row_key).
 jet_eval_ir_host_row: fn(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {
     text: jet_eval_ir_text(s, key) ?? return None
-    if name_rows_value(types.type_rows, text) == .Val(row) -> return Val(row)
+    if name_column_value(types.type_rows_keys, types.type_rows, text) == .Val(row) -> return Val(row)
     jet_eval_ir_problem(s, "host operand type `{text}` is not a row of the module")
     None
 }

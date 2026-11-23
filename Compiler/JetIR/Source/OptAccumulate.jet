@@ -59,7 +59,7 @@
 // the call's value or writes the operation's. The call graph keeps the
 // call's edge: the function stays recursive, which only keeps it from being
 // inlined.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[Type, compiler_threads_single]
 
 // Rewrites each recursive function the header comment describes.
 ir_opt_accumulate: fn(m: &IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
@@ -145,7 +145,7 @@ ir_opt_accumulate_function: fn(m: &IRModule, f: &IRFunction, id: Int, keys: [Str
     args: f.b[call]
     consumed := [Bool]{}
     loop _ in 0..<f.param_count -> consumed.push(false)
-    clone: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
     scan := call + 1
     loop scan < tail {
         if ir_opt_accumulate_stop(f, keys, scan) {
@@ -564,7 +564,7 @@ ir_accumulate_test_run: fn(m: &&IRModule, g: &&IRFunction, sum: Int, drops: [Int
     _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 9)
     ir_opt_compact(f)
     built.entry = 1
-    name_rows_set(built.function_rows, f.key, 1)
+    ir_function_bind(built, f.key, 1)
     built.functions.push(f)
     options := ir_opt_options(level)
     options.verify = true

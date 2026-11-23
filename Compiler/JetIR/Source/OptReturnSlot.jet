@@ -30,7 +30,7 @@
 // stored with a value that has a Drop keeps its boxes too: the caller's
 // Drop of the box would drop that value. Library and runtime modules
 // (no program entry) keep every convention, their exports' ABI.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
 
 // The box size of each function whose Returns can use a return slot (-1:
 // none), the instructions whose allocations it returns, by function.
@@ -46,11 +46,11 @@ IROptSlotPlan: struct {
 // are the same for any thread count.
 ir_opt_return_slots: fn(m: &IRModule, threads: CompilerThreads) -> Int Never! {
     if m.entry < 0 -> return 0
-    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? -2
-    value: name_rows_value(m.name_rows, "jet_rt_alloc_value") ?? -2
+    alloc: ir_interned_name(m, "jet_rt_alloc") ?? -2
+    value: ir_interned_name(m, "jet_rt_alloc_value") ?? -2
     if alloc == -2 && value == -2 -> return 0
-    unique: name_rows_value(m.name_rows, "jet_rt_block_unique") ?? -2
-    free: name_rows_value(m.name_rows, "jet_rt_free") ?? -2
+    unique: ir_interned_name(m, "jet_rt_block_unique") ?? -2
+    free: ir_interned_name(m, "jet_rt_free") ?? -2
     calls: [Int]{alloc, value, unique, free}
     count: m.functions.len()
     weights := [Int]{}
@@ -213,7 +213,7 @@ ir_opt_slot_scan: fn(m: IRModule, f: IRFunction, calls: [Int], results: [Int], a
         op: f.op[at]
         if op == .FunctionAddress && f.a[at] >= 0 -> marks.push(f.a[at])
         if op == .CallRuntime && f.a[at] >= 0 && f.a[at] < m.names.len() {
-            if name_rows_value(m.function_rows, m.names[f.a[at]]) == .Val(id) -> marks.push(id)
+            if ir_keyed_function(m, m.names[f.a[at]]) == .Val(id) -> marks.push(id)
         }
         if op == .Call && f.dst[at] >= 0 {
             callee: f.a[at]
@@ -249,10 +249,10 @@ ir_opt_slot_mark: fn(m: IRModule, plan: &IROptSlotPlan, marks: [Int]) -> Int Nev
     if m.entry < count -> plan.size[m.entry] = -1
     loop ty in m.types {
         if ty.drop != "" {
-            if name_rows_value(m.function_rows, ty.drop) == .Val(id) -> plan.size[id] = -1
+            if ir_keyed_function(m, ty.drop) == .Val(id) -> plan.size[id] = -1
         }
         if ty.clone != "" {
-            if name_rows_value(m.function_rows, ty.clone) == .Val(id) -> plan.size[id] = -1
+            if ir_keyed_function(m, ty.clone) == .Val(id) -> plan.size[id] = -1
         }
     }
     made := 0
@@ -539,7 +539,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     _ := ir_emit(make, IROp.Store, -1, box, 8, x, 2)
     _ := ir_emit(make, IROp.Return, -1, box, -1, -1, 2)
     ir_opt_compact(make)
-    name_rows_set(m.function_rows, make.key, 0)
+    ir_function_bind(m, make.key, 0)
     m.functions.push(make)
     callee := 0
     if forward {
@@ -552,7 +552,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
         _ := ir_emit(pass, IROp.Return, -1, got, -1, -1, 5)
         ir_opt_compact(pass)
         callee = m.functions.len()
-        name_rows_set(m.function_rows, pass.key, callee)
+        ir_function_bind(m, pass.key, callee)
         m.functions.push(pass)
     }
     run := ir_function_new("run", "test:slot.jet.run", "", "slot.jet", 7)
@@ -584,7 +584,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 11)
     ir_opt_compact(run)
     m.entry = m.functions.len()
-    name_rows_set(m.function_rows, run.key, m.entry)
+    ir_function_bind(m, run.key, m.entry)
     m.functions.push(run)
     m
 }
@@ -611,7 +611,7 @@ ir_opt_slot_test_wide: fn(users: Int, leak: Bool) -> IRModule Never! {
     loop k in 0..<users {
         f := ir_opt_slot_test_use(m, word, boxed, k, leak && k == users - 1)
         ir_opt_compact(f)
-        name_rows_set(m.function_rows, f.key, m.functions.len())
+        ir_function_bind(m, f.key, m.functions.len())
         m.functions.push(f)
     }
     m
@@ -682,7 +682,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     _ := ir_emit(make, IROp.CopyBytes, -1, into, payload, 32, 3)
     _ := ir_emit(make, IROp.Return, -1, box, -1, -1, 3)
     ir_opt_compact(make)
-    name_rows_set(m.function_rows, make.key, 0)
+    ir_function_bind(m, make.key, 0)
     m.functions.push(make)
     run := ir_function_new("run", "test:quad.jet.run", "", "quad.jet", 7)
     run.result = word
@@ -718,7 +718,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     _ := ir_emit(run, IROp.Return, -1, sum, -1, -1, 11)
     ir_opt_compact(run)
     m.entry = m.functions.len()
-    name_rows_set(m.function_rows, run.key, m.entry)
+    ir_function_bind(m, run.key, m.entry)
     m.functions.push(run)
     m
 }
@@ -801,8 +801,8 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         }
         assert_eq(eight.functions[0].param_count, if leak -> 1 else -> 2)
         assert_eq(eight.types.len(), one.types.len())
-        assert_eq(name_rows_value(eight.function_rows, "test:slot.jet.use3") ?? -1, 5)
-        assert_eq(name_rows_value(eight.name_rows, "jet_rt_free") ?? -1, name_rows_value(one.name_rows, "jet_rt_free") ?? -2)
+        assert_eq(ir_keyed_function(eight, "test:slot.jet.use3") ?? -1, 5)
+        assert_eq(ir_interned_name(eight, "jet_rt_free") ?? -1, ir_interned_name(one, "jet_rt_free") ?? -2)
     }
 }
 

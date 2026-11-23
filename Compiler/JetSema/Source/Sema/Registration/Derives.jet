@@ -54,6 +54,7 @@ use {
         NamedCtValue,
         NamedSpan,
         NamedType,
+        NameTable,
         OrFallback,
         Param,
         ParamZone,
@@ -104,6 +105,10 @@ use {
         diagnostic_sentence_case_line,
         expr_source_span,
         expr_span,
+        name_find,
+        name_index,
+        name_intern,
+        name_table_sized,
         owned_trait_codec,
         owned_trait_implies,
         owned_trait_requested,
@@ -2380,66 +2385,95 @@ sema_derive_has_name: fn(derives: [NamedSpan], name: String) -> Bool {
 
 // Membership facts over one module's items, built once per expansion so
 // readiness, selection, and the codec expansion ask keyed questions instead of
-// rescanning items. `trait_impls` maps an impl key to its sources
-// (sema_derive_impl_flags); `nominals` maps a name to its first struct, enum,
-// or distinct position. `codec_methods` holds the (type, Encode/Decode) impl
-// keys whose type declares that codec's method name (`encode`, `decode`) as an
-// ordinary method: the generated codec would be a second member of that name,
-// so the package default never selects it (an explicit marker still asks).
+// rescanning items. `keys` interns impl keys and declared names; the columns
+// hold each id's facts (row 0, the empty text, holds none). `impl_flags` holds
+// an impl key's sources (sema_derive_impl_flags, 0 for none); `nominal_rows` a
+// name's first struct, enum, or distinct position (-1 for none); `distinct`
+// whether a name declares a distinct type. `codec_method` marks the (type,
+// Encode/Decode) impl keys whose type declares that codec's method name
+// (`encode`, `decode`) as an ordinary method: the generated codec would be a
+// second member of that name, so the package default never selects it (an
+// explicit marker still asks).
 SemaDeriveItemIndex: struct {
-    trait_impls: [String:Int],
-    nominals: [String:Int],
-    distincts: [String:Bool],
-    codec_methods: [String:Bool],
+    keys: NameTable,
+    impl_flags: [Int],
+    nominal_rows: [Int],
+    distinct: [Bool],
+    codec_method: [Bool],
 }
 
 sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
-    index := SemaDeriveItemIndex{trait_impls: [String:Int]{}, nominals: [String:Int]{}, distincts: [String:Bool]{}, codec_methods: [String:Bool]{}}
+    index := SemaDeriveItemIndex{keys: name_table_sized(items.len() * 2 + 4), impl_flags: [Int]{0}, nominal_rows: [Int]{-1}, distinct: [Bool]{false}, codec_method: [Bool]{false}}
     loop (position, item) in items {
         if item == {
             .Impl(definition) -> {
-                key: sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")
-                index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), definition.is_generated_serde)
+                id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? ""))
+                index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], definition.is_generated_serde)
                 if !sema_derive_is_codec_trait(definition.trait_name ?? "") {
                     sema_derive_index_codec_methods(index, definition.type_name, definition.methods)
                 }
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
-                    key: sema_type_metadata_impl_key(definition.name, block.trait_name)
-                    index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.name, block.trait_name))
+                    index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], block.compiler_generated)
                     if !sema_derive_is_codec_trait(block.trait_name) {
                         sema_derive_index_codec_methods(index, definition.name, block.methods)
                     }
                 }
                 sema_derive_index_codec_methods(index, definition.name, definition.methods)
-                if index.nominals.get(definition.name) == None {
-                    index.nominals[definition.name] = position
-                }
+                sema_derive_index_nominal(index, definition.name, position)
             }
             .Enum(definition) -> {
                 loop block in definition.trait_impls {
-                    key: sema_type_metadata_impl_key(definition.name, block.trait_name)
-                    index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    id: sema_derive_index_id(index, sema_type_metadata_impl_key(definition.name, block.trait_name))
+                    index.impl_flags[id] = sema_derive_impl_flags(index.impl_flags[id], block.compiler_generated)
                     if !sema_derive_is_codec_trait(block.trait_name) {
                         sema_derive_index_codec_methods(index, definition.name, block.methods)
                     }
                 }
                 sema_derive_index_codec_methods(index, definition.name, definition.methods)
-                if index.nominals.get(definition.name) == None {
-                    index.nominals[definition.name] = position
-                }
+                sema_derive_index_nominal(index, definition.name, position)
             }
             .Distinct(definition) -> {
-                index.distincts[definition.name] = true
-                if index.nominals.get(definition.name) == None {
-                    index.nominals[definition.name] = position
-                }
+                index.distinct[sema_derive_index_id(index, definition.name)] = true
+                sema_derive_index_nominal(index, definition.name, position)
             }
             .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     index
+}
+
+// The id of `key` in `index`, interned with empty facts when new.
+sema_derive_index_id: fn(index: &SemaDeriveItemIndex, key: String) -> Int Never! {
+    id: name_index(name_intern(index.keys, key))
+    if id == index.impl_flags.len() {
+        index.impl_flags.push(0)
+        index.nominal_rows.push(-1)
+        index.distinct.push(false)
+        index.codec_method.push(false)
+    }
+    id
+}
+
+// The id of `key` in `index`, or 0 (no facts) when no item names it.
+sema_derive_index_find: fn(index: SemaDeriveItemIndex, key: String) -> Int Never! {
+    found: name_find(index.keys, key) ?? return 0
+    name_index(found)
+}
+
+sema_derive_index_nominal: fn(index: &SemaDeriveItemIndex, name: String, position: Int) Never! {
+    id: sema_derive_index_id(index, name)
+    if index.nominal_rows[id] < 0 -> index.nominal_rows[id] = position
+}
+
+// The position of the first struct, enum, or distinct `index` declares as
+// `name`.
+sema_derive_nominal_row: fn(index: SemaDeriveItemIndex, name: String) -> Int? Never! {
+    row: index.nominal_rows[sema_derive_index_find(index, name)]
+    if row < 0 -> return None
+    Val(row)
 }
 
 // An `Encode`/`Decode` impl is the codec itself; any other impl's `encode` or
@@ -2451,10 +2485,10 @@ sema_derive_is_codec_trait: fn(trait_name: String) -> Bool Never! {
 sema_derive_index_codec_methods: fn(index: &SemaDeriveItemIndex, type_name: String, methods: [Func]) {
     loop method in methods {
         if method.name == "encode" {
-            index.codec_methods[sema_type_metadata_impl_key(type_name, "Encode")] = true
+            index.codec_method[sema_derive_index_id(index, sema_type_metadata_impl_key(type_name, "Encode"))] = true
         }
         if method.name == "decode" {
-            index.codec_methods[sema_type_metadata_impl_key(type_name, "Decode")] = true
+            index.codec_method[sema_derive_index_id(index, sema_type_metadata_impl_key(type_name, "Decode"))] = true
         }
     }
 }
@@ -2462,15 +2496,21 @@ sema_derive_index_codec_methods: fn(index: &SemaDeriveItemIndex, type_name: Stri
 // The sources of one (type, trait) impl key: bit 1 a written impl item or
 // inline trait block, bit 2 a compiler-generated one (a generated codec impl
 // item, or a derived inline block).
-sema_derive_impl_flags: fn(existing: Int?, generated: Bool) -> Int Never! {
-    flags: existing ?? 0
+sema_derive_impl_flags: fn(existing: Int, generated: Bool) -> Int Never! {
+    flags: existing
     bit: if generated -> 2 else -> 1
     if flags == 3 || flags == bit -> return flags
     flags + bit
 }
 
 sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {
-    index.trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) != None
+    index.impl_flags[sema_derive_index_find(index, sema_type_metadata_impl_key(type_name, trait_name))] != 0
+}
+
+// Whether `index`'s type `type_name` declares the method `trait_name`'s
+// generated codec would add (sema_derive_index_codec_methods).
+sema_derive_has_codec_method: fn(index: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Bool {
+    index.codec_method[sema_derive_index_find(index, sema_type_metadata_impl_key(type_name, trait_name))]
 }
 
 // ---------------------------------------------------------------------------
@@ -2483,15 +2523,31 @@ sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, tr
 // qualifies when the graph's own fixed point gives that type the codec
 // (sema_derive_foreign_codecs), read from `foreign` ("{trait}|{leaf}"). The
 // graph's fixed point runs over every module at once (`global`), each
-// candidate read against its own module's index (`indexes[module]`).
+// candidate read against its own module's index (`indexes[module]`). Each
+// candidate's name is in `candidate_names`, its node at its id in
+// `candidate_nodes` (-1 for none).
 SemaDeriveReadiness: struct {
     indexes: [SemaDeriveItemIndex],
     module: Int,
     trait_name: String,
-    candidates: [String:Int],
+    candidate_names: NameTable,
+    candidate_nodes: [Int],
     relied_on: [Int],
-    foreign: [String:Bool],
+    foreign: NameTable,
     global: Bool,
+}
+
+// The node of the candidate named `name`.
+sema_derive_candidate: fn(readiness: SemaDeriveReadiness, name: String) -> Int? Never! {
+    found: name_find(readiness.candidate_names, name) ?? return None
+    node: readiness.candidate_nodes[name_index(found)]
+    if node < 0 -> return None
+    Val(node)
+}
+
+sema_derive_candidate_add: fn(readiness: &SemaDeriveReadiness, name: String, node: Int) Never! {
+    id: name_index(name_intern(readiness.candidate_names, name))
+    if id == readiness.candidate_nodes.len() -> readiness.candidate_nodes.push(node) else -> readiness.candidate_nodes[id] = node
 }
 
 sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
@@ -2526,7 +2582,7 @@ sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name:
     if owned_trait_implies("KeyBy", readiness.trait_name) && sema_derive_has_trait_impl(readiness.indexes[readiness.module], name, "KeyBy") {
         return true
     }
-    if readiness.candidates.get(name) == .Val(node) {
+    if sema_derive_candidate(readiness, name) == .Val(node) {
         readiness.relied_on.push(node)
         return true
     }
@@ -2534,7 +2590,7 @@ sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name:
     if sema_derive_has_trait_impl(readiness.indexes[readiness.module], name, readiness.trait_name) {
         return true
     }
-    position: readiness.indexes[readiness.module].nominals.get(name) ?? return sema_derive_foreign_ready(readiness, name)
+    position: sema_derive_nominal_row(readiness.indexes[readiness.module], name) ?? return sema_derive_foreign_ready(readiness, name)
     if items[position] == {
         .Struct(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Enum(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
@@ -2549,11 +2605,11 @@ sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name:
 sema_derive_foreign_ready: fn(readiness: &SemaDeriveReadiness, name: String) -> Bool {
     if !owned_trait_codec(readiness.trait_name) -> return false
     leaf: sema_serde_named_leaf(name)
-    if readiness.global && readiness.candidates.get(leaf) == .Val(node) {
+    if readiness.global && sema_derive_candidate(readiness, leaf) == .Val(node) {
         readiness.relied_on.push(node)
         return true
     }
-    readiness.foreign.get("{readiness.trait_name}|{leaf}") != None
+    name_find(readiness.foreign, "{readiness.trait_name}|{leaf}") != None
 }
 
 sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
@@ -2673,8 +2729,9 @@ sema_derive_fields_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ite
 // declarations hold (sema_derive_foreign_codecs); empty for any other trait.
 // A distinct type is a candidate for a codec only: it codes as its base
 // unless `#!Codable` or a package denying auto_derive refuses it.
-sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: [String:Bool]) -> [String:Bool] {
-    readiness := SemaDeriveReadiness{indexes: [SemaDeriveItemIndex]{index}, module: 0, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}, foreign: foreign, global: false}
+// The result holds the names of the selected declarations.
+sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: NameTable) -> NameTable {
+    readiness := SemaDeriveReadiness{indexes: [SemaDeriveItemIndex]{index}, module: 0, trait_name: trait_name, candidate_names: name_table_sized(items.len() + 1), candidate_nodes: [Int]{-1}, relied_on: [Int]{}, foreign: foreign, global: false}
     names := [String]{}
     nodes := [Item]{}
     loop item in items {
@@ -2698,10 +2755,10 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
                 next
             }
         }
-        if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) || sema_derive_has_trait_impl(index, name, "KeyBy") || index.codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None {
+        if !requested || sema_derive_candidate(readiness, name) != None || sema_derive_has_trait_impl(index, name, trait_name) || sema_derive_has_trait_impl(index, name, "KeyBy") || sema_derive_has_codec_method(index, name, trait_name) {
             next
         }
-        readiness.candidates[name] = names.len()
+        sema_derive_candidate_add(readiness, name, names.len())
         names.push(name)
         nodes.push(item.copy())
     }
@@ -2720,9 +2777,9 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
         } else { failed[node] = true }
     }
     sema_derive_fail_dependents(failed, dependents)
-    selected := [String:Bool]{}
+    selected := name_table_sized(names.len() + 1)
     loop (node, name) in names {
-        if !failed[node] -> selected[name] = true
+        if !failed[node] -> _ := name_intern(selected, name)
     }
     selected
 }
@@ -2792,7 +2849,7 @@ sema_derive_foreign_scan_spawn: fn(inputs: [SemaRegistrationModuleInput], part: 
     }
 }
 
-sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: CompilerThreads) -> [[String:Bool]] {
+sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: CompilerThreads) -> [NameTable] {
     indexes := [SemaDeriveItemIndex]{}
     held_names := [[String]]{}
     workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
@@ -2803,17 +2860,17 @@ sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: C
     } else {
         sema_derive_foreign_scan_spawn(inputs, 0, workers, indexes, held_names)
     }
-    readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidates: [String:Int]{}, relied_on: [Int]{}, foreign: [String:Bool]{}, global: true}
-    ready := [String:Bool]{}
+    readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidate_names: name_table_sized(4), candidate_nodes: [Int]{-1}, relied_on: [Int]{}, foreign: name_table_sized(4), global: true}
+    ready := name_table_sized(inputs.len() * 4 + 4)
     codecs: [String]{"Encode", "Decode"}
     loop trait_name in codecs -> sema_derive_codec_ready(readiness, inputs, trait_name, ready)
-    tables := [[String:Bool]]{}
+    tables := [NameTable]{}
     loop names in held_names {
-        table := [String:Bool]{}
+        table := name_table_sized(names.len() * 2 + 1)
         loop name in names {
             loop trait_name in codecs {
                 key: "{trait_name}|{name}"
-                if ready.get(key) != None -> table[key] = true
+                if name_find(ready, key) != None -> _ := name_intern(table, key)
             }
         }
         tables.push(table.move())
@@ -2826,10 +2883,11 @@ sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: C
 // structural auto-derive selects it over every module at once, as
 // sema_derive_auto_selected does over one, a type alias when the type it
 // names does. Each candidate's fields are read against its own module.
-sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegistrationModuleInput], trait_name: String, ready: &[String:Bool]) {
+sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegistrationModuleInput], trait_name: String, ready: &NameTable) {
     readiness.trait_name = trait_name
-    readiness.candidates = [String:Int]{}
-    readiness.foreign = [String:Bool]{}
+    readiness.candidate_names = name_table_sized(inputs.len() * 4 + 4)
+    readiness.candidate_nodes = [Int]{-1}
+    readiness.foreign = name_table_sized(16)
     written := [String]{}
     names := [String]{}
     node_modules := [Int]{}
@@ -2873,16 +2931,16 @@ sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegist
                 written.push("{trait_name}|{name}")
                 next
             }
-            if !requested || readiness.candidates.get(name) != None || readiness.indexes[module_index].codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None {
+            if !requested || sema_derive_candidate(readiness, name) != None || sema_derive_has_codec_method(readiness.indexes[module_index], name, trait_name) {
                 next
             }
-            readiness.candidates[name] = names.len()
+            sema_derive_candidate_add(readiness, name, names.len())
             names.push(name)
             node_modules.push(module_index)
             node_positions.push(position)
         }
     }
-    loop key in written -> readiness.foreign[key] = true
+    loop key in written -> _ := name_intern(readiness.foreign, key)
     failed := [Bool]{}
     dependents := [[Int]]{}
     loop _ in names {
@@ -2900,9 +2958,9 @@ sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegist
     }
     sema_derive_fail_dependents(failed, dependents)
     loop (node, name) in names {
-        if !failed[node] -> ready["{trait_name}|{name}"] = true
+        if !failed[node] -> _ := name_intern(ready, "{trait_name}|{name}")
     }
-    loop key in written -> ready[key] = true
+    loop key in written -> _ := name_intern(ready, key)
 }
 
 // The nominal leaf names a declaration's stored fields, variant payloads,
@@ -2948,8 +3006,8 @@ sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic])
 // kept in `memo`.
 sema_derive_expand_builtin_items_with: fn(items: &[Item], diagnostics: &[Diagnostic], memo: &SemaDeriveMemo) {
     facts: sema_derive_item_index(items)
-    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", [String:Bool]{})
-    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", [String:Bool]{})
+    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", name_table_sized(4))
+    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", name_table_sized(4))
     generated := [Item]{}
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
@@ -3193,12 +3251,26 @@ sema_derive_distinct_forward_error: fn(name: String, base: String, trait_name: S
 
 // The forwarding impls registration generates for the distinct types in
 // `items` (sema_derive_expand_builtin_items over the same items), formatted
-// as Jet source and keyed by the distinct's name. Printing, the codec and
-// arithmetic forward natively and generate no members. A checked module's
-// items already hold those impls, each at its distinct's name span; they
-// are left out first so the expansion generates them again instead of
-// treating them as written impls.
-sema_derive_distinct_forward_source: fn(items: [Item]) -> [String:String] {
+// as Jet source: each distinct with generated members is in `names`, its
+// source at its id in `sources`.
+SemaDistinctForwards: struct {
+    names: NameTable,
+    sources: [String],
+}
+
+// The forwarded source `forwards` holds for distinct `name`.
+sema_derive_distinct_forward: fn(forwards: SemaDistinctForwards, name: String) -> String? Never! {
+    if name == "" -> return None
+    found: name_find(forwards.names, name) ?? return None
+    Val(forwards.sources[name_index(found)])
+}
+
+// The forwarding impls of the distinct types in `items` (SemaDistinctForwards).
+// Printing, the codec and arithmetic forward natively and generate no
+// members. A checked module's items already hold those impls, each at its
+// distinct's name span; they are left out first so the expansion generates
+// them again instead of treating them as written impls.
+sema_derive_distinct_forward_source: fn(items: [Item]) -> SemaDistinctForwards {
     names := [String]{}
     name_spans := [Span]{}
     loop item in items {
@@ -3207,7 +3279,7 @@ sema_derive_distinct_forward_source: fn(items: [Item]) -> [String:String] {
             name_spans.push(definition.name_span)
         }
     }
-    output := [String:String]{}
+    output := SemaDistinctForwards{names: name_table_sized(names.len() + 1), sources: [String]{""}}
     if names.len() == 0 -> return output
     expanded := [Item]{}
     loop item in items {
@@ -3229,7 +3301,11 @@ sema_derive_distinct_forward_source: fn(items: [Item]) -> [String:String] {
                 if implementation.type_name == name -> generated.push(expanded[index].copy())
             }
         }
-        if generated.len() > 0 -> output[name] = sema_build_generate_format(generated)
+        if generated.len() > 0 {
+            id: name_index(name_intern(output.names, name))
+            text: sema_build_generate_format(generated)
+            if id == output.sources.len() -> output.sources.push(text) else -> output.sources[id] = text
+        }
     }
     output
 }
@@ -3374,7 +3450,7 @@ sema_derive_computed_getters: fn(items: &[Item]) {
             rewrite := sema_inline_rewrite_empty()
             loop field in definition.fields {
                 receiver: Expr.Ident{name: "self", span: field.name_span, id: AST_NODE_GENERATED}
-                rewrite.values[field.name] = Expr.Field{base: receiver, member: field.name, span: field.name_span, id: AST_NODE_GENERATED}
+                sema_inline_value_put(rewrite.values, field.name, Expr.Field{base: receiver, member: field.name, span: field.name_span, id: AST_NODE_GENERATED})
             }
             getters := [Func]{}
             loop field in definition.fields {
@@ -3506,14 +3582,14 @@ sema_computed_field_param: fn(name: String, ty: Type, span: Span) -> Param Never
 
 // The derived trait impls of a struct or enum `item`, in trait order. A
 // distinct's impls join `generated` as separate impl items instead.
-sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: [String:Bool], auto_comparable: [String:Bool], generated: &[Item], memo: &SemaDeriveMemo, diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
+sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equatable: NameTable, auto_comparable: NameTable, generated: &[Item], memo: &SemaDeriveMemo, diagnostics: &[Diagnostic]) -> [TraitImplBlock] {
     blocks := [TraitImplBlock]{}
     if item == {
         .Struct(definition) -> {
             // A KeyBy type is equal and ordered by its key alone.
             keyed: sema_derive_has_trait_impl(facts, definition.name, "KeyBy")
-            equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
-            comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
+            equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || name_find(auto_equatable, definition.name) != None
+            comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
             type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_struct_type_info(definition)
@@ -3526,8 +3602,8 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
         }
         .Enum(definition) -> {
             keyed: sema_derive_has_trait_impl(facts, definition.name, "KeyBy")
-            equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || auto_equatable.get(definition.name) != None
-            comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || auto_comparable.get(definition.name) != None
+            equatable: keyed || sema_derive_has_name(definition.derives, "Equatable") || name_find(auto_equatable, definition.name) != None
+            comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
             type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_enum_type_info(definition)
@@ -3542,7 +3618,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             // A distinct over another distinct is rejected elsewhere; it
             // derives nothing here.
             if definition.base == .Named(base) {
-                if facts.distincts.get(base) != None -> return blocks.move()
+                if facts.distinct[sema_derive_index_find(facts, base)] -> return blocks.move()
             }
             owner_type: Type.Named{name: definition.name}
             type_info: sema_derive_distinct_type_info(definition)

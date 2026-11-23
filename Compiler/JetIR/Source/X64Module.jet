@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -919,11 +919,11 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         }
     }
     count: m.functions.len()
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
-    zone_plot: name_rows_value(m.name_rows, "jet_perf_plot_float") ?? -1
-    zone_frame: name_rows_value(m.name_rows, "jet_perf_frame") ?? -1
+    poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+    trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
+    turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
+    zone_plot: ir_interned_name(m, "jet_perf_plot_float") ?? -1
+    zone_frame: ir_interned_name(m, "jet_perf_frame") ?? -1
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.select", "", -1, -1)
     weights := [Int]{}
     weights.try_reserve(count) ?? panic("reserve failed")
@@ -1411,7 +1411,7 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
         type_copy_clones.push(has_d && k != O0_KIND_AGGREGATE && !ir_clone_shares(ty.clone))
         type_clone_is_int.push(k == O0_KIND_INT || ty.clone == "jet_rt_int_clone")
         if has_d {
-            if name_rows_value(m.function_rows, ty.drop) == .Val(fid) {
+            if ir_keyed_function(m, ty.drop) == .Val(fid) {
                 type_drop_fn.push(fid)
                 type_drop_rt_id.push(-1)
             } else {
@@ -2262,7 +2262,7 @@ ir_x64_library_object_into: fn(owned: &IRX64Result, exports: [IRLibraryExport], 
 // The global symbol of a library's site registration: the init array names
 // it, so each library's is its own, from the names of its functions.
 ir_x64_zone_sites_symbol: fn(m: IRModule) -> String Never! {
-    digest: sha256_hex(m.function_rows.texts.join("\n"))
+    digest: sha256_hex(m.function_rows_keys.texts.join("\n"))
     "{IR_X64_ZONE_SITES_NAME}_{digest.slice(0..<16)}"
 }
 

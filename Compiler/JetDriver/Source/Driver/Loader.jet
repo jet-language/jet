@@ -75,6 +75,7 @@ use {
         name_index,
         name_intern,
         name_table,
+        name_table_sized,
         name_pool_adopt,
         name_pool_fold,
         ImportedItem,
@@ -3476,7 +3477,7 @@ jet_driver_namespace_reach: fn(modules: &[JetDriverLoadedModule], source_units: 
     default_has := [Bool]{false}
     default_entries := [{key: String, slot: Int}]{}
     default_words := [[String]]{}
-    default_seen := [[String:Bool]]{}
+    default_seen := [NameTable]{}
     loop region in regions {
         id: name_index(name_intern(default_table, region.key))
         loop default_has.len() <= id -> default_has.push(false)
@@ -3485,7 +3486,7 @@ jet_driver_namespace_reach: fn(modules: &[JetDriverLoadedModule], source_units: 
         slot: default_words.len()
         default_entries.push({key: region.key, slot: slot})
         default_words.push([String]{})
-        default_seen.push([String:Bool]{})
+        default_seen.push(name_table_sized(64))
     }
     default_entries.sort_by(fn(left: {key: String, slot: Int}, right: {key: String, slot: Int}) { left.key <=> right.key })
     default_slots := [String:Int]{}
@@ -3617,12 +3618,13 @@ jet_driver_reach_part: fn(inputs: Shared<JetDriverReachShared>, part: Shared<Jet
 // then those the defaults they key splice in, closed over defaults of
 // defaults; a word another member of its package declares is a ref.
 jet_driver_member_reach: fn(inputs: JetDriverReachShared, job: JetDriverReachJob) -> [String] Never! {
-    seen := [String:Bool]{}
+    // Source words are never empty, so the table's id 0 never answers.
+    seen := name_table_sized(256)
     words := [String]{}
     sema_source_wanted_words(job.source.bytes(), inputs.wanted[job.table_index], seen, words)
     loop word in inputs.always {
-        if seen.get(word) != None -> next
-        seen[word] = true
+        known: name_count(seen)
+        if name_index(name_intern(seen, word)) < known -> next
         words.push(word.copy())
     }
     refs := [String]{}
@@ -3635,8 +3637,8 @@ jet_driver_member_reach: fn(inputs: JetDriverReachShared, job: JetDriverReachJob
         }
         slot: inputs.default_slots.get(word) ?? next
         loop extra in inputs.default_words[slot] {
-            if seen.get(extra) != None -> next
-            seen[extra] = true
+            known_extra: name_count(seen)
+            if name_index(name_intern(seen, extra)) < known_extra -> next
             words.push(extra.copy())
         }
     }
@@ -6422,13 +6424,13 @@ jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, 
 // come from any source, so this is known only once every source is loaded.
 // Core declares no record and reads none.
 jet_driver_module_meta_needed: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule]) -> Bool Never! {
-    names := [String:Bool]{}
+    names := name_table_sized(2)
     loop module_row in modules {
         if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         sema_module_meta_declared_names(module_row.program.items, module_row.declared_module, names)
     }
-    if names.len() == 0 -> return false
-    reads := [String:Bool]{}
+    if name_count(names) <= 1 -> return false
+    reads := name_table_sized(2)
     loop module_row in modules {
         if jet_driver_unit_is_embedded(source_units[module_row.source_unit_index]) -> next
         sema_module_meta_value_reads(jet_driver_source_unit_text(request, source_units[module_row.source_unit_index]) ?? "", names, reads)

@@ -78,14 +78,11 @@ use jet_foundation.[
     FnBody,
     Interner,
     Name,
-    NameRows,
     NameTable,
     name_count,
     name_find,
+    name_index,
     name_intern,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set,
     name_table,
     name_table_sized,
     name_text,
@@ -164,7 +161,7 @@ SemaLocalSpliceDemand: struct {
 }
 
 sema_local_splice_demand_empty: fn() -> SemaLocalSpliceDemand Never! {
-    SemaLocalSpliceDemand{codecs: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derived: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
+    SemaLocalSpliceDemand{codecs: Shared{sema_codec_demand_new()}, derived: Shared{sema_derive_demand_new()}}
 }
 
 // A demand that starts as `graph`'s holds now and is recorded apart from
@@ -173,7 +170,11 @@ sema_local_splice_demand_empty: fn() -> SemaLocalSpliceDemand Never! {
 sema_local_splice_demand_snapshot: fn(graph: SemaRegistrationGraph) -> SemaLocalSpliceDemand {
     codecs: graph.codec_demand.guard_read()
     derived: graph.derive_demand.guard_read()
-    SemaLocalSpliceDemand{codecs: Shared{SemaCodecDemand{keys: codecs.value.keys.copy(), order: codecs.value.order.copy()}}, derived: Shared{SemaDeriveDemand{keys: derived.value.keys.copy()}}}
+    // copy: the snapshot is recorded into apart from the graph's demand.
+    codec_keys := codecs.value.copy()
+    codec_keys.capturing = false
+    codec_keys.captured = [String]{}
+    SemaLocalSpliceDemand{codecs: Shared{codec_keys.move()}, derived: Shared{SemaDeriveDemand{keys: derived.value.keys.copy()}}}
 }
 
 // Makes `next` the demand the graph's checks record into and returns the
@@ -191,20 +192,27 @@ sema_local_splice_demand_swap: fn(graph: &SemaRegistrationGraph, next: &&SemaLoc
 sema_local_splice_same_demand: fn(before: SemaLocalSpliceDemand, after: SemaLocalSpliceDemand) -> Bool {
     before_codecs: before.codecs.guard_read()
     after_codecs: after.codecs.guard_read()
-    if !sema_local_splice_same_keys(before_codecs.value.keys, after_codecs.value.keys) {
+    if !sema_local_splice_same_codecs(before_codecs.value, after_codecs.value) {
         return false
     }
     before_derived: before.derived.guard_read()
     after_derived: after.derived.guard_read()
-    sema_local_splice_same_keys(before_derived.value.keys, after_derived.value.keys)
+    sema_local_splice_same_names(before_derived.value.keys, after_derived.value.keys)
 }
 
-sema_local_splice_same_keys: fn(before: [String:Bool], after: [String:Bool]) -> Bool Never! {
-    if before.len() != after.len() -> return false
-    loop (key, _) in before {
-        if after.get(key) == None -> return false
+// Whether two codec demands stand for the same requirements.
+sema_local_splice_same_codecs: fn(before: SemaCodecDemand, after: SemaCodecDemand) -> Bool Never! {
+    count := 0
+    loop id in 1..<before.present.len() {
+        if !before.present[id] -> next
+        count += 1
+        name: name_find(after.keys, before.keys.texts[id]) ?? return false
+        if !after.present[name_index(name)] -> return false
     }
-    true
+    loop id in 1..<after.present.len() {
+        if after.present[id] -> count -= 1
+    }
+    count == 0
 }
 
 sema_local_splice_same_names: fn(before: NameTable, after: NameTable) -> Bool Never! {
@@ -416,13 +424,12 @@ sema_local_splice_drop_diagnostics: fn(diagnostics: &[Diagnostic], dropped: [Str
 }
 
 // The position of the one function of each key of `functions`, -1 for a key
-// more than one function has.
-sema_local_splice_slots: fn(functions: [FnBody]) -> NameRows Never! {
-    slots := name_rows(functions.len() + 1)
+// more than one function has (sema_comptime_key_row reads it).
+sema_local_splice_slots: fn(functions: [FnBody]) -> SemaComptimeKeyRows Never! {
+    slots := SemaComptimeKeyRows{keys: name_table_sized(functions.len() + 1), rows: [Int]{-1}}
     loop index in 0..<functions.len() {
-        key: functions[index].key
-        value: if name_rows_get_text(slots, key) == None -> index else -> -1
-        name_rows_set(slots, key, value)
+        id: name_index(name_intern(slots.keys, functions[index].key))
+        if id == slots.rows.len() -> slots.rows.push(index) else -> slots.rows[id] = -1
     }
     slots
 }
@@ -497,7 +504,7 @@ sema_local_splice_valued: fn(landed: NameTable, after: [SemaModuleBodyRows]) -> 
 // site that got a value (sema_local_splice_valued), and `computed` those of
 // them whose value is not a failure (sema_local_splice_computed).
 SemaLocalSpliceSites: struct {
-    owners: [String:Bool],
+    owners: NameTable,
     valued: NameTable,
     computed: NameTable,
 }
@@ -539,7 +546,7 @@ sema_local_splice_holds: fn(interner: Interner, modules: [SemaGraphModuleResult]
         settled_owners += hold.settled
         aside.push(hold.rows.move())
     }
-    if settled_owners != sites.owners.len() -> return Val("owners")
+    if settled_owners != name_count(sites.owners) - 1 -> return Val("owners")
     None
 }
 
@@ -684,11 +691,11 @@ sema_local_splice_hold_bodies: fn(interner: Interner, finalized: [FnBody], sites
     loop index > 0 {
         index -= 1
         if new.functions[index].key != rows.functions[index].key -> return Val("bodies")
-        if sites.owners.get(rows.functions[index].key) == None {
+        if name_find(sites.owners, rows.functions[index].key) == None {
             if rows.functions[index] != new.functions[index] -> return Val("bodies")
             next
         }
-        slot: name_rows_get_text(slots, rows.functions[index].key) ?? -1
+        slot: sema_comptime_key_row(slots, rows.functions[index].key) ?? -1
         if slot < 0 -> return Val("bodies")
         if stamped -> sema_local_splice_settle(interner, rows.functions[index], finalized[slot])
         if rows.functions[index] != finalized[slot] -> return Val("finalized_bodies")
@@ -728,13 +735,13 @@ sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: NameTable) -> 
 }
 
 // Whether the pass's comptime functions name a Core body that waits for
-// demand (graph.core_demand_rows), checked or not. A compile that lowers
+// demand (graph.core_demand), checked or not. A compile that lowers
 // seeds its Core demand with what they name (sema_core_demand_waves), so
 // the full recheck checks it as their demand and solves its failure facts
 // again, which may restamp it and the bodies that call it; any compile
 // refuses a splice into a finalized result then.
 sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
-    if graph.core_demand_rows.len() == 0 -> return false
+    if !sema_core_demand_any(graph.core_demand) -> return false
     names := sema_core_demand_names_new()
     loop result in functions {
         if result.function == .Val(function) {
@@ -747,14 +754,14 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
         }
     }
     loop key in names.keys {
-        if graph.core_demand_rows.get(key) != None || graph.core_demand_rows.get(sema_core_demand_template_key(key)) != None {
+        if sema_core_demand_row(graph.core_demand, key) != None || sema_core_demand_row(graph.core_demand, sema_core_demand_template_key(key)) != None {
             return true
         }
     }
     false
 }
 
-// The Core bodies that wait for demand (graph.core_demand_rows) the owner
+// The Core bodies that wait for demand (graph.core_demand) the owner
 // bodies of `rows` name (sema_core_demand_body_keys), each key as
 // sema_core_demand_key looks it up, itself and its template, but for those
 // whose template a call fact of `rows` names: the two checks record the
@@ -762,14 +769,14 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
 // its initializer, so its owner body no longer names what the initializer
 // named outside its calls, such as the template items of a call at type
 // arguments.
-sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModuleBodyRows], owners: [String:Bool]) -> NameTable Never! {
+sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModuleBodyRows], owners: NameTable) -> NameTable Never! {
     named := name_table_sized(16)
-    if graph.core_demand_rows.len() == 0 -> return named
+    if !sema_core_demand_any(graph.core_demand) -> return named
     names := sema_core_demand_names_new()
     called := name_table_sized(32)
     loop module_rows in rows {
         loop function in module_rows.functions {
-            if owners.get(function.key) != None {
+            if name_find(owners, function.key) != None {
                 sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
             }
         }
@@ -784,8 +791,8 @@ sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModule
         key := keys.pop() ?? break
         template := sema_core_demand_template_key(key)
         if name_find(called, template) != None -> next
-        if graph.core_demand_rows.get(key) != None -> _ := name_intern(named, key)
-        if graph.core_demand_rows.get(template) != None -> _ := name_intern(named, template)
+        if sema_core_demand_row(graph.core_demand, key) != None -> _ := name_intern(named, key)
+        if sema_core_demand_row(graph.core_demand, template) != None -> _ := name_intern(named, template)
     }
     named
 }
@@ -974,7 +981,7 @@ sema_local_splice_owners: fn(
     facts: &[SemaPassFacts],
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
-    owners := [String:Bool]{}
+    owners := name_table_sized(16)
     owner_module := loop _ in modules -> false
     found := name_table_sized(name_count(landed) + 1)
     loop module_index in 0..<modules.len() {
@@ -983,7 +990,7 @@ sema_local_splice_owners: fn(
             if name_find(landed, site) == None -> next
             if source.function_key == "" -> return sema_local_splice_none(graph)
             _ := name_intern(found, site)
-            owners[source.function_key] = true
+            _ := name_intern(owners, source.function_key)
             owner_module[module_index] = true
         }
     }
@@ -991,13 +998,13 @@ sema_local_splice_owners: fn(
     // The module rows of each module identity, and the function slots
     // (sema_local_splice_slots) of a module once a result names it.
     identity_rows := [U32:[Int]]{}
-    module_slots := [NameRows]{}
+    module_slots := [SemaComptimeKeyRows]{}
     slots_built := [Bool]{}
     loop module_index in 0..<modules.len() {
         identity: modules[module_index].module_identity.id
         if !identity_rows.has_key(identity) -> identity_rows[identity] = [Int]{}
         identity_rows[identity].push(module_index)
-        module_slots.push(name_rows(0))
+        module_slots.push(SemaComptimeKeyRows{keys: name_table_sized(4), rows: [Int]{-1}})
         slots_built.push(false)
     }
     // A function the pass checked to run while compiling is not checked as a
@@ -1013,7 +1020,7 @@ sema_local_splice_owners: fn(
     // stays as the demand left it.
     earlier_rows: sema_comptime_checked_function_rows(earlier_functions)
     loop result in comptime_functions {
-        if earlier_rows.get("{result.module_identity.id}\n{result.function_key}") != None || owners.get(result.function_key) != None {
+        if sema_comptime_function_row(earlier_rows, result.module_identity, result.function_key) != None || name_find(owners, result.function_key) != None {
             next
         }
         named_rows: identity_rows.get(result.module_identity.id) ?? next
@@ -1022,9 +1029,9 @@ sema_local_splice_owners: fn(
                 module_slots[module_index] = sema_local_splice_slots(modules[module_index].functions)
                 slots_built[module_index] = true
             }
-            slot: name_rows_get_text(module_slots[module_index], result.function_key) ?? -1
+            slot: sema_comptime_key_row(module_slots[module_index], result.function_key) ?? -1
             if slot < 0 || modules[module_index].functions[slot].stand_in -> next
-            owners[result.function_key] = true
+            _ := name_intern(owners, result.function_key)
             owner_module[module_index] = true
         }
     }
@@ -1060,7 +1067,7 @@ sema_local_splice_owners: fn(
     after := sema_module_body_rows_take(modules, owner_modules)
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.compare", "", -1, -1)
     owners = graph.core_wave_rows.move()
-    graph.core_wave_rows = [String:Bool]{}
+    graph.core_wave_rows = name_table_sized(4)
     sema_module_body_rows_put(modules, owner_modules, held)
     // A landed local whose outcome is a run-time reason stays run-time code,
     // so it is still a site of the pass's check, as of the full recheck's;
@@ -1083,13 +1090,13 @@ sema_local_splice_owners: fn(
         !same_demand -> Val("demand")
         else -> sema_local_splice_holds(graph.interner, modules, owner_modules, sites, sema_local_splice_diagnostic_texts(replayed_diagnostics), before, after, into, dropped, aside.rows, threads)
     }
-    if trace_sink == .Val(sink) -> sink.end("sema.local_values.compare", sites.owners.len())
+    if trace_sink == .Val(sink) -> sink.end("sema.local_values.compare", name_count(sites.owners) - 1)
     if refusal == .Val(reason) {
-        sema_local_splice_refused(trace_sink, reason, sites.owners.len())
+        sema_local_splice_refused(trace_sink, reason, name_count(sites.owners) - 1)
         return sema_local_splice_none(graph)
     }
     if trace_sink == .Val(sink) {
-        sink.progress("counters.sema.local_values_spliced", sites.owners.len(), -1)
+        sink.progress("counters.sema.local_values_spliced", name_count(sites.owners) - 1, -1)
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.splice", "", -1, -1)
     stamped: sema_local_splice_stamped(into)
@@ -1106,11 +1113,11 @@ sema_local_splice_owners: fn(
         spliced := loop _ in modules[module_index].functions -> FnBody?{None}
         loop checked.len() > 0 {
             function := checked.pop() ?? break
-            if sites.owners.get(function.key) == None {
+            if name_find(sites.owners, function.key) == None {
                 aside.functions.push(function.move())
                 next
             }
-            slot: name_rows_get_text(slots, function.key) ?? -1
+            slot: sema_comptime_key_row(slots, function.key) ?? -1
             if slot < 0 -> panic("a spliced local value lost its owner function")
             if stamped -> sema_local_splice_settle(graph.interner, function, modules[module_index].functions[slot])
             spliced[slot] = Val(function.move())
@@ -1134,7 +1141,7 @@ sema_local_splice_owners: fn(
         sema_local_splice_unlanded(modules[module_index].comptime_body_sources, sites.valued, aside.sources)
     }
     sema_local_splice_release(aside, threads)
-    if trace_sink == .Val(sink) -> sink.end("sema.local_values.splice", sites.owners.len())
+    if trace_sink == .Val(sink) -> sink.end("sema.local_values.splice", name_count(sites.owners) - 1)
     SemaLocalValueSplice{graph: graph.move(), spliced: true, valued: sites.valued.move()}
 }
 

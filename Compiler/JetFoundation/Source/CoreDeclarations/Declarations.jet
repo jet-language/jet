@@ -187,6 +187,23 @@ core_decl_at: fn(line: Int, error: CoreDeclarationError) -> CoreDeclarationError
 
 // ---- Syntax constants ---------------------------------------------------
 
+// Texts by name: each name's latest text at its id in `names`.
+CoreDeclTexts: struct {
+    names: NameTable{name_table_sized(2)},
+    values: [String]{[String]{""}},
+}
+
+core_decl_text_of: fn(texts: CoreDeclTexts, name: String) -> String? Never! {
+    id: name_find(texts.names, name) ?? return None
+    if name_index(id) == 0 -> return None
+    Val(texts.values[name_index(id)])
+}
+
+core_decl_text_put: fn(texts: &CoreDeclTexts, name: String, value: &&String) Never! {
+    row: name_index(name_intern(texts.names, name))
+    if row == texts.values.len() -> texts.values.push(value.move()) else -> texts.values[row] = value.move()
+}
+
 // The text of a Jet string literal's content: braces doubled, escapes
 // `\n \r \t \\ \"`, the escapes the Jet lexer knows.
 core_decl_jet_string_text: fn(content: String, context: String) -> String CoreDeclarationError! {
@@ -227,8 +244,8 @@ core_decl_jet_string_text: fn(content: String, context: String) -> String CoreDe
 // The string constants of the Syntax registry, the names a dispatcher row
 // may spell instead of a literal: the `NAME: "text"` and
 // `NAME: String.from_bytes([U8]{…})` lines of every Syntax file.
-core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String:String] CoreDeclarationError! {
-    constants := [String:String]{}
+core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> CoreDeclTexts CoreDeclarationError! {
+    constants := CoreDeclTexts{}
     loop file in syntax {
         loop line in file.text.split("\n") {
             bytes: line.bytes()
@@ -239,7 +256,7 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String:String]
             if open < bytes.len() && (Int{bytes[open]}) == 34 {
                 close: core_decl_quote_end(bytes, open)
                 if close < 0 -> next
-                constants[name] = core_decl_jet_string_text(foundation_byte_text(bytes, open + 1, close), "{file.path} {name}") ?? return Err(err)
+                core_decl_text_put(constants, name, core_decl_jet_string_text(foundation_byte_text(bytes, open + 1, close), "{file.path} {name}") ?? return Err(err))
                 next
             }
             rest: core_decl_tail(line, open)
@@ -256,7 +273,7 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String:String]
                 text_bytes.push(U8{Int.parse(value) ?? 0})
             }
             if !listed -> next
-            constants[name] = String.from_bytes(text_bytes) ?? return Err(core_decl_fail("{file.path}: a String.from_bytes constant is not UTF-8"))
+            core_decl_text_put(constants, name, String.from_bytes(text_bytes) ?? return Err(core_decl_fail("{file.path}: a String.from_bytes constant is not UTF-8")))
         }
     }
     Ok(constants)
@@ -523,16 +540,16 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
 }
 
 // A `dispatcher_row`'s module or member may name a Syntax constant.
-core_decl_dispatcher_member: fn(member: String, constants: [String:String]) -> String Never! {
+core_decl_dispatcher_member: fn(member: String, constants: CoreDeclTexts) -> String Never! {
     if !core_decl_is_constant(member) -> return member.copy()
-    if constants.get(member) == .Val(value) && value != "" -> return value.copy()
+    if core_decl_text_of(constants, member) == .Val(value) && value != "" -> return value.copy()
     member.copy()
 }
 
 // `dispatcher_row <kind> <module|-> <member> | <expression>`, evaluated. The
 // record must carry the identity the row's labels name; a receiver row's
 // label is its method or one of its receiver types.
-core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, constants: [String:String]) -> CoreDeclarationDispatcher CoreDeclarationError! {
+core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, constants: CoreDeclTexts) -> CoreDeclarationDispatcher CoreDeclarationError! {
     kind: groups[0]
     written_module: groups[1]
     member: groups[2]
@@ -741,7 +758,7 @@ core_decl_register_public: fn(rows: [CoreDeclPublic], module_name: String, membe
 
 // What is wrong with the public dispatcher rows, or "". `expressions` are
 // the dispatcher rows' expressions, in row order.
-core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], constants: [String:String]) -> String CoreDeclarationError! {
+core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], constants: CoreDeclTexts) -> String CoreDeclarationError! {
     rows := [CoreDeclPublic]{}
     loop (index, row) in declared.dispatchers {
         expression: expressions[index]
@@ -903,7 +920,7 @@ core_decl_list_body: fn(source: String, anchor: String, path: String) -> String 
 
 // A list body's quoted strings and the values of the Syntax constants it
 // names, each once, sorted.
-core_decl_resolve_items: fn(body: String, constants: [String:String]) -> [String] Never! {
+core_decl_resolve_items: fn(body: String, constants: CoreDeclTexts) -> [String] Never! {
     out := [String]{}
     bytes: body.bytes()
     at := 0
@@ -929,7 +946,7 @@ core_decl_resolve_items: fn(body: String, constants: [String:String]) -> [String
         name: foundation_byte_text(bytes, start, index)
         start = -1
         if !core_decl_is_constant(name) -> next
-        if constants.get(name) == .Val(value) && !out.contains(value) -> out.push(value.copy())
+        if core_decl_text_of(constants, name) == .Val(value) && !out.contains(value) -> out.push(value.copy())
     }
     out.sort()
     out
@@ -943,7 +960,7 @@ core_decl_mem_tiers_body: fn(syntax: [CoreDeclarationFile]) -> String CoreDeclar
 
 // What is wrong with core.mem's exports, or "": they are exactly the named
 // items of the syntax registry's core.mem gate-tier map.
-core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], constants: [String:String]) -> String CoreDeclarationError! {
+core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], constants: CoreDeclTexts) -> String CoreDeclarationError! {
     tiers: core_decl_resolve_items(core_decl_mem_tiers_body(syntax) ?? return Err(err), constants)
     owner: core_declarations_module(declared.modules, "core.mem") ?? return Ok("{CORE_DECLARATIONS_CORE_PATH} declares no core.mem module")
     members := owner.members.copy()

@@ -17,7 +17,7 @@
 // heap first (ir_move_heap). So no part is served by a younger allocator
 // than the part holding it, and a part that need not move holds none that
 // does.
-use jet_foundation.[Span, Type, name_rows_set, name_rows_value]
+use jet_foundation.[Span, Type]
 
 // The runtime's move into the carrier word in a slot (0: the heap), and into
 // the allocator owning the storage an address slot names.
@@ -195,11 +195,11 @@ ir_move_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, o
 // moves its parts in place.
 ir_move_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#move<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("move", helper_key, "jet_ir_move_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     value: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     boxed: m.types[row].kind != .Aggregate
@@ -219,7 +219,7 @@ ir_move_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int N
     if a.error != "" {
         ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
-        name_rows_set(m.function_rows, helper_key, -1)
+        ir_function_bind(m, helper_key, -1)
         ir_fail(b, a.error_span, a.error)
         return -1
     }

@@ -15,14 +15,14 @@
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_intern, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_intern]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
-    poll := name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
-    turn := name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
+    poll := ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
+    turn := ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
-        poll = name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-        turn = name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+        poll = ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+        turn = ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
         if poll < 0 && turn < 0 {
             return
         }
@@ -144,12 +144,12 @@ ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Ne
 // entry versions, OptReduce.jet) read them, so a loop they left alone
 // before stays so.
 ir_opt_stops_hand_off: fn(f: &IRFunction, m: IRModule) Never! {
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
-    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
+    turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
         return
     }
-    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
+    trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -1
     count: f.op.len()
     // The poll whose drops and edge replace each handing Br (-1: none).
     into := [Int]{}
@@ -524,13 +524,13 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // ir_x64_zone_regions). The stop points' and the widening's ids are the
 // module's (ir_opt_view names them in `m`).
 ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
-    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
-    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
+    turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
         return
     }
-    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
-    widen: name_rows_value(m.name_rows, "jet_int_checked_widen") ?? -2
+    trap: ir_interned_name(m, IR_STOP_TRAP_KEY) ?? -1
+    widen: ir_interned_name(m, "jet_int_checked_widen") ?? -2
     folded := false
     loop at in 0..<f.op.len() {
         if !ir_opt_stops_any_poll(f, poll, turn, at) -> next
@@ -737,9 +737,9 @@ IRStripMineLoop: struct {
 
 ir_opt_strip_mine: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     if f.asm != None || f.cold || f.op.len() == 0 -> return 0
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
+    trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
+    turn: ir_keyed_function(m, IR_STOP_TURN_KEY) ?? -1
     ir_opt_strip_mine_with(m, f, poll, trap, turn)
 }
 

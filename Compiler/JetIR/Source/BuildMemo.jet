@@ -20,7 +20,7 @@
 // The store is the function's zeroed static cell. No stop check runs while the
 // lock is held: a stop the comparison publishes is taken at the next check
 // after unlock.
-use jet_foundation.[DeclID, FnBody, Span, Type, decl_id_index, name_rows_set, name_rows_value]
+use jet_foundation.[DeclID, FnBody, Span, Type, decl_id_index, name_column_set, name_column_value]
 
 IR_MEMO_CELL_BYTES: 48
 
@@ -151,7 +151,7 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
 // capacity, entries, hits, misses]) per function instance.
 ir_memo_cell: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
     object_key: "memo:{key}"
-    object := name_rows_value(m.constant_rows, object_key) ?? -1
+    object := name_column_value(m.constant_rows_keys, m.constant_rows, object_key) ?? -1
     if object < 0 {
         object = m.data.len()
         cell := [U8]{}
@@ -159,7 +159,7 @@ ir_memo_cell: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! {
         m.data.push(cell)
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
-        name_rows_set(m.constant_rows, object_key, object)
+        name_column_set(m.constant_rows_keys, m.constant_rows, object_key, object)
     }
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)

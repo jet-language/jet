@@ -996,8 +996,8 @@ ir_dyn_encode_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot
 // only its own type.
 ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -> {key: String, args: [Type]}? Never! {
     identity: ir_trait_identity(p, concrete)
-    declaration: ir_render_type_key(p.type_rows, p.types, concrete)
-    candidates: p.trait_methods.get("{codec}|{method}") ?? [Int]{}
+    declaration: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, concrete)
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{codec}|{method}")]
     loop row in candidates {
         if ir_function_row(p, p.functions[row].key) != (Val(row)) -> next
         owner := Type?{None}
@@ -1018,13 +1018,13 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
             // A derived codec of a generic declaration (SerdeItems) declares
             // the declaration's parameters on the method itself: its instance
             // binds each to the concrete type's argument in that position.
-            if p.functions[row].generic_params.len() == 0 || ir_render_type_key(p.type_rows, p.types, implementer) != declaration {
+            if p.functions[row].generic_params.len() == 0 || ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration {
                 next
             }
             method_args: ir_codec_method_args(p, p.functions[row], concrete) ?? next
             return Val({key: p.functions[row].key.copy(), args: method_args})
         }
-        if ir_render_type_key(p.type_rows, p.types, implementer) != declaration -> next
+        if ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, implementer) != declaration -> next
         args: ir_owner_args(p, p.functions[row], concrete) ?? next
         return Val({key: p.functions[row].key.copy(), args: args})
     }

@@ -12,7 +12,7 @@
 // descriptor carries so the host refuses a host import outside it at load.
 use {
     plug_files: core.files
-    jet_foundation.[foundation_byte_text, name_rows_set]
+    jet_foundation.[foundation_byte_text, name_column_set]
     jet_ir.[IRModule, IROp, IRSlotKind, IR_PLUGIN_GUEST_PREFIX, ir_end, ir_function_new, ir_intern_bytes, ir_intern_name, ir_open_if, ir_slot, ir_word_row]
     jet_wasm.[WasmError, WasmFuncType, WASM_EXTERN_FUNC, WASM_FUNCREF, WASM_OP_REF_FUNC, wasm_load_component]
 }
@@ -181,7 +181,7 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
         m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
     }
     loop made in base..<m.functions.len() {
-        name_rows_set(m.function_rows, m.functions[made].key, made)
+        name_column_set(m.function_rows_keys, m.function_rows, m.functions[made].key, made)
     }
     desc: ir_intern_bytes(m, plug_descriptor(flat, name, bytes, thunks, sigs, needs))
     plug_guest_entry(m, id, desc, kit.thunk_base, thunk_fids, base, flat.starts)

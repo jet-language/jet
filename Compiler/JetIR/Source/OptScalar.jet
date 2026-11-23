@@ -32,7 +32,7 @@
 // (stored, returned, offset other than as a view, lent inside a Loop),
 // when two accesses of one offset have different types, when fields
 // overlap or leave the storage, or when a field is itself an aggregate.
-use jet_foundation.[compiler_threads_single, name_rows_set]
+use jet_foundation.[compiler_threads_single]
 
 ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Never! {
     has_stack := false
@@ -615,7 +615,7 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         _ := ir_emit(callee, IROp.Store, -1, p_self, 0, next_val, 2)
         _ := ir_emit(callee, IROp.Return, -1, -1, -1, -1, 3)
         callee_id: m.functions.len()
-        name_rows_set(m.function_rows, callee.key, callee_id)
+        ir_function_bind(m, callee.key, callee_id)
         m.functions.push(callee)
 
         // Callee 1: bump(&x) mutates the disjoint field passed by address.
@@ -631,7 +631,7 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         _ := ir_emit(bump, IROp.Store, -1, b_ptr, 0, b_out, 6)
         _ := ir_emit(bump, IROp.Return, -1, -1, -1, -1, 7)
         bump_id: m.functions.len()
-        name_rows_set(m.function_rows, bump.key, bump_id)
+        ir_function_bind(m, bump.key, bump_id)
         m.functions.push(bump)
 
         // Caller: 24-byte local struct `s` (log@0, hits@8, tag@16); holds two
@@ -683,7 +683,7 @@ ir_opt_fields_fit: fn(m: IRModule, offsets: [Int], rows: [Int], size: Int) -> Bo
         _ := ir_emit(run, IROp.Add, sum2, sum1, r_t, IR_OVERFLOW_WRAP, 17)
         _ := ir_emit(run, IROp.Return, -1, sum2, -1, -1, 17)
         run_id: m.functions.len()
-        name_rows_set(m.function_rows, run.key, run_id)
+        ir_function_bind(m, run.key, run_id)
         m.functions.push(run)
         m.entry = run_id
 

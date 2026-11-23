@@ -7,7 +7,6 @@
 // inlines, as the stops receipt is (BuildLibrary.jet ir_stop_exports).
 use {
     jet_backend.[X64_ASM_UNKNOWN]
-    jet_foundation.[name_rows_value]
     jet_sema.[SemaUnitMap, sema_unsafe_last_at]
 }
 
@@ -98,7 +97,7 @@ ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport], units: [IREval
     count: m.functions.len()
     name_callees := loop _ in m.names -> -1
     loop row in exports {
-        if name_rows_value(m.name_rows, row.symbol) == .Val(at) -> name_callees[at] = row.function
+        if ir_interned_name(m, row.symbol) == .Val(at) -> name_callees[at] = row.function
     }
     entries := loop f in m.functions -> f.host_symbol != ""
     loop row in exports -> entries[row.function] = true

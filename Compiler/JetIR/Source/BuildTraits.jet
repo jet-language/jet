@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, interner_empty, module_none, name_count, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, interner_empty, module_none, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -112,8 +112,8 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
                 }
             }
             .Method(_, owner_type) -> {
-                owner_key: ir_render_type_key(p.type_rows, p.types, owner_type)
-                slot: name_rows_value(p.impl_slots, "{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
+                owner_key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, owner_type)
+                slot: name_column_value(p.impl_slots_keys, p.impl_slots, "{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
                 if slot >= 0 {
                     loop trait_short in p.impl_traits[slot] {
                         if trait_short == short -> owner = Val(owner_type.copy())
@@ -335,11 +335,11 @@ ir_trait_drop_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: 
 // implementer leaves the box as it is. Built once per row and never inlined.
 ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#trait.last<{ir_row_key(m, row)}>"
-    known: name_rows_value(m.function_rows, helper_key) ?? -1
+    known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
-    name_rows_set(m.function_rows, helper_key, id)
+    ir_function_bind(m, helper_key, id)
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     owners := [Type]{}
@@ -437,7 +437,7 @@ ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, 
 // spells the name: a boxed value's type is module-qualified, an
 // implementation's owner type is the name its body wrote.
 ir_trait_identity: fn(p: IRProgram, ty: Type) -> String Never! {
-    ir_type_identity(p.type_rows, p.types, ty)
+    ir_type_identity(p.type_rows_keys, p.type_rows, p.types, ty)
 }
 
 // Whether `receiver` is a trait value whose `method` dispatches dynamically.
@@ -456,7 +456,7 @@ ir_method_key: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef)
     if ir_function_row(p, method_key) != None -> return method_key
     owner: method.trait_owner ?? return method_key
     concrete: ir_trait_identity(p, receiver)
-    candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{ir_short_name(ir_symbol_key(p, owner))}|{method.name}")]
     loop row in candidates {
         implementer: ir_trait_implementer(p, row, owner) ?? next
         if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
@@ -495,7 +495,7 @@ ir_trait_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner
         return ir_decode_env_names(m, p, b, ty, concrete, span)
     }
     exact: ir_trait_constant_key(trait_short, ir_trait_identity(p, concrete), name)
-    if p.constants.get(exact) != None -> return ir_constant(m, p, b, ty, exact, span)
+    if ir_constant_row(p, exact) != None -> return ir_constant(m, p, b, ty, exact, span)
     head: ir_trait_head_identity(p, concrete) ?? return ir_fail_slot(b, span, "no `{trait_short}` constant `{name}` for {ir_type_name(concrete)}")
     ir_constant(m, p, b, ty, ir_trait_constant_key(trait_short, head, name), span)
 }
@@ -640,7 +640,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     // result the call marks lent.
     lent := false
     short: ir_short_name(ir_symbol_key(p, owner))
-    candidates: p.trait_methods.get("{short}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{short}|{method.name}")]
     // The implementations for exact types come first; a generic owner's
     // (`impl Box.Shape`) then serves each instance of it the program boxes
     // as the trait's values (p.trait_boxed) that no exact one claimed.

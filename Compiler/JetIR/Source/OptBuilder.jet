@@ -13,10 +13,10 @@
 //   - At `jet_char_len(s)`, the static count and all `t_i` sums add up into `len`.
 // UTF-8 scalar count is strictly additive under concatenation of valid UTF-8
 // strings, so the result is bit-for-bit identical for every input.
-use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+use jet_foundation.[Type, compiler_threads_single]
 
 ir_builder_route: fn(m: IRModule, name: String) -> Int Never! {
-    name_rows_value(m.name_rows, name) ?? -2
+    ir_interned_name(m, name) ?? -2
 }
 
 // Rewrites non-escaping string-builder -> jet_char_len chains in `f`.
@@ -320,7 +320,7 @@ ir_opt_builders: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     _ := ir_emit(g, IROp.Drop, -1, s, -1, -1, 3)
     _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 4)
     m.entry = 0
-    name_rows_set(m.function_rows, g.key, 0)
+    ir_function_bind(m, g.key, 0)
     m.functions.push(g)
     options := ir_opt_options(2)
     options.verify = true

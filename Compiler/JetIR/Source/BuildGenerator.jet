@@ -6,7 +6,7 @@
 // point; and the release, which frees the env and drops what a producer that
 // never started still holds there. A consumer's pull resumes the producer; a
 // dropped stream cancels it at its yield, where its cleanup runs.
-use jet_foundation.[FnBody, Span, Type, name_rows_set, name_rows_value]
+use jet_foundation.[FnBody, Span, Type]
 
 // One parameter the env holds, at byte `offset` (row `row`); `moved`: the
 // generator took it by move, so the release closes it if it closes.
@@ -173,11 +173,11 @@ ir_generator_producer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: F
 // `bytes` bytes, is freed either way.
 ir_generator_release: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, captures: [IRGeneratorCapture], bytes: Int) -> Int Never! {
     key: "{b.f.key}#generator.release"
-    known: name_rows_value(m.function_rows, key) ?? -1
+    known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
     m.functions.push(ir_hashed_function("{b.f.name}.generator.release", key, "jet_ir_generator_release_", b.f.source_file, function.line))
-    name_rows_set(m.function_rows, key, id)
+    ir_function_bind(m, key, id)
     r := ir_builder_new(m.functions[id].copy())
     r.instance = b.instance.copy()
     r.line = function.line
