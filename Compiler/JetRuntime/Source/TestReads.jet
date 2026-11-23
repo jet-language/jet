@@ -34,11 +34,11 @@ TEST_READS_UNRESOLVED: I64{-2}
 rt_test_reads_arm: fn(envp: I64, main: Bool) {
     old: test_reads_fd
     armed: if main -> TEST_READS_UNRESOLVED else -> rt_test_reads_open_log(envp)
-    #Unsafe("startup is single-threaded and precedes user code") {
-        // close(2) of the recorder's own descriptor.
-        if (old >= I64{0}) {
-            _ := os_syscall_i64(I64{3}, old, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+    // close(2) of the recorder's own descriptor.
+    if (old >= I64{0}) {
+        _ := os_close_i64(old)
+    }
+    #Unsafe("runs during single-threaded startup before any other thread exists") {
         test_reads_fd = armed
     }
 }
@@ -50,9 +50,7 @@ rt_test_reads_open_log: fn(envp: I64) -> I64 {
     if (path == I64{0}) { return I64{-1} }
     fd := I64{-1}
     // O_WRONLY|O_APPEND|O_CLOEXEC: never a read, so never recorded.
-    #Unsafe("the startup entry is a live NUL-terminated path for open") {
-        fd = os_syscall_i64(I64{2}, path, I64{525313}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    fd = os_open_i64(path, I64{525313}, I64{0})
     if (fd >= I64{0}) -> fd else -> I64{-1}
 }
 
@@ -108,16 +106,12 @@ rt_test_reads_path: fn(kind: I64, directory: I64, name: I64) {
     if (rt_text_byte(name) != I64{47}) {
         base := I64{-1}
         if (directory == I64{-100}) {
-            #Unsafe("buffer lends 4096 writable bytes after the kind byte to getcwd") {
-                base = os_syscall_i64(I64{79}, wrapping(buffer + I64{1}), I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
+            base = os_getcwd_i64(wrapping(buffer + I64{1}), I64{4096})
             // getcwd counts the NUL it wrote.
             if (base > I64{0}) { base -= I64{1} }
         } else {
             link: rt_test_reads_fd_link(directory)
-            #Unsafe("link is a live NUL-terminated /proc path and buffer lends 4096 writable bytes after the kind byte") {
-                base = os_syscall_i64(I64{89}, link, wrapping(buffer + I64{1}), I64{4096}, I64{0}, I64{0}, I64{0})
-            }
+            base = os_readlink_i64(link, wrapping(buffer + I64{1}), I64{4096})
             jet_rt_free(link, I64{32}, I64{1})
         }
         // A base the recorder cannot name makes the record unkeyable: `U`.
@@ -175,7 +169,5 @@ rt_test_reads_text: fn(kind: I64, name: I64) {
 // One O_APPEND write per record. A record the file did not take whole leaves
 // the run unkeyable: `jet test` stores no results for a malformed log.
 rt_test_reads_write: fn(data: I64, length: I64) {
-    #Unsafe("data lends `length` initialized bytes to one write") {
-        _ := os_syscall_i64(I64{1}, test_reads_fd, data, length, I64{0}, I64{0}, I64{0})
-    }
+    _ := os_write_i64(test_reads_fd, data, length)
 }

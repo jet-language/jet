@@ -242,9 +242,7 @@ sync_clock_read: fn(clock: I64, timespec: I64) {
         // Not counted (HostProcess.jet host_syscall): perf's sampler handler
         // reads its clock here (PerfSamples.jet perf_samples_read), and so
         // does a counted call where the vDSO has no clock (perf_syscall_now).
-        #Unsafe("clock_gettime writes the caller's two timespec words") {
-            status = os_syscall_i64(I64{228}, clock, timespec, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        status = os_clock_gettime_i64(clock, timespec)
     }
     if (status != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
 }

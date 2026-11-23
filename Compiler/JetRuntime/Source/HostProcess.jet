@@ -36,10 +36,10 @@ host_call: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
 #Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments")
 host_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     table: perf_system
-    if (table == I64{0}) { return os_syscall_i64(number, a1, a2, a3, a4, a5, a6) }
+    if (table == I64{0}) { return os_syscall_forwarded_i64(number, a1, a2, a3, a4, a5, a6) }
     row: perf_syscall_row(table, number)
     began: perf_syscall_now()
-    result: os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
+    result: os_syscall_forwarded_i64(number, a1, a2, a3, a4, a5, a6)
     perf_syscall_spent(row, began)
     result
 }

@@ -23,11 +23,11 @@ alloc_test_require: fn(ok: Bool) {
     }
     #Unsafe("a failed allocator witness writes three process-static texts to stderr with raw writes, which take no heap, and terminates this isolated test process") {
         head: rt_static_text("alloc tests: ")
-        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(head), rt_text_len(head), I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(alloc_test_witness), rt_text_len(alloc_test_witness), I64{0}, I64{0}, I64{0})
+        _ := os_write_i64(I64{2}, rt_text_data(head), rt_text_len(head))
+        _ := os_write_i64(I64{2}, rt_text_data(alloc_test_witness), rt_text_len(alloc_test_witness))
         tail: rt_static_text(" failed\n")
-        _ := os_syscall_i64(I64{1}, I64{2}, rt_text_data(tail), rt_text_len(tail), I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_write_i64(I64{2}, rt_text_data(tail), rt_text_len(tail))
+        _ := os_exit_group_i64(I64{1})
     }
     loop {
 

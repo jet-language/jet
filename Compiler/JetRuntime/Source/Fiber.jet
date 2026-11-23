@@ -536,12 +536,10 @@ fiber_new: fn(root: I64, pool: I64) -> I64 {
     }
     if (bytes != want) { fiber_space_give(root, want - bytes) }
     guard := I64{0}
-    #Unsafe("the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE; madvise only changes the mapping's page size") {
-        _ := os_syscall_i64(I64{28}, mapping, bytes, I64{15}, I64{0}, I64{0}, I64{0})
-        guard = os_syscall_i64(I64{28}, mapping, I64{4096}, I64{102}, I64{0}, I64{0}, I64{0})
-        if (guard != I64{0}) {
-            guard = os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+    _ := os_madvise_i64(mapping, bytes, I64{15})
+    guard = os_madvise_i64(mapping, I64{4096}, I64{102})
+    if (guard != I64{0}) {
+        guard = os_mprotect_i64(mapping, I64{4096}, I64{0})
     }
     if (guard != I64{0}) {
         alloc_unmap(mapping, bytes)

@@ -875,9 +875,7 @@ perf_samples_timer_start: fn(sampling: Bool) -> I64 {
     rt_text_store(wrapping(scratch + I64{8}), PERF_SAMPLES_SIGNAL | (I64{4} << I64{32}))
     rt_text_store(wrapping(scratch + I64{16}), perf_own_tid())
     status := I64{0}
-    #Unsafe("timer_create reads the sigevent and writes the timer id in the scratch words") {
-        status = os_syscall_i64(I64{222}, I64{3}, scratch, wrapping(scratch + I64{64}), I64{0}, I64{0}, I64{0})
-    }
+    status = os_timer_create_i64(I64{3}, scratch, wrapping(scratch + I64{64}))
     id: rt_text_word(wrapping(scratch + I64{64})) & I64{4294967295}
     if (status >= I64{0}) {
         // Kept before it is armed: a rate change (perf_samples_rate) either
@@ -893,9 +891,7 @@ perf_samples_timer_start: fn(sampling: Bool) -> I64 {
             armed = if (sampling) -> perf_samples_interval_us else -> PERF_PRECISE_DRAIN_US
             rt_text_store(wrapping(spec + I64{8}), wrapping(armed * I64{1000}))
             rt_text_store(wrapping(spec + I64{24}), wrapping(armed * I64{1000}))
-            #Unsafe("timer_settime reads the itimerspec in the scratch words") {
-                status = os_syscall_i64(I64{223}, id, I64{0}, spec, I64{0}, I64{0}, I64{0})
-            }
+            status = os_timer_settime_i64(id, I64{0}, spec, I64{0})
         }
         if (status < I64{0}) {
             // A timer the kernel refuses to arm is deleted.
@@ -998,9 +994,7 @@ perf_samples_rate: fn(interval_us: I64) {
         loop at < PERF_SAMPLES_TIMER_PAGE {
             kept: sync_load(wrapping(page + at))
             if (kept != I64{0}) {
-                #Unsafe("timer_settime reads the itimerspec this call owns") {
-                    _ := os_syscall_i64(I64{223}, wrapping(kept - I64{1}), I64{0}, spec, I64{0}, I64{0}, I64{0})
-                }
+                _ := os_timer_settime_i64(wrapping(kept - I64{1}), I64{0}, spec, I64{0})
             }
             at = wrapping(at + I64{8})
         }
@@ -1411,9 +1405,7 @@ perf_precise_cycles: fn() -> I64 {
     rt_text_store(wrapping(attr + I64{32}), I64{2})
     rt_text_store(wrapping(attr + I64{40}), I64{64})
     fd := I64{-1}
-    #Unsafe("perf_event_open reads the attribute words of the scratch") {
-        fd = os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
-    }
+    fd = os_perf_event_open_i64(attr, I64{0}, I64{-1}, I64{-1}, I64{8})
     if (fd < I64{0}) {
         jet_rt_free(attr, I64{72}, I64{8})
         return fd
@@ -1493,9 +1485,7 @@ perf_precise_open: fn(attr: I64, source: I64, period: I64) -> I64 {
     rt_text_store(wrapping(attr + I64{64}), if (source == PERF_PC_IBS_OP) -> I64{1} else -> I64{0})
     rt_text_store(wrapping(attr + I64{80}), I64{448})
     rt_text_store(wrapping(attr + I64{88}), PERF_PRECISE_STACK | (I64{1} << I64{32}))
-    #Unsafe("perf_event_open reads the attribute words of the scratch") {
-        return os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
-    }
+    return os_perf_event_open_i64(attr, I64{0}, I64{-1}, I64{-1}, I64{8})
 }
 
 // Map sampler `fd`'s ring into the table, write its tail once, start the
@@ -2621,9 +2611,7 @@ perf_samples_cpu_clock_ns: fn(clock: I64) -> I64 {
     scratch: jet_rt_alloc(I64{16}, I64{8})
     alloc_check_own_leave()
     status := I64{-1}
-    #Unsafe("clock_gettime writes the two timespec words of the scratch") {
-        status = os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    status = os_clock_gettime_i64(clock, scratch)
     ns: if (status == I64{0}) -> wrapping(wrapping(rt_text_word(scratch) * I64{1000000000}) + rt_text_word(wrapping(scratch + I64{8}))) else -> I64{0}
     jet_rt_free(scratch, I64{16}, I64{8})
     ns
@@ -3023,9 +3011,7 @@ perf_zone_mem_open: fn() -> I64 {
 perf_zone_mem_put: fn(mem: I64, address: I64, value: I64) -> Bool {
     scratch: wrapping(thread_base() + I64{232})
     rt_text_put(scratch, value)
-    #Unsafe("pwrite64 copies one byte from the thread-owned TCB scratch and retains no pointer") {
-        return os_syscall_i64(I64{18}, mem, scratch, I64{1}, address, I64{0}, I64{0}) == I64{1}
-    }
+    return os_pwrite64_i64(mem, scratch, I64{1}, address) == I64{1}
 }
 
 // Zones were asked for but their sites stay skipped: the system refuses to
@@ -3628,9 +3614,7 @@ perf_samples_heap_take: fn(fd: I64, name: I64, frame: I64) -> I64 {
     number: alloc_check_track_hold()
     began: sync_now_ns()
     pid := I64{-1}
-    #Unsafe("fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here") {
-        pid = os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    pid = os_fork_i64()
     if (pid <= I64{0}) { perf_samples_heap_write(fd, number, name, frame) }
     if (pid == I64{0}) { perf_samples_heap_child_exit() }
     held: wrapping(sync_now_ns() - began)
@@ -4741,13 +4725,13 @@ perf_counter_attach: fn(buffer: I64, index: I64, fd: I64, tid: I64) -> I64 {
 perf_event_signal: fn(fd: I64, signal: I64, owner: I64, tid: I64) -> I64 {
     result := I64{0}
     #Unsafe("fcntl reads the two-word f_owner_ex built at `owner`") {
-        result = os_syscall_i64(I64{72}, fd, I64{4}, I64{8192}, I64{0}, I64{0}, I64{0})
+        result = os_fcntl_i64(fd, I64{4}, I64{8192})
         if (result >= I64{0}) {
-            result = os_syscall_i64(I64{72}, fd, I64{10}, signal, I64{0}, I64{0}, I64{0})
+            result = os_fcntl_i64(fd, I64{10}, signal)
         }
         if (result >= I64{0}) {
             rt_text_store(owner, tid << I64{32})
-            result = os_syscall_i64(I64{72}, fd, I64{15}, owner, I64{0}, I64{0}, I64{0})
+            result = os_fcntl_i64(fd, I64{15}, owner)
         }
     }
     result
@@ -4768,9 +4752,7 @@ perf_counter_event_open: fn(attr: I64, kind: I64, config: I64, period: I64, form
     rt_text_store(wrapping(attr + I64{40}), I64{97})
     rt_text_store(wrapping(attr + I64{48}), I64{0})
     rt_text_store(wrapping(attr + I64{56}), I64{0})
-    #Unsafe("perf_event_open reads the attribute words the held buffer keeps") {
-        return os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
-    }
+    return os_perf_event_open_i64(attr, I64{0}, I64{-1}, I64{-1}, I64{8})
 }
 
 // Arm counter descriptor `fd` for one more overflow (PERF_EVENT_IOC_REFRESH
@@ -6307,9 +6289,7 @@ perf_flight_open: fn() -> I64 {
     pair: wrapping(state + PERF_FLIGHT_RECEIVE_AT)
     status := I64{-1}
     // AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC.
-    #Unsafe("socketpair writes its two descriptors into the fresh state's receive buffer") {
-        status = os_syscall_i64(I64{53}, I64{1}, I64{526338}, I64{0}, pair, I64{0}, I64{0})
-    }
+    status = os_socketpair_i64(I64{1}, I64{526338}, I64{0}, pair)
     if (status < I64{0}) {
         alloc_unmap(state, PERF_FLIGHT_BYTES)
         return I64{-1}
@@ -6342,9 +6322,7 @@ perf_flight_drain: fn(state: I64) {
     buffer: wrapping(state + PERF_FLIGHT_RECEIVE_AT)
     loop {
         count := I64{0}
-        #Unsafe("read fills the state's receive buffer with one datagram") {
-            count = os_syscall_i64(I64{0}, read, buffer, PERF_FLIGHT_RECEIVE, I64{0}, I64{0}, I64{0})
-        }
+        count = os_read_i64(read, buffer, PERF_FLIGHT_RECEIVE)
         if (count == I64{-4}) { next }
         if (count <= I64{0}) {
             return
@@ -7389,9 +7367,7 @@ perf_flight_image: fn(state: I64, text: I64, zeros: I64, image: I64, length: I64
     _ := perf_flight_text(wrapping(staging + size), rt_static_text("~"))
     // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
     fd := I64{-1}
-    #Unsafe("openat reads the image copy's NUL-terminated path in the state's text page") {
-        fd = os_syscall_i64(I64{257}, I64{-100}, staging, I64{524865}, I64{384}, I64{0}, I64{0})
-    }
+    fd = os_openat_i64(I64{-100}, staging, I64{524865}, I64{384})
     if (fd < I64{0}) { return false }
     good: perf_flight_redacted(fd, state, zeros, image, length, false, I64{0})
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
@@ -7738,7 +7714,7 @@ perf_flight_context: fn(row: I64, context: I64) {
 // A raw system call of the dump's, which neither allocates nor records.
 perf_flight_syscall: fn(number: I64, a: I64, b: I64, c: I64) -> I64 {
     #Unsafe("the dump's calls take words alone or borrow the state's scratch or the process's own mappings for their duration") {
-        return os_syscall_i64(number, a, b, c, I64{0}, I64{0}, I64{0})
+        return os_syscall_forwarded_i64(number, a, b, c, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -7841,9 +7817,7 @@ perf_flight_read: fn(state: I64, into: I64, address: I64, length: I64) {
 // process_vm_readv of this process: the one local and one remote vector at
 // `vectors`.
 perf_flight_readv: fn(process: I64, vectors: I64) -> I64 {
-    #Unsafe("the vectors name the state's copy and a range of this process's own mappings; the kernel copies between them, faulting on neither") {
-        return os_syscall_i64(I64{310}, process, vectors, I64{1}, wrapping(vectors + I64{16}), I64{1}, I64{0})
-    }
+    return os_process_vm_readv_i64(process, vectors, I64{1}, wrapping(vectors + I64{16}), I64{1}, I64{0})
 }
 
 // The digit value of hexadecimal byte `byte`, or -1.
@@ -8341,9 +8315,7 @@ perf_flight_dump_open: fn(state: I64, text: I64, words: I64) -> I64 {
         _ := perf_flight_text(end, rt_static_text(".jetdump"))
         // O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, mode 0600.
         fd := I64{-1}
-        #Unsafe("openat reads the dump's NUL-terminated path in the state's text page") {
-            fd = os_syscall_i64(I64{257}, I64{-100}, text, I64{524481}, I64{384}, I64{0}, I64{0})
-        }
+        fd = os_openat_i64(I64{-100}, text, I64{524481}, I64{384})
         if (fd != I64{-17}) { return fd }
         attempt = wrapping(attempt + I64{1})
     }
@@ -8882,9 +8854,7 @@ perf_causal_mark: fn(thread: I64, now: I64) {
 perf_causal_switches: fn(thread: I64) -> I64 {
     usage: wrapping(thread + I64{48})
     status := I64{-1}
-    #Unsafe("getrusage writes the struct rusage in this thread's own entry") {
-        status = os_syscall_i64(I64{98}, I64{1}, usage, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    status = os_getrusage_i64(I64{1}, usage)
     if (status != I64{0}) { return I64{-1} }
     rt_text_word(wrapping(usage + I64{128}))
 }
@@ -9080,9 +9050,7 @@ perf_causal_core: fn(thread: I64) -> I64 {
     word: wrapping(thread + PERF_CAUSAL_THREAD_TASK_CORE)
     rt_text_store(word, I64{0})
     status := I64{-1}
-    #Unsafe("getcpu writes the CPU's 32-bit number into this thread's own entry") {
-        status = os_syscall_i64(I64{309}, word, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    status = os_getcpu_i64(word, I64{0})
     if (status != I64{0}) { return I64{-1} }
     rt_text_word(word)
 }
