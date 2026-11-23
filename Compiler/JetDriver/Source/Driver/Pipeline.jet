@@ -292,13 +292,13 @@ use {
         interner_empty,
         interner_merge_delta,
         type_syntax,
-        NameRows,
         name_rows,
-        name_rows_get,
+        name_column,
+        name_column_get_hashed,
+        name_column_set_hashed,
+        name_column_table,
         name_rows_get_text,
-        name_rows_hash,
-        name_rows_set_first,
-        name_rows_set_hashed,
+        name_text_hash,
         Name,
         NameTable,
         name_count,
@@ -306,6 +306,7 @@ use {
         name_find,
         name_index,
         name_intern,
+        name_table,
         name_table_sized,
         name_text,
         ast_job_metadata,
@@ -1076,10 +1077,11 @@ JetDriverComptimeRunIndex: struct {
     ambiguous_owners: [String:Bool],
     owners_built: Bool,
     // Each function any closure or prefetch of the run named, by its node
-    // id: `node_keys` interns `module\nkey` to the id, and `nodes`,
-    // `checked_at`, `waiting_at` and the `prefetched` rows hold one row per
-    // id.
-    node_keys: NameRows{name_rows()},
+    // id: `node_names` interns `module\nkey`, `node_ids` holds the node id at
+    // that name's id, and `nodes`, `checked_at`, `waiting_at` and the
+    // `prefetched` rows hold one row per node id.
+    node_names: NameTable{name_column_table()},
+    node_ids: [Int]{name_column()},
     nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}},
     // The first row of each node's function in the run's checked
     // functions, or -1.
@@ -1520,10 +1522,10 @@ jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: &JetD
 // time the run names it.
 jet_driver_comptime_node_id: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, function_key: String) -> Int Never! {
     key: "{module_identity.id}\n{function_key}"
-    hash: name_rows_hash(key)
-    if name_rows_get(index.node_keys, key, hash) == .Val(found) -> return found
+    hash: name_text_hash(key)
+    if name_column_get_hashed(index.node_names, index.node_ids, key, hash) == .Val(found) -> return found
     id: index.nodes.len()
-    name_rows_set_hashed(index.node_keys, key, hash, id)
+    name_column_set_hashed(index.node_names, index.node_ids, key, hash, id)
     index.nodes.push(JetDriverComptimeClosureNode{})
     index.checked_at.push(-1)
     index.waiting_at.push(-1)
@@ -2952,7 +2954,7 @@ jet_driver_comptime_batch_awaited: fn(batch: JetDriverComptimeBatch, wait_rows: 
 // Whether one of `keys` has a value now.
 jet_driver_comptime_any_available: fn(available: SemaComptimeAvailableConstants, keys: [String]) -> Bool Never! {
     loop key in keys {
-        if available.keys.get(key) != None -> return true
+        if name_find(available.keys, key) != None -> return true
     }
     false
 }
@@ -3554,7 +3556,7 @@ jet_driver_run_comptime_carried: fn(
     environment.checked_types = [TTypeDef]{}
     environment.checked_type_names = name_table_sized(2)
     environment.checked_type_name_rows = [[Int]]{}
-    environment.boxed_edges = [String:[String]]{}
+    environment.boxed_edges = [U32:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
     staging := if carried_staging.len() > 0 -> carried_staging.pop() ?? panic("carried staging slot lost") else -> JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, taken: [String:Bool]{}, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
@@ -5035,8 +5037,8 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 // whole, the methods lowering selects by owner type
 // (ir_core_method_lowered_by_owner) and the `__Decoding` reads it selects by
 // target (ir_core_decoding_read).
-jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bool]) -> [String:Bool] Never! {
-    roots := [String:Bool]{}
+jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bool]) -> NameTable Never! {
+    roots := name_table_sized(256)
     loop module_row in graph.modules {
         identity: module_row.module_identity
         if !module_is_core(identity) -> next
@@ -5049,21 +5051,21 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
             if item == .Func(func) {
                 source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
                 if rooted || ir_core_lowered_by_name(true, source_file, func.name) || sema_core_role(func.markers, graph, identity) != "" {
-                    roots[symbol_key_text(SymbolKind.Function, identity_text, "", func.name)] = true
+                    _ := name_intern(roots, symbol_key_text(SymbolKind.Function, identity_text, "", func.name))
                 }
             }
         }
         loop nominal in module_row.nominals {
             loop method in nominal.methods {
                 if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity_text, nominal.symbol.name, method.declaration.name) {
-                    roots[symbol_table_key(graph.symbols, method.symbol.id)] = true
+                    _ := name_intern(roots, symbol_table_key(graph.symbols, method.symbol.id))
                 }
             }
         }
         loop implementation in module_row.impls {
             loop method in implementation.methods {
                 if ir_core_method_lowered_by_owner(method.declaration.name) {
-                    roots[symbol_table_key(graph.symbols, method.symbol.id)] = true
+                    _ := name_intern(roots, symbol_table_key(graph.symbols, method.symbol.id))
                 }
             }
         }
@@ -5885,28 +5887,29 @@ jet_driver_root_loop_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue]
 }
 
 // The function keys each registration module declares: `modules` binds a
-// module id to its row of `keys`. Hashed sets, only looked up.
+// module id to its row of `keys`, a name table of those keys, only looked
+// up.
 JetDriverRegisteredKeys: struct {
     modules: [U32:Int],
-    keys: [NameRows],
+    keys: [NameTable],
 }
 
 // The function keys each registration module declares, by module identity.
 jet_driver_registered_function_keys: fn(graph: SemaRegistrationGraph) -> JetDriverRegisteredKeys Never! {
-    registered := JetDriverRegisteredKeys{modules: [U32:Int]{}, keys: [NameRows]{}}
+    registered := JetDriverRegisteredKeys{modules: [U32:Int]{}, keys: [NameTable]{}}
     loop source_module in graph.modules {
         at: jet_driver_registered_module(registered, source_module.module_identity)
         loop function in source_module.functions {
-            name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
+            _: name_intern(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id))
         }
         loop nominal in source_module.nominals {
             loop function in nominal.methods {
-                name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
+                _: name_intern(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id))
             }
         }
         loop implementation in source_module.impls {
             loop function in implementation.methods {
-                name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
+                _: name_intern(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id))
             }
         }
     }
@@ -5918,20 +5921,21 @@ jet_driver_registered_module: fn(registered: &JetDriverRegisteredKeys, module_id
     if registered.modules.get(module_identity.id) == .Val(at) -> return at
     at: registered.keys.len()
     registered.modules[module_identity.id] = at
-    registered.keys.push(name_rows())
+    registered.keys.push(name_table_sized(64))
     at
 }
 
 // Per checked row (graph module order, then function order): an earlier row
-// has the same key.
+// has the same key. Function keys are never empty, so the table's id 0 (the
+// empty spelling) never matches one.
 jet_driver_checked_repeated_rows: fn(modules: [SemaGraphModuleResult]) -> [Bool] Never! {
-    seen := name_rows()
+    seen := name_table()
     repeated := [Bool]{}
     loop graph_module in modules {
         loop function in graph_module.functions {
-            before: seen.rows.len()
-            name_rows_set_first(seen, function.key, repeated.len())
-            repeated.push(seen.rows.len() == before)
+            before: name_count(seen)
+            _: name_intern(seen, function.key)
+            repeated.push(name_count(seen) == before)
         }
     }
     repeated
@@ -6780,7 +6784,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         compiler_transfer_rows<FnBody>(checked_functions, module_functions)
     }
     // Every checked function has its owner now.
-    registered_function_keys = JetDriverRegisteredKeys{modules: [U32:Int]{}, keys: [NameRows]{}}
+    registered_function_keys = JetDriverRegisteredKeys{modules: [U32:Int]{}, keys: [NameTable]{}}
     loaded_identity_counts = [U32:Int]{}
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.owners", checked_row)
     // E0601 only when neither named tests nor selected Check Outputs exist,
@@ -8619,7 +8623,7 @@ jet_driver_verify_owners_chunk: fn(modules: [SemaGraphModuleResult], registered_
         module_keys: registered_function_keys.modules.get(graph_module.module_identity.id) ?? -1
         loop function_index in 0..<graph_module.functions.len() {
             function: graph_module.functions[function_index]
-            registered: (module_keys >= 0 && name_rows_get_text(registered_function_keys.keys[module_keys], function.key) != None) || graph_module.injected_function_keys.contains(function.key)
+            registered: (module_keys >= 0 && function.key != "" && name_find(registered_function_keys.keys[module_keys], function.key) != None) || graph_module.injected_function_keys.contains(function.key)
             if function.module_identity != graph_module.module_identity || !registered {
                 bad.push(JetDriverBadOwner{module_index: graph_module_index, function_index: function_index})
             }

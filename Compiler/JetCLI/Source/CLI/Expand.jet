@@ -4,7 +4,7 @@ use {
     jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, Type, diagnostic_column_at, diagnostic_line_at, type_name]
     jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_shown_name, failure_contract_shown_type, failure_contract_source]
-    jet_sema.[sema_derive_distinct_forward_source]
+    jet_sema.[SemaDistinctForwards, sema_derive_distinct_forward, sema_derive_distinct_forward_source]
     jet_semindex.[
         SemCallable,
         SemIndex,
@@ -172,7 +172,7 @@ jet_cli_expand_effects: fn(index: SemIndex) -> [JetCLIExpandFact] Never! {
 // are named in a comment.
 jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] {
     output := [JetCLIExpandFact]{}
-    forwards := [String:[String:String]]{}
+    forwards := [Int:SemaDistinctForwards]{}
     loop definition in index.definitions {
         if definition.derives.len() == 0 -> next
         row: definition.def
@@ -197,18 +197,17 @@ jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [Je
 
 // The forwarded members of distinct `name` declared in module `path`, as Jet
 // source, or "" when `name` is not a distinct there. `forwards` keeps each
-// module's generated source so a module expands once.
-jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String, name: String, derives: [String], forwards: &[String:[String:String]]) -> String {
-    loop unit in modules {
+// module's generated source, by its row in `modules`, so a module expands once.
+jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String, name: String, derives: [String], forwards: &[Int:SemaDistinctForwards]) -> String {
+    loop (unit_index, unit) in modules {
         if unit.path != path && unit.physical_path != path -> next
         loop item in unit.items {
             if item == .Distinct(declaration) {
                 if declaration.name != name -> next
-                if forwards.get(unit.path) == None {
-                    forwards[unit.path] = sema_derive_distinct_forward_source(unit.items)
+                if forwards.get(unit_index) == None {
+                    forwards[unit_index] = sema_derive_distinct_forward_source(unit.items)
                 }
-                generated: forwards.get(unit.path) ?? [String:String]{}
-                source := generated.get(name) ?? ""
+                source := if forwards.get(unit_index) == .Val(generated) -> sema_derive_distinct_forward(generated, name) ?? "" else -> ""
                 native := [String]{}
                 loop derived in derives {
                     if derived != "Equatable" && derived != "Comparable" {

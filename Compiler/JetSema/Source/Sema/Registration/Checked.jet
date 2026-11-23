@@ -35,6 +35,7 @@ use {
         StructLayout,
         SymbolID,
         SymbolKind,
+        symbol_find,
         symbol_key_text,
         symbol_table_key,
         TAssociatedTypeDecl,
@@ -2676,11 +2677,11 @@ sema_checked_box_node_edges: fn(graph: SemaRegistrationGraph, nominal: SemaRegis
 }
 
 // The recursive-layout edge graph over struct and enum nodes: node `n`
-// (nominal SymbolId key `keys[n]`) owns edges `edge_starts[n]..<edge_starts[n + 1]`,
+// (nominal SymbolId `keys[n]`) owns edges `edge_starts[n]..<edge_starts[n + 1]`,
 // and edge `e` (key `names[e]`) names nodes `targets[target_starts[e]..<target_starts[e + 1]]`.
 // A node's successors are therefore one contiguous run of `targets`.
 SemaCheckedBoxGraph: struct {
-    keys: [String],
+    keys: [U32],
     edge_starts: [Int],
     names: [String],
     target_starts: [Int],
@@ -2755,8 +2756,8 @@ sema_checked_box_components: fn(box_graph: SemaCheckedBoxGraph) -> [Int] Never! 
 // `owner --key--> target` is boxed iff `target` reaches `owner`: the two share
 // a component (a self-loop is its owner's own component). Each owner's keys
 // are sorted like Rust `owner_boxed_edges`; owners with none are absent.
-sema_checked_box_select: fn(box_graph: SemaCheckedBoxGraph, component: [Int]) -> [String:[String]] Never! {
-    boxed := [String:[String]]{}
+sema_checked_box_select: fn(box_graph: SemaCheckedBoxGraph, component: [Int]) -> [U32:[String]] Never! {
+    boxed := [U32:[String]]{}
     loop node in 0..<box_graph.keys.len() {
         owner_edges := [String]{}
         loop edge in box_graph.edge_starts[node]..<box_graph.edge_starts[node + 1] {
@@ -2780,11 +2781,11 @@ sema_checked_box_select: fn(box_graph: SemaCheckedBoxGraph, component: [Int]) ->
 // graph, computed once: Rust `find_box_edges`. Every struct and enum is a root
 // and only those have edges, so no multi-type cycle runs through a non-root and
 // Rust's SCC answer is exact (its path-enumeration fallback never applies).
-// Result: nominal SymbolId key -> the owner's boxed keys.
-sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [String:[String]] Never! {
+// Result: nominal SymbolId -> the owner's boxed keys.
+sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [U32:[String]] Never! {
     nodes := [U32:Int]{}
     rows := [SemaRegistrationRowRef]{}
-    box_graph := SemaCheckedBoxGraph{keys: [String]{}, edge_starts: [Int]{}, names: [String]{}, target_starts: [Int]{}, targets: [Int]{}}
+    box_graph := SemaCheckedBoxGraph{keys: [U32]{}, edge_starts: [Int]{}, names: [String]{}, target_starts: [Int]{}, targets: [Int]{}}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
             if !sema_checked_box_is_node(graph.modules[module_index].nominals[row]) -> next
@@ -2795,7 +2796,7 @@ sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [String:[S
                 next
             }
             nodes[id.id] = box_graph.keys.len()
-            box_graph.keys.push(symbol_table_key(graph.symbols, id))
+            box_graph.keys.push(id.id)
             rows.push(first)
         }
     }
@@ -2810,11 +2811,11 @@ sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [String:[S
 
 // The checked recursive-layout keys of `definition`, read from the graph's
 // one edge set (`sema_checked_program_boxed_edges`).
-sema_checked_boxed_edges: fn(graph: SemaRegistrationGraph, boxed_edges: [String:[String]], module_identity: ModuleID, definition: Item) -> [String] Never! {
+sema_checked_boxed_edges: fn(graph: SemaRegistrationGraph, boxed_edges: [U32:[String]], module_identity: ModuleID, definition: Item) -> [String] Never! {
     owner: sema_registration_root_name(definition)
     if owner == "" -> return [String]{}
     row: sema_type_resolve_nominal_row(graph, Type.Named{name: owner}, module_identity) ?? return [String]{}
-    boxed_edges.get(symbol_table_key(graph.symbols, graph.modules[row.module_index].nominals[row.row].symbol.id)) ?? [String]{}
+    boxed_edges.get(graph.modules[row.module_index].nominals[row.row].symbol.id.id) ?? [String]{}
 }
 
 sema_checked_type_has_boxed_edge: fn(definition: TTypeDef, edge: String) -> Bool Never! {
@@ -3032,7 +3033,7 @@ sema_checked_shared_witness: fn(graph: SemaRegistrationGraph, owner: String, cal
     }
 }
 
-sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]], module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
+sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], module_row: SemaRegistrationModule, layout_engine: TargetLayoutEngine?, nominal: SemaRegistrationNominal, diagnostics: &[Diagnostic]) -> TTypeDef? {
     definition: sema_registration_nominal_source_item(nominal.source) ?? return None
     if nominal.kind == SemaRegistrationNominalKind.Trait -> return None
     name: nominal.symbol.name
@@ -4159,14 +4160,13 @@ sema_checked_constant_from_value: fn(graph: SemaRegistrationGraph, module_row: S
     TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_name, constant.declaration.name), name: constant.declaration.name, symbol_key: symbol_key_text(SymbolKind.Constant, module_name, "", constant.declaration.name), span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: is_storage, value: value.value, shared_holder: value.shared_holder && !is_storage}
 }
 
-// `staged_values` holds the module's staged constant values by symbol key.
-sema_checked_constant_with_values: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
+// `staged` is the constant's staged value, if it has one.
+sema_checked_constant_with_values: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged: SemaComptimeItemValue?, diagnostics: &[Diagnostic]) -> TConstantDef? {
     if sema_output_metadata_binding(constant.declaration) -> return None
     if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_computed(constant.declaration) {
         diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
-    staged: staged_values.get(symbol_table_key(graph.symbols, constant.symbol.id))
     if staged == {
         .Val(value) -> sema_checked_constant_from_value(graph, module_row, constant, value, diagnostics)
         .None -> sema_checked_constant(graph, module_row, constant.declaration, diagnostics)
@@ -4440,7 +4440,7 @@ sema_checked_layout_engine: fn(graph: SemaRegistrationGraph, module_row: SemaReg
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, name_resolutions, jet_target_layout_from_machine(graph.target_machine))
 }
 
-sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {
+sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [U32:[String]]) -> TDeclarationFacts {
     if module_index < 0 || module_index >= graph.modules.len() {
         return TDeclarationFacts{type_defs: [TTypeDef]{}, traits: [TTraitDef]{}, impls: [TImplDef]{}, constants: [TConstantDef]{}, core_builtin_owners: [TCoreBuiltinOwner]{}}
     }
@@ -4483,26 +4483,27 @@ sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: I
         impl_constants: sema_trait_constants_check_impl(graph, module_row.module_identity, implementation.declaration.trait_name, implementation.declaration.type_name, implementation.declaration.constants, implementation.declaration.type_span, diagnostics)
         impls.push(sema_checked_impl_row(graph, module_row, implementation, impl_constants))
     }
-    // The module's staged constant values by key, first row winning: one
+    // The module's staged constant values by symbol, first row winning: one
     // pass over the values rather than one per constant.
-    staged_values := [String:SemaComptimeItemValue]{}
+    staged_values := [U32:SemaComptimeItemValue]{}
     if module_row.constants.len() > 0 {
         loop value in values {
             if value.kind != SemaComptimeItemKind.Constant || value.module_identity != module_row.module_identity {
                 next
             }
-            if staged_values.get(value.key) == None -> staged_values[value.key] = value
+            symbol: symbol_find(graph.symbols, value.key) ?? next
+            if staged_values.get(symbol.id) == None -> staged_values[symbol.id] = value
         }
     }
     loop constant in module_row.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
-        row: sema_checked_constant_with_values(graph, module_row, constant, staged_values, diagnostics) ?? next
+        row: sema_checked_constant_with_values(graph, module_row, constant, staged_values.get(constant.symbol.id.id), diagnostics) ?? next
         constants.push(row)
     }
     TDeclarationFacts{type_defs: type_defs, traits: traits, impls: impls, constants: constants, core_builtin_owners: core_builtin_owners}
 }
 
 // `boxed` is `sema_checked_program_boxed_edges(graph)`, computed once per graph.
-sema_registration_check_declarations_with_values: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {
+sema_registration_check_declarations_with_values: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [U32:[String]]) -> TDeclarationFacts {
     sema_checked_declaration_facts(graph, module_index, diagnostics, values, boxed)
 }

@@ -27,7 +27,7 @@ use jet_foundation.[
     TypedLitBody,
     compiler_threads_admit,
     compiler_threads_heaviest_first,
-    name_rows_hash,
+    name_text_hash,
     module_is_core,
 ]
 
@@ -591,7 +591,7 @@ sema_divergence_callee: fn(graph: SemaRegistrationGraph, module_index: Int, name
 }
 
 sema_divergence_module_function: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SymbolID? Never! {
-    position: sema_registration_symbol_position(graph.modules[module_index], name, name_rows_hash(name)) ?? return None
+    position: sema_registration_symbol_position(graph.modules[module_index], name, name_text_hash(name)) ?? return None
     symbol: graph.modules[module_index].symbols[position]
     if symbol.kind != SymbolKind.Function -> return None
     Val(symbol.id)

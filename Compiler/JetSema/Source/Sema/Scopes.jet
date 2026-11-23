@@ -536,12 +536,14 @@ SemaScopeLoopLabel: struct {
     name: String,
 }
 
-// `last_reads` maps each queried name to the index of the last statement that
-// reads it (-1: none), filled on the first query so later live-after queries
-// are O(1) instead of rewalking the remaining statements.
+// `last_reads` holds, at each queried name's id in `read_names`, the index of
+// the last statement that reads it (-1: none), filled on the first query so
+// later live-after queries are O(1) instead of rewalking the remaining
+// statements.
 SemaStatementTailBody: struct {
     statements: [Stmt],
-    last_reads: [String:Int],
+    read_names: NameTable,
+    last_reads: [Int],
 }
 
 SemaStatementTailStore: struct {
@@ -561,9 +563,13 @@ sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statement
     body_id := store.bodies.len()
     // copy: the checker's statement lists are read parameters (the program
     // keeps them), and live-after queries outlive this frame's borrow of them.
-    store.bodies.push(SemaStatementTailBody{statements: statements.copy(), last_reads: [String:Int]{}})
+    // Row 0 is the empty spelling, which no statement reads.
+    store.bodies.push(SemaStatementTailBody{statements: statements.copy(), read_names: name_table_sized(SEMA_STATEMENT_TAIL_NAME_SLOTS), last_reads: [Int]{-1}})
     body_id
 }
+
+// A body's live-after queries name few locals: its name table starts small.
+SEMA_STATEMENT_TAIL_NAME_SLOTS: 16
 
 // A pure check staged at a call site: a checked text literal's
 // `CheckedText.check`, or a static HTTP route method token's core.http
@@ -639,6 +645,13 @@ SemaComptimeBodyValue: struct {
     ty: Type,
 }
 
+// One module's index of staged keys: each key's id in `keys` and, at that
+// id, the row it names (-1: none). Row 0 is the empty spelling, never a key.
+SemaComptimeKeyRows: struct {
+    keys: NameTable,
+    rows: [Int],
+}
+
 // Published ordered prefixes are immutable. The staging owner may append
 // future rows under its guard; contexts retain only the owner and captured
 // visible length, never a copied table or a rebuilt index.
@@ -646,8 +659,9 @@ SemaComptimeBodyFacts: struct {
     values: [SemaComptimeBodyValue],
     // Each module's slot at its ModuleID row (sema_comptime_index_module_slot).
     modules: [Int],
-    first_rows: [[String:Int]],
-    second_rows: [[String:Int]],
+    // Each slot's first row of a key, and at the same key id its second.
+    first_rows: [SemaComptimeKeyRows],
+    second_rows: [[Int]],
     indexed_rows: Int,
 }
 
@@ -710,7 +724,7 @@ SemaScopeEnvironment: struct {
     checked_types: [TTypeDef]{[TTypeDef]{}},
     checked_type_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     checked_type_name_rows: [[Int]]{[[Int]]{}},
-    boxed_edges: [String:[String]]{[String:[String]]{}},
+    boxed_edges: [U32:[String]]{[U32:[String]]{}},
     copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[{known: Bool, value: Bool}]]{}}},
     declarations: [SemaScopeDeclaration],
     generic_params: [TGenericParam],
@@ -869,7 +883,7 @@ SemaCheckContext: struct {
     comptime_body_values: SemaComptimeBodyValues,
     // Derived module/key indexes into the canonical ordered source rows.
     comptime_body_source_modules: [Int],
-    comptime_body_source_rows: [[String:Int]],
+    comptime_body_source_rows: [SemaComptimeKeyRows],
     compute_calls: [SemaComputeCallFact],
     autodiff_obligations: [SemaAutodiffObligation],
     // Ownership/GenericCrossings.jet: what this body's type parameters cross,
@@ -1256,10 +1270,10 @@ SemaProgramTables: struct {
     checked_type_names: NameTable,
     checked_type_name_rows: [[Int]],
     // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
-    // key -> its boxed recursive-layout keys, computed once per tables. Staged
+    // -> its boxed recursive-layout keys, computed once per tables. Staged
     // comptime values type only waiting constants, never a nominal's fields,
     // so landing values leaves these edges unchanged.
-    boxed_edges: [String:[String]],
+    boxed_edges: [U32:[String]],
     // `sema_copy_facts_table(registration_graph)`: each non-generic nominal's
     // copy facts, walked once per tables. Landing comptime values never
     // changes a nominal's members, so these stay true.
@@ -1445,7 +1459,7 @@ sema_program_tables_init: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
 
 // The tables over `graph` whose boxed edges and copy facts were already
 // computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
-sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: &&[String:[String]], copy_facts: &&SemaCopyFactsTable) -> SemaProgramTables Never! {
+sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: &&[U32:[String]], copy_facts: &&SemaCopyFactsTable) -> SemaProgramTables Never! {
     names := name_table_sized(checked_types.len() * 2 + 2)
     name_rows := [[Int]]{[Int]{}}
     has_computed := graph == None
@@ -1487,7 +1501,7 @@ sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: Str
         checked_types: [TTypeDef]{},
         checked_type_names: name_table_sized(2),
         checked_type_name_rows: [[Int]]{},
-        boxed_edges: [String:[String]]{},
+        boxed_edges: [U32:[String]]{},
         declarations: declarations,
         generic_params: [TGenericParam]{},
         comptime_body_values: SemaComptimeBodyValues{},
@@ -1517,9 +1531,9 @@ sema_scope_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgr
 // The boxed field edges of `graph`, read in place through the `.Val(…)`
 // pattern on the parameter; binding `value: graph ?? …` copies the whole
 // graph.
-sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
+sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [U32:[String]] Never! {
     if graph == .Val(value) -> return sema_checked_program_boxed_edges(value)
-    [String:[String]]{}
+    [U32:[String]]{}
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -1658,7 +1672,7 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
             // module, so its edges are the ones keyed by the owner (what
             // sema_checked_boxed_edges looks up after resolving that name).
             if sema_registration_root_name(definition) == nominal.symbol.name {
-                edges: program.boxed_edges.get(symbol_table_key(graph.symbols, owner)) ?? return false
+                edges: program.boxed_edges.get(owner.id) ?? return false
                 return edges.contains(edge)
             }
             return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
@@ -1702,7 +1716,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         comptime_body_sources: [SemaComptimeBodySource]{},
         comptime_body_values: SemaComptimeBodyValues{},
         comptime_body_source_modules: [Int]{},
-        comptime_body_source_rows: [[String:Int]]{},
+        comptime_body_source_rows: [SemaComptimeKeyRows]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
         generic_crossings: [SemaGenericCrossing]{},
@@ -1788,7 +1802,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         // edits.
         comptime_body_values: source.comptime_body_values.copy(),
         comptime_body_source_modules: [Int]{},
-        comptime_body_source_rows: [[String:Int]]{},
+        comptime_body_source_rows: [SemaComptimeKeyRows]{},
         compute_calls: source.compute_calls.copy(),
         autodiff_obligations: source.autodiff_obligations.copy(),
         generic_crossings: source.generic_crossings.copy(),

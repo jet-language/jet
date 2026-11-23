@@ -57,10 +57,11 @@ use jet_foundation.[
     pattern_binding_names,
     symbol_is_none,
     symbol_none,
-    NameRows,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set,
+    NameTable,
+    name_column,
+    name_column_get,
+    name_column_set,
+    name_column_table,
 ]
 
 SemaOwnershipReferenceKind: enum {
@@ -6584,11 +6585,11 @@ sema_ownership_check_ident_reference: fn(state: &SemaOwnershipState, name: Strin
 // Branch and scope state
 
 // Branch facts are joined per key, like Rust `FlowFacts.merge_paths` rows:
-// `slots` maps a key to its bucket in `rows`, and each bucket lists the
-// merged rows of that key in merge order.
-sema_ownership_bucket_add: fn(slots: &NameRows, rows: &[[Int]], key: String, row: Int) Never! {
-    if name_rows_get_text(slots, key) == .Val(slot) -> rows[slot].push(row) else {
-        name_rows_set(slots, key, rows.len())
+// `slots` holds a key's bucket in `rows` at its id in `names`, and each
+// bucket lists the merged rows of that key in merge order.
+sema_ownership_bucket_add: fn(names: &NameTable, slots: &[Int], rows: &[[Int]], key: String, row: Int) Never! {
+    if name_column_get(names, slots, key) == .Val(slot) -> rows[slot].push(row) else {
+        name_column_set(names, slots, key, rows.len())
         rows.push([Int]{row})
     }
 }
@@ -7070,14 +7071,17 @@ sema_ownership_join_paths: fn(state: &SemaOwnershipState, before: SemaOwnershipS
 sema_ownership_uninit_join: fn(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {
     // copy: the join is the left facts themselves when the right adds none.
     if right.len() == 0 -> return left.copy()
-    right_slots := name_rows()
+    // The join's keys: each right key's bucket and each merged key's mark,
+    // by its id in `keys`.
+    keys := name_column_table(left.len() + right.len())
+    right_slots := name_column(right.len())
     right_rows := [[Int]]{}
-    loop (row, other) in right -> sema_ownership_bucket_add(right_slots, right_rows, other.key, row)
+    loop (row, other) in right -> sema_ownership_bucket_add(keys, right_slots, right_rows, other.key, row)
     merged := [SemaOwnershipUninitFact]{}
-    merged_keys := name_rows()
+    merged_keys := name_column(left.len() + right.len())
     loop fact in left {
         joined := fact
-        if name_rows_get_text(right_slots, joined.key) == .Val(key_slot) {
+        if name_column_get(keys, right_slots, joined.key) == .Val(key_slot) {
             loop row in right_rows[key_slot] {
                 if joined.fixed_len == right[row].fixed_len {
                     kept := [Int]{}
@@ -7091,12 +7095,12 @@ sema_ownership_uninit_join: fn(left: [SemaOwnershipUninitFact], right: [SemaOwne
                 }
             }
         }
-        name_rows_set(merged_keys, joined.key, 0)
+        name_column_set(keys, merged_keys, joined.key, 0)
         merged.push(joined)
     }
     loop fact in right {
-        if name_rows_get_text(merged_keys, fact.key) != None -> next
-        name_rows_set(merged_keys, fact.key, 0)
+        if name_column_get(keys, merged_keys, fact.key) != None -> next
+        name_column_set(keys, merged_keys, fact.key, 0)
         merged.push(fact.copy())
     }
     merged

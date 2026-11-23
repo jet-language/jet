@@ -40,6 +40,7 @@ use {
         sema_comptime_body_values_truncate,
         sema_comptime_environment,
         sema_comptime_graph_apply_values,
+        sema_comptime_key_row,
         sema_comptime_module_slot,
         sema_comptime_staged_constant_rows,
         sema_comptime_value_sites,
@@ -542,12 +543,11 @@ body_index_linear_constant_rows: fn(graph: SemaRegistrationGraph, values: [SemaC
         }
         if earlier -> next
         module_index: sema_registration_module_index(graph, value.module_identity) ?? next
-        staged_values := [String:SemaComptimeItemValue]{}
-        // copy: `values` keeps its row; the staged map owns the value it checks
-        staged_values[value.key] = value.copy()
+        // copy: `values` keeps its row; the check owns the value it stages
+        staged: Val(value.copy())
         loop constant in graph.modules[module_index].constants {
             if symbol_table_key(graph.symbols, constant.symbol.id) != value.key -> next
-            row: sema_checked_constant_with_values(graph, graph.modules[module_index], constant, staged_values, diagnostics) ?? next
+            row: sema_checked_constant_with_values(graph, graph.modules[module_index], constant, staged, diagnostics) ?? next
             rows.push(row)
         }
     }
@@ -588,7 +588,7 @@ body_index_constant_projection: fn() {
     fresh := sema_comptime_available_constants(graph, [SemaComptimeItemValue]{})
     sema_comptime_available_constants_add(fresh, [SemaComptimeItemValue]{duplicate})
     slot: sema_comptime_module_slot(fresh.constant_modules, body_index_module("constant.0")) ?? panic("fresh generation has no module")
-    body_index_require(fresh.constant_rows[slot].get(first.key) == (Val(0)) && available.counted_values == values.len(), "replacement starts a fresh value generation without changing the retained prior frontier")
+    body_index_require(sema_comptime_key_row(fresh.constant_rows[slot], first.key) == (Val(0)) && available.counted_values == values.len(), "replacement starts a fresh value generation without changing the retained prior frontier")
     duplicate_graph := body_index_constant_graph([String]{"repeated: 1\nrepeated: 2\n"})
     body_index_require(duplicate_graph.internal_problem == None, "duplicate-name invalid input still has an ordinary graph")
     duplicate_key: symbol_key_text(SymbolKind.Constant, "constant.0", "", "repeated")

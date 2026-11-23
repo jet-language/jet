@@ -42,9 +42,10 @@ use jet_foundation.[
     symbol_table_key,
     type_name,
     module_text,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set_first,
+    name_column,
+    name_column_get,
+    name_column_set_first,
+    name_column_table,
 ]
 
 SemaMarkerRuleArgumentObservation: struct {
@@ -2383,14 +2384,16 @@ SemaInlineAlwaysEdge: struct {
 // function's.
 sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
     // The marked functions, as module and function indexes into `modules`,
-    // and each marked key's first position in that list.
+    // and each marked key's first position in that list, at the key's id in
+    // `marked_names`.
     marked_modules := [Int]{}
     marked_functions := [Int]{}
-    marked_keys := name_rows()
+    marked_names := name_column_table()
+    marked_rows := name_column()
     loop (module_index, module_result) in modules {
         loop (function_index, function) in module_result.functions {
             if function.is_inline_always {
-                name_rows_set_first(marked_keys, function.key, marked_modules.len())
+                name_column_set_first(marked_names, marked_rows, function.key, marked_modules.len())
                 marked_modules.push(module_index)
                 marked_functions.push(function_index)
             }
@@ -2403,7 +2406,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         segments_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         start: diagnostics.len()
         loop fact in module_result.call_facts {
-            caller: name_rows_get_text(marked_keys, fact.caller_key) ?? next
+            caller: name_column_get(marked_names, marked_rows, fact.caller_key) ?? next
             name: modules[marked_modules[caller]].functions[marked_functions[caller]].name
             if fact.detail == .Val(detail) {
                 if detail.intrinsic_api == .Val(api) {
@@ -2413,7 +2416,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
                 }
             }
             callee_id: fact.callee ?? next
-            callee: name_rows_get_text(marked_keys, symbol_table_key(graph.symbols, callee_id)) ?? next
+            callee: name_column_get(marked_names, marked_rows, symbol_table_key(graph.symbols, callee_id)) ?? next
             // A direct call of itself is the local half's E0917.
             if callee != caller {
                 edges.push(SemaInlineAlwaysEdge{caller: caller, callee: callee, module: module_index, span: fact.span})

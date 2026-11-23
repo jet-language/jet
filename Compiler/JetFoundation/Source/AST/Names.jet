@@ -413,6 +413,90 @@ module_text: fn(table: ModuleTable, module_id: ModuleID) -> String Never! {
     table.identities.texts[module_index(module_id)]
 }
 
+// A pass's own text-keyed column (Docs/Spec/compiler-data.md, Lookups): a
+// pass that matches text no compilation table holds interns each key into a
+// NameTable of its own and keeps the key's row at that id in an `[Int]`
+// column; several columns may share one table. NAME_COLUMN_UNBOUND marks an
+// id the column never bound (id 0, the empty spelling, starts unbound). A
+// negative row reads as unbound to name_column_get and as itself to
+// name_column_value, so -1 unbinds a key and a pass may keep markers of its
+// own below 0.
+NAME_COLUMN_UNBOUND: -4611686018427387904
+
+// An empty column for a table expected to hold about `expected` keys.
+name_column: fn(expected: Int{0}) -> [Int] Never! {
+    rows := [Int]{}
+    if expected > 0 -> rows.try_reserve(expected + 1) ?? panic("reserve failed")
+    rows.push(NAME_COLUMN_UNBOUND)
+    rows
+}
+
+// A NameTable sized for about `expected` keys, as name_column is.
+name_column_table: fn(expected: Int{0}) -> NameTable Never! { name_table_sized(expected * 2 + 2) }
+
+// The row `rows` binds at id `id`, whatever its sign; None when unbound.
+name_column_at: fn(rows: [Int], id: Int) -> Int? Never! {
+    if id >= rows.len() || rows[id] == NAME_COLUMN_UNBOUND -> return None
+    Val(rows[id])
+}
+
+// The row `rows` binds to `text` in `names` when it is not negative.
+name_column_get: fn(names: NameTable, rows: [Int], text: String) -> Int? Never! {
+    found: name_find(names, text) ?? return None
+    row: name_column_at(rows, name_index(found)) ?? return None
+    if row < 0 -> return None
+    Val(row)
+}
+
+// name_column_get of a `text` whose name_text_hash is `hash`.
+name_column_get_hashed: fn(names: NameTable, rows: [Int], text: String, hash: Int) -> Int? Never! {
+    found: name_find_hashed(names, text, hash) ?? return None
+    row: name_column_at(rows, name_index(found)) ?? return None
+    if row < 0 -> return None
+    Val(row)
+}
+
+// The row `rows` binds to `text` whatever its sign, if `text` was ever bound.
+name_column_value: fn(names: NameTable, rows: [Int], text: String) -> Int? Never! {
+    found: name_find(names, text) ?? return None
+    name_column_at(rows, name_index(found))
+}
+
+// Binds `text` to `row`, replacing any earlier value.
+name_column_set: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+    name_column_set_hashed(names, rows, text, name_text_hash(text), row)
+}
+
+// name_column_set of a `text` whose name_text_hash is `hash`.
+name_column_set_hashed: fn(names: &NameTable, rows: &[Int], text: String, hash: Int, row: Int) Never! {
+    id: name_index(name_intern_hashed(names, text, hash))
+    loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
+    rows[id] = row
+}
+
+// Binds `text` to `row` (>= 0) unless it is bound: a key's first row stands.
+name_column_set_first: fn(names: &NameTable, rows: &[Int], text: String, row: Int) Never! {
+    id: name_index(name_intern(names, text))
+    loop rows.len() <= id -> rows.push(NAME_COLUMN_UNBOUND)
+    if rows[id] < 0 -> rows[id] = row
+}
+
+#Test("a name column binds, replaces, keeps a first row and reads markers") {
+    names := name_column_table()
+    rows := name_column()
+    assert_eq(name_column_get(names, rows, ""), None)
+    assert_eq(name_column_value(names, rows, "a"), None)
+    name_column_set(names, rows, "b", 2)
+    name_column_set(names, rows, "a", 1)
+    name_column_set_first(names, rows, "a", 5)
+    assert_eq(name_column_get(names, rows, "a"), Val(1))
+    name_column_set(names, rows, "b", -1)
+    assert_eq(name_column_get(names, rows, "b"), None)
+    assert_eq(name_column_value(names, rows, "b"), Val(-1))
+    name_column_set_first(names, rows, "b", 7)
+    assert_eq(name_column_get(names, rows, "b"), Val(7))
+}
+
 // The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
 // A lookup computes it once (in place, no byte copy) and passes it with the
 // spelling to every `NameRows` it visits.
