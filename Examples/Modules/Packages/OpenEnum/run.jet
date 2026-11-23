@@ -1,0 +1,38 @@
+// Outside its declaring package, matching an `#Open` enum (directly or inside
+// a nested pattern) requires a catch-all (`else` or `_`), while single-arm
+// guards stay unaffected.
+use net
+
+describe: fn(kind: net.ErrorKind) -> String {
+    if kind == {
+        .NotFound -> "missing"
+        .Timeout -> "timed out"
+        else -> "other"
+    }
+}
+
+describe_opt: fn(opt: net.ErrorKind?) -> String {
+    if opt == {
+        .Val(.NotFound) -> "opt-missing"
+        .Val(_) -> "opt-other"
+        .None -> "opt-none"
+    }
+}
+
+describe_opt_else: fn(opt: net.ErrorKind?) -> String {
+    if opt == {
+        .Val(.NotFound) -> "else-missing"
+        .None -> "else-none"
+        else -> "else-other"
+    }
+}
+
+run: fn() {
+    a: net.ErrorKind.NotFound
+    b: net.ErrorKind.Timeout
+    print("{net.internal_code(a)} {describe(a)}")
+    print("{net.internal_code(b)} {describe(b)}")
+    print("{describe_opt(Val(a))} {describe_opt(Val(b))} {describe_opt(None)}")
+    print("{describe_opt_else(Val(a))} {describe_opt_else(Val(b))} {describe_opt_else(None)}")
+    if a == .NotFound -> print("guard-ok")
+}

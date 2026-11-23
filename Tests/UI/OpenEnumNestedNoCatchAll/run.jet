@@ -1,0 +1,35 @@
+// Outside the declaring package, a nested pattern over an `#Open` enum must
+// include a catch-all (`_` or `else`) even when every currently-known variant
+// is matched (E0307).
+use api.[ErrorKind]
+
+Wrapper: enum {
+    Wrapped(ErrorKind),
+    Empty,
+}
+
+describe_opt: fn(opt: ErrorKind?) -> String {
+    if opt == {
+        .Val(.NotFound) -> "missing"
+        .Val(.Timeout) -> "timed out"
+        .None -> "none"
+    }
+}
+
+describe_res: fn(res: Int ErrorKind!) -> String {
+    if res == {
+        .Ok(_) -> "ok"
+        .Err(.NotFound) -> "missing"
+        .Err(.Timeout) -> "timed out"
+    }
+}
+
+describe_wrap: fn(w: Wrapper) -> String {
+    if w == {
+        .Wrapped(.NotFound) -> "missing"
+        .Wrapped(.Timeout) -> "timed out"
+        .Empty -> "empty"
+    }
+}
+
+run: fn() { print("{describe_opt(None)} {describe_res(Ok(1))} {describe_wrap(Wrapper.Empty)}") }

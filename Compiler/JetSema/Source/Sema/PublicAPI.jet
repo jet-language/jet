@@ -13,6 +13,7 @@ use jet_foundation.[
     Func,
     ImportDecl,
     Item,
+    MARKER_OPEN,
     ModuleCap,
     Name,
     NameTable,
@@ -481,7 +482,9 @@ sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: Str
     sema_public_api_impls(name, definition.trait_impls, rows)
 }
 
-// An enum is its row plus one `variant` row per variant.
+// An enum is its row plus one `variant` row per variant. An `#Open` enum's row
+// ends in ` #Open`, so adding a variant is non-breaking while adding or
+// removing `#Open` changes the row signature.
 sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
     loop variant in definition.variants {
         payload: if variant.payload == {
@@ -494,7 +497,14 @@ sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String,
         }
         rows.push(PublicAPIItem{kind: "variant", name: "{name}.{variant.name}", signature: "variant {name}.{variant.name}{payload}"})
     }
-    rows.push(PublicAPIItem{kind: "enum", name: name.copy(), signature: "enum {name}{sema_public_api_type_params(definition.type_params, units)}"})
+    open_mark := ""
+    loop marker in definition.type_markers {
+        if marker.name == MARKER_OPEN && !marker.negated {
+            open_mark = " #Open"
+            break
+        }
+    }
+    rows.push(PublicAPIItem{kind: "enum", name: name.copy(), signature: "enum {name}{sema_public_api_type_params(definition.type_params, units)}{open_mark}"})
     sema_public_api_cap(definition.cap, name, rows)
     sema_public_api_methods(name, definition.methods, functions, units, rows)
     sema_public_api_impls(name, definition.trait_impls, rows)

@@ -311,6 +311,23 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     assert_eq(publication_diff_test_breaks([draw], [draw, publication_diff_test_item("require", "Draw.inner.k", "require Draw.inner.k: Int")]).len(), 0)
 }
 
+#Test("publication api diff open enum allows variant additions and catches open toggle") {
+    closed_err: publication_diff_test_item("enum", "ErrorKind", "enum ErrorKind")
+    open_err: publication_diff_test_item("enum", "ErrorKind", "enum ErrorKind #Open")
+    not_found: publication_diff_test_item("variant", "ErrorKind.NotFound", "variant ErrorKind.NotFound")
+    timeout: publication_diff_test_item("variant", "ErrorKind.Timeout", "variant ErrorKind.Timeout")
+    canceled: publication_diff_test_item("variant", "ErrorKind.Canceled", "variant ErrorKind.Canceled")
+    // Adding a variant to an `#Open` enum is non-breaking.
+    assert_eq(publication_diff_test_breaks([open_err, not_found, timeout], [open_err, not_found, timeout, canceled]).len(), 0)
+    // Removing a variant from an `#Open` enum is breaking.
+    assert_eq(publication_diff_test_breaks([open_err, not_found, timeout], [open_err, not_found]), ["ErrorKind.Timeout"])
+    // Adding `#Open` to a closed enum, or removing `#Open` from an open enum, is breaking.
+    assert_eq(publication_diff_test_breaks([closed_err, not_found], [open_err, not_found]), ["ErrorKind"])
+    assert_eq(publication_diff_test_breaks([open_err, not_found], [closed_err, not_found]), ["ErrorKind"])
+    // Adding a variant to a closed enum remains breaking.
+    assert_eq(publication_diff_test_breaks([closed_err, not_found], [closed_err, not_found, timeout]), ["ErrorKind.Timeout"])
+}
+
 #Test("publication api diff effect rows may narrow but never widen") {
     io_net: publication_diff_test_function("fetch", "fn fetch(url: String) -[IO, Net]> String Never!")
     io: publication_diff_test_function("fetch", "fn fetch(url: String) -[IO]> String Never!")

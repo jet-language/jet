@@ -15,6 +15,7 @@ use jet_foundation.[
     JobSkip,
     MARKER_CODABLE,
     MARKER_JOB,
+    MARKER_OPEN,
     Marker,
     MaturityTag,
     MetaAttr,
@@ -51,6 +52,7 @@ parser_split_type_markers: fn(markers: [Marker]) -> {derives: [NamedSpan], serde
             }
             next
         }
+        if marker.name == MARKER_OPEN -> next
         if marker.name == {
             "Rename" | "Default" -> serde.push(marker.copy())
             "Layout" | "Specified" | "Deprecated" | "Error" | "FX" -> {}

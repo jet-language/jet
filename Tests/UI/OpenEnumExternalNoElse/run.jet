@@ -1,0 +1,12 @@
+// Outside the declaring package, an `#Open` enum requires `else` even when
+// every currently-known variant is listed (E0307).
+use api
+
+describe: fn(kind: api.ErrorKind) -> String {
+    if kind == {
+        .NotFound -> "missing"
+        .Timeout -> "timed out"
+    }
+}
+
+run: fn() { print(describe(api.ErrorKind.NotFound)) }

@@ -1,0 +1,22 @@
+// `#Open` is valid only on public enums (E1137): structs, distinct types,
+// and `priv` enums are rejected.
+#Open
+Record: struct {
+    value: Int,
+}
+
+#Open
+priv SecretKind: enum {
+    Hidden,
+    Internal,
+}
+
+#Open
+Tag: distinct Int
+
+run: fn() {
+    r: Record{value: 1}
+    k: SecretKind.Hidden
+    t: Tag{2}
+    print("{r.value}")
+}

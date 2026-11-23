@@ -198,11 +198,24 @@ sema_coverage_keys: fn(subject_ty: Type, shapes: [TPatternShape], environment: S
     keys
 }
 
+// True when `ty` resolves to an `#Open` enum declared in another package:
+// external matches and nested patterns treat it as an open set.
+sema_coverage_is_open_enum: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if !(ty == .Named(_) || ty == .Apply(_, _)) -> return false
+    if program.registration_graph == .Val(graph) {
+        nominal_row: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return false
+        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Enum || !nominal.is_open -> return false
+        return graph.modules[nominal_row.module_index].package_identity != environment.package_identity
+    }
+    false
+}
+
 // Whether the nested arms on payload field `field` of head `key` jointly
 // cover that field's closed type.
 sema_coverage_field_covers: fn(subject_ty: Type, key: String, field: Int, group: [{field: Int, inner: TPatternShape}], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     payload_ty: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, field, environment, program) ?? return false)
-    if !sema_coverage_is_closed(payload_ty) -> return false
+    if !sema_coverage_is_closed(payload_ty) || sema_coverage_is_open_enum(payload_ty, environment, program) -> return false
     inner := [TPatternShape]{}
     loop entry in group {
         if entry.field == field -> inner.push(entry.inner)
@@ -414,6 +427,9 @@ sema_coverage_nested_cases: fn(subject_ty: Type, key: String, shapes: [TPatternS
     loop shape in shapes -> sema_coverage_collect_nested(shape, key, inner, seen)
     if inner.len() == 0 -> return [String]{}
     payload_ty: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, 0, environment, program) ?? return [String]{})
+    if sema_coverage_is_open_enum(payload_ty, environment, program) {
+        return [String]{"_"}
+    }
     if !(payload_ty == .Named(_) || payload_ty == .Apply(_, _) || payload_ty == .Union(_)) {
         return [String]{}
     }
@@ -474,6 +490,18 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
             return
         }
         diagnostics.push(sema_error("E0307", span, "this `if` over a `{shown}` value has no `else` arm", "a `{shown}` value may hold any type that implements `{shown}`, so type arms can't list them all", "add `else -> {{ … }}` after the last arm"))
+        return
+    }
+    // An `#Open` enum from another package may add new cases in future
+    // releases, so external dispatches must include `else` (or a catch-all
+    // head in a multi-head function).
+    if sema_coverage_is_open_enum(subject_ty, environment, program) {
+        shown: type_name(subject_ty)
+        if multi_head {
+            diagnostics.push(sema_error("E0307", span, "this multi-head function over `#Open` enum `{shown}` needs a catch-all head", "`{shown}` is `#Open` and declared in another package, so future releases may add new cases", "add a head that binds `{shown}` without testing a specific case"))
+            return
+        }
+        diagnostics.push(sema_error("E0307", span, "this `if` over `#Open` enum `{shown}` has no `else` arm", "`{shown}` is `#Open` and declared in another package, so future releases may add new cases", "add `else -> {{ … }}` after the last arm"))
         return
     }
     matrix := false
@@ -801,9 +829,97 @@ sema_coverage_is_closed_set: fn(ty: Type, environment: SemaScopeEnvironment, pro
     }
     if program.registration_graph == .Val(graph) {
         nominal_row: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
-        return graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
+        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Enum -> return false
+        if nominal.is_open && graph.modules[nominal_row.module_index].package_identity != environment.package_identity {
+            return false
+        }
+        return true
     }
     false
+}
+
+// True when any arm shape tests a specific case of an external `#Open` enum
+// nested inside `subject_ty`, so an `else` arm legitimately covers future
+// cases of that open enum.
+sema_coverage_shapes_test_open_enum: fn(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    loop shape in shapes {
+        if sema_coverage_shape_tests_open_enum(subject_ty, shape, environment, program) -> return true
+    }
+    false
+}
+
+sema_coverage_shape_tests_open_enum: fn(subject_ty: Type, shape: TPatternShape, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    plain: sema_pattern_unwrap_tags(subject_ty)
+    if shape == {
+        .Or(alternatives, _) -> {
+            loop alt in alternatives {
+                if sema_coverage_shape_tests_open_enum(plain, alt, environment, program) -> return true
+            }
+            return false
+        }
+        .Variant(variant, bindings, _, _) -> {
+            if sema_coverage_is_open_enum(plain, environment, program) -> return true
+            loop (field_index, binding) in bindings {
+                if binding == .Nested(nested) {
+                    if sema_coverage_payload_type(plain, variant, field_index, environment, program) == .Val(payload_ty) {
+                        if sema_coverage_shape_tests_open_enum(payload_ty, nested.shape, environment, program) -> return true
+                    }
+                }
+            }
+            return false
+        }
+        .Present(_, _, inner, _) -> {
+            if inner == .Val(nested) && plain == .Option(inner_ty) {
+                return sema_coverage_shape_tests_open_enum(inner_ty, nested.shape, environment, program)
+            }
+            return false
+        }
+        .Ok(_, _, inner, _) -> {
+            if inner == .Val(nested) && plain == .Result(ok_ty, _) {
+                return sema_coverage_shape_tests_open_enum(ok_ty, nested.shape, environment, program)
+            }
+            return false
+        }
+        .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) && plain == .Result(_, err_ty) {
+                return sema_coverage_shape_tests_open_enum(err_ty, nested.shape, environment, program)
+            }
+            return false
+        }
+        .Struct(fields, _) -> {
+            if program.registration_graph == .Val(graph) && sema_pattern_nominal_row(graph, environment.module_identity, plain) == .Val(owner) {
+                nominal: graph.modules[owner.module_index].nominals[owner.row]
+                generic_names: loop parameter in nominal.generic_params -> parameter.name
+                args: sema_pattern_subject_args(plain)
+                loop field in fields {
+                    if field == .Nested(name, nested, _) {
+                        loop declared in nominal.fields {
+                            if declared.symbol.name == name {
+                                field_ty: sema_inference_substitute_type(declared.ty, generic_names, args)
+                                if sema_coverage_shape_tests_open_enum(field_ty, nested.shape, environment, program) -> return true
+                            }
+                        }
+                    }
+                }
+            }
+            return false
+        }
+        .List(items, _, _) -> {
+            elem := Type?{None}
+            if plain == {
+                .List(e) | .FixedList(e, _) -> elem = Val(e)
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+            if elem == .Val(elem_ty) {
+                loop item in items {
+                    if item == .Nested(nested) && sema_coverage_shape_tests_open_enum(elem_ty, nested.shape, environment, program) -> return true
+                }
+            }
+            return false
+        }
+        .Absent(_) | .Range(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> false
+    }
 }
 
 // E0641: one arm of a table that ends in `else`. `shape` is the pattern the
@@ -1024,6 +1140,12 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
             missing = sema_coverage_three_state_missing(ok_ty, shapes, keys, environment, program)
         }
     }
+    // When an arm tests a nested external `#Open` enum, `else` is a valid
+    // catch-all for future cases of that open enum (unless every case of the
+    // outer subject is already handled, making `else` dead).
+    if missing.len() > 0 && sema_coverage_shapes_test_open_enum(subject_ty, shapes, environment, program) {
+        return
+    }
     // A union member no name in this module reaches has no arm; the `else`
     // is how a table reaches it.
     union_subject: subject_ty == .Union(_)
@@ -1199,6 +1321,9 @@ sema_pattern_matrix_map_total: fn(shape: TPatternShape) -> Bool Never! {
 }
 
 sema_pattern_matrix_constructors: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaPatternCoverageConstructor] Never! {
+    if sema_coverage_is_open_enum(ty, environment, program) {
+        return [SemaPatternCoverageConstructor]{}
+    }
     if ty == {
         .Option(inner) -> {
             return [SemaPatternCoverageConstructor]{

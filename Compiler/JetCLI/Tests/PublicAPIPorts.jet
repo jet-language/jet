@@ -260,3 +260,23 @@ pap_cap_source: fn(receipt: String) -> String {
     }
     assert(description.starts_with("public reexport `blend` changed signature"), "retargeting `blend` is no change:\n{pap_text(clamp_api)}")
 }
+
+#Test("open_enum_public_api_snapshot_and_semver") {
+    root: pap_root("open-enum")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    v1_open: pap_api(root, "v1-open", "net", "#Open\nErrorKind: enum {{\n    NotFound,\n    Timeout,\n}}\n")
+    v2_open_added: pap_api(root, "v2-open-added", "net", "#Open\nErrorKind: enum {{\n    NotFound,\n    Timeout,\n    Canceled,\n}}\n")
+    v2_closed: pap_api(root, "v2-closed", "net", "ErrorKind: enum {{\n    NotFound,\n    Timeout,\n}}\n")
+    v2_open_removed: pap_api(root, "v2-open-removed", "net", "#Open\nErrorKind: enum {{\n    NotFound,\n}}\n")
+    assert_eq(pap_find(v1_open, "ErrorKind").signature, "enum ErrorKind #Open")
+    published: pap_frozen("net", v1_open)
+    assert_eq(pap_find(published, "ErrorKind").signature, "enum ErrorKind #Open")
+    // Adding a variant to an `#Open` enum is non-breaking.
+    assert_eq(pap_changes(published, v2_open_added).len(), 0)
+    // Removing `#Open`, adding `#Open` to a closed enum, or removing a variant breaks.
+    assert_eq(loop change in pap_changes(published, v2_closed) -> "{change.item_name}", [String]{"ErrorKind"})
+    assert_eq(loop change in pap_changes(pap_frozen("net", v2_closed), v1_open) -> "{change.item_name}", [String]{"ErrorKind"})
+    assert_eq(loop change in pap_changes(published, v2_open_removed) -> "{change.item_name}", [String]{"ErrorKind.Timeout"})
+}
+
