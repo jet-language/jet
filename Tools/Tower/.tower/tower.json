@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6996,
-    "rev": 113285,
+    "nextNum": 6997,
+    "rev": 113297,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35461,6 +35461,21 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Owner direction 2026-11-23: G7's compile-speed target for the architectural pillars is about 400K lines/s; c3 (30M end metric), c8 (fused per-function pipeline) and c9 (compiler compiled well) moved to G8 card #6996. After the pillars land, work moves to G1-G6 (all unfrozen work), owner target Friday 2026-11-27 06:00."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Ranking input 2026-11-23 (same receipt as #6795 log): O0 compile of the 1.09M-line compiler corpus, process CPU by phase: sema.finalize 41-42 s, ir.build 16 s, comptime 10-12 s, load 6.5 s, register 5 s, ir.x64 3-4 s, ir.object 3-4 s, build.step 2.5-3 s; total ~100 s CPU over ~44 s wall (average parallelism 2.2-2.5 of 32). Largest levers: parallelism (#6794) and sema.finalize/ir.build data cost (#6978, #6793), ahead of backend emission."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Gap check 2026-11-23: measured CompileThroughput O0 is 30,654 LOC/s (#6796 log). The planned architecture cards' own targets top out at >=400K lines/s (#6794 c3); no open card plan reaches 30M (c3). After #6793-#6798 and #6978, the remaining ~75x needs a ranked plan (c8 fused per-function pipeline + direct image writer, c9 compiler compiled well) with profile-based shares before staffing."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Landed Wave 6B (b6f3fe265b, Pillar 2 slice): direct split-buffer Object->StaticLink (-109 MiB RSS, StaticLink copies 46->39), zero-copy BuildMerge, BuildWaves 6->5, CoreSources single bundle, Loader O(N) lookups. Verified Stage-1->Stage-2 -O2 self-host, CodegenCeiling 9/9, CompilerData 0 rises, UnsafeRatchet ok, JetBackend 30/30, JetIR 185/185, JetDriver 1/1, JetCLI 52/52, Tests/Guards 217/217. Live cold metrics: FULL jet build -O0 --threads 24 Compiler 40.69s -> 38.91s (-1.78s, -4.4%); standalone jet-bare 15.05s -> 14.92s."
         },
         {
@@ -35966,11 +35981,16 @@
         {
           "n": 3,
           "text": "End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build. Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:16.938Z"
+          "evidence": "Moved to #6996 c1",
+          "at": "2026-11-23T13:58:21.195Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6996,
+            "n": 1
+          }
         },
         {
           "n": 4,
@@ -36011,20 +36031,30 @@
         {
           "n": 8,
           "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:20.838Z"
+          "evidence": "Moved to #6996 c2",
+          "at": "2026-11-23T13:58:21.195Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6996,
+            "n": 2
+          }
         },
         {
           "n": 9,
           "text": "Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) and a SIMD lexer at 1 GB/s or more close the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/Perf/AsmParity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median). and `node Tools/Perf/AsmParity/AsmParity.mjs --jet $JET --gate` for the hot-loop cells.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:21.762Z"
+          "evidence": "Moved to #6996 c3",
+          "at": "2026-11-23T13:58:21.195Z",
+          "closure": "duplicate",
+          "movedTo": {
+            "card": 6996,
+            "n": 3
+          }
         },
         {
           "n": 10,
@@ -36330,7 +36360,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-23T00:23:17.832Z",
+      "updated": "2026-11-23T13:58:34.257Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 41
     },
@@ -52560,6 +52590,16 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "2026-11-23 08:12: S1 resumed in worktree ParallelSched (detached at dev 93bd9dc289) with the parked part-A Alloc.jet patch applied; implementer CopyPatchO0."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Parked 2026-11-23 06:48 when staffing was cut to 2 agents: S1 part A (Alloc.jet sharding) diff at $JET_SCRATCH_ROOT/tmp/parked_arch/6794_s1.patch, base 93bd9dc289; Scheduler.jet part B not started; the baseline scheduler benchmark hung (task killed)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Landed Pillar 5 Slice 2 + 4B/6B (dev d2fc656a69, master ec68fd9d73, S2==S3 4e091ee4...): hardware SHA-NI link/embed (core-embed 2267->702ms, -69%), direct x64_link_runtime_image_objects (runtime.pack -22%), struct JetCLICoreLibraryIR (709MB drop gap 267.5->1.0ms), lock-free partitioned ir_opt_bodies + OptStops/OptSimplify/OptBuilder fast paths (runtime.core ir.opt -12.4%), parallel Core writes & 4-way IR drop. Full -O0 Compiler 33.51s->30.99s quiet (-2.52s), full -O2 Compiler 39.44s->37.89s, Peak RSS 4833 MB (sub-5GB!). All gates pass (CodegenCeiling 9/9, CompilerData 1093, UnsafeRatchet 1660, Tests/Guards 217/217)."
         },
         {
@@ -52602,7 +52642,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T10:46:19.621Z",
+      "updated": "2026-11-23T13:09:32.106Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -52624,6 +52664,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c4 measurement 2026-11-23 ~09:20 (GoalsOrder build d0321068 vs base da9c7114 = 93bd9dc289-era milestone-s2, CompileThroughput --against, O0, n=3, compiler corpus 1,093,656 lines, 12 threads): ir.x64 process CPU 4.38 -> 3.10 s (-34%, spread 29.5 INCONCLUSIVE), ir.object 4.10 -> 2.93 s (-31%, pass), native.link -20%; whole O0 compile CPU 105.5 -> 100.5 s (-5.5%), wall ~43-44 s both (24.7K vs 25.5K lines/s, parallelism 2.2-2.5). Far from c4's >=10x: the base already emits most O0 functions through the Pillar 2 X64Patch emitter, so the X64Select-relative 10x projection does not apply to the live baseline. c4 stays open; c2 case passes on every tier; c3 has one regression (TailCalls/comptime_tail_walk_runs_in_constant_stack at -O0, StackOverflow) sent back to the implementer. Receipt: $JET_SCRATCH_ROOT/tmp/orch/c4/against.{log,tsv}."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Handoff 2026-11-23 07:56 (prior session stopped on quota at 07:40). Worktree GoalsOrder (base 93bd9dc289), uncommitted: S1 Encoder helpers + Compiler/Toolchain/X64Stencils generator + generated JetIR X64StencilData.jet, S2 unified X64FlatReloc across consumers, S3 DropEarly/X64Patch rewrite in progress; Backend/o0_stencil_emit case added and passing on all tiers after a block_release hole-offset fix. Open guard failures: closed_lists (X64RelocTarget baseline row to delete) and copy_ratchet (Image/Object.jet 4 copies over ceiling 3). Snapshot: $JET_SCRATCH_ROOT/tmp/parked_arch/snap-0756/GoalsOrder.{diff,newfiles.tar,base}."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52682,7 +52732,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-23T11:32:17.567Z",
+      "updated": "2026-11-23T13:47:31.457Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -52704,6 +52754,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Parked 2026-11-23 06:48 when staffing was cut to 2 agents: S1 diff (lexer Chunks/Payload/Scan, parser Entry/ColonDeclarations/markers) at $JET_SCRATCH_ROOT/tmp/parked_arch/6796_s1.patch, base 93bd9dc289. Worktree was force-removed; new files would not be in the diff (master-mirror exclude hides them)."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52766,7 +52821,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-23T10:46:17.281Z",
+      "updated": "2026-11-23T12:56:57.277Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
@@ -72525,6 +72580,16 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Decision (Slice 3, copy ratchet): TypeTable's per-type copy in type_table_intern moves to JetSema Sema/BodyFlatten.jet (TExpr-sourced types deferred and interned at publish): ledger adds BodyFlatten.jet 1 and lowers Types.jet 25->24, so the repository's net copy count is unchanged. The arena-sourced path is copy-free (index deferral). Threading (program, context) through ~129 flatten functions to remove this one copy is not worth the churn."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Handoff 2026-11-23 07:56 (prior session stopped on quota at 07:40). Slice 2 (s33-2) verified but uncommitted in worktree CodegenOpt (base fb1cb69a62): BodyTree.types deleted, TExprType.ty is TypeID, Interner + InternerDelta threaded Foundation->Sema->IR->Eval->Driver->SemIndex->CLI; check --threads 1 == --threads 12 == baseline byte-identical; JetFoundation/JetSema/JetIR(186/186) pass. Slice 3 (s33-3: delete IRModule.value_types and TypeTable, IRType.ty to TypeID, remaining Facts Type fields) partly coded and unverified (96 files, +2724/-2267 total). Snapshot: $JET_SCRATCH_ROOT/tmp/parked_arch/snap-0756/CodegenOpt.{diff,newfiles.tar,base}. Resumed by the new orchestrator session."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Landed Pillar 1/4A final push in dev 83a9da0215 (master 016807b791): eliminated 55k+ duplicate Type.Fn/FunctionCallMetadata copies, converted Effects/LocalSplice/ComptimeUse/Items/Frame to NameTable/NameRows (-59 CompilerData, -6 copy_ratchet), sema.finalize -14.2% on CompileThroughput O0 (30,654 LOC/s) and -12.4% on jet-bare (-536ms)."
         },
         {
@@ -72570,7 +72635,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-23T09:07:32.091Z",
+      "updated": "2026-11-23T13:54:02.216Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 2
     },
@@ -74061,6 +74126,80 @@
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3,
       "completedAt": "2026-11-15T01:10:53.610Z"
+    },
+    {
+      "id": "c0clt9eg",
+      "num": 6996,
+      "title": "Compile speed beyond the G7 pillars: 30M lines per second (fused per-function pipeline, direct image writer, compiler compiled well)",
+      "body": "Split from #5479.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "G8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Owner direction 2026-11-23: the G7 architectural pillars (#6978, #6795, #6794, #6796, #6797, #6798, #6793) target about 400K lines/s (#6794 c3); the rest of the road to 30M lines/s is G8 Hillclimbing work, this card. Measured 2026-11-23 on the 1.09M-line compiler corpus at O0: 25K lines/s, 92 us CPU per line, parallelism 2.2 of 32; 30M on 32 cores needs about 1 us CPU per line."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "End metric: `jet build` of the corpus runs at 30M lines per second or faster, with output identical to the slower build. Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T13:58:21.195Z",
+          "movedFrom": {
+            "card": 5479,
+            "n": 3
+          }
+        },
+        {
+          "n": 2,
+          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T13:58:21.195Z",
+          "movedFrom": {
+            "card": 5479,
+            "n": 8
+          }
+        },
+        {
+          "n": 3,
+          "text": "Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) and a SIMD lexer at 1 GB/s or more close the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/Perf/AsmParity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens). Proof: the c1 cell receipt (`jet Tools/Perf/CompileThroughput/Throughput.jet`, cold and uncached, n=3 median). and `node Tools/Perf/AsmParity/AsmParity.mjs --jet $JET --gate` for the hot-loop cells.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T13:58:21.195Z",
+          "movedFrom": {
+            "card": 5479,
+            "n": 9
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c031o59x",
+      "needsAcceptance": false,
+      "created": "2026-11-23T13:58:21.194Z",
+      "updated": "2026-11-23T13:58:31.422Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -134636,6 +134775,143 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T13:58:34.257Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T13:58:31.422Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0clt9eg",
+      "note": "epoch,phase,priority,logEntry,parent,parentId"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.split",
+      "ref": "c031o59x",
+      "refs": [
+        "c031o59x",
+        "c0clt9eg"
+      ],
+      "note": "c3, c8, c9 → #6996 Compile speed beyond the G7 pillars: 30M lines per second (f"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0clt9eg",
+      "note": "#3 moved from #5479 c9"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c031o59x",
+      "note": "#9 → #6996 c3: split into #6996"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0clt9eg",
+      "note": "#2 moved from #5479 c8"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c031o59x",
+      "note": "#8 → #6996 c2: split into #6996"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0clt9eg",
+      "note": "#1 moved from #5479 c3"
+    },
+    {
+      "at": "2026-11-23T13:58:21.195Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-move",
+      "ref": "c031o59x",
+      "note": "#3 → #6996 c1: split into #6996"
+    },
+    {
+      "at": "2026-11-23T13:58:21.194Z",
+      "by": "Orchestrator",
+      "action": "card.add",
+      "ref": "c0clt9eg",
+      "note": "Compile speed beyond the G7 pillars: 30M lines per second (fused per-function pipeline, direct image writer, compiler compiled well)"
+    },
+    {
+      "at": "2026-11-23T13:54:02.216Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T13:47:32.351Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T13:47:31.457Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T13:09:32.992Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T13:09:32.106Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T12:56:58.109Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T12:56:57.277Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0okfgjw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T12:56:56.446Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T12:56:55.562Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T11:32:18.472Z",
       "by": "Orchestrator",
