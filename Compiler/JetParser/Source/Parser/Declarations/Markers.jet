@@ -595,7 +595,7 @@ parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> Par
 // `#State` may continue as a chain `A -> B -> C`. Returns the label of the
 // last argument it pushed.
 parser_parse_marker_value_arg: fn(state: &JetParserState, marker_name: String, label: CallLabel?, args: &[MarkerCallArg], labels: &[CallLabel?], required: &[Int]) -> CallLabel? {
-    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_text(state, parser_current(state)) == "#run" {
+    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_token_text_is_id(parser_current(state), state.words.id_run) {
         if parser_parse_marker_required_arg(state, args, marker_name, label) {
             required.push(args.len() - 1)
         }

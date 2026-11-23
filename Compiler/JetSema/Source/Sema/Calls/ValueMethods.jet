@@ -315,9 +315,6 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, [EffectRowEntry]{}, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
     value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
@@ -374,15 +371,31 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, effect_row, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
+    if row.access == AccessConvention.Write {
+        if !sema_effect_record_mem_intrinsic(environment, program, scopes, context, callee, span, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    } else {
+        needs_fact: if row.lowering == {
+            .CoreSource(_, _) | .Atomic(_) -> true
+            .Builtin(op) -> sema_effect_builtin_may_have_effect(op)
+            .StringSlice | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Arithmetic(_) | .Euclidean(_) | .Overflow(_, _) -> false
+        }
+        if needs_fact {
+            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, callee, span, [EffectRowEntry]{}, diagnostics) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
     }
     if row.lowering == .CoreSource(source_owner, member) {
         return sema_value_method_core_source(source_owner, member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
     }
     result := builtin_method_bind(row.result, receiver_value.ty)
-    line: sema_source_line_at(environment.source_segments, span) ?? 0
+    needs_line: if row.lowering == {
+        .StringSlice | .Arithmetic(_) | .Overflow(_, _) -> true
+        .Builtin(_) | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Euclidean(_) | .Atomic(_) | .CoreSource(_, _) -> false
+    }
+    line: if needs_line -> sema_source_line_at(environment.source_segments, span) ?? 0 else -> 0
     if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) {
         // `x.pow(-n)` is the exact Fraction 1 / x^n (from_parts normalizes
         // the sign and reduces; x == 0 stops "divided by zero").

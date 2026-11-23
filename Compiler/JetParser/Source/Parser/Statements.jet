@@ -717,8 +717,9 @@ parser_parse_scope_member: fn(state: &JetParserState) -> Stmt {
 // the `,` that ends a compact table arm, or a `(name)` target; anywhere else
 // it is an ordinary name (`next := 0`).
 parser_next_statement_ahead: fn(state: &JetParserState) -> Bool Never! {
+    if state.words.id_next < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || parser_value(state, token) != "next" -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_decoded_is_id(token, state.words.id_next) -> return false
     following: parser_kind_at(state, 1)
     following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) || (following == TOKEN_LPAREN && parser_kind_at(state, 2) == TOKEN_IDENT && parser_kind_at(state, 3) == TOKEN_RPAREN)
 }
@@ -1479,7 +1480,7 @@ parser_prep_verb_ahead: fn(state: &JetParserState, offset: Int, verb: Int) -> Bo
 
 // `NAME: #run operand` is a prepared value without braces.
 parser_prep_operand_ahead: fn(state: &JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(state, offset) == TOKEN_PREP && parser_kind_at(state, offset + 1) != TOKEN_LBRACE && parser_text(state, parser_lookahead(state, offset)) == "#run"
+    state.words.id_run >= 0 && parser_kind_at(state, offset) == TOKEN_PREP && parser_kind_at(state, offset + 1) != TOKEN_LBRACE && parser_token_text_is_id(parser_lookahead(state, offset), state.words.id_run)
 }
 
 // An unbraced `#run` takes one postfix operand: a call, a name or a

@@ -26,21 +26,166 @@ JET_FRAME_CARRIER_BYTES: 32
 // The type declarations a frame bound sizes nominal types by. A type is
 // found by its key, then by its name where no key names one, as the IR
 // builder finds it (JetIR Build.jet ir_program_declared).
+// `fixed_storage[row]` caches the storage bytes of each non-generic definition
+// once: >= 0 exact bytes, -1 unknown or cyclic, -2 generic.
 JetFrameTypes: struct {
     defs: [TTypeDef],
-    rows: [String:Int],
+    rows: NameRows,
+    fixed_storage: [Int],
 }
 
 jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
     owned := defs.move()
-    rows := [String:Int]{}
+    rows := name_rows(owned.len() * 2 + 1)
     loop (index, definition) in owned {
-        if rows.get(definition.key) == None -> rows[definition.key.copy()] = index
+        name_rows_set_first(rows, definition.key, index)
     }
     loop (index, definition) in owned {
-        if rows.get(definition.name) == None -> rows[definition.name.copy()] = index
+        name_rows_set_first(rows, definition.name, index)
     }
-    JetFrameTypes{defs: owned.move(), rows: rows.move()}
+    // -3 not yet computed, -2 generic, -1 unknown/cycle, >= 0 cached storage bytes.
+    fixed := [Int]{}
+    if owned.len() > 0 -> fixed.try_reserve(owned.len()) ?? panic("reserve failed")
+    loop definition in owned {
+        fixed.push(if definition.generic_params.len() > 0 -> -2 else -> -3)
+    }
+    types := JetFrameTypes{defs: owned.move(), rows: rows.move(), fixed_storage: fixed.move()}
+    // Precompute every non-generic declaration's storage once.
+    laying := [Int]{}
+    loop row in 0..<types.defs.len() {
+        if types.fixed_storage[row] == -3 {
+            _ := jet_frame_precompute_row(types, row, laying)
+        }
+    }
+    types
+}
+
+jet_frame_precompute_row: fn(types: &JetFrameTypes, row: Int, laying: &[Int]) -> Int Never! {
+    cached: types.fixed_storage[row]
+    if cached != -3 -> return cached
+    loop active in laying {
+        if active == row -> return -1
+    }
+    laying.push(row)
+    result := -1
+    if types.defs[row].kind == {
+        .Enum(_, _) | .UnitFamily(_, _) -> result = 0
+        .Distinct(base, _) -> {
+            result = jet_frame_precompute_type(types, base, laying)
+        }
+        .Alias(target) -> {
+            result = jet_frame_precompute_type(types, target, laying)
+        }
+        .Struct(fields, _) -> {
+            total := 0
+            ok := true
+            loop field_idx in 0..<fields.len() {
+                if fields[field_idx].computed -> next
+                if types.defs[row].boxed_edges.contains(fields[field_idx].name) {
+                    total += 8
+                    next
+                }
+                bytes: jet_frame_precompute_type(types, fields[field_idx].ty, laying)
+                if bytes < 0 {
+                    ok = false
+                    break
+                }
+                total += jet_frame_member_bytes(bytes)
+            }
+            if ok {
+                result = if total < 8 -> 8 else -> total
+            }
+        }
+    }
+    _ := laying.pop()
+    types.fixed_storage[row] = result
+    result
+}
+
+jet_frame_precompute_type: fn(types: &JetFrameTypes, ty: Type, laying: &[Int]) -> Int Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Measure(_) -> 0
+        .List(_) | .Map(_, _, _) -> 24
+        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_precompute_type(types, base, laying)
+        .Tagged(_, inner) -> jet_frame_precompute_type(types, inner, laying)
+        .Tuple(fields) -> {
+            total := 0
+            loop field in fields {
+                bytes: jet_frame_precompute_type(types, field.ty, laying)
+                if bytes < 0 -> return -1
+                total += jet_frame_member_bytes(bytes)
+            }
+            total
+        }
+        .FixedList(elem, len) -> {
+            if len == .Literal(_, count) {
+                element: jet_frame_precompute_type(types, elem, laying)
+                if element < 0 -> return -1
+                inline: count * jet_frame_member_bytes(element)
+                return if inline > 24 -> inline else -> 24
+            }
+            -1
+        }
+        .Named(name) -> {
+            if name == "Unit" || name == "()" || name == "Never" -> return 0
+            row: name_rows_get_text(types.rows, name) ?? return -1
+            if types.fixed_storage[row] == -2 -> return -1
+            jet_frame_precompute_row(types, row, laying)
+        }
+        .Apply(name, args) -> {
+            if name == "SharedSnapshot" && args.len() == 2 {
+                captured: jet_frame_precompute_type(types, args[1], laying)
+                if captured < 0 -> return -1
+                return 16 + jet_frame_member_bytes(captured)
+            }
+            if name_rows_get_text(types.rows, name) == None -> return JET_FRAME_CARRIER_BYTES
+            active_keys := [String]{}
+            loop idx in laying -> active_keys.push(types.defs[idx].key)
+            jet_frame_nominal(types, name, args, [String:Int]{}, active_keys) ?? -1
+        }
+    }
+}
+
+// Fast zero-allocation storage lookup for top-level value types (empty env and
+// empty laying stack), consulting precomputed `fixed_storage` for every
+// non-generic nominal declaration.
+jet_frame_storage_fast: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Measure(_) -> Val(0)
+        .List(_) | .Map(_, _, _) -> Val(24)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_storage_fast(types, base)
+        .Tagged(_, inner) -> jet_frame_storage_fast(types, inner)
+        .Named(name) -> {
+            if name == "Unit" || name == "()" || name == "Never" -> return Val(0)
+            row: name_rows_get_text(types.rows, name) ?? return None
+            cached: types.fixed_storage[row]
+            if cached >= 0 -> Val(cached) else -> None
+        }
+        .Tuple(fields) -> {
+            total := 0
+            loop field in fields {
+                bytes: jet_frame_storage_fast(types, field.ty) ?? return None
+                total += jet_frame_member_bytes(bytes)
+            }
+            Val(total)
+        }
+        .FixedList(elem, len) -> {
+            if len == .Literal(_, count) {
+                element: jet_frame_storage_fast(types, elem) ?? return None
+                inline: count * jet_frame_member_bytes(element)
+                return Val(if inline > 24 -> inline else -> 24)
+            }
+            None
+        }
+        .Apply(name, args) -> {
+            if name == "SharedSnapshot" && args.len() == 2 {
+                captured: jet_frame_storage_fast(types, args[1]) ?? return None
+                return Val(16 + jet_frame_member_bytes(captured))
+            }
+            if name_rows_get_text(types.rows, name) == None -> return Val(JET_FRAME_CARRIER_BYTES)
+            jet_frame_nominal(types, name, args, [String:Int]{}, [String]{})
+        }
+    }
 }
 
 // The frame bytes one value of checked type `ty` may take, counted over
@@ -50,7 +195,7 @@ jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
 // `ty` names a type with no known size, such as a generic parameter no
 // instance has bound.
 jet_frame_value_bytes: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
-    storage: jet_frame_storage_bytes(types, ty, [String:Int]{}, [String]{}) ?? return None
+    storage: jet_frame_storage_fast(types, ty) ?? return None
     slot: if storage == 0 -> 16 else -> 24 + storage
     Val(JET_FRAME_VALUE_SLOTS * slot)
 }
@@ -126,20 +271,28 @@ jet_frame_measure: fn(measure: Measure, env: [String:Int]) -> Int? Never! {
 // known size.
 jet_frame_nominal: fn(types: JetFrameTypes, name: String, args: [Type], env: [String:Int], laying: [String]) -> Int? Never! {
     if args.len() == 0 {
-        if env.get(name) == .Val(bound) -> return Val(bound)
+        if env.len() > 0 {
+            if env.get(name) == .Val(bound) -> return Val(bound)
+        }
         if name == "Unit" || name == "()" || name == "Never" -> return Val(0)
     }
     if name == "SharedSnapshot" && args.len() == 2 {
         captured: jet_frame_storage_bytes(types, args[1], env, laying) ?? return None
         return Val(16 + jet_frame_member_bytes(captured))
     }
-    row: types.rows.get(name) ?? {
+    row: name_rows_get_text(types.rows, name) ?? {
         if args.len() == 0 -> return None
         return Val(JET_FRAME_CARRIER_BYTES)
+    }
+    if args.len() == 0 && types.fixed_storage[row] >= 0 && laying.len() == 0 {
+        return Val(types.fixed_storage[row])
     }
     definition: types.defs[row]
     if laying.contains(definition.key) -> return None
     if definition.generic_params.len() != args.len() -> return None
+    if args.len() == 0 && types.fixed_storage[row] >= 0 {
+        return Val(types.fixed_storage[row])
+    }
     params := [String:Int]{}
     loop (index, parameter) in definition.generic_params {
         bound: if args[index] == .Measure(measure) -> jet_frame_measure(measure, env) else -> jet_frame_storage_bytes(types, args[index], env, laying)

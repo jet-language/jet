@@ -126,7 +126,6 @@ sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index
 sema_registration_qualified_function_types: fn(functions: [SemaRegistrationFunction], jobs: SemaQualifiedJobs, source: Int, slots: &[Type?]) Never! {
     loop function in functions {
         slots.push(sema_registration_canonical_type(function.signature, jobs.keys[source]))
-        slots.push(sema_registration_qualified_symbol_type(function.symbol, jobs, source))
         loop parameter in function.parameters {
             slots.push(sema_registration_canonical_type(parameter.ty, jobs.keys[source]))
         }
@@ -182,7 +181,6 @@ sema_registration_qualified_rewrites: fn(slots: [Type?]) -> Bool Never! {
 sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFunction], slots: &[Type?]) {
     loop row in 0..<functions.len() {
         if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].signature = ty
-        if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].symbol.ty = Val(ty)
         loop parameter in 0..<functions[row].parameters.len() {
             if sema_registration_qualified_next(slots) == .Val(ty) {
                 functions[row].parameters[parameter].ty = ty

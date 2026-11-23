@@ -8,7 +8,7 @@
 // struct holding an `impl Marker` block, with the source range its bare name
 // resolves in, which is the code module holding it or the whole file.
 use {
-    jet_foundation.[Marker, MarkerHook, marker_hook_of_declaration]
+    jet_foundation.[Marker, MarkerHook, marker_hook_of_declaration, name_find]
     jet_lexer.[Token, TokenTables, token_decoded, TOKEN_IDENT, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACE, TOKEN_RBRACE]
 }
 
@@ -32,6 +32,7 @@ ParserMarkerBrace: struct {
 // a struct body opens after `struct Name` and a code module body after
 // `module name`, with the moved `:` as trivia between.
 parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
+    if name_find(tables.names, "Marker") == None -> return [ParserMarkerScope]{}
     scopes := [ParserMarkerScope]{}
     braces := [ParserMarkerBrace]{}
     // The two code tokens before the current one (-1 = none yet).

@@ -91,9 +91,19 @@ lexed_threads_single: fn(source: [U8], config_surface: Bool, allow_reserved_iden
 // `first` (the range starts the source), then one past every newline.
 lexer_line_starts: fn(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Never! {
     starts := [Int]{}
+    if to > from -> starts.try_reserve((to - from) /% 32 + 2) ?? panic("reserve failed")
     if first -> starts.push(0)
-    loop index in from..<to {
+    index := from
+    loop index + 4 <= to {
         if source[index] == (U8{10}) -> starts.push(index + 1)
+        if source[index + 1] == (U8{10}) -> starts.push(index + 2)
+        if source[index + 2] == (U8{10}) -> starts.push(index + 3)
+        if source[index + 3] == (U8{10}) -> starts.push(index + 4)
+        index += 4
+    }
+    loop index < to {
+        if source[index] == (U8{10}) -> starts.push(index + 1)
+        index += 1
     }
     starts
 }
@@ -195,6 +205,8 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     runs := [Int]{0}
     loop chunk in 1..<parts.len() {
         output := lexer_chunk_part_take(parts[chunk])
+        if output.tables.has_fences -> tables.has_fences = true
+        if output.tables.has_paste -> tables.has_paste = true
         runs.push(tokens.len())
         compiler_transfer_rows<Token>(tokens, output.tokens)
         compiler_transfer_rows<TokenLiteral>(tables.literals, output.tables.literals)
@@ -293,6 +305,7 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     }
     if !lexer_chunk_delimiters_nest(facts, if seed -> 1 else -> 0, !last) -> clean = false
     tables := token_tables()
+    tables.has_paste = scanned.has_paste
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
     lexed := lex_payload_from_facts(source, facts, events, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, tables, terminator_diagnostics)

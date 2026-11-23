@@ -250,15 +250,14 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if is_direct_collection {
+            is_len: method == "len"
+            callee_name: if is_len -> "collection.len" else -> "collection.is_empty"
+            consumer_name: if is_len -> "`.len()`" else -> "`.is_empty()`"
             empty_args := [CallArg]{}
-            ownership := sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, AccessConvention.Read, false, [SemaCallParam]{}, empty_args, scopes, span, expr_span(receiver), diagnostics)
+            ownership := sema_ownership_check_two_phase_method_call(state, callee_name, consumer_name, receiver, AccessConvention.Read, false, [SemaCallParam]{}, empty_args, scopes, span, expr_span(receiver), diagnostics)
             if !ownership.accepted || !ownership.complete {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "collection.{method}", span, [EffectRowEntry]{}, diagnostics) {
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
-            is_len: method == "len"
             result_type: if is_len -> Type.Int else -> Type.Bool
             builtin_op: if is_len -> TBuiltinOp.LenList else -> TBuiltinOp.IsEmpty
             value: sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin_op, args: [TExpr]{}}, span)
@@ -457,9 +456,18 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             }
         }
     }
-    effect_row := sema_collection_method_effect_row(contract, span)
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "collection.{method}", span, effect_row, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
+    if contract.row.access == CollectionAccess.Write {
+        if !sema_effect_record_mem_intrinsic(environment, program, scopes, context, "collection.{method}", span, diagnostics) {
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    } else {
+        skip_fact := false
+        if operation == .Builtin(builtin) -> skip_fact = !sema_effect_builtin_may_have_effect(builtin) && !sema_call_collections_runs_on_iter(builtin)
+        if !skip_fact {
+            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "collection.{method}", span, [EffectRowEntry]{}, diagnostics) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
     }
     if method == "split_write" || method == "get_disjoint_write" {
         sema_call_collections_record_disjoint_views(receiver, method, updated_args, span, scopes, state, context)

@@ -1,7 +1,7 @@
 // Syntax-only expansion into the ordinary marker reader.
 // Sema owns declaration validity and lexical declaration identities.
 use {
-    jet_foundation.[Diagnostic, Span, name_empty, name_intern, name_text]
+    jet_foundation.[Diagnostic, Span, name_empty, name_find, name_intern, name_text]
     jet_lexer.[Token, TokenLiteral, TokenTables, StringPart, token_tables, token_decoded, TOKEN_IDENT, TOKEN_DOT, TOKEN_COLON, TOKEN_HASH, TOKEN_BANG, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_EOF, TOKEN_SEMI, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
 }
 
@@ -125,6 +125,9 @@ marker_group_namespace_advance: fn(scope: &MarkerGroupNamespace, tokens: [Token]
 }
 
 named_marker_groups: fn(tokens: [Token], tables: TokenTables) -> [NamedMarkerGroupTokens] Never! {
+    if name_find(tables.names, "Marker") == None || name_find(tables.names, "group") == None {
+        return [NamedMarkerGroupTokens]{}
+    }
     code: marker_group_code(tokens)
     groups := [NamedMarkerGroupTokens]{}
     index := 0
@@ -138,6 +141,7 @@ named_marker_groups: fn(tokens: [Token], tables: TokenTables) -> [NamedMarkerGro
         if declarative && marker_group_token_range(code, tables, index) == .Val(range) {
             name: if scope.path == "" -> range.name else -> "{scope.path}.{range.name}"
             member_tables := token_tables()
+            member_tables.has_paste = tables.has_paste
             members := [Token]{}
             loop cursor in range.start..<range.end {
                 members.push(marker_group_rebase_token(code[cursor], tables, member_tables))

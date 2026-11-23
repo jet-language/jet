@@ -2701,7 +2701,7 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
     }
     choices := [TypeAliasChoice]{}
     end := target.span.end
-    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_text(state, parser_current(state)) == "#run" {
+    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_token_text_is_id(parser_current(state), state.words.id_run) {
         parser_bump(state)
         parser_bump(state)
         choices = parser_parse_alias_choices(state)
