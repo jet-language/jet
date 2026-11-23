@@ -151,7 +151,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0423 | UninitNotPlainData | Compiler/JetSema/Source/Sema/Statements.jet:6501 | `uninit` takes plain-data types only |
 | E0429 | PreludeNameUnderNoPrelude | Compiler/JetSema/Source/Sema/MarkerRules.jet:2551 | import the name, or remove `#NoPrelude` |
 | E0437 | PipeValueOutsideStep | Compiler/JetSema/Source/Sema/Diagnostics.jet:399 | `<>` belongs inside a `\|>` step or an `if` table header |
-| E0444 | HoleHeaderInPipeStep | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:231 | a hole table starts outside a pipe step |
+| E0444 | HoleHeaderInPipeStep | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | a hole table starts outside a pipe step |
 | E0446 | FixedArrayElementwiseMismatch | Compiler/JetSema/Source/Sema/Expressions/FixedArithmetic.jet:128 | both arrays have one shape, or the value has the slots' type |
 | E0501 | UntypedEmptyList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:633 | a type context gives the list its element type |
 | E0502 | InvalidMapKeyType | Compiler/JetSema/Source/Sema/Comparability.jet:898 | a map key is an eligible scalar, enum, tuple or struct |
@@ -287,18 +287,18 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0940 | MemoLazyIter | Compiler/JetSema/Source/Sema/MarkerRules.jet:2580 | the function collects the values before returning them |
 | E0944 | ComptimeImportAtRuntime | Compiler/JetSema/Source/Sema/ComptimeUse.jet:521 | shipped code imports the module with a plain `use` |
 | E0945 | ToolchainInputOutsideTree | Compiler/JetDriver/Source/Driver/ComptimeInputs.jet:194 | `toolchain:` inputs belong to the toolchain tree's packages |
-| E0946 | DispatchHoleCount | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:231 | a hole table header holds one hole |
-| E0948 | DispatchHoleCandidatePattern | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:231 | patterns and ranges match against the subject of a plain `if subject == {` table |
+| E0946 | DispatchHoleCount | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | a hole table header holds one hole |
+| E0948 | DispatchHoleCandidatePattern | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | patterns and ranges match against the subject of a plain `if subject == {` table |
 | E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1723 | list the values you need yourself |
 | E0950 | FieldMethodClash | Compiler/JetSema/Source/Sema/Expressions/Places.jet:1458 | write the closure that names the one you mean |
-| E0952 | ComptimeFuelExhausted | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:297 | a budget, not a power: the work is split, or its binding raises the limit with `#StepLimit(n)` |
+| E0952 | ComptimeFuelExhausted | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:299 | a budget, not a power: the work is split, or its binding raises the limit with `#StepLimit(n)` |
 | E0953 | ComptimePanic | Compiler/JetEval/Source/EvalValues.jet:159 | the condition that raises the authored error is changed |
 | E0955 | ComptimeFileUnreadable | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:902 | the input file exists and is readable |
 | E0956 | ComptimeConstructNotSupported | Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet:149 | the value is computed at run time, or with constructs the evaluator runs |
 | E0957 | InvalidEmbedPath | Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet:73 | the path is a relative String inside the project |
 | E0959 | MissingLayoutByteFact | Compiler/JetCLI/Source/CLI/ExpandFacts.jet:116 | the type declares a Jet-owned physical layout |
 | E0960 | ReservedContributionNamespace | Compiler/JetParser/Source/Parser/Declarations/Modules.jet:209 | contributions name a reserved namespace |
-| E0961 | InvalidMemberSpread | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:189 | spread entries are bare field or package names |
+| E0961 | InvalidMemberSpread | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:190 | spread entries are bare field or package names |
 | E0962 | RejectOutsideTemplate | Compiler/JetSema/Source/Sema/Calls/Resolution.jet:139 | `reject` belongs in a marker's `expand` template |
 | E0963 | InvalidFixedListLength | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:582 | the length is an in-range compile-time integer |
 | E0964 | FixedListLengthChange | Compiler/JetSema/Source/Sema/Calls/Collections.jet:274 | a list whose length changes is a `[T]` |
@@ -367,7 +367,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1121 | CaseNumberOutOfRange | Compiler/JetSema/Source/Sema/Registration/EnumNumbers.jet:132 | the case numbers fit the backing type |
 | E1122 | DuplicateCaseNumber | Compiler/JetSema/Source/Sema/Registration/EnumNumbers.jet:146 | each case has its own number |
 | E1123 | TargetDeniedEffect | Compiler/JetSema/Source/Sema/TargetDenials.jet:269 | the entry is built for a target that provides the service |
-| E1126 | ThroughLastArm | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:300 | `#Through` goes on an arm with a next arm |
+| E1126 | ThroughLastArm | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:302 | `#Through` goes on an arm with a next arm |
 | E1127 | ThroughNextBinding | Compiler/JetSema/Source/Sema/Statements.jet:1801 | the arm run into binds no names |
 | E1128 | ThroughUnreachable | Compiler/JetSema/Source/Sema/Statements.jet:1786 | `#Through` goes on an arm whose next body can run |
 | E1129 | AsRepeated | Compiler/JetSema/Source/Sema/Registration/Items.jet:4627 | one field carries `#As` |
@@ -452,7 +452,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1305 | UnmappedCliFieldType | Compiler/JetSema/Source/Sema/Registration/Items.jet:4547 | the field uses a type that maps to a flag |
 | E1306 | DuplicateCliFlag | Compiler/JetSema/Source/Sema/Registration/Items.jet:4557 | each field derives a distinct, unreserved flag |
 | E1308 | RunParameterNotCli | Compiler/JetSema/Source/Sema/Outputs.jet:380 | the parameter type is a `#CLI` struct |
-| E1310 | MisplacedVariadicParameter | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:188 | the rest parameter is last, with no default |
+| E1310 | MisplacedVariadicParameter | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:189 | the rest parameter is last, with no default |
 | E1311 | SpreadNotList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:375 | the operand is a list |
 | E1312 | SpreadWithoutVariadic | Compiler/JetSema/Source/Sema/Calls/Binder.jet:222 | the callee ends in a variadic parameter |
 | E1313 | VariadicBoundNotImplemented | Compiler/JetSema/Source/Sema/Calls/Checking.jet:970 | the argument's type implements the bound |
@@ -542,7 +542,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2410 | MissingRequiredField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:761 | the field is optional or has a default |
 | E2411 | NotSerializable | Compiler/JetSema/Source/Sema/Calls/HTTP.jet:90 | the type qualifies for a codec or supplies one |
 | E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:931 | the type leaves out `#Codable(unknown: .Deny)` |
-| E2414 | DefaultNotConstant | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | the default is a compile-time constant |
+| E2414 | DefaultNotConstant | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:233 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:5313 | members have distinct wire shapes |
 | E2416 | EnvDecodeFailed | Core/Web/Web.jet:895 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:907 | the domain is an error type |

@@ -169,20 +169,39 @@ run: fn() {
 }
 
 // The test profiles of a package manifest's text: each
-// `NAME: TestProfile{ suites: [A, B], ... }` line, by name.
+// `NAME: TestProfile{ suites: [A, B], ... }` entry, on one line or spread
+// over several, by name.
 test_profiles: fn(text: String) -> [String:[String]] Never! {
     out := [String:[String]]{}
+    name := ""
+    held := ""
     loop line in text.split("\n").to_list() {
-        parts: line.trim().split(": TestProfile{{").to_list()
-        if parts.len() != 2 -> next
-        opened: parts[1].split("suites: [").to_list()
-        if opened.len() < 2 -> next
-        closed: opened[1].split("]").to_list()
-        suites := [String]{}
-        loop part in closed[0].split(",").to_list() {
-            if part.trim() != "" -> suites.push(part.trim().copy())
+        if {
+            name == "" -> {
+                parts: line.trim().split(": TestProfile{{").to_list()
+                if parts.len() != 2 -> next
+                name = parts[0].copy()
+                held = "{{{parts[1]}"
+            }
+            else -> held = "{held} {line.trim()}"
         }
-        out[parts[0].copy()] = suites
+        // The entry ends where its braces close.
+        depth := 0
+        loop byte in held.bytes() {
+            if byte == 123 -> depth += 1
+            if byte == 125 -> depth -= 1
+        }
+        if depth > 0 -> next
+        opened: held.split("suites: [").to_list()
+        if opened.len() >= 2 {
+            closed: opened[1].split("]").to_list()
+            suites := [String]{}
+            loop part in closed[0].split(",").to_list() {
+                if part.trim() != "" -> suites.push(part.trim().copy())
+            }
+            out[name.copy()] = suites
+        }
+        name = ""
     }
     out
 }
@@ -273,12 +292,14 @@ plan_text: fn(args: [String]) -> String Never! {
 // SELF, PACKAGE and KIT spell them.
 SELF_FIXTURE: "use {{\n}}\n\nSUITES: [String]{{\"golden\", \"ui\", \"cases\", \"registries\"}}\n"
 
-PROFILES_FIXTURE: "    golden: TestProfile{{ suites: [golden, run], baseline: \"../tests/known-failing.tsv\" }},\n    ui: TestProfile{{ suites: [ui, ui_lint] }},\n    cases: TestProfile{{ suites: [cases] }},\n    registries: TestProfile{{ suites: [cases], opt_in: true }},\n    corpora: TestProfile{{ suites: [golden, run, ui, ui_lint, cases] }},\n"
+PROFILES_FIXTURE: "    golden: TestProfile{{\n        suites: [golden, run],\n        baseline: \"../Tests/known-failing.tsv\",\n    }},\n    ui: TestProfile{{\n        suites: [ui, ui_lint]\n    }},\n    cases: TestProfile{{ suites: [cases] }},\n    registries: TestProfile{{\n        suites: [cases],\n        opt_in: true,\n    }},\n    corpora: TestProfile{{\n        suites: [golden, run, ui, ui_lint, cases],\n        baseline: \"../Tests/known-failing.tsv\",\n    }},\n"
 
 KIT_FIXTURE: "}}\n\nkit_suites: fn() -> [String] {{ [\"golden\", \"ui\", \"cases\"] }}\n\n"
 
 #Test("the check holds SUITES to the Compiler profiles, the testkit's suites and the release gate's corpora pool") {
     assert_eq(test_profiles(PROFILES_FIXTURE).get("ui") ?? [String]{}, [String]{"ui", "ui_lint"})
+    assert_eq(test_profiles(PROFILES_FIXTURE).get("cases") ?? [String]{}, [String]{"cases"})
+    assert_eq(test_profiles(PROFILES_FIXTURE).get("registries") ?? [String]{}, [String]{"cases"})
     assert_eq(kit_suite_names(KIT_FIXTURE), [String]{"golden", "ui", "cases"})
     assert_eq(suite_problems(PROFILES_FIXTURE, SELF_FIXTURE, KIT_FIXTURE), [String]{})
     // A corpus the pool runs that no suite owns, and a suite with no profile.

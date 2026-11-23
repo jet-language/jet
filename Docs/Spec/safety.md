@@ -1945,7 +1945,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2689,
+      "line": 2691,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -5417,7 +5417,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/WsRoutes.jet",
-      "line": 613,
+      "line": 636,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -6474,7 +6474,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/HTTP/Client.jet",
-      "line": 704,
+      "line": 856,
       "column": 5,
       "reason": "checked resolver octets and port transferred into the socket carrier"
     },
@@ -12068,7 +12068,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2689:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2691:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12564,7 +12564,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/VaultTestHooks.jet | 218:5 | "written under the vault test backup mutex" |
 | Compiler | Compiler/JetRuntime/Source/World.jet | 647:5 | "the entry function sets the device store before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/World.jet | 719:5 | "device_mutex is held" |
-| Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 613:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/WsRoutes.jet | 636:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 17:5 | "the witnesses run one at a time on the main thread" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 24:5 | "a failed allocator witness writes three process-static texts to stderr with raw writes, which take no heap, and terminates this isolated test process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 45:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
@@ -12715,7 +12715,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/HTTP/Client.jet | 704:5 | "checked resolver octets and port transferred into the socket carrier" |
+| Core | Core/HTTP/Client.jet | 856:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 136:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 143:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
 | Core | Core/Jobs/Jobs.jet | 283:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
