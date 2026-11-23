@@ -1,0 +1,13 @@
+// A cache hit reuses only pure work: `square`'s second call with 3 is a hit
+// and prints nothing itself, so the program prints every line, in the same
+// order, whichever calls hit. `SIDES` is a `#run` value the build computed
+// once.
+SIDES: #run { [3, 4, 3] }
+
+#Memo square: fn(n: Int) -> Int { n * n }
+
+run: fn() {
+    loop side in SIDES { print("{side}: {square(side)}") }
+    stats: square.cache()
+    print("hits {stats.hits}, misses {stats.misses}")
+}

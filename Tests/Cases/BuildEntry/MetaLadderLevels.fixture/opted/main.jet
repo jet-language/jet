@@ -1,0 +1,34 @@
+// The package opts in to the two operations above level 5 it uses, and
+// both run.
+package: { name: "main", authority: { allow: [Meta.Code.Rewrite, Meta.Code.Types] } }
+
+Source: struct {
+    id: Int,
+    secret: String,
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop field in Source.reflect().fields {
+        if field.name != "secret" {
+            fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+        }
+    }
+    meta.add_struct("Shape", fields, scope: "shape")
+    meta.rewrite_body(
+        greeting,
+        #code {
+            print("rewritten by the build")
+        },
+    )
+    b.default(app)
+}
+
+run: fn() {
+    greeting()
+    print(Shape{id: 7}.id)
+}
+
+greeting: fn() { print("written by hand") }

@@ -1,0 +1,16 @@
+// Rewriting written code is above level 5: refused without the opt-in.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(
+        greeting,
+        #code {
+            print("rewritten by the build")
+        },
+    )
+    b.default(app)
+}
+
+run: fn() { greeting() }
+
+greeting: fn() { print("written by hand") }

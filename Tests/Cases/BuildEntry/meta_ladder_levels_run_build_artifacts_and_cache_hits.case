@@ -1,0 +1,102 @@
+# `#run` runs on every tier: `tiers` reads `config.txt` while building, and
+# `jet check`, `jet test`, `jet run` at its default, release and debug
+# profiles and `jet build` all compute the same value, and all stop with
+# E3010 when the file is empty. A built artifact never runs `#run` again: an
+# edit of the file changes nothing the built program prints, and only a new
+# build reads it. `build: fn` runs only for a command that makes an artifact:
+# `artifacts` panics in it, which `jet check` never reaches and `jet run`,
+# `jet test` and `jet build` stop at. A cache hit keeps every observable
+# effect: only a pure function keeps its results (`impure_memo` is refused),
+# so `cached` prints every line, in order, on every run and from the built
+# program, whichever calls hit.
+fixture: MetaLadderLevels.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+cwd: tiers
+exit: 0
+step: jet test main.jet
+cwd: tiers
+exit: 0
+stdout: ~ "1 passed, 0 failed" # the test reads the value the build computed
+step: jet run main.jet
+cwd: tiers
+exit: 0
+stdout: = "first\ntext: alpha beta\nwords: 2\nlast\n"
+step: jet run --release main.jet
+cwd: tiers
+exit: 0
+stdout: = "first\ntext: alpha beta\nwords: 2\nlast\n"
+step: jet run --profile=debug main.jet
+cwd: tiers
+exit: 0
+stdout: = "first\ntext: alpha beta\nwords: 2\nlast\n"
+step: jet build main.jet
+cwd: tiers
+exit: 0
+write: tiers/config.txt = "gamma\n"
+step: {work}/tiers/.jet/build/main
+exit: 0
+stdout: = "first\ntext: alpha beta\nwords: 2\nlast\n"
+step: jet build main.jet
+cwd: tiers
+exit: 0
+step: {work}/tiers/.jet/build/main
+exit: 0
+stdout: = "first\ntext: gamma\nwords: 1\nlast\n"
+write: tiers/config.txt = "\n"
+step: jet check main.jet
+cwd: tiers
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `config.txt is empty`" # the check runs `#run`
+step: jet test main.jet
+cwd: tiers
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `config.txt is empty`" # so does the test
+step: jet run main.jet
+cwd: tiers
+exit: 1
+stdout: = ""
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `config.txt is empty`" # and the run
+step: jet build main.jet
+cwd: tiers
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `config.txt is empty`" # and the build
+step: {work}/tiers/.jet/build/main
+exit: 0
+stdout: = "first\ntext: gamma\nwords: 1\nlast\n"
+step: jet check main.jet
+cwd: artifacts
+exit: 0
+stderr: !~ "build fn ran" # a check makes no artifact, so the build never runs
+step: jet run main.jet
+cwd: artifacts
+exit: 1
+stdout: = ""
+stderr: ~ "build fn ran" # a run makes its program, so the build runs
+step: jet test main.jet
+cwd: artifacts
+exit: 1
+stderr: ~ "build fn ran" # so does a test
+step: jet build main.jet
+cwd: artifacts
+exit: 1
+stderr: ~ "build fn ran" # and a build
+step: jet check main.jet
+cwd: impure_memo
+exit: 1
+stderr: ~ "Jet.MemoNotPure: `#Memo` requires a pure function" # a hit would drop the print
+step: jet run main.jet
+cwd: cached
+exit: 0
+stdout: = "3: 9\n4: 16\n3: 9\nhits 1, misses 2\n"
+step: jet run main.jet
+cwd: cached
+exit: 0
+stdout: = "3: 9\n4: 16\n3: 9\nhits 1, misses 2\n"
+step: jet build main.jet
+cwd: cached
+exit: 0
+step: {work}/cached/.jet/build/main
+exit: 0
+stdout: = "3: 9\n4: 16\n3: 9\nhits 1, misses 2\n"
