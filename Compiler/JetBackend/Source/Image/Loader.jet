@@ -3073,9 +3073,9 @@ x64_trace_poke: fn(trace: X64Trace, address: Int, word: I64) -> Bool {
 // its mapping ends; None when none of them is mapped. Read through the
 // trace's thread, stopped and so still there: a main thread that ended
 // before the others has no memory left to read through.
-x64_trace_read: fn(trace: X64Trace, address: Int, count: Int) -> [U8]? {
+x64_trace_read: fn(trace: X64Trace, address: Int, count: Int, chunk: Int{OS_PAGE_SIZE - LOADER_TRACE_BYTES}) -> [U8]? {
     bytes := [U8]{}
-    chunk: OS_PAGE_SIZE - LOADER_TRACE_BYTES
+    if count > 64 -> bytes.try_reserve(count) ?? return None
     loop bytes.len() < count {
         want: if count - bytes.len() < chunk -> count - bytes.len() else -> chunk
         got := 0

@@ -14,7 +14,7 @@ use {
 // (0..5), so moving them into place never collides.
 X64_COMPTIME_FD_FLOOR: 100
 
-X64_COMPTIME_BUFFER: 65536
+X64_COMPTIME_BUFFER: 262144
 
 X64ComptimeChild: struct {
     pid: Int{0},
@@ -34,24 +34,23 @@ X64ComptimeChild: struct {
     // The wait status once the child ended, else -1.
     status: Int{-1},
     failure: String{""},
-    // The write end of the child's lifeline (x64_comptime_tie), which only
-    // this process holds and nothing writes; -1 once closed.
+    // Write end of the child's lifeline (x64_comptime_tie); -1 once closed.
     lifeline: Int{-1},
-    // The spawn's random cookie, which the child's refusal handler passes
-    // when it reissues a call of an admitted `#Impure` block
-    // (x64_comptime_admit_block), and whether the child admits them now
-    // (ADMIT).
+    // Spawn cookie for admitted `#Impure` calls, and whether they are admitted.
     cookie: Int{0},
     admitted: Bool{false},
+    shm: Int{0},
+    shm_ready: Bool{false},
+    vm_read_ok: Bool{true},
+    write_pending: Bool{false},
 }
 
 // Starts the linked executable `image` (Image/Loader.jet
-// x64_executable_load: a bound one's image part is mapped from its file,
-// not copied) in a child and receives its entries; `stdout` admits the
-// child's own standard output. An image this process can't load, as when
+// x64_executable_load) in a child and receives its entries; `stdout` admits
+// the child's own standard output. An image this process can't load, as when
 // its own image holds the image's range (a compiler `jet run` runs), starts
-// from a file instead (x64_executable_spawn_file). A failure leaves
-// `failure` set.
+// from a file instead (x64_executable_spawn_file). A failure leaves `failure`
+// set.
 x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64ComptimeChild {
     child := X64ComptimeChild{budget: budget}
     scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
@@ -61,6 +60,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     }
     child.scratch = scratch
     // command, reply, output, errors, lifeline: [read end, write end] each.
+    // pipes holds ten descriptors in pairs.
     pipes := [Int]{}
     loop _ in 0..<5 {
         ends := [Int]{}
@@ -76,10 +76,10 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
         pipes.push(ends[0])
         pipes.push(ends[1])
     }
-    // No parent_death: the compile's child may outlive the worker thread that spawned it, and PR_SET_PDEATHSIG follows that thread; the lifeline ends it with the compiler instead.
+    // No parent_death: the lifeline ends the child with the compiler instead.
     launch: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false, read_scope: [String]{}}
-    // The child's standard input stays the compiler's; its filter refuses reading it.
-    fds: [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3], pipes[8]}
+    shm_fd: x64_comptime_shm_open(child)
+    fds: x64_comptime_spawn_fds(pipes, shm_fd)
     loaded: x64_executable_load(image)
     spawned := X64Spawned{pid: -1, failure: ""}
     if loaded.failure == "" {
@@ -95,6 +95,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     x64_comptime_close_fd(pipes[3])
     x64_comptime_close_fd(pipes[5])
     x64_comptime_close_fd(pipes[7])
+    x64_comptime_close_fd(shm_fd)
     child.command = pipes[1]
     child.reply = pipes[2]
     child.output = pipes[4]
@@ -119,6 +120,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
         x64_comptime_close(child)
         return child
     }
+    child.shm_ready = child.shm != 0 && x64_comptime_word(hello, 16) != 0
     count: x64_comptime_word(hello, 8)
     table: x64_comptime_receive_bytes(child, 8 * count) ?? {
         child.failure = x64_comptime_end_text(child, "before it started")
@@ -135,9 +137,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64Co
     child
 }
 
-// The entry table's first word is the refusal handler. Installs the child's
-// seccomp program; `stdout` admits its standard output. The program holds a
-// fresh random cookie the child keeps for its admitted calls.
+// Installs the child's seccomp filter and refusal handler (`stdout` admits stdout).
 x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
     loop child.cookie == 0 {
         filled := 0
@@ -256,25 +256,25 @@ x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int 
     0
 }
 
-// Sends one frame and its payload.
-x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bool {
+// Sends one frame and its payload (or stages payload at child.shm when via_shm).
+x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8], via_shm: Bool{false}) -> Bool {
     if child.pid <= 0 -> return false
     error := 0
     #Unsafe("the buffer is the child's scratch mapping past its first page") {
+        if via_shm && child.shm != 0 && payload.len() > 0 && payload.len() <= X64_COMPTIME_SHM_SIZE - 8 {
+            os_copy_in_range(child.shm, payload, 0, payload.len())
+        }
+        // Always write the 64-byte command frame on the command pipe.
         error = x64_comptime_write_all(child.command, frame, child.scratch + 4096, X64_COMPTIME_BUFFER)
-        if error == 0 && payload.len() > 0 {
+        if error == 0 && !via_shm && payload.len() > 0 {
             error = x64_comptime_write_all(child.command, payload, child.scratch + 4096, X64_COMPTIME_BUFFER)
         }
+        // Payload was either staged in child.shm or written over child.command.
     }
-    if error == 0 -> return true
+    if error == 0 -> return x64_comptime_sent(child, frame, via_shm)
     // The child is gone; its end is what its exit says.
     x64_comptime_reap(child, false)
     false
-}
-
-// One reply frame, or None once the child ended or ran out of time.
-x64_comptime_receive: fn(child: &X64ComptimeChild) -> [U8]? {
-    x64_comptime_receive_bytes(child, X64_COMPTIME_FRAME_BYTES)
 }
 
 // Exactly `count` reply bytes, draining the child's output meanwhile.
@@ -326,11 +326,11 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
             }
         }
     }
+    child.write_pending = false
     Val(bytes)
 }
 
-// Takes the output the child wrote before its last reply: drains its
-// standard output and error until neither holds more.
+// Drains the child's stdout and stderr until neither holds more.
 x64_comptime_settle: fn(child: &X64ComptimeChild) {
     if child.pid <= 0 {
         return
@@ -450,10 +450,107 @@ x64_comptime_close: fn(child: &X64ComptimeChild) {
     child.output = -1
     child.errors = -1
     child.lifeline = -1
+    if child.shm != 0 {
+        _ := os_unmap(child.shm, X64_COMPTIME_SHM_SIZE)
+        child.shm = 0
+        child.shm_ready = false
+    }
     if child.scratch != 0 {
         _ := os_unmap(child.scratch, 4096 + X64_COMPTIME_BUFFER)
         child.scratch = 0
     }
+}
+
+// One reply frame, or None once the child ended or ran out of time.
+x64_comptime_receive: fn(child: &X64ComptimeChild) -> [U8]? {
+    x64_comptime_receive_bytes(child, X64_COMPTIME_FRAME_BYTES)
+}
+
+// Opens and maps the child's shared staging memfd; returns the child-side fd
+// (above X64_COMPTIME_FD_FLOOR) or -1 if unavailable.
+x64_comptime_shm_open: fn(child: &X64ComptimeChild) -> Int {
+    raw: loader_memfd(false)
+    if os_failed(raw) -> return -1
+    sized: os_pwrite64_i64(I64{raw}, I64{child.scratch + 4096}, I64{1}, I64{X64_COMPTIME_SHM_SIZE - 1})
+    if sized != (I64{1}) {
+        _ := os_close_i64(I64{raw})
+        return -1
+    }
+    mapped: os_map_with(0, X64_COMPTIME_SHM_SIZE, OS_PROT_READ + OS_PROT_WRITE, 1, raw, 0)
+    if os_failed(mapped) {
+        _ := os_close_i64(I64{raw})
+        return -1
+    }
+    high: Int{os_fcntl_i64(I64{raw}, I64{1030}, I64{X64_COMPTIME_FD_FLOOR})}
+    _ := os_close_i64(I64{raw})
+    if os_failed(high) {
+        _ := os_unmap(mapped, X64_COMPTIME_SHM_SIZE)
+        return -1
+    }
+    child.shm = mapped
+    high
+}
+
+x64_comptime_spawn_fds: fn(pipes: [Int], shm_fd: Int) -> [Int] Never! {
+    if shm_fd >= 0 -> return [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3], pipes[8], shm_fd}
+    [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3], pipes[8]}
+}
+
+// Records an asynchronous pipe WRITE so process_vm_readv drains it first.
+x64_comptime_sent: fn(child: &X64ComptimeChild, frame: [U8], via_shm: Bool) -> Bool Never! {
+    if !via_shm && x64_comptime_word(frame, 0) == X64_COMPTIME_WRITE -> child.write_pending = true
+    true
+}
+
+// Reads `count` bytes from `address` in the child via process_vm_readv (zero
+// pipe round-trips, zero child wakeups), falling back to pipe READ if blocked.
+x64_comptime_read_memory: fn(child: &X64ComptimeChild, address: Int, count: Int) -> [U8]? {
+    if count <= 0 -> return Val([U8]{})
+    if !child.write_pending && child.vm_read_ok && child.pid > 0 && child.scratch != 0 {
+        trace: X64Trace{pid: child.pid, scratch: child.scratch, failure: "", thread: child.pid}
+        if x64_trace_read(trace, address, count, chunk: X64_COMPTIME_BUFFER) == .Val(got) {
+            if got.len() == count -> return Val(got)
+        }
+    }
+    was_pending: child.write_pending
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_READ, [Int]{address, count}), [U8]{}) {
+        return None
+    }
+    bytes: x64_comptime_receive_bytes(child, count) ?? return None
+    if !was_pending && child.vm_read_ok -> child.vm_read_ok = false
+    Val(bytes)
+}
+
+// Creates a runtime String from `bytes` via the shared staging window when it
+// fits, avoiding pipe payload writes and child scratch allocation.
+x64_comptime_shm_text: fn(child: &X64ComptimeChild, bytes: [U8]) -> Int? {
+    if !child.shm_ready || bytes.len() > X64_COMPTIME_SHM_SIZE - 8 -> return None
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_SHM_TEXT, [Int]{bytes.len()}), bytes, via_shm: true) {
+        return None
+    }
+    reply: x64_comptime_receive(child) ?? return None
+    if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
+        child.failure = "the comptime child answered SHM_TEXT with frame {x64_comptime_word(reply, 0)}"
+        x64_comptime_reap(child, true)
+        return None
+    }
+    Val(x64_comptime_word(reply, 8))
+}
+
+// Writes `bytes` at `address` in the child through the shared staging window
+// when it fits; returns false if SHM is unavailable or the write failed.
+x64_comptime_shm_write: fn(child: &X64ComptimeChild, address: Int, bytes: [U8]) -> Bool {
+    if !child.shm_ready || bytes.len() > X64_COMPTIME_SHM_SIZE - 8 -> return false
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_SHM_WRITE, [Int]{address, bytes.len()}), bytes, via_shm: true) {
+        return false
+    }
+    reply: x64_comptime_receive(child) ?? return false
+    if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
+        child.failure = "the comptime child answered SHM_WRITE with frame {x64_comptime_word(reply, 0)}"
+        x64_comptime_reap(child, true)
+        return false
+    }
+    true
 }
 
 // The part of an executable bound at a program base (MemoryLink.jet
@@ -494,9 +591,43 @@ x64_comptime_code: fn(exe: X64Executable, from: Int) -> X64ComptimeCode Never! {
     code
 }
 
-// Loads `code` into the child: each segment gets fresh pages at its
-// address, its bytes, then its protection. "" or why it didn't load.
+// Loads `code` into the child: in one shared-memory round-trip when the batch
+// fits in the staging window, else per-segment MAP/WRITE/PROTECT over pipes.
 x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String {
+    table_bytes: code.segments.len() * 48
+    if child.shm_ready && code.segments.len() > 0 && table_bytes + code.bytes.len() <= X64_COMPTIME_SHM_SIZE - 8 {
+        staged := [U8]{}
+        staged.try_reserve(table_bytes + code.bytes.len()) ?? panic("reserve failed")
+        loop segment in code.segments {
+            low: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+            end: os_page_round(segment.vaddr + segment.memory_size)
+            protection := 0
+            if segment.flags & 1 != 0 -> protection += 4
+            if segment.flags & 2 != 0 -> protection += 2
+            if segment.flags & 4 != 0 -> protection += 1
+            x64_comptime_put_word(staged, low)
+            x64_comptime_put_word(staged, end - low)
+            x64_comptime_put_word(staged, segment.vaddr)
+            x64_comptime_put_word(staged, segment.file_size)
+            x64_comptime_put_word(staged, protection)
+            x64_comptime_put_word(staged, table_bytes + segment.offset)
+        }
+        if code.bytes.len() > 0 -> staged.extend(code.bytes)
+        if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_SHM_LOAD, [Int]{code.segments.len()}), staged, via_shm: true) {
+            return x64_comptime_end_text(child, "while its code loaded")
+        }
+        reply: x64_comptime_receive(child) ?? return x64_comptime_end_text(child, "while its code loaded")
+        if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
+            child.failure = "the comptime child answered SHM_LOAD with frame {x64_comptime_word(reply, 0)}"
+            x64_comptime_reap(child, true)
+            return x64_comptime_end_text(child, "while its code loaded")
+        }
+        status: x64_comptime_word(reply, 8)
+        if status != 0 {
+            return "the comptime child couldn't load its code via shared memory ({status})"
+        }
+        return ""
+    }
     loop segment in code.segments {
         low: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
         end: os_page_round(segment.vaddr + segment.memory_size)
