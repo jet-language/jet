@@ -260,7 +260,7 @@ os_unmap: fn(address: Int, size: Int) -> Int {
 // which. Returns the address, or -errno.
 os_map_untracked_i64: fn(address: I64, size: I64, protection: I64, flags: I64, fd: I64, offset: I64) -> I64 {
     #Unsafe("the caller owns `address .. address + size` when it names one, so a fixed mapping replaces only its own pages; the pages mapped are the caller's alone") {
-        return os_syscall_i64(I64{OS_SYS_MMAP}, address, size, protection, flags, fd, offset)
+        return os_syscall_i64(I64{9}, address, size, protection, flags, fd, offset)
     }
 }
 
@@ -268,7 +268,7 @@ os_map_untracked_i64: fn(address: I64, size: I64, protection: I64, flags: I64, f
 // size`, with no account kept (os_unmap is the tracked form). 0, or -errno.
 os_unmap_untracked_i64: fn(address: I64, size: I64) -> I64 {
     #Unsafe("the caller owns the mapping and nothing uses it any more") {
-        return os_syscall_i64(I64{OS_SYS_MUNMAP}, address, size, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{11}, address, size, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
@@ -278,7 +278,7 @@ os_unmap_untracked_i64: fn(address: I64, size: I64) -> I64 {
 // the heap registers each block it hands out. The new address, or -errno.
 os_remap_untracked_i64: fn(address: I64, old_size: I64, new_size: I64, flags: I64) -> I64 {
     #Unsafe("the caller owns the mapping and keeps no pointer into it past this call but the result") {
-        return os_syscall_i64(I64{OS_SYS_MREMAP}, address, old_size, new_size, flags, I64{0}, I64{0})
+        return os_syscall_i64(I64{25}, address, old_size, new_size, flags, I64{0}, I64{0})
     }
 }
 
@@ -287,175 +287,175 @@ os_remap_untracked_i64: fn(address: I64, old_size: I64, new_size: I64, flags: I6
 // call sites never duplicate raw syscall numbers or per-call `#Unsafe` blocks.
 os_read_i64: fn(fd: I64, buffer: I64, count: I64) -> I64 {
     #Unsafe("read(2) writes at most `count` bytes into the caller's live buffer at `buffer`") {
-        return os_syscall_i64(I64{OS_SYS_READ}, fd, buffer, count, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{0}, fd, buffer, count, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_write_i64: fn(fd: I64, buffer: I64, count: I64) -> I64 {
     #Unsafe("write(2) reads at most `count` bytes from the caller's live buffer at `buffer`") {
-        return os_syscall_i64(I64{OS_SYS_WRITE}, fd, buffer, count, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{1}, fd, buffer, count, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_open_i64: fn(path: I64, flags: I64, mode: I64) -> I64 {
     #Unsafe("open(2) reads the caller's NUL-terminated path string at `path`") {
-        return os_syscall_i64(I64{OS_SYS_OPEN}, path, flags, mode, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{2}, path, flags, mode, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_openat_i64: fn(dirfd: I64, path: I64, flags: I64, mode: I64) -> I64 {
     #Unsafe("openat(2) reads the caller's NUL-terminated path string at `path`") {
-        return os_syscall_i64(I64{OS_SYS_OPENAT}, dirfd, path, flags, mode, I64{0}, I64{0})
+        return os_syscall_i64(I64{257}, dirfd, path, flags, mode, I64{0}, I64{0})
     }
 }
 
 os_close_i64: fn(fd: I64) -> I64 {
     #Unsafe("close(2) closes descriptor `fd` owned by this process") {
-        return os_syscall_i64(I64{OS_SYS_CLOSE}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_mprotect_i64: fn(address: I64, bytes: I64, protection: I64) -> I64 {
     #Unsafe("mprotect(2) changes page permissions on whole pages owned by the caller in `address .. address + bytes`") {
-        return os_syscall_i64(I64{OS_SYS_MPROTECT}, address, bytes, protection, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{10}, address, bytes, protection, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_rt_sigprocmask_i64: fn(how: I64, set: I64, oldset: I64, sigsetsize: I64) -> I64 {
     #Unsafe("rt_sigprocmask(2) reads `set` and writes `oldset` when non-zero, each `sigsetsize` bytes wide") {
-        return os_syscall_i64(I64{OS_SYS_RT_SIGPROCMASK}, how, set, oldset, sigsetsize, I64{0}, I64{0})
+        return os_syscall_i64(I64{14}, how, set, oldset, sigsetsize, I64{0}, I64{0})
     }
 }
 
 os_pwrite64_i64: fn(fd: I64, buffer: I64, count: I64, offset: I64) -> I64 {
     #Unsafe("pwrite64(2) reads at most `count` bytes from the caller's live buffer at `buffer`") {
-        return os_syscall_i64(I64{OS_SYS_PWRITE64}, fd, buffer, count, offset, I64{0}, I64{0})
+        return os_syscall_i64(I64{18}, fd, buffer, count, offset, I64{0}, I64{0})
     }
 }
 
 os_sched_yield_i64: fn() -> I64 {
     #Unsafe("sched_yield(2) takes no pointers and yields the current thread") {
-        return os_syscall_i64(I64{OS_SYS_SCHED_YIELD}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_madvise_i64: fn(address: I64, bytes: I64, advice: I64) -> I64 {
     #Unsafe("madvise(2) advises the kernel on pages owned by the caller in `address .. address + bytes`") {
-        return os_syscall_i64(I64{OS_SYS_MADVISE}, address, bytes, advice, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{28}, address, bytes, advice, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_getpid_i64: fn() -> I64 {
     #Unsafe("getpid(2) takes no pointers and returns this process's id") {
-        return os_syscall_i64(I64{OS_SYS_GETPID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_socketpair_i64: fn(domain: I64, kind: I64, protocol: I64, sv: I64) -> I64 {
     #Unsafe("socketpair(2) writes two file descriptors into the caller's live 8-byte buffer at `sv`") {
-        return os_syscall_i64(I64{OS_SYS_SOCKETPAIR}, domain, kind, protocol, sv, I64{0}, I64{0})
+        return os_syscall_i64(I64{53}, domain, kind, protocol, sv, I64{0}, I64{0})
     }
 }
 
 os_fork_i64: fn() -> I64 {
     #Unsafe("fork(2) clones this thread into a child process; the caller obeys async-signal-safe rules in the child") {
-        return os_syscall_i64(I64{OS_SYS_FORK}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_kill_i64: fn(pid: I64, signal: I64) -> I64 {
     #Unsafe("kill(2) sends `signal` to `pid` and retains no memory") {
-        return os_syscall_i64(I64{OS_SYS_KILL}, pid, signal, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{62}, pid, signal, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_fcntl_i64: fn(fd: I64, command: I64, arg: I64) -> I64 {
     #Unsafe("fcntl(2) acts on descriptor `fd` and any live argument buffer `arg` required by `command`") {
-        return os_syscall_i64(I64{OS_SYS_FCNTL}, fd, command, arg, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{72}, fd, command, arg, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_getcwd_i64: fn(buffer: I64, size: I64) -> I64 {
     #Unsafe("getcwd(2) writes at most `size` bytes into the caller's live buffer at `buffer`") {
-        return os_syscall_i64(I64{OS_SYS_GETCWD}, buffer, size, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{79}, buffer, size, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_readlink_i64: fn(path: I64, buffer: I64, size: I64) -> I64 {
     #Unsafe("readlink(2) reads the NUL-terminated path at `path` and writes at most `size` bytes at `buffer`") {
-        return os_syscall_i64(I64{OS_SYS_READLINK}, path, buffer, size, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{89}, path, buffer, size, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_getrusage_i64: fn(who: I64, usage: I64) -> I64 {
     #Unsafe("getrusage(2) writes a struct rusage into the caller's live buffer at `usage`") {
-        return os_syscall_i64(I64{OS_SYS_GETRUSAGE}, who, usage, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{98}, who, usage, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_arch_prctl_i64: fn(code: I64, address: I64) -> I64 {
     #Unsafe("arch_prctl(2) updates or reads thread segment base state for the caller's live `address`") {
-        return os_syscall_i64(I64{OS_SYS_ARCH_PRCTL}, code, address, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{158}, code, address, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_gettid_i64: fn() -> I64 {
     #Unsafe("gettid(2) takes no pointers and returns this thread's id") {
-        return os_syscall_i64(I64{OS_SYS_GETTID}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_timer_create_i64: fn(clock: I64, sigevent: I64, timerid: I64) -> I64 {
     #Unsafe("timer_create(2) reads the caller's live sigevent and writes the timer id at `timerid`") {
-        return os_syscall_i64(I64{OS_SYS_TIMER_CREATE}, clock, sigevent, timerid, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{222}, clock, sigevent, timerid, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_timer_settime_i64: fn(timerid: I64, flags: I64, new_value: I64, old_value: I64) -> I64 {
     #Unsafe("timer_settime(2) reads the caller's live itimerspec at `new_value` and writes `old_value` when non-zero") {
-        return os_syscall_i64(I64{OS_SYS_TIMER_SETTIME}, timerid, flags, new_value, old_value, I64{0}, I64{0})
+        return os_syscall_i64(I64{223}, timerid, flags, new_value, old_value, I64{0}, I64{0})
     }
 }
 
 os_clock_gettime_i64: fn(clock: I64, timespec: I64) -> I64 {
     #Unsafe("clock_gettime(2) writes two timespec words at the caller's live `timespec`") {
-        return os_syscall_i64(I64{OS_SYS_CLOCK_GETTIME}, clock, timespec, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{228}, clock, timespec, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_exit_group_i64: fn(status: I64) -> I64 {
     #Unsafe("exit_group(2) terminates all threads in this process with `status`") {
-        return os_syscall_i64(I64{OS_SYS_EXIT_GROUP}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_tgkill_i64: fn(tgid: I64, tid: I64, signal: I64) -> I64 {
     #Unsafe("tgkill(2) sends `signal` to thread `tid` of thread group `tgid`") {
-        return os_syscall_i64(I64{OS_SYS_TGKILL}, tgid, tid, signal, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{234}, tgid, tid, signal, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_perf_event_open_i64: fn(attr: I64, pid: I64, cpu: I64, group_fd: I64, flags: I64) -> I64 {
     #Unsafe("perf_event_open(2) reads the caller's live perf_event_attr words at `attr`") {
-        return os_syscall_i64(I64{OS_SYS_PERF_EVENT_OPEN}, attr, pid, cpu, group_fd, flags, I64{0})
+        return os_syscall_i64(I64{298}, attr, pid, cpu, group_fd, flags, I64{0})
     }
 }
 
 os_getcpu_i64: fn(cpu: I64, node: I64) -> I64 {
     #Unsafe("getcpu(2) writes the 32-bit CPU id into the caller's live word at `cpu`") {
-        return os_syscall_i64(I64{OS_SYS_GETCPU}, cpu, node, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{309}, cpu, node, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
 os_process_vm_readv_i64: fn(pid: I64, local_iov: I64, liovcnt: I64, remote_iov: I64, riovcnt: I64, flags: I64) -> I64 {
     #Unsafe("process_vm_readv(2) copies between the caller's live local and remote iovec arrays") {
-        return os_syscall_i64(I64{OS_SYS_PROCESS_VM_READV}, pid, local_iov, liovcnt, remote_iov, riovcnt, flags)
+        return os_syscall_i64(I64{310}, pid, local_iov, liovcnt, remote_iov, riovcnt, flags)
     }
 }
 
 os_memfd_create_i64: fn(name: I64, flags: I64) -> I64 {
     #Unsafe("memfd_create(2) reads the caller's NUL-terminated name string at `name`") {
-        return os_syscall_i64(I64{OS_SYS_MEMFD_CREATE}, name, flags, I64{0}, I64{0}, I64{0}, I64{0})
+        return os_syscall_i64(I64{319}, name, flags, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
 
