@@ -1,0 +1,68 @@
+# Claim: a build cut short midway, past its step limit, ended by the system
+# as memory runs out (the SIGKILL the kernel sends its compile-time
+# process), or cancelled, publishes nothing of what it generated and records
+# no fact: the modules and the program of the last good build stay byte for
+# byte and no staged file is left. The stop is reported, ahead of the staged
+# report on the name the build never made. The next run starts clean: it
+# builds the same modules and the same program as before the stops.
+# stalls.txt changes `first`, then loops before it generates `second`;
+# comptime.sh finds the process `build: fn` runs in.
+requires: os:unix
+requires: tool:sh
+requires: tool:pgrep
+fixture: Fixtures/GenerateCancelMidway
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step good: jet build main.jet
+exit: 0
+copy: .jet/generated/main/first.jet good.first
+copy: .jet/generated/main/second.jet good.second
+copy: .jet/build/app good.app
+step launch: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"
+copy: stalls.txt main.jet
+step steps: jet build main.jet
+exit: 1
+stderr: ~ "Jet.ComptimeFuelExhausted" # the step limit stops the build midway, and is reported
+stderr: ~ "Nothing named `second_value` exists here" # then the staged report on the name it never made
+stderr: ~ "which `b.generate(\"second\")` at `main.jet:12` promised" # with the promise the stop broke
+file: .jet/generated/main/first.jet == good.first # the changed `first` was never published
+file: .jet/generated/main/second.jet == good.second
+file: .jet/generated/main/first.jet.writing absent
+file: .jet/build/app == good.app # nothing was compiled or linked
+spawn memory: jet build main.jet
+stderr: file memory.stderr
+step: sh comptime.sh {pid:memory} KILL
+exit: 0
+stdout: = "running\n" # `build: fn` was running when its process was killed
+wait: memory timeout 60s
+exit: nonzero
+file: memory.stderr ~ "Jet.ComptimeEndedBySignal" # the kill is reported
+file: memory.stderr ~ "ended by SIGKILL from outside jet" # the signal and who sent it
+file: memory.stderr ~ "Nothing named `second_value` exists here" # the staged report the stop left
+file: .jet/generated/main/first.jet == good.first
+file: .jet/generated/main/second.jet == good.second
+file: .jet/generated/main/first.jet.writing absent
+file: .jet/build/app == good.app
+spawn cancel: jet build main.jet
+stderr: file cancel.stderr
+step: sh comptime.sh {pid:cancel}
+exit: 0
+stdout: = "running\n" # `build: fn` is running
+signal cancel: INT
+wait: cancel timeout 60s
+exit: nonzero # the cancel ends the build
+file: .jet/generated/main/first.jet == good.first
+file: .jet/generated/main/second.jet == good.second
+file: .jet/generated/main/first.jet.writing absent
+file: .jet/build/app == good.app
+copy: good.txt main.jet
+step again: jet build main.jet
+exit: 0
+file: .jet/generated/main/first.jet == good.first # the next run starts clean
+file: .jet/generated/main/second.jet == good.second
+file: .jet/build/app == good.app
+step relaunch: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"

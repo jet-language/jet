@@ -454,11 +454,12 @@ jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&
 // failed staging check, `staged`, the staged ones) and the build's own
 // reports `ran`. An internal `problem` is the answer whatever was staged: the
 // staged reports name what the build would have generated, not why it
-// failed. Without one, a staged query whose build refused a call reports that
-// refusal first (`refused`), and a staged run that stopped at a trap restates
-// the staged reports, so they stand alone.
+// failed. Without one, a staged query whose build refused a call, or was
+// stopped by its step limit or from outside (jet_driver_build_cut_short),
+// reports that first, and a staged run that stopped at a trap restates the
+// staged reports, so they stand alone.
 jet_driver_build_query_stopped: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool, refused: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
-    if problem == None && staged && refused {
+    if problem == None && staged && (refused || jet_driver_build_cut_short(ran)) {
         return jet_driver_build_query_failed(request, errors, ran, true)
     }
     reports := errors.move()
@@ -466,6 +467,18 @@ jet_driver_build_query_stopped: fn(request: &&JetDriverCompileRequest, errors: &
         loop error in ran.move() -> reports.push(error)
     }
     jet_driver_build_query_empty(request, reports, false, problem)
+}
+
+// Whether the build was cut short rather than stopped by its own code: it
+// ran past its step limit (E0952), or something outside jet ended it (E3007
+// with its signal: a cancel, or the system out of memory). Such a stop
+// restates no staged report: it is why the modules the build would have
+// generated are missing, and none of them was published.
+jet_driver_build_cut_short: fn(ran: [Diagnostic]) -> Bool Never! {
+    loop report in ran {
+        if report.code == "E0952" || report.outside_signal != None -> return true
+    }
+    false
 }
 
 // Drops the build plan's full load `load` on a detached task, so the

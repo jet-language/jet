@@ -278,6 +278,37 @@ inspect_build_stopped_is_internal: fn(ran: [Diagnostic], refused: Bool, problem:
     inspect_build_require(trapped_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && trapped_failure.stderr.contains("Shape"), "a staged run that stopped at a trap reports the staged check")
 }
 
+// The codes of a staged build query that stopped before its plan with the
+// build's reports `ran` and no internal problem.
+inspect_build_stopped_codes: fn(ran: [Diagnostic]) -> [String] Never! {
+    staged := [Diagnostic]{diagnostic_from_registry("E0107", None, "Nothing named `answer` exists here", "A name must be declared before it's used", "Declare it first")}
+    reports := ran
+    held := String?{None}
+    request := inspect_build_request()
+    response := jet_driver_build_query_stopped(request, staged, reports, true, false, held)
+    query := response.query.move()
+    inspect_build_require(!query.complete && query.internal_problem == None, "a stopped build is a failed query, not an internal problem")
+    loop reported in query.diagnostics -> reported.code.copy()
+}
+
+// A build cut short midway, past its step limit or ended from outside jet (a
+// cancel, or the system out of memory), generated nothing, so its stop is why
+// the staged check misses the names it would have generated: the stop comes
+// first, then the staged report. A stop of the build's own code (a keep-going
+// trap) restates the staged report, which stands alone.
+#Test("inspect_build a build cut short reports its stop before the staged report") {
+    fuel: diagnostic_from_registry("E0952", None, "Compile-time code ran past its step limit of 10000000 steps", "Compile-time code runs under a step limit", "Split the work so it fits")
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{fuel}), [String]{"E0952", "E0107"})
+    cancelled := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGINT from outside jet", "another process sent it SIGINT", "build again without stopping it")
+    cancelled.outside_signal = Val(2)
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{cancelled}), [String]{"E3007", "E0107"})
+    out_of_memory := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGKILL from outside jet", "the system sent it SIGKILL as memory ran out", "free memory or make the compile-time work smaller")
+    out_of_memory.outside_signal = Val(9)
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{out_of_memory}), [String]{"E3007", "E0107"})
+    trap: diagnostic_from_registry("E3010", None, "keep-going trap: this function calls `answer`, which did not check", "the function did not check", "fix the staged report")
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{trap}), [String]{"E0107"})
+}
+
 // The compiler under test, never this test binary, owns the runtime pack:
 // planning `build: fn` runs compile-time code over its jet_runtime.image.
 inspect_build_runtime_dir: fn() -> String {
