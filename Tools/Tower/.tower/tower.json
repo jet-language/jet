@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113263,
+    "rev": 113266,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52703,7 +52703,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed Pillar 6A SWAR/SIMD lex/parse + final Pillar 1/4A flat sema (dev 83a9da0215, master 016807b791, combined Stage-2 d128fb0b...): 256-byte SCAN_IDENT_CONT, 8-byte SWAR bidi skip, 4x unrolled line-starts, ParserWordIds, O(1) marker/fence/paste fast-skips, zero-alloc jet_frame_storage_fast, 55k+ duplicate Type.Fn copies removed, NameTable/NameRows across Effects/LocalSplice/ComptimeUse/Items/Frame. CompileThroughput O0 27,023->30,654 LOC/s (+13.4%, -4.77s), check 76,968->80,266 LOC/s (+4.3%), full -O0 Compiler 30.78s (jet-bare 11.72s sub-12s!, runtime 15.25s, Peak RSS 4801 MB), full -O2 Compiler 36.87s (-25.2% vs start). CompilerData 1093->1034 (-59, -111 cumulative), copy_ratchet -6, CodegenCeiling 9/9, UnsafeRatchet 1660 (0 outside kernel)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -52760,8 +52766,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-22T02:10:23.720Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T09:07:31.265Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
     {
@@ -72514,6 +72520,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Landed Pillar 1/4A final push in dev 83a9da0215 (master 016807b791): eliminated 55k+ duplicate Type.Fn/FunctionCallMetadata copies, converted Effects/LocalSplice/ComptimeUse/Items/Frame to NameTable/NameRows (-59 CompilerData, -6 copy_ratchet), sema.finalize -14.2% on CompileThroughput O0 (30,654 LOC/s) and -12.4% on jet-bare (-536ms)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Landed Pillar 1 Slice 2 + Pillar 4A (ea899fafc9, 42 files): lean SemaRegistrationParameter (-200k symbol copies), zero-duplicate import types (-300k Type.Fn copies), header-only method registration, 2-field SemaCallSiteFacts, parser summary flags (has_scope_member/has_task_spawn), fast-path Collections/Direct/TypeRelations/ScopeMembers/Typestate/Effects, CompilerData 1115->1093 (-22, 2 files hit 0), copy_ratchet 5 lowered (2 files hit 0). Verified 3-stage -O2 exact S1==S2==S3 (40.42s S1, 2m30s user), CodegenCeiling 9/9, UnsafeRatchet 1660 (0 outside kernel), Tests/Guards 217/217, 640+ unit tests. Live cold: jet-bare -O0 -j24 13.005s, runtime step 19.57->17.21s (-2.36s), Throughput check CPU -16.3% (-109.6B insns, sema.finalize -19.6%), Throughput O0 27234 LOC/s & -344 MiB RSS."
         },
         {
@@ -72554,7 +72565,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-23T06:50:17.992Z",
+      "updated": "2026-11-23T09:07:32.091Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 2
     },
@@ -134621,6 +134632,27 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T09:07:32.964Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing0quaqtz",
+      "note": "30M LOC/s Architectural Overhaul — Pillar Status (90%)"
+    },
+    {
+      "at": "2026-11-23T09:07:32.091Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T09:07:31.265Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0okfgjw",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-23T08:55:39.583Z",
       "by": "Orchestrator",
       "action": "briefing.post",
@@ -139193,6 +139225,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing0quaqtz",
+      "title": "30M LOC/s Architectural Overhaul — Pillar Status (90%)",
+      "body": "# 30M LOC/s Architectural Overhaul — Pillar Status (90% Overall)\n\n**Updated:** `2026-11-23 04:07 EST` · **`dev`**: `83a9da0215` · **`master`**: `016807b791` (both synced to `origin`) · **Cold, uncached builds only (zero compile caching, strict I9 parity)**\n\n## Pillar Progress Summary\n\n| Pillar | Card(s) | % Complete | Status & Latest Landed Proof |\n|---|---:|---:|---|\n| **1. TypeID Interner & Flat Sema** | `#6978`, `#6793` | **95%** | **LANDED S1+S2+S3** (`f17b0e1815`, `ea899fafc9`, `83a9da0215`): live `U32` `TypeID` interner, O(1) `canonical`, zero-copy `InternerDelta`, lean `SemaRegistrationParameter`, eliminated 55k+ duplicate `Type.Fn`/`FunctionCallMetadata` copies, `NameTable`/`NameRows` across `Effects`/`LocalSplice`/`ComptimeUse`/`Items`/`Frame` (`CompilerData 1145→1034`, `-111`!). Final 25-min `sema.finalize` strike in flight. |\n| **2. Copy-and-Patch `-O0` & Direct Link** | `#6795` | **95%** | **LANDED S1+S2+S3** (`1d11568b1b`, `364bb1b402`, `d2fc656a69`): 52-op `X64Patch` stencils, fused `-O0` `DropEarly` (`110→0ms`), zero-COW `ir.merge.functions` (`548→153ms`), direct `x64_link_runtime_image_objects` (`runtime.pack -22%`), hardware SHA-NI link/embed (`core-embed 2,267→702ms`, `-69%`), fixed double `.rela.*` encode. |\n| **3. Shared-Memory Persistent Comptime** | `#6798` | **90%** | **LANDED** (`bf843c6d0b`): `X64Patch` comptime batches + 4 MiB `memfd`/`MAP_SHARED` staging + zero-pipe `process_vm_readv` + MRU page/layout caches (`comptime.load -39.6%`, `comptime.eval -26.3%`, host CPU `-31.9%`, 0 new `#Unsafe`). |\n| **4. SoA IR & Memory Cuts** | `#6793` | **85%** | **LANDED 4A+4B+4C+4D** (`ea899fafc9`, `c022bb1d9c`, `d2fc656a69`, `83a9da0215`): 4-way parallel `release_aside` + `ir_x64_write_with_release` on 21k Core fns, struct `JetCLICoreLibraryIR` (`267.5→1.0ms`), zero-alloc `jet_frame_storage_fast`, Peak RSS **`4,801 MB` (`-2.14 GiB` vs `6,940 MiB` start!)**. |\n| **5. Task Graph & Runtime Parallelism** | `#6794` | **90%** | **LANDED S1+S2** (`c022bb1d9c`, `d2fc656a69`): parallel `comptime.prefetch`/`driver.prelower.owners`, overlapped `driver.result`/`ir_body_scan_collect`/`ir_x64_debug_types`/`ir_x64_reached_only`, lock-free partitioned `ir_opt_bodies`, fast `OptStops`/`OptSimplify`/`OptBuilder` (`runtime.core ir.opt -12.4%`), parallel 7-artifact Core writes. Final 25-min `-O2` `JetIR`/backend strike in flight. |\n| **6. SWAR/SIMD Lex/Parse & Generic Sharing** | `#6796`, `#6797` | **85%** | **LANDED Pillar 6A (`83a9da0215`)**: 256-byte `SCAN_IDENT_CONT`, 4-space skip, 8-byte SWAR bidi skip, 4x unrolled line-starts, `ParserWordIds` (19 pre-resolved IDs), O(1) fast-skips on `MarkerHooks`/`FencedNames`/`NamedMarkerGroups`/paste (`load -12.1%`, `CompileThroughput -O0` broke **30.7k LOC/s**, `check` broke **80.3k LOC/s**!). |\n| **Overall Architectural Overhaul** | All 6 | **90%** | **Both Pillar 5 S2 (`d2fc656a69`) AND Pillar 6A + final P1/4A (`83a9da0215`) LANDED!** Now running one final coordinated 25-min Pareto wave (`sema.finalize` + `-O2` `JetIR` backend) + SSoT-3 (`Loader.jet` → `OS/Linux.jet`), followed by clean idle-host milestone receipt before `05:00 EST`, then immediate `G1 → G6` burndown! |\n\n## Live Cold, Uncached Compiler Metrics (`174a8cdeda` → `83a9da0215`)\n\n| Metric (Cold, Uncached) | Start Baseline | Previous (`d2fc656a69`) | Latest (`83a9da0215`) | Total Gain |\n|---|---:|---:|---:|---:|\n| **Full `jet build -O0 --threads 24 Compiler`** | `40.69s` | `30.99s` (quiet) | **`30.78s`** (`87.2s` CPU) | **`-9.91s` (`-24.4%`)** |\n| ↳ `jet-bare` (inside full `-O0` build) | `15.05s` (`23.53s` AM) | `11.80s` | **`11.72s`** (**SUB-12s!**) | **`-50.2%` vs AM** |\n| ↳ `runtime` step | `16,500+ ms` | `15,645 ms` | **`15,246 ms`** | **`-1.25s+`** |\n| ↳ `core-embed` (`runtime.embed`) | `2,267 ms` | `702 ms` | **`702–957 ms`** | **`-58%` to `-69%`** |\n| **Full `jet build -O2 --threads 12 Compiler`** | `49.28s` (`3m08s` CPU) | `37.89s` | **`36.87s`** (`2m27s` CPU) | **`-12.41s` (`-25.2%`)** |\n| **Peak RSS (Full `-O0 Compiler`)** | `6,940 MiB` | `4,833 MB` | **`4,801 MB`** | **`-2.14 GiB` (`-30.8%`)** |\n| **`CompileThroughput -O0` (1.09M LOC)** | `25,271 LOC/s` (`43.1s`) | `27,234 LOC/s` (`40.3s`) | **`30,654 LOC/s` (`35.5s`)** | **`+21.3%` (`-7.6s` wall!)** |\n| **`CompileThroughput check` (1.09M LOC)** | `~71,000 LOC/s` | `76,968 LOC/s` (`14.14s`) | **`80,266 LOC/s` (`13.56s`)** | **`+13%+` (`-73 MiB` RSS)** |\n\n## Gates & Single-Source-of-Truth (SSoT)\n- **All Gates PASS on Combined Stage-2 (`d128fb0b...`)**: `CodegenCeiling 9/9`, `CompilerData 1034` (**`-111` cumulative**, 0 rises), `UnsafeRatchet 1660` (`-10`, **0 raw memory actions outside audited memory kernel**), `copy_ratchet` (`-6` more copies lowered), `closed_lists`, `example_grants`, determinism (`-j1 == -j24` & `-j12 == -j24`), strict I9 parity.\n- **Orchestrator SSoT-3 in flight now**: migrating `Loader.jet`'s last 42 raw `os_syscall_i64` calls to `OS/Linux.jet` typed wrappers (leaving **0** raw `os_syscall_i64` calls anywhere outside `OS/Linux.jet`).\n",
+      "by": "Orchestrator",
+      "created": "2026-11-23T09:07:32.964Z",
+      "sections": []
+    },
     {
       "id": "briefing00tjmpm",
       "title": "30M LOC/s Architectural Overhaul — Pillar Status (82%)",
