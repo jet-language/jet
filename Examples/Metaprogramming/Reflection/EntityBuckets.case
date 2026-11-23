@@ -1,9 +1,14 @@
 # `World`, its buckets and its spawn functions are the module `build: fn`
-# adds, so the oracle is the built program: `jet build` runs the build and
-# compiles the target with that module, and the image prints the tables. The
-# flow is the same on every tier, so this is the one tier-independent run.
+# adds. `jet check`, `jet run` and `jet build` all load that generated module
+# the same way (I9), and both `jet run` and the built image print the exact
+# same tables.
 artifact: entity_buckets
 env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = EntityBuckets.out
 step: jet build run.jet
 exit: 0
 step: {built}

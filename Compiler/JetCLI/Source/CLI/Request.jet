@@ -2620,8 +2620,11 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // (Host.jet jet_cli_finish), so a check's compile state moves into the
 // result and is never dropped (JetDriverCompileRequest.hold_check_state).
 // `capture_cost_report`: a check keeps its typed cost report and its L2510
-// lints (`explain --cost`, `lint --cost`).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}) -> JetCLICompiled {
+// lints (`explain --cost`, `lint --cost`). `load_generated`: the modules the
+// entry package's `build: fn` generates load beside its sources
+// (jet_cli_generated_request), as under `jet run` and `jet build`; a library
+// check of `jet build` passes false, as it carries what its build generated.
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}, release_state_aside: Bool{false}, load_generated: Bool{true}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2638,6 +2641,9 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.hold_check_state = hold_check_state
             selected.release_state_aside = release_state_aside
             selected.capture_cost_report = capture_cost_report
+            // A Prelude source's check and `jet check Core` check no package
+            // a build generates for.
+            if load_generated && !prelude && !every_core_body -> selected = jet_cli_generated_request(selected)
             // A check of a program over the built-in Core loads that Core's
             // function checks as a bound native compile does. Neither a
             // Prelude source's check nor `jet check Core` does, as they check

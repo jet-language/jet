@@ -22,6 +22,7 @@ use {
         JetDriverBuildPackageSettings,
         jet_driver_physical_path,
         jet_driver_entry_build_probe,
+        jet_driver_sources_may_generate,
         jet_driver_present_diagnostics,
         jet_driver_build_plan_json,
         jet_driver_build_explanation,
@@ -697,7 +698,7 @@ jet_cli_check_library: fn(file: String, source: String, sources: [String], gener
             with_sources := request
             with_sources.generated_modules = generated
             with_sources.target_sources = sources
-            compiled: jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: with_sources.move(), snapshot: snapshot}, None, trace_sink)
+            compiled: jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: with_sources.move(), snapshot: snapshot}, None, trace_sink, load_generated: false)
             if compiled == {
                 .Refused(refusal) -> refusal.move()
                 .Compiled(result, checked_snapshot) -> {
@@ -821,6 +822,28 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
         contributed.build_contributions = lock.build_contributions.copy()
     }
     {request: contributed.move(), refusal: None}
+}
+
+// `owned_request` with the modules its entry package's `build: fn` generates
+// (`b.generate`, `meta.add`, `meta.rewrite_body`) beside its sources, for a
+// compile that runs no build of its own (`jet check`, `fix`, `explain`): it
+// loads them as `jet run` and `jet build` do (jet_cli_contributed_request).
+// The build runs only when the sources spell a generating call
+// (jet_driver_sources_may_generate), and only up to its generated modules
+// (jet_driver_query_build_plan's `generated_only`): its reports, its
+// settings and its plan stay `jet build`'s, and a build that fails leaves
+// the compile its sources alone, whose check reports what they miss. A
+// request that already carries generated modules is returned as it is.
+jet_cli_generated_request: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCompileRequest {
+    request := owned_request.move()
+    if request.generated_modules.len() > 0 || !jet_driver_sources_may_generate(request) -> return request.move()
+    if !jet_driver_entry_build_probe(request).has_build -> return request.move()
+    scope := JetDriverBuildQueryScope{next_session_id: 1}
+    response: jet_driver_query_build_plan(request, scope, generated_only: true)
+    query: response.query.move()
+    folded := response.request.move()
+    if query.complete && query.internal_problem == None -> folded.generated_modules = query.generated.move()
+    folded.move()
 }
 
 // Record what `plan`'s `build: fn` contributed as `package`'s

@@ -1,0 +1,23 @@
+# Modules a package's `build: fn` adds load the same way under `jet check`,
+# `jet run` and `jet build` (I9), whether `build: fn` lives in its own
+# `build.jet` file or in the entry file. Both `jet run` and the built program
+# print the exact same output, and `jet check` succeeds cleanly.
+fixture: BuildFnGeneratedModulesLoadAcrossRunCheckAndBuild.fixture
+artifact: generated_parity
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check run.jet
+exit: 0
+step: jet check .
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "banner: jet-build-fn-parity\ncount: 42\n"
+step: jet run .
+exit: 0
+stdout: = "banner: jet-build-fn-parity\ncount: 42\n"
+step: jet build run.jet
+exit: 0
+step: {built}
+exit: 0
+stdout: = "banner: jet-build-fn-parity\ncount: 42\n"
