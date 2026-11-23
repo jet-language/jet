@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 876 active error rows: 753 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 872 active error rows: 749 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -92,7 +92,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1367 | a function type with the same marks reaches the program |
 | E0231 | InvalidReceiverFootprint | Compiler/JetSema/Source/Sema/Footprint.jet:331 | the footprint must name the fields the body touches |
 | E0301 | ImplOnBuiltinType | Compiler/JetSema/Source/Sema/CheckProgram.jet:1349 | an operator hook belongs to the package that declares an operand type |
-| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:656 | no opt-in reaches a field the type does not declare |
+| E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:485 | no opt-in reaches a field the type does not declare |
 | E0303 | InvalidConstructionField | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:734 | a value is built from exactly its declared fields |
 | E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1167 | an enum holds only its declared variants |
 | E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:211 | an explicit conversion reaches the program; nothing reinterprets the value |
@@ -445,10 +445,6 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1297 | ToolJobConflict | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:693 | the tool or the job takes another name |
 | E1298 | ToolProviderUnavailable | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:696 | use a provider with a handler |
 | E1299 | ReservedStorePathComponent | Jetpack/PackageModel/Source/Store/SourceStore.jet:65 | store paths use portable names |
-| E1301 | FlagArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:108 | `flag` gets its two arguments |
-| E1302 | OptionArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:110 | `option` gets its three arguments |
-| E1303 | PositionalArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:112 | `positional` gets its two arguments |
-| E1304 | ParseArgumentCount | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:115 | `parse` gets the argument list |
 | E1305 | UnmappedCliFieldType | Compiler/JetSema/Source/Sema/Registration/Items.jet:4547 | the field uses a type that maps to a flag |
 | E1306 | DuplicateCliFlag | Compiler/JetSema/Source/Sema/Registration/Items.jet:4557 | each field derives a distinct, unreserved flag |
 | E1308 | RunParameterNotCli | Compiler/JetSema/Source/Sema/Outputs.jet:380 | the parameter type is a `#CLI` struct |
@@ -1364,10 +1360,6 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E1297 | ToolJobConflict | soundness | The tool and the job would both answer to one name on `~/.jet/bin`, so the name would have two meanings. |
 | E1298 | ToolProviderUnavailable | soundness | The provider has no handler yet, so there is nothing to install the tool with. |
 | E1299 | ReservedStorePathComponent | soundness | A reserved, aliasing or case-folding path name could name another file on some systems, so the store entry would not be one path. |
-| E1301 | FlagArgumentCount | soundness | `flag` takes a name and a help string, so another count has no defined flag. |
-| E1302 | OptionArgumentCount | soundness | `option` takes a name, a help string and a metavar, so another count has no defined option. |
-| E1303 | PositionalArgumentCount | soundness | `positional` takes a name and a help string, so another count has no defined argument. |
-| E1304 | ParseArgumentCount | soundness | `parse` takes the one argument list, so another count has nothing defined to parse. |
 | E1305 | UnmappedCliFieldType | soundness | The field's type has no flag mapping, so the command line has no way to set it. |
 | E1306 | DuplicateCliFlag | soundness | Two fields on one flag, or a field on a reserved flag, give that flag two meanings. |
 | E1308 | RunParameterNotCli | soundness | A typed `run` entry is filled by the CLI parser, so a parameter type it cannot derive gets no value. |

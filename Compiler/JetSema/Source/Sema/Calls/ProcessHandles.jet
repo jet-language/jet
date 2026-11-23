@@ -1,5 +1,5 @@
-// Checked process and command-line handle methods. The caller supplies a checked
-// receiver; this module owns only these compiler-provided handle contracts.
+// Checked process handle methods. The caller supplies a checked receiver;
+// this module owns only these compiler-provided handle contracts.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -66,123 +66,6 @@ sema_process_handle_receiver_name: fn(ty: Type) -> String Never! {
     }
 }
 
-sema_process_args_spec_op: fn(method: String) -> THandleOp? {
-    if method == {
-        "flag" -> Val(THandleOp.ArgsSpecFlag)
-        "flag_short" -> Val(THandleOp.ArgsSpecFlagShort)
-        "option" -> Val(THandleOp.ArgsSpecOption)
-        "option_short" -> Val(THandleOp.ArgsSpecOptionShort)
-        "option_default" -> Val(THandleOp.ArgsSpecOptionDefault)
-        "option_env" -> Val(THandleOp.ArgsSpecOptionEnv)
-        "option_int" -> Val(THandleOp.ArgsSpecOptionInt)
-        "option_float" -> Val(THandleOp.ArgsSpecOptionFloat)
-        "option_choice" -> Val(THandleOp.ArgsSpecOptionChoice)
-        "repeat" -> Val(THandleOp.ArgsSpecRepeat)
-        "required_option" -> Val(THandleOp.ArgsSpecRequiredOption)
-        "positional" -> Val(THandleOp.ArgsSpecPositional)
-        "description" -> Val(THandleOp.ArgsSpecDescription)
-        "subcommand" -> Val(THandleOp.ArgsSpecSubcommand)
-        "version" -> Val(THandleOp.ArgsSpecVersion)
-        "completion" -> Val(THandleOp.ArgsSpecCompletion)
-        "help" -> Val(THandleOp.ArgsSpecHelp)
-        "parse" -> Val(THandleOp.ArgsSpecParse)
-        "parse_or_exit" -> Val(THandleOp.ArgsSpecParseOrExit)
-        else -> None
-    }
-}
-
-sema_process_args_spec_arity: fn(method: String) -> Int? {
-    if method == {
-        "flag" | "positional" -> Val(2)
-        "flag_short" | "option_int" | "option_float" | "repeat" | "required_option" | "subcommand" -> Val(3)
-        "option" -> Val(3)
-        "option_short" | "option_default" | "option_env" | "option_choice" -> Val(4)
-        "description" | "version" | "completion" | "parse" | "parse_or_exit" -> Val(1)
-        "help" -> Val(0)
-        else -> None
-    }
-}
-
-sema_process_args_spec_wrong_arity: fn(method: String, actual: Int, span: Span) -> Diagnostic? {
-    if method == {
-        "flag" -> Val(sema_error("E1301", span, "`flag` expects 2 arguments (name, help), got {actual}", "`ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`", "pass exactly two strings: the flag name and a help description"))
-        "flag_short" -> Val(sema_error("E1301", span, "`flag_short` expects 3 arguments (name, short, help), got {actual}", "`ArgsSpec.flag_short(name, short, help)` registers a boolean flag with a `-v` alias", "pass exactly three strings: long name, one-letter short name, and help text"))
-        "option" -> Val(sema_error("E1302", span, "`option` expects 3 arguments (name, help, metavar), got {actual}", "`ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`", "pass three strings: the option name, a help description, and a metavar like `FILE`"))
-        "option_short" | "option_default" | "option_env" | "option_int" | "option_float" | "option_choice" | "repeat" | "required_option" -> Val(sema_error("E1302", span, "`{method}` was called with the wrong number of arguments", "`core.args` option builders declare long names, help text, and a value name; variants add one extra string where needed", "check the `core.args` builder signature and pass the required strings"))
-        "positional" -> Val(sema_error("E1303", span, "`positional` expects 2 arguments (name, help), got {actual}", "`ArgsSpec.positional(name, help)` registers a required positional argument", "pass exactly two strings: the positional name and a help description"))
-        "subcommand" -> Val(sema_error("E1303", span, "`subcommand` expects 3 arguments (name, help, spec), got {actual}", "`ArgsSpec.subcommand(name, help, spec)` gives a subcommand its own nested ArgsSpec", "pass the subcommand name, help text, and an ArgsSpec built with `args.spec()`"))
-        "version" | "completion" -> Val(sema_error("E1303", span, "`{method}` expects 1 argument, got {actual}", "`version(text)` configures `--version`; `completion(shell)` renders shell completion text", "pass exactly one string"))
-        "parse" -> Val(sema_error("E1304", span, "`parse` expects 1 argument (the argument list), got {actual}", "`ArgsSpec.parse(args)` parses the program's words (`process.args()`) against the spec; pass exactly that list.", "pass exactly one argument: the argument list, e.g. `spec.parse(process.args())`"))
-        "description" -> Val(sema_call_arity_diagnostic(method, 1, actual, false, span))
-        else -> None
-    }
-}
-
-// `spec` is the receiver's checked `ArgsSpec` type and `parsed` the
-// Core/Args/Args.jet `ParsedArgs` nominal; Core source implements every
-// method (`__args_*`, `__parsed_*`). `parse` fails with `Err` (the refusal
-// text is its message): a String is not a failure domain (E2417).
-sema_process_args_spec_result: fn(method: String, spec: Type, parsed: Type) -> Type? {
-    if method == {
-        "flag" | "flag_short" | "option" | "option_short" | "option_default" | "option_env" | "option_int" | "option_float" | "option_choice" | "repeat" | "required_option" | "positional" | "description" | "subcommand" | "version" -> Val(spec)
-        "completion" | "help" -> Val(Type.String)
-        "parse" -> Val(sema_process_result(parsed, Type.Named{name: "Err"}))
-        "parse_or_exit" -> Val(parsed)
-        else -> None
-    }
-}
-
-sema_process_parsed_args_result: fn(method: String) -> Type? {
-    if method == {
-        "flag" -> Val(Type.Bool)
-        "option" | "positional" | "subcommand" -> Val(Type.Option{inner: Type.String})
-        "option_int" -> Val(Type.Option{inner: Type.Int})
-        "option_float" -> Val(Type.Option{inner: Type.Float})
-        "options" -> Val(Type.List{element: Type.String})
-        else -> None
-    }
-}
-
-sema_process_parsed_args_arity: fn(method: String) -> Int? {
-    if method == {
-        "flag" | "option" | "option_int" | "option_float" | "options" | "positional" -> Val(1)
-        "subcommand" -> Val(0)
-        else -> None
-    }
-}
-
-sema_process_parsed_args_wrong_arity: fn(method: String, actual: Int, span: Span) -> Diagnostic? {
-    if method == {
-        "flag" -> Val(sema_error("E1301", span, "`ParsedArgs.flag` expects 1 argument (flag name), got {actual}", "`parsed.flag(\"verbose\")` returns `true` when `--verbose` was passed", "pass exactly one string: the flag name without leading `--`"))
-        "option" -> Val(sema_error("E1302", span, "`ParsedArgs.option` expects 1 argument (option name), got {actual}", "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `null`", "pass exactly one string: the option name without leading `--`"))
-        "option_int" | "option_float" | "options" -> Val(sema_error("E1302", span, "`ParsedArgs.{method}` expects 1 argument (option name), got {actual}", "typed option queries read values already validated by `ArgsSpec.parse`", "pass exactly one string: the option name without leading `--`"))
-        "positional" -> Val(sema_error("E1303", span, "`ParsedArgs.positional` expects 1 argument (index), got {actual}", "`parsed.positional(0)` returns the first positional argument, or `null`", "pass exactly one Int: the zero-based positional argument index"))
-        "subcommand" -> Val(sema_error("E1303", span, "`ParsedArgs.subcommand` expects 0 arguments, got {actual}", "`parsed.subcommand()` returns the matched subcommand name, if any", "call it with no arguments"))
-        else -> None
-    }
-}
-
-sema_process_args_spec_arg_types: fn(method: String, spec: Type) -> [Type] Never! {
-    if method == {
-        "flag" | "positional" -> [Type]{Type.String, Type.String}
-        "flag_short" -> [Type]{Type.String, Type.String, Type.String}
-        "option" | "option_int" | "option_float" | "repeat" | "required_option" -> [Type]{Type.String, Type.String, Type.String}
-        "option_short" | "option_default" | "option_env" | "option_choice" -> [Type]{Type.String, Type.String, Type.String, Type.String}
-        "description" | "version" | "completion" -> [Type]{Type.String}
-        "subcommand" -> [Type]{Type.String, Type.String, spec}
-        "parse" | "parse_or_exit" -> [Type]{Type.List{element: Type.String}}
-        else -> [Type]{}
-    }
-}
-
-sema_process_parsed_args_arg_types: fn(method: String) -> [Type] Never! {
-    if method == "positional" -> return [Type]{Type.Int}
-    if method == "flag" || method == "option" || method == "option_int" || method == "option_float" || method == "options" {
-        return [Type]{Type.String}
-    }
-    [Type]{}
-}
-
 sema_process_method_params: fn(args: [CallArg], required: [Type], moving: [Bool]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop index in 0..<args.len() {
@@ -245,60 +128,6 @@ sema_process_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], re
     // its success side, and the call root then propagates the failure.
     checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
-}
-
-sema_process_args_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    operation: sema_process_args_spec_op(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    parsed: Type.Named{name: sema_core_module_nominal(program, "core.args", "ParsedArgs")}
-    result: sema_process_args_spec_result(method, receiver_value.ty, parsed) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    required_arity: sema_process_args_spec_arity(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != required_arity {
-        sema_process_wrong_arity(method, required_arity, args.len(), span, diagnostics)
-        if sema_process_args_spec_wrong_arity(method, args.len(), span) == .Val(diagnostic) {
-            _ := diagnostics.pop()
-            diagnostics.push(diagnostic)
-        }
-        sema_process_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    required := sema_process_args_spec_arg_types(method, receiver_value.ty)
-    values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    receiver_access: if method == "help" || method == "completion" || method == "parse" || method == "parse_or_exit" -> AccessConvention.Read else -> AccessConvention.Move
-    moving_args: if method == "subcommand" -> [Bool]{false, false, true} else -> [Bool]{}
-    sema_call_note_route_implicit_takes(sema_process_method_params(args, required, moving_args), args, values, environment, program, scopes, state, context)
-    if !sema_process_check_method_ownership(receiver, "ArgsSpec.{method}", args, required, moving_args, receiver_access, span, scopes, state, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    // Rust recorded no effect for spec methods: `parse` reads an
-    // option_env variable inside the parse, without application authority.
-    sema_process_finish(receiver_value, operation, values, result, "", "ArgsSpec.{method}", span, expected, environment, program, scopes, context, diagnostics)
-}
-
-sema_process_parsed_args_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    result: sema_process_parsed_args_result(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    required_arity: sema_process_parsed_args_arity(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != required_arity {
-        if sema_process_parsed_args_wrong_arity(method, args.len(), span) == .Val(diagnostic) {
-            diagnostics.push(diagnostic)
-        }
-        sema_process_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    required := sema_process_parsed_args_arg_types(method)
-    values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_process_check_method_ownership(receiver, "ParsedArgs.{method}", args, required, [Bool]{}, AccessConvention.Read, span, scopes, state, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    operation: if method == {
-        "flag" -> THandleOp.ParsedArgsFlag
-        "option" -> THandleOp.ParsedArgsOption
-        "option_int" -> THandleOp.ParsedArgsOptionInt
-        "option_float" -> THandleOp.ParsedArgsOptionFloat
-        "options" -> THandleOp.ParsedArgsOptions
-        "positional" -> THandleOp.ParsedArgsPositional
-        else -> THandleOp.ParsedArgsSubcommand
-    }
-    sema_process_finish(receiver_value, operation, values, result, "", "ParsedArgs.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }
 
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
@@ -660,15 +489,6 @@ sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
         }
     }
     receiver_name: sema_process_handle_receiver_name(receiver_value.ty)
-    // Core/Args/Args.jet declares both; a user type of the same leaf name is
-    // not them.
-    receiver_leaf: sema_call_reflection_leaf_name(receiver_name)
-    if receiver_leaf == "ArgsSpec" && receiver_name == sema_core_module_nominal(program, "core.args", "ArgsSpec") {
-        return sema_process_args_spec_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
-    if receiver_leaf == "ParsedArgs" && receiver_name == sema_core_module_nominal(program, "core.args", "ParsedArgs") {
-        return sema_process_parsed_args_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
     if receiver_name == "ProcessSpec" {
         return sema_process_spec_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }

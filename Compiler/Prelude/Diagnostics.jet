@@ -15867,84 +15867,64 @@ RuntimeOnlyAtBuildTime: struct {
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301",
-        safety_class: .Soundness,
-        safety_reason: "`flag` takes a name and a help string, so another count has no defined flag.",
-        expert_path: "none: `flag` gets its two arguments",
-        meaning: "`ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity",
-        detail: true,
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "`flag` expects 2 arguments (name, help), got N" }
+        what: fn(self) -> String { "*Retired* (was: `flag` expects 2 arguments (name, help), got N)" }
 
         why: fn(self) -> String {
-            "`ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`; both the flag name and a one-line help string are required."
+            "`ArgsSpec.flag` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
         }
 
-        fix: fn(self) -> String {
-            "Pass exactly two strings: the flag name and a help description, e.g. `.flag(\"verbose\", \"enable verbose output\")`."
-        }
+        fix: fn(self) -> String { "Do not use Jet.FlagArgumentCount" }
     }
 }
 
 OptionArgumentCount: struct {
     impl Diagnostic {
         code: "E1302",
-        safety_class: .Soundness,
-        safety_reason: "`option` takes a name, a help string and a metavar, so another count has no defined option.",
-        expert_path: "none: `option` gets its three arguments",
-        meaning: "`ArgsSpec.option` or `ParsedArgs.option` called with wrong arity",
-        detail: true,
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "`option` expects 3 arguments (name, help, metavar), got N" }
+        what: fn(self) -> String { "*Retired* (was: `option` expects 3 arguments (name, help, metavar), got N)" }
 
         why: fn(self) -> String {
-            "`ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`; all three strings are required."
+            "`ArgsSpec.option` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
         }
 
-        fix: fn(self) -> String {
-            "Pass three strings: the option name, a help description, and a placeholder like `FILE`, e.g. `.option(\"output\", \"write to FILE\", \"FILE\")`."
-        }
+        fix: fn(self) -> String { "Do not use Jet.OptionArgumentCount" }
     }
 }
 
 PositionalArgumentCount: struct {
     impl Diagnostic {
         code: "E1303",
-        safety_class: .Soundness,
-        safety_reason: "`positional` takes a name and a help string, so another count has no defined argument.",
-        expert_path: "none: `positional` gets its two arguments",
-        meaning: "`ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity",
-        detail: true,
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "`positional` expects 2 arguments (name, help), got N" }
+        what: fn(self) -> String { "*Retired* (was: `positional` expects 2 arguments (name, help), got N)" }
 
         why: fn(self) -> String {
-            "`ArgsSpec.positional(name, help)` registers a required positional argument; both name and help are required."
+            "`ArgsSpec.positional` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
         }
 
-        fix: fn(self) -> String {
-            "Pass exactly two strings: the positional name and a help description, e.g. `.positional(\"input\", \"file to process\")`."
-        }
+        fix: fn(self) -> String { "Do not use Jet.PositionalArgumentCount" }
     }
 }
 
 ParseArgumentCount: struct {
     impl Diagnostic {
         code: "E1304",
-        safety_class: .Soundness,
-        safety_reason: "`parse` takes the one argument list, so another count has nothing defined to parse.",
-        expert_path: "none: `parse` gets the argument list",
-        meaning: "`ArgsSpec.parse` called with wrong arity",
-        detail: true,
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "`parse` expects 1 argument (the argument list), got N" }
+        what: fn(self) -> String { "*Retired* (was: `parse` expects 1 argument (the argument list), got N)" }
 
         why: fn(self) -> String {
-            "`ArgsSpec.parse(args)` parses the program's words (`process.args()`) against the spec; pass exactly that list."
+            "`ArgsSpec.parse` is an ordinary Core method, so a wrong argument count is the ordinary method arity error"
         }
 
-        fix: fn(self) -> String {
-            "Pass exactly one argument: the argument list, e.g. `spec.parse(process.args())`."
-        }
+        fix: fn(self) -> String { "Do not use Jet.ParseArgumentCount" }
     }
 }
 

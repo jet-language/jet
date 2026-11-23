@@ -2675,8 +2675,9 @@ they do not require a bespoke Rust test or direct `rustc` invocation.
 
 `core.args` provides an `ArgsSpec` builder, explicit `decode_argv` tree parsing,
 and typed `decode<T>()` / `T.merge` using the target's checked `#CLI` shape.
-`ArgsSpec` is the checked builder handle, not a record containing only flag
-names. The builder consumes a spec and returns a new value at each method call;
+`ArgsSpec` and `ParsedArgs` are ordinary Core structs whose methods are the
+builder and the readers; a wrong argument count is the ordinary method arity
+error. The builder consumes a spec and returns a new value at each method call;
 parsing is separate from process execution so tests can pass an explicit
 argument vector.
 
