@@ -1150,7 +1150,8 @@ sema_budget_snake_case: fn(value: String) -> Bool Never! {
     assert_eq(sema_budget_unit_scale("GiB"), Val(1073741824))
     assert_eq(sema_budget_unit_scale("ns"), Val(1))
     assert_eq(sema_budget_unit_scale("s"), Val(1000000000))
-    assert_eq(sema_units_catalog_scale("DataSize", "bytes"), Val(1))
+    // No `bytes` member: it would mint the unit type `Bytes`, Core's byte buffer.
+    assert_eq(sema_units_catalog_scale("DataSize", "bytes"), None)
     assert_eq(sema_units_catalog_scale("DataSize", "kib"), Val(1024))
     assert_eq(sema_units_catalog_scale("DataSize", "mib"), Val(1048576))
     assert_eq(sema_units_catalog_scale("DataSize", "gib"), Val(1073741824))
