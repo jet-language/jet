@@ -506,9 +506,7 @@ compiler_mapped_settle: fn(slot: I64) {
         memory := I64{-1}
         // Raw, not through HostProcess.jet's gate: only the break's signal
         // handler runs this, and a handler's own calls are not counted.
-        #Unsafe("memfd_create reads the slot's NUL-terminated name word; MFD_CLOEXEC") {
-            memory = os_syscall_i64(I64{319}, wrapping(slot + I64{48}), I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-        }
+        memory = os_memfd_create_i64(wrapping(slot + I64{48}), I64{1})
         if (memory >= I64{0}) {
             copied = compiler_mapped_place(fd, memory, slot)
             compiler_mapped_close(memory)

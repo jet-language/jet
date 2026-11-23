@@ -207,9 +207,7 @@ stack_segment_back: fn(tcb: I64, record: I64, reach: I64) {
     if (reach < target) { target = reach & wrapping(I64{0} - STACK_SEGMENT_HUGE_PAGE) }
     if (target < low) { target = low }
     if (target < frontier) {
-        #Unsafe("target..frontier lies inside the segment, this thread's own mapping above its guard page; populating only backs its pages") {
-            _ := os_syscall_i64(I64{28}, target, wrapping(frontier - target), I64{23}, I64{0}, I64{0}, I64{0})
-        }
+        _ := os_madvise_i64(target, wrapping(frontier - target), I64{23})
         sync_store(wrapping(record + I64{32}), target)
     }
     sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(sync_load(wrapping(record + I64{32})) + STACK_SEGMENT_RED))
@@ -283,7 +281,7 @@ stack_segment_map: fn(bytes: I64) -> I64 {
     #Unsafe("a fresh private anonymous mapping, owned by this thread's segment chain; its first page becomes the guard") {
         mapping: os_map_untracked_i64(I64{0}, total, I64{3}, I64{34}, I64{-1}, I64{0})
         if (mapping < I64{0}) { return mapping }
-        protect: os_syscall_i64(I64{10}, mapping, THREAD_GUARD_BYTES, I64{0}, I64{0}, I64{0}, I64{0})
+        protect: os_mprotect_i64(mapping, THREAD_GUARD_BYTES, I64{0})
         if (protect != I64{0}) {
             _ := os_unmap_untracked_i64(mapping, total)
             return protect

@@ -288,9 +288,7 @@ alloc_map_shared_at: fn(address: I64, bytes: I64, descriptor: I64) -> I64 {
 // Makes `bytes` at the page-aligned `address` of a mapping the caller owns
 // inaccessible, as a stack guard.
 alloc_guard: fn(address: I64, bytes: I64) {
-    #Unsafe("the caller owns these whole pages of its own mapping and keeps no live value in them") {
-        _ := os_syscall_i64(I64{10}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := os_mprotect_i64(address, bytes, I64{0})
 }
 
 // The page map: every region core.mem.Region.reserve maps
@@ -668,10 +666,8 @@ alloc_reservation_unmap: fn(base: I64, bytes: I64) {
         return
     }
     window: sync_load(wrapping(alloc_root + ALLOC_WINDOW))
-    #Unsafe("the region has ended, so nothing reads or writes its pages; MADV_DONTNEED drops only its own units inside the window, which read as zero again") {
-        if (os_syscall_i64(I64{28}, base, bytes, I64{4}, I64{0}, I64{0}, I64{0}) != I64{0}) {
-            return
-        }
+    if (os_madvise_i64(base, bytes, I64{4}) != I64{0}) {
+        return
     }
     unit: wrapping(base - window) >> I64{16}
     class: alloc_window_class(bytes)
@@ -1034,9 +1030,7 @@ priv alloc_slab_retire: fn(slab: I64) {
 alloc_region_map: fn(bytes: I64) -> I64 {
     region: alloc_map_try(bytes)
     if (region == I64{0}) { return I64{0} }
-    #Unsafe("madvise only changes the page size of the fresh private region") {
-        _ := os_syscall_i64(I64{28}, region, bytes, I64{15}, I64{0}, I64{0}, I64{0})
-    }
+    _ := os_madvise_i64(region, bytes, I64{15})
     region
 }
 
@@ -2831,7 +2825,7 @@ alloc_frames_start: fn() {
     stub: alloc_map(I64{4096}, I64{4096})
     #Unsafe("the fresh stub page is private until its address is stored; it becomes read+execute before any call") {
         os_store_i64(stub, I64{3286796616})
-        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) {
+        if (os_mprotect_i64(stub, I64{4096}, I64{5}) == I64{0}) {
             os_store_i64(wrapping(alloc_root + I64{56}), stub)
         }
     }
@@ -3581,13 +3575,13 @@ alloc_abort: fn() {
     // Raw, not through HostProcess.jet's gate: the process's last calls,
     // which may come from any thread in any state.
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
-        pid: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        tid: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        pid: os_getpid_i64()
+        tid: os_gettid_i64()
         _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_syscall_i64(I64{234}, pid, tid, I64{6}, I64{0}, I64{0}, I64{0})
+        _ := os_tgkill_i64(pid, tid, I64{6})
         _ := os_syscall_stack4_i64(I64{13}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_syscall_i64(I64{234}, pid, tid, I64{6}, I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{231}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_tgkill_i64(pid, tid, I64{6})
+        _ := os_exit_group_i64(I64{127})
     }
     loop {
 

@@ -5,9 +5,7 @@ thread_test_require: fn(ok: Bool) {
     if ok {
         return
     }
-    #Unsafe("a failed isolated runtime witness ends the process without allocation or libc") {
-        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    _ := os_exit_group_i64(I64{1})
     loop {
 
     }
@@ -34,9 +32,7 @@ thread_test_require: fn(ok: Bool) {
 
 thread_test_identity: fn() {
     tid := I64{0}
-    #Unsafe("gettid verifies identity without trusting the TCB under test") {
-        tid = os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    tid = os_gettid_i64()
     thread_test_require(sync_load(thread_base() + I64{8}) == tid)
 }
 
@@ -44,9 +40,7 @@ thread_test_identity: fn() {
 
 #Export(c) jet_rt_thread_fixture_inherited_base: fn(scratch: I64, expected: I64) {
     status := I64{0}
-    #Unsafe("ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced") {
-        status = os_syscall_i64(I64{158}, I64{4100}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-    }
+    status = os_arch_prctl_i64(I64{4100}, scratch)
     thread_test_require(status == I64{0} && sync_load(scratch) == expected)
 }
 
@@ -117,9 +111,7 @@ thread_test_identity: fn() {
     thread_test_require(jet_rt_tls_get(key) == state)
     sync_store(state + I64{8}, thread_base())
     sync_store(state + I64{16}, sync_load(thread_base() + I64{8}))
-    #Unsafe("rt_sigprocmask writes this thread's mask to a caller-owned word") {
-        _ := os_syscall_i64(I64{14}, I64{0}, I64{0}, state + I64{24}, I64{8}, I64{0}, I64{0})
-    }
+    _ := os_rt_sigprocmask_i64(I64{0}, I64{0}, state + I64{24}, I64{8})
     I64{41}
 }
 
@@ -204,9 +196,7 @@ thread_test_parks: fn(entry: I64, detached: Bool) {
     loop round < (I64{100000}) {
         sync_park_wake(parker)
         if (round % I64{2} == I64{0}) {
-            #Unsafe("sched_yield widens both sides of the check-to-wait race without timing assumptions") {
-                _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
+            _ := os_sched_yield_i64()
         }
         sync_park(notifier, I64{-1})
         round += I64{1}
@@ -242,9 +232,7 @@ thread_test_clone: fn(entry: I64) {
     thread_test_require(thread_base() == parent && jet_rt_tls_get(key) == I64{0})
     // The child ran its entry under the spawner's signal mask.
     own: jet_rt_alloc(I64{8}, I64{8})
-    #Unsafe("rt_sigprocmask writes this thread's mask to a caller-owned word") {
-        _ := os_syscall_i64(I64{14}, I64{0}, I64{0}, own, I64{8}, I64{0}, I64{0})
-    }
+    _ := os_rt_sigprocmask_i64(I64{0}, I64{0}, own, I64{8})
     thread_test_require(sync_load(own) == sync_load(state + I64{24}))
     jet_rt_free(own, I64{8}, I64{8})
     jet_rt_free(state, I64{40}, I64{8})

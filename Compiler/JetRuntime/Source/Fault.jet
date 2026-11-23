@@ -176,9 +176,9 @@ priv fault_stack_end: fn(stack: I64) {
 fault_raise: fn(signal: I64) {
     #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread") {
         _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
-        process: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        thread: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        _ := os_syscall_i64(I64{234}, process, thread, signal, I64{0}, I64{0}, I64{0})
+        process: os_getpid_i64()
+        thread: os_gettid_i64()
+        _ := os_tgkill_i64(process, thread, signal)
     }
     trap_defect_exit(wrapping(I64{128} + signal))
 }
@@ -233,7 +233,7 @@ trace_walk: fn(lines: I64, with_function: Bool) -> Bool {
     frame := I64{0}
     #Unsafe("stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call") {
         os_store_i64(stub, I64{3286796616})
-        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) {
+        if (os_mprotect_i64(stub, I64{4096}, I64{5}) == I64{0}) {
             frame = os_call_address_i64(stub, I64{0})
         }
     }
