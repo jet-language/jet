@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113305,
+    "rev": 113307,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43,7 +43,6 @@
         "radar-sq",
         "radar:G3",
         "radar:G4",
-        "radar:G1",
         "radar:G5",
         "radar:G6",
         "radar:G7",
@@ -52599,6 +52598,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "S1 rev 2 (IR_BUILD_MAX_PARTS 12 and the quarter-thread taint-walk cap restored) measured 2026-11-23 on dev 03f1442ac1: Throughput --against the dev-tip compiler, O0, --threads 32, n=3: wall 39.33 -> 39.33 s median, cpu +0.3%, instructions -0.0%, ir.build cpu 15.66 -> 15.57 s (the S1 v1 regression to 29.5 s is gone), gate INCONCLUSIVE only on build.step spread. Neutral: no gain and no regression. S2 (two ready targets at once, the thread cap split between compiles and passed to child jets, Core leaves the pool while it waits on the runtime image) is frozen; S1r2+S2 is under A/B with thread-count byte identity. The worker's trace analysis: the c1 critical path is jet-bare (about 14 s) then the runtime step (about 20 s); Tier-1 load streaming can win at most 0.3 s and is parked; the jet-bare finalize tail is under 0.2 s; splitting the runtime unit (about 2 s) is deferred for its blast radius; the runtime-overlap option is written up in Docs/Audits/2026-11-23-parallel-pipeline-runtime-overlap.md and is not built: it speeds only the compiler's self-build and moves the pack identity contract, so it needs an adversarial review against the no-cell-tailoring rule first."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "S1 test 2026-11-23 (S1's 15 files on dev c4b26fa3ac): self-host fixed point holds (s2 == s3); golden and ui no new failures; cases: one new abort under full-suite load, Atomics/d_atomic_width1_contract  -> 'memory allocation of 32 bytes failed' (Alloc.jet alloc_out_of_memory, never seen on the base; passes 3/3 alone). Throughput --against dev tip, O0, --threads 32, n=3: no wall gain (parallelism 3.1 -> 3.2), process CPU +10.4% FAIL, ir.build CPU 15.7 -> 29.5 s (+89%) FAIL after lifting IR_BUILD_MAX_PARTS. S1 is not landed; both findings went back to the implementer. Thread caps were not the wall-time limit: the phases are serial in structure, so S3 streaming is the lever."
         },
         {
@@ -52656,7 +52660,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T14:27:43.661Z",
+      "updated": "2026-11-23T15:04:43.918Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -134826,6 +134830,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T15:04:43.918Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T14:56:30.623Z",
       "by": "Orchestrator",
