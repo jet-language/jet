@@ -459,9 +459,58 @@ os_memfd_create_i64: fn(name: I64, flags: I64) -> I64 {
     }
 }
 
+os_pread64_i64: fn(fd: I64, buffer: I64, count: I64, offset: I64) -> I64 {
+    #Unsafe("pread64(2) writes at most `count` bytes into the caller's live buffer at `buffer`") {
+        return os_syscall_i64(I64{17}, fd, buffer, count, offset, I64{0}, I64{0})
+    }
+}
+
+os_dup2_i64: fn(oldfd: I64, newfd: I64) -> I64 {
+    #Unsafe("dup2(2) duplicates descriptor `oldfd` onto `newfd` for this process") {
+        return os_syscall_i64(I64{33}, oldfd, newfd, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+os_execve_i64: fn(path: I64, argv: I64, envp: I64) -> I64 {
+    #Unsafe("execve(2) reads the caller's live NUL-terminated path and NULL-ended argument/environment arrays") {
+        return os_syscall_i64(I64{59}, path, argv, envp, I64{0}, I64{0}, I64{0})
+    }
+}
+
+os_wait4_i64: fn(pid: I64, status: I64, options: I64, rusage: I64) -> I64 {
+    #Unsafe("wait4(2) writes child wait status at `status` and rusage at `rusage` when non-zero") {
+        return os_syscall_i64(I64{61}, pid, status, options, rusage, I64{0}, I64{0})
+    }
+}
+
+os_ptrace_i64: fn(request: I64, pid: I64, addr: I64, data: I64) -> I64 {
+    #Unsafe("ptrace(2) acts on traced process `pid` with caller-vetted `addr` and `data`") {
+        return os_syscall_i64(I64{101}, request, pid, addr, data, I64{0}, I64{0})
+    }
+}
+
+os_personality_i64: fn(persona: I64) -> I64 {
+    #Unsafe("personality(2) queries or sets this process's execution domain flags") {
+        return os_syscall_i64(I64{135}, persona, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+os_dup3_i64: fn(oldfd: I64, newfd: I64, flags: I64) -> I64 {
+    #Unsafe("dup3(2) duplicates descriptor `oldfd` onto `newfd` with `flags` for this process") {
+        return os_syscall_i64(I64{292}, oldfd, newfd, flags, I64{0}, I64{0}, I64{0})
+    }
+}
+
+os_close_range_i64: fn(first: I64, last: I64, flags: I64) -> I64 {
+    #Unsafe("close_range(2) closes this process's descriptors in `first ..= last`") {
+        return os_syscall_i64(I64{436}, first, last, flags, I64{0}, I64{0}, I64{0})
+    }
+}
+
 // Dynamic-number Linux syscall forwarder for the runtime's profiled/observed
-// dispatch gates (`host_syscall`, `observe_syscall`, `perf_dump_syscall`),
-// keeping the raw `os_syscall_i64` asm leaf private to this OS layer.
+// dispatch gates (`host_syscall`, `observe_syscall`, `perf_dump_syscall`) and
+// trace helper replay, keeping the raw `os_syscall_i64` asm leaf private to
+// this OS layer.
 #Unsafe("forwards a vetted runtime Linux x86-64 syscall number and its machine-word arguments")
 os_syscall_forwarded_i64: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
