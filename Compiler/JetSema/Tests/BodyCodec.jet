@@ -66,6 +66,7 @@ use {
         DeclRow,
         Diagnostic,
         FnBody,
+        InternerDelta,
         ModuleID,
         Span,
         SymbolID,
@@ -744,11 +745,12 @@ BODY_CODEC_AHEAD_RUNS: 160
     shared := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     loads := [String]{}
     total := 0
+    type_delta := [InternerDelta]{}
     loop position in 0..<count {
         at: sema_core_bodies_offset(bodies.bytes, bodies.head, position)
         end: if position + 1 < count -> sema_core_bodies_offset(bodies.bytes, bodies.head, position + 1) else -> bodies.bytes.len()
         // A record whose keys this graph does not resolve loads at no time.
-        load: sema_core_body_decode(bodies.bytes, at, graph, position, shared)
+        load: sema_core_body_decode(bodies.bytes, at, graph, position, shared, type_delta)
         if load == .Val(packet) {
             total += end - at
             loads.push("{packet:Debug}")
@@ -830,6 +832,7 @@ body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &
     count: found.len()
     sema_core_bodies_ahead_load(graph, hooks, found.move(), CompilerThreads{cap: None, cores: 4, memory_available: None})
     ahead := 0
+    type_delta := [InternerDelta]{}
     loop position in 0..<count {
         read_ahead: hooks.core_bodies_ahead.has_key(U32{position})
         if loads[position] == "" {
@@ -843,7 +846,7 @@ body_codec_ahead: fn(failures: &[String], graph: SemaRegistrationGraph, hooks: &
             next
         }
         ahead += 1
-        taken := sema_core_body_ahead_take(hooks, SymbolID{id: U32{position}}) ?? {
+        taken := sema_core_body_ahead_take(hooks, SymbolID{id: U32{position}}, type_delta) ?? {
             failures.push("{mode}: record {position} was not taken")
             next
         }

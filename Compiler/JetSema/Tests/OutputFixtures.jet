@@ -24,7 +24,8 @@ use {
         sema_effect_type_caps,
         sema_effect_prepare_modules,
         sema_effects_check_modules,
-        sema_finalize_registration_graph,
+        sema_finalize_graph,
+        sema_graph_trail_init,
         sema_has_error_since,
         sema_inline_member_name,
         sema_output_resolve,
@@ -122,10 +123,19 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
         return
     }
     // Finalization consumes its graph; the in-place publication below
-    // re-reads the declared graph, so finalize a copy.
-    checked := sema_finalize_registration_graph(graph.copy(), None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None)
+    // re-reads the declared graph, so finalize a copy. The checked bodies'
+    // types are rows of the finalized graph's interner, which the
+    // finalization hands back with that graph.
+    trail := sema_graph_trail_init()
+    checked := sema_finalize_graph(graph.copy(), trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), true, None)
     if !checked.complete {
         failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
+        return
+    }
+    finalized := checked.registration_graph.move()
+    checked.registration_graph = None
+    finalized_graph := finalized.move() ?? {
+        failures.push("solved effect publication: finalization handed back no graph")
         return
     }
     key: symbol_key_text(SymbolKind.Function, "output-fixture.main", "", "launch")
@@ -193,7 +203,8 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
     effect_inputs.reverse()
     prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls, graph.symbols)
     effect_symbols := graph.symbols.copy()
-    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, graph.module_table, name_table_sized(2), compiler_threads_single(), false)
+    effect_interner := finalized_graph.interner.move()
+    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, effect_interner, graph.module_table, name_table_sized(2), compiler_threads_single(), false)
     if republished.memory_declarations.len() != 2 {
         failures.push("in-place effect publication: manifest memory declarations duplicated")
     }
