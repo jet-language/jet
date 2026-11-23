@@ -317,7 +317,8 @@ sema_window_length_preserving_method: fn(method: String) -> Bool Never! {
 // and any other method (a resizing write, a move, or a method the rows do not
 // name) may resize it.
 sema_window_method_may_resize: fn(method: String) -> Bool Never! {
-    if method == "copy" || sema_window_length_preserving_method(method) -> return false
+    if method == "len" || method == "is_empty" || method == "get" || method == "first" || method == "last" || method == "contains" || method == "index_of" || method == "count" || method == "slice" || method == "equal" || method == "lazy" || method == "join" || method == "copy" || sema_window_length_preserving_method(method) -> return false
+    if method == "push" || method == "append" || method == "pop" || method == "clear" || method == "insert" || method == "remove" || method == "extend" || method == "try_push" || method == "try_reserve" -> return true
     loop row in COLLECTION_OPERATIONS {
         if row.name == method && row.status != CollectionStatus.Proposed && (row.receivers == CollectionReceivers.List || row.receivers == CollectionReceivers.Sequence) {
             return row.access == CollectionAccess.Write || row.access == CollectionAccess.Move

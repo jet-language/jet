@@ -138,70 +138,110 @@ body_flat_intern_type: fn(flat: &BodyFlat, ty: Type, tid_in: TypeID) -> Int Neve
 }
 
 // The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
-body_flat_function: fn(value: TFunc, arena: BodyTree, arena_type_ids: [TypeID]{[TypeID]{}}) -> FnBody Never! {
-    is_generic: value.generic_params.len() > 0
-    flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false, arena_type_ids: arena_type_ids, keep_type_index: is_generic, allow_delta_type_ids: false}
-    params: body_flat_list_parameter(value.params, flat)
+body_flat_function: fn(value: &&TFunc, arena: &&BodyTree, arena_type_ids: &&[TypeID]{[TypeID]{}}) -> FnBody Never! {
+    owned_value := value.move()
+    owned_arena := arena.move()
+    owned_type_ids := arena_type_ids.move()
+    is_generic: owned_value.generic_params.len() > 0
+    reserved_nodes: owned_arena.nodes.len()
+    reserved_stmts: owned_arena.stmts.len()
+    out_tree := body_tree_new()
+    if reserved_nodes > 0 {
+        out_tree.nodes.try_reserve(reserved_nodes) ?? panic("reserve failed")
+        out_tree.expr_types.try_reserve(reserved_nodes) ?? panic("reserve failed")
+    }
+    if reserved_stmts > 0 {
+        out_tree.stmts.try_reserve(reserved_stmts) ?? panic("reserve failed")
+    }
+    flat := BodyFlat{tree: out_tree.move(), arena: owned_arena.move(), into_arena: false, arena_type_ids: owned_type_ids.move(), keep_type_index: is_generic, allow_delta_type_ids: false}
+    params: body_flat_list_parameter(owned_value.params, flat)
     flat.allow_delta_type_ids = true
-    body: body_flat_list_stmt(value.body, flat)
+    body: body_flat_list_stmt(owned_value.body, flat)
     flat.allow_delta_type_ids = false
-    pre: body_flat_list_contract(value.pre, flat)
+    pre: body_flat_list_contract(owned_value.pre, flat)
     tree := flat.tree.move()
     // The body's own symbol keys (SYMBOL_LOCAL_BIT ids) leave with it, so a
     // reader after the check names its locals (symbol_key).
-    tree.symbols = arena.symbols.copy()
+    tree.symbols = flat.arena.symbols.move()
     body_tree_finish(tree)
-    sema_body_fact_types(tree, params, value.ret, value.kind, value.failure_carrier)
-    sema_loop_facts(tree, value.is_scalar)
-    tree = body_tree_sealed(tree, is_generic)
+    sema_body_fact_types(tree, params, owned_value.ret, owned_value.kind, owned_value.failure_carrier)
+    sema_loop_facts(tree, owned_value.is_scalar)
+    nodes_fitted: tree.nodes.len() == reserved_nodes
+    stmts_fitted: tree.stmts.len() == reserved_stmts
+    tree = body_tree_sealed(tree, is_generic, nodes_fitted, stmts_fitted)
     FnBody{
-        name: value.name,
-        module_name: value.module_name,
-        module_identity: value.module_identity,
-        key: value.key,
-        source_file: value.source_file,
-        source_span: value.source_span,
-        failure_carrier: value.failure_carrier,
-        effects: value.effects,
-        web_bucket: value.web_bucket,
-        web_marker: value.web_marker,
-        endpoint: value.endpoint,
-        system_run: value.system_run,
-        role: value.role,
-        visibility: value.visibility,
-        foreign: value.foreign,
+        name: owned_value.name.move(),
+        module_name: owned_value.module_name.move(),
+        module_identity: owned_value.module_identity,
+        key: owned_value.key.move(),
+        source_file: owned_value.source_file.move(),
+        source_span: owned_value.source_span,
+        failure_carrier: owned_value.failure_carrier.move(),
+        effects: owned_value.effects.move(),
+        web_bucket: owned_value.web_bucket,
+        web_marker: owned_value.web_marker,
+        endpoint: owned_value.endpoint.move(),
+        system_run: owned_value.system_run.move(),
+        role: owned_value.role,
+        visibility: owned_value.visibility,
+        foreign: owned_value.foreign.move(),
         params: params,
-        web_param_reconstructions: value.web_param_reconstructions,
-        ret: value.ret,
-        gc_return: value.gc_return,
-        gc_scope: value.gc_scope,
-        return_view_provenance: value.return_view_provenance,
-        generic_params: value.generic_params,
-        is_main: value.is_main,
-        line: value.line,
-        synthetic: value.synthetic,
-        is_unsafe: value.is_unsafe,
-        unsafe_gate: value.unsafe_gate,
-        is_pure: value.is_pure,
-        memo_bound: value.memo_bound,
-        memo_unbounded: value.memo_unbounded,
-        is_reactive: value.is_reactive,
-        reactive_upgrades: value.reactive_upgrades,
-        is_inline: value.is_inline,
-        is_inline_always: value.is_inline_always,
-        is_scalar: value.is_scalar,
-        kernel_proof: value.kernel_proof,
-        uses_stack_sentry: value.uses_stack_sentry,
-        max_depth: value.max_depth,
+        web_param_reconstructions: owned_value.web_param_reconstructions.move(),
+        ret: owned_value.ret.move(),
+        gc_return: owned_value.gc_return,
+        gc_scope: owned_value.gc_scope.move(),
+        return_view_provenance: owned_value.return_view_provenance.move(),
+        generic_params: owned_value.generic_params.move(),
+        is_main: owned_value.is_main,
+        line: owned_value.line,
+        synthetic: owned_value.synthetic,
+        is_unsafe: owned_value.is_unsafe,
+        unsafe_gate: owned_value.unsafe_gate.move(),
+        is_pure: owned_value.is_pure,
+        memo_bound: owned_value.memo_bound,
+        memo_unbounded: owned_value.memo_unbounded,
+        is_reactive: owned_value.is_reactive,
+        reactive_upgrades: owned_value.reactive_upgrades.move(),
+        is_inline: owned_value.is_inline,
+        is_inline_always: owned_value.is_inline_always,
+        is_scalar: owned_value.is_scalar,
+        kernel_proof: owned_value.kernel_proof.move(),
+        uses_stack_sentry: owned_value.uses_stack_sentry,
+        max_depth: owned_value.max_depth,
         body: body,
-        kind: value.kind,
-        origin_facts: value.origin_facts,
-        typed_goals: value.typed_goals,
-        index_proofs: value.index_proofs,
+        kind: owned_value.kind.move(),
+        origin_facts: owned_value.origin_facts.move(),
+        typed_goals: owned_value.typed_goals.move(),
+        index_proofs: owned_value.index_proofs.move(),
         pre: pre,
-        effect_scope: value.effect_scope,
-        effect_scope_regions: value.effect_scope_regions,
+        effect_scope: owned_value.effect_scope.move(),
+        effect_scope_regions: owned_value.effect_scope_regions.move(),
         tree: tree,
+    }
+}
+
+body_tree_sort_nodes_and_types: fn(nodes: &[BodyNode], expr_types: &[TExprType]) Never! {
+    count: nodes.len()
+    if count <= 1 -> return
+    gap := 1
+    loop gap * 3 + 1 < count -> gap = gap * 3 + 1
+    loop gap >= 1 {
+        loop i in gap..<count {
+            node_key := nodes[i]
+            type_key := expr_types[i]
+            key_id: node_key.id
+            j := i
+            loop j >= gap && nodes[j - gap].id > key_id {
+                nodes[j] = nodes[j - gap]
+                expr_types[j] = expr_types[j - gap]
+                j -= gap
+            }
+            if j != i {
+                nodes[j] = node_key
+                expr_types[j] = type_key
+            }
+        }
+        gap = gap /% 3
     }
 }
 
@@ -230,6 +270,26 @@ body_tree_finish: fn(tree: &BodyTree) Never! {
         }
         if !types_sorted {
             tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
+        }
+    } else if tree.expr_types.len() == count {
+        aligned := true
+        loop index in 0..<count {
+            if tree.nodes[index].id != tree.expr_types[index].id {
+                aligned = false
+                break
+            }
+        }
+        if aligned {
+            body_tree_sort_nodes_and_types(tree.nodes, tree.expr_types)
+        } else {
+            tree.nodes.sort_by(fn(left: BodyNode, right: BodyNode) { left.id <=> right.id })
+            tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
+        }
+        loop index in 1..<count {
+            if tree.nodes[index].id == tree.nodes[index - 1].id {
+                has_dup = true
+                break
+            }
         }
     } else {
         tree.nodes.sort_by(fn(left: BodyNode, right: BodyNode) { left.id <=> right.id })

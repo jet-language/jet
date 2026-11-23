@@ -28,6 +28,9 @@ NameTable: struct {
 
 NAME_TABLE_INITIAL_SLOTS: 1024
 
+// Precomputed `name_hash([U8]{}, 0, 0)` (also `name_text_hash("")`).
+NAME_EMPTY_HASH: 983116070
+
 // A table whose id 0 is the empty spelling (`name_empty`).
 name_table: fn() -> NameTable Never! { name_table_sized(NAME_TABLE_INITIAL_SLOTS) }
 
@@ -35,15 +38,17 @@ name_table: fn() -> NameTable Never! { name_table_sized(NAME_TABLE_INITIAL_SLOTS
 // `name_table` does. A small table (a body's own symbol keys) starts small.
 // A probe steps through the slots masked by their count less one, which
 // visits every slot only for a power of two: `slots` rounds up to one.
+// Minimum capacity is 4 so id 0 (the empty spelling) never triggers an
+// immediate grow on construction.
 name_table_sized: fn(slots: Int) -> NameTable Never! {
-    capacity := 2
+    capacity := 4
     loop capacity < slots -> capacity *= 2
+    mask: capacity - 1
     initial := [Int]{}
     initial.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> initial.push(0)
-    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: initial, mask: capacity - 1}
-    name_intern_bytes(table, [U8]{}, 0, 0)
-    table
+    initial[NAME_EMPTY_HASH & mask] = (NAME_EMPTY_HASH << 32) | 1
+    NameTable{texts: [String]{""}, bytes: [U8]{}, ends: [Int]{0}, hashes: [Int]{NAME_EMPTY_HASH}, slots: initial, mask: mask}
 }
 
 // The empty spelling; every `name_table()` interns it first.
@@ -144,7 +149,7 @@ name_slot_text: fn(table: NameTable, hash: Int, text: String) -> Int Never! {
 // next id at the empty slot `slot`.
 name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int, end: Int, text: &&String) -> Name Never! {
     id: table.texts.len()
-    table.bytes.extend(bytes[start..<end])
+    if end > start -> table.bytes.extend(bytes[start..<end])
     table.ends.push(table.bytes.len())
     table.hashes.push(hash)
     table.texts.push(text)
@@ -316,6 +321,8 @@ name_table_merge: fn(into: &NameTable, from: NameTable, first: Int) -> [Name] Ne
 }
 
 #Test("the compilation table's well-known names are their constants, and a merge renumbers a source's names") {
+    assert_eq(NAME_EMPTY_HASH, name_hash([U8]{}, 0, 0))
+    assert_eq(NAME_EMPTY_HASH, name_text_hash(""))
     table := name_table_compilation()
     assert_eq(name_text(table, NAME_NEVER), "Never")
     assert_eq(name_text(table, NAME_SELF), "Self")
@@ -439,6 +446,7 @@ name_rows: fn(expected: Int{0}) -> NameRows Never! {
 // held it. Each occupied slot packs `(hash << 32) | (key + 1)` so a probe
 // rejects mismatched hashes without touching `map.hashes`.
 name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
+    if map.texts.len() == 0 -> return None
     mask: map.mask
     slot := hash & mask
     loop {
@@ -520,6 +528,7 @@ name_rows_get: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
 }
 
 name_rows_get_text: fn(map: NameRows, text: String) -> Int? Never! {
+    if map.texts.len() == 0 -> return None
     name_rows_get(map, text, name_rows_hash(text))
 }
 
@@ -527,6 +536,7 @@ name_rows_get_text: fn(map: NameRows, text: String) -> Int? Never! {
 // a map that removes no key and whose negative values are markers of its own
 // (the IR's key tables: a failed helper, a memo of "none").
 name_rows_value: fn(map: NameRows, text: String) -> Int? Never! {
+    if map.texts.len() == 0 -> return None
     key: name_rows_key(map, text, name_rows_hash(text)) ?? return None
     Val(map.rows[key])
 }

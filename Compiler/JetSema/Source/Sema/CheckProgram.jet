@@ -24,6 +24,7 @@ use jet_foundation.[
     DIAGNOSTIC_LINT,
     Diagnostic,
     DiagnosticLabel,
+    InternerDelta,
     ast_binding,
     ast_func,
     ConstDef,
@@ -1175,15 +1176,6 @@ sema_check_sorted_view_summary_jobs: fn(environment: SemaScopeEnvironment, progr
     jobs
 }
 
-sema_check_nominal_positions: fn(nominals: [SemaRegistrationNominal]) -> [String:Int] Never! {
-    positions := [String:Int]{}
-    loop index in 0..<nominals.len() {
-        name: nominals[index].symbol.name
-        if positions.get(name) == None -> positions[name] = index
-    }
-    positions
-}
-
 sema_check_view_rounds_equal: fn(left: [ViewProvenanceMap?], right: [ViewProvenanceMap?]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop index in 0..<left.len() {
@@ -1557,7 +1549,16 @@ sema_function_check_passes: fn(func: Func, owner_key: String, function_kind: TFu
             } else { diagnostics.extend(pass_diagnostics.move()) }
             call_facts.extend(pass_call_facts.move())
             comptime_requests.extend(pass_comptime_requests.move())
-            name_references.extend(pass_name_references.move())
+            keep_locals: if program.registration_graph == .Val(graph) -> graph.keep_local_name_references || graph.retain_programs || graph.core_seal else -> true
+            if keep_locals {
+                name_references.extend(pass_name_references.move())
+            } else {
+                loop reference in pass_name_references.move() {
+                    if reference.symbol.kind != SymbolKind.Local && reference.symbol.kind != SymbolKind.Parameter {
+                        name_references.push(reference)
+                    }
+                }
+            }
             checked.eval_answers = eval_answers.move()
             return checked
         }
@@ -1773,6 +1774,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     scopes.comptime_execution_depth = 0
     if func.is_comptime -> scopes.comptime_execution_depth = 1
     context := sema_check_context_init()
+    if scopes.type_delta.pop() == .Val(delta) {
+        context.type_delta.push(delta)
+    } else if program.registration_graph != None || program.interner != None {
+        context.type_delta.push(sema_program_fork_delta(program))
+    }
     context.host_hooks = host_hooks
     context.number_retypes_known = number_known
     context.generic_params = generic_params
@@ -2137,8 +2143,20 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if stand_in == None {
         return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
     }
-    if !complete -> return sema_function_result(None, owner_key, context.move())
-    source_line_value: source_line ?? return sema_function_result(None, owner_key, context.move())
+    if !complete {
+        if context.type_delta.len() > 0 {
+            scopes.type_delta = context.type_delta.move()
+            context.type_delta = [InternerDelta]{}
+        }
+        return sema_function_result(None, owner_key, context.move())
+    }
+    source_line_value: source_line ?? {
+        if context.type_delta.len() > 0 {
+            scopes.type_delta = context.type_delta.move()
+            context.type_delta = [InternerDelta]{}
+        }
+        return sema_function_result(None, owner_key, context.move())
+    }
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
@@ -2228,13 +2246,19 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.origin_facts = [TOriginProjection]{}
     context.typed_goals = [TTypedGoal]{}
     context.index_proofs = [TIndexProof]{}
-    flat := body_flat_function(built, context.arena.tree, context.arena.type_ids)
+    flat := body_flat_function(built.move(), context.arena.tree.move(), context.arena.type_ids.move())
+    context.arena.tree = body_tree_new()
+    context.arena.type_ids = [TypeID]{}
     if sema_footprint_has_receiver(func) {
         if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, flat.module_identity) == .Val(module_index) {
                 flat.receiver_footprint = sema_footprint_for_method_span(graph.modules[module_index], func.span)
             }
         }
+    }
+    if context.type_delta.len() > 0 {
+        scopes.type_delta = context.type_delta.move()
+        context.type_delta = [InternerDelta]{}
     }
     if stand_in == None -> return sema_function_result(Val(flat), owner_key, context.move())
     flat.stand_in = true
@@ -2291,7 +2315,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
         loop diagnostic in job_diagnostics -> diagnostics.push(diagnostic)
         complete = false
     }
-    loop diagnostic in sema_scope_members_check(source_program.tables, source_program.items) {
+    loop diagnostic in sema_scope_members_check(source_program.tables, source_program.items, source_program.has_scope_member) {
         diagnostics.push(diagnostic)
     }
     environment := sema_scope_environment_init(module_none(), "", module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, local_declarations)
@@ -2344,7 +2368,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     }
     // #3708: one program has no bundle failure solve, so every recorded
     // failure-domain obligation is emitted as reported.
-    if sema_failure_settle_obligations(diagnostics, [String:Bool]{}) -> complete = false
+    if sema_failure_settle_obligations(diagnostics, name_table_sized(4)) -> complete = false
     sema_attach_diagnostic_source_locations(diagnostics, 0, source_segments)
     SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
 }
@@ -2482,8 +2506,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         }
         .NominalMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            // copy: the source is the caller's own; the row stays in the graph.
-            declaration := graph.modules[declaring].nominals[owner].methods[index].declaration.copy()
+            declaration := sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].nominals[owner].methods[index])
             if declaration.body.len() == 0 && sema_codec_method_body(graph, graph.modules[declaring].nominals[owner].symbol.name, graph.modules[declaring].nominals[owner].methods[index].symbol.id) == .Val(body) {
                 declaration.body = body
             }
@@ -2491,8 +2514,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         }
         .ImplMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
-            // copy: the source is the caller's own; the row stays in the graph.
-            declaration := graph.modules[declaring].impls[owner].methods[index].declaration.copy()
+            declaration := sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].impls[owner].methods[index])
             if sema_codec_pending_body(graph, declaring, owner, declaration.name) == .Val(body) {
                 declaration.body = body
             }
@@ -3015,6 +3037,41 @@ sema_function_check_registered_unregistered: fn(job: SemaBodyJob, module_index: 
     panic("a registered Jet body check lost its owning graph")
 }
 
+sema_function_check_unregistered_method: fn(module_row: SemaRegistrationModule, method: SemaRegistrationFunction, owner_key: String, function_kind: TFuncKind, scopes: SemaScopeTable, program: SemaProgramTables) -> SemaFunctionResult? {
+    if method.declaration.body.len() == 0 && method.item_index >= 0 && method.item_index < module_row.program.items.len() {
+        method_index: method.method_index
+        trait_block_index: method.trait_block_index
+        if module_row.program.items[method.item_index] == {
+            .Impl(item_impl) -> {
+                if method_index >= 0 && method_index < item_impl.methods.len() && item_impl.methods[method_index].return_type == method.declaration.return_type && item_impl.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_unregistered(item_impl.methods[method_index], owner_key, function_kind, scopes, program)
+                }
+            }
+            .Struct(item_struct) -> {
+                if trait_block_index >= 0 {
+                    if trait_block_index < item_struct.trait_impls.len() && method_index >= 0 && method_index < item_struct.trait_impls[trait_block_index].methods.len() && item_struct.trait_impls[trait_block_index].methods[method_index].return_type == method.declaration.return_type && item_struct.trait_impls[trait_block_index].methods[method_index].return_type_span == method.declaration.return_type_span {
+                        return sema_function_check_unregistered(item_struct.trait_impls[trait_block_index].methods[method_index], owner_key, function_kind, scopes, program)
+                    }
+                } else if method_index >= 0 && method_index < item_struct.methods.len() && item_struct.methods[method_index].return_type == method.declaration.return_type && item_struct.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_unregistered(item_struct.methods[method_index], owner_key, function_kind, scopes, program)
+                }
+            }
+            .Enum(item_enum) -> {
+                if trait_block_index >= 0 {
+                    if trait_block_index < item_enum.trait_impls.len() && method_index >= 0 && method_index < item_enum.trait_impls[trait_block_index].methods.len() && item_enum.trait_impls[trait_block_index].methods[method_index].return_type == method.declaration.return_type && item_enum.trait_impls[trait_block_index].methods[method_index].return_type_span == method.declaration.return_type_span {
+                        return sema_function_check_unregistered(item_enum.trait_impls[trait_block_index].methods[method_index], owner_key, function_kind, scopes, program)
+                    }
+                } else if method_index >= 0 && method_index < item_enum.methods.len() && item_enum.methods[method_index].return_type == method.declaration.return_type && item_enum.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_unregistered(item_enum.methods[method_index], owner_key, function_kind, scopes, program)
+                }
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+        return sema_function_check_unregistered(sema_registration_function_with_body(module_row, method), owner_key, function_kind, scopes, program)
+    }
+    sema_function_check_unregistered(method.declaration, owner_key, function_kind, scopes, program)
+}
+
 // The graph is a read parameter here: a declaration reached through the
 // optional-payload binding of the caller was copied natively, a read
 // parameter's place is borrowed (as in the helpers below).
@@ -3026,8 +3083,8 @@ sema_function_check_unregistered_in_graph: fn(graph: SemaRegistrationGraph, job:
             }
             panic("a selected source function lost its original item")
         }
-        .NominalMethod(_, owner, row) -> return sema_function_check_unregistered(graph.modules[module_index].nominals[owner].methods[row].declaration, owner_key, function_kind, scopes, program)
-        .ImplMethod(_, owner, row) -> return sema_function_check_unregistered(graph.modules[module_index].impls[owner].methods[row].declaration, owner_key, function_kind, scopes, program)
+        .NominalMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, scopes, program)
+        .ImplMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, scopes, program)
     }
 }
 
@@ -3074,6 +3131,41 @@ sema_function_check_registered_passes: fn(job: SemaBodyJob, module_index: Int, m
     panic("a registered Jet body check lost its owning graph")
 }
 
+sema_function_check_passes_method: fn(module_row: SemaRegistrationModule, method: SemaRegistrationFunction, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    if method.declaration.body.len() == 0 && method.item_index >= 0 && method.item_index < module_row.program.items.len() {
+        method_index: method.method_index
+        trait_block_index: method.trait_block_index
+        if module_row.program.items[method.item_index] == {
+            .Impl(item_impl) -> {
+                if method_index >= 0 && method_index < item_impl.methods.len() && item_impl.methods[method_index].return_type == method.declaration.return_type && item_impl.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_passes(item_impl.methods[method_index], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+                }
+            }
+            .Struct(item_struct) -> {
+                if trait_block_index >= 0 {
+                    if trait_block_index < item_struct.trait_impls.len() && method_index >= 0 && method_index < item_struct.trait_impls[trait_block_index].methods.len() && item_struct.trait_impls[trait_block_index].methods[method_index].return_type == method.declaration.return_type && item_struct.trait_impls[trait_block_index].methods[method_index].return_type_span == method.declaration.return_type_span {
+                        return sema_function_check_passes(item_struct.trait_impls[trait_block_index].methods[method_index], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+                    }
+                } else if method_index >= 0 && method_index < item_struct.methods.len() && item_struct.methods[method_index].return_type == method.declaration.return_type && item_struct.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_passes(item_struct.methods[method_index], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+                }
+            }
+            .Enum(item_enum) -> {
+                if trait_block_index >= 0 {
+                    if trait_block_index < item_enum.trait_impls.len() && method_index >= 0 && method_index < item_enum.trait_impls[trait_block_index].methods.len() && item_enum.trait_impls[trait_block_index].methods[method_index].return_type == method.declaration.return_type && item_enum.trait_impls[trait_block_index].methods[method_index].return_type_span == method.declaration.return_type_span {
+                        return sema_function_check_passes(item_enum.trait_impls[trait_block_index].methods[method_index], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+                    }
+                } else if method_index >= 0 && method_index < item_enum.methods.len() && item_enum.methods[method_index].return_type == method.declaration.return_type && item_enum.methods[method_index].return_type_span == method.declaration.return_type_span {
+                    return sema_function_check_passes(item_enum.methods[method_index], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+                }
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+        return sema_function_check_passes(sema_registration_function_with_body(module_row, method), owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    }
+    sema_function_check_passes(method.declaration, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+}
+
 sema_function_check_passes_in_graph: fn(graph: SemaRegistrationGraph, job: SemaBodyJob, module_index: Int, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if job == {
         .TopLevel(item_index) -> {
@@ -3083,10 +3175,10 @@ sema_function_check_passes_in_graph: fn(graph: SemaRegistrationGraph, job: SemaB
             panic("a selected source function lost its original item")
         }
         .NominalMethod(_, owner, row) -> {
-            return sema_function_check_passes(graph.modules[module_index].nominals[owner].methods[row].declaration, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+            return sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
         }
         .ImplMethod(_, owner, row) -> {
-            return sema_function_check_passes(graph.modules[module_index].impls[owner].methods[row].declaration, owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+            return sema_function_check_passes_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
         }
     }
 }
@@ -3499,12 +3591,12 @@ sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, prog
             module_identity: graph.modules[module_index].module_identity,
             module_name: graph.modules[module_index].module_name,
             functions: [FnBody]{},
-            nominals: graph.modules[module_index].nominals,
-            nominal_positions: sema_check_nominal_positions(graph.modules[module_index].nominals),
+            nominals: [SemaRegistrationNominal]{},
+            nominal_positions: [String:Int]{},
             constants: graph.modules[module_index].constants,
-            impls: graph.modules[module_index].impls,
-            exports: graph.modules[module_index].exports,
-            imports: graph.modules[module_index].imports,
+            impls: [SemaRegistrationImpl]{},
+            exports: [SemaRegistrationExport]{},
+            imports: [SemaRegistrationImport]{},
             foreign_providers: [SemaCheckedForeignProvider]{},
             foreign_functions: [SemaCheckedForeignFunction]{},
             call_facts: [SemaCallSiteFact]{},
@@ -3735,7 +3827,7 @@ sema_check_registration_module_scopes: fn(program: SemaProgramTables, module_ind
 // before this ordinary program/header phase, exactly as in the old checker.
 sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult, count_work: Bool, items_scanned: &Int) {
     if program.registration_graph == .Val(graph) {
-        test_names := [String:Bool]{}
+        test_names := name_table_sized(4)
         unsupported_forms := sema_check_unsupported_program_forms(graph.modules[module_index].program)
         if unsupported_forms.len() > 0 {
             module_result.complete = false
@@ -3753,7 +3845,7 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
             module_result.incomplete_reasons.push("invalid job names")
         }
         // `check`: structural `.member { … }` checks in every mode.
-        loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.tables, graph.modules[module_index].program.items) {
+        loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.tables, graph.modules[module_index].program.items, graph.modules[module_index].program.has_scope_member) {
             module_result.diagnostics.push(diagnostic)
         }
         // `infer_module_footprints`: a stated receiver footprint names stored
@@ -3797,9 +3889,9 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 // module's other test names.
                 .Test(test) -> {
                     if test.name == .Val(test_name) {
-                        if test_names.get(test_name) != None {
+                        if name_find(test_names, test_name) != None {
                             module_result.diagnostics.push(sema_defined_twice(test_name, "every test needs a unique name so failures are easy to find", test.name_span))
-                        } else { test_names[test_name] = true }
+                        } else { _ := name_intern(test_names, test_name) }
                     }
                 }
                 .CodeModule(definition) -> {
@@ -5350,7 +5442,9 @@ sema_check_body_stream_claimed_batch: fn(cell: Shared<SemaStreamEnvironment>, pr
     stream_module: claims[0].stream_module
     if stream_module != current {
         current = stream_module
+        saved_delta := part.scopes.type_delta.pop()
         part.scopes = if held.value.light_scopes.len() > 0 -> sema_scope_light_copy(held.value.light_scopes[0]) else -> sema_check_body_stream_scope_copy(held.value.environments[0])
+        if saved_delta == .Val(delta) -> part.scopes.type_delta.push(delta)
     }
     done := 0
     loop claim in claims {
@@ -11334,7 +11428,7 @@ sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts]) -> [String] Ne
 // proved infallible (`solved` holds the infallible keys), and emit the rest
 // with the obligation mark removed. Returns whether any obligation survived
 // as an error.
-sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:Bool]) -> Bool Never! {
+sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: NameTable) -> Bool Never! {
     mark: sema_failure_obligation_mark()
     pending: loop diagnostic in diagnostics {
         if (diagnostic.detail ?? "").starts_with(mark) {
@@ -11361,7 +11455,7 @@ sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:
         }
         lines: detail.split("\n").to_list()
         callee: lines[0].replace(mark, "")
-        if solved.get(callee) != None -> next
+        if name_find(solved, callee) != None -> next
         remainder := [String]{}
         loop line_index in 1..<lines.len() -> remainder.push(lines[line_index])
         rest: remainder.join("\n")
@@ -11390,7 +11484,7 @@ sema_failure_union_settle_reports: fn(diagnostics: &[Diagnostic]) Never! {
 // E2404 repeated sites: every call of one callee whose failure domain has no
 // route into the same caller domain is one root, reported once at its first
 // site. `seen` carries the reported domains across the bundle's report lists.
-sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &[String:Bool]) Never! {
+sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &NameTable) Never! {
     repeated: loop diagnostic in diagnostics {
         if diagnostic.code == "E2404" {
             break true
@@ -11406,11 +11500,11 @@ sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &[String:Bool])
         detail: diagnostic.detail ?? ""
         if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") -> next
         key: detail.split("\n").to_list()[0]
-        if seen.get(key) != None {
+        if name_find(seen, key) != None {
             repeats.push(index)
             next
         }
-        seen[key] = true
+        _ := name_intern(seen, key)
     }
     loop repeats.pop() == .Val(index) -> _ := diagnostics.remove(index, .Slot)
 }
@@ -11453,8 +11547,8 @@ sema_comptime_failure_closure_settle: fn(graph: SemaRegistrationGraph, closure: 
     loop (index, facts) in closure.facts {
         sema_failure_add_candidate(graph, closure.owners[index], facts, closure.address_taken, candidates)
     }
-    solved := [String:Bool]{}
-    loop key in sema_failure_fixpoint(candidates) -> solved[key] = true
+    solved := name_table_sized(4)
+    loop key in sema_failure_fixpoint(candidates) -> _ := name_intern(solved, key)
     obligations := closure.obligations
     if !sema_failure_settle_obligations(obligations, solved) -> return true
     loop diagnostic in obligations -> diagnostics.push(diagnostic)
@@ -12993,6 +13087,7 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     // here would serialize the body-check threads on the shared counters.
     trail.entries.push(SemaGraphUndo.Counting{old: resolved_graph.counting})
     resolved_graph.counting = false
+    resolved_graph.keep_local_name_references = bodies.build_names
     hook_access: sema_host_hook_access(host_hooks)
     trail.entries.push(SemaGraphUndo.CoreBodiesHeld{old: resolved_graph.core_bodies_held})
     resolved_graph.core_bodies_held = sema_core_bodies_hold(resolved_graph, hook_access)
@@ -13125,9 +13220,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     sema_failure_reconcile_infallible(modules, infallible, final_graph.symbols)
     // The export and import rows read the projected declarations.
-    loop module_index in 0..<modules.len() {
-        modules[module_index].exports = final_graph.modules[module_index].exports
-        modules[module_index].imports = final_graph.modules[module_index].imports
+    if final_graph.retain_programs {
+        loop module_index in 0..<modules.len() {
+            modules[module_index].exports = final_graph.modules[module_index].exports
+            modules[module_index].imports = final_graph.modules[module_index].imports
+        }
     }
     // A case creation the mint reported (E0105) reports nothing more.
     sema_failure_union_drop_settled(modules, unions.settled)
@@ -13143,8 +13240,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
-    infallible_keys := [String:Bool]{}
-    loop key in inferred_infallible -> infallible_keys[key] = true
+    infallible_keys := name_table_sized(inferred_infallible.len() + 1)
+    loop key in inferred_infallible -> _ := name_intern(infallible_keys, key)
     if sema_failure_settle_obligations(diagnostics, infallible_keys) -> complete = false
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(modules[settle_index].diagnostics, infallible_keys) {
@@ -13157,9 +13254,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     // The bundle list and the per-module lists each keep one report per
     // failure domain.
-    bundle_domains := [String:Bool]{}
+    bundle_domains := name_table_sized(4)
     sema_failure_domain_dedupe(diagnostics, bundle_domains)
-    module_domains := [String:Bool]{}
+    module_domains := name_table_sized(4)
     loop dedupe_index in 0..<modules.len() {
         sema_failure_domain_dedupe(modules[dedupe_index].diagnostics, module_domains)
     }
@@ -13433,6 +13530,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
 
     if trace_sink == .Val(sink) -> sink.begin("sema.facts", "", -1, -1)
+    keep_flat_calls: final_graph.retain_programs || held.build_names
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
     comptime_requests := [SemaComptimeRequest]{}
@@ -13440,13 +13538,19 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     compute_facts := [SemaComputeFunctionFacts]{}
     loop module_index in 0..<modules.len() {
         module_result: modules[module_index]
-        loop fact in module_result.call_facts -> call_facts.push(fact.copy())
+        if keep_flat_calls {
+            loop fact in module_result.call_facts -> call_facts.push(fact.copy())
+        }
         sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(module_result.hardware_use))
         loop request in module_result.comptime_requests -> comptime_requests.push(request.copy())
         loop source in module_result.comptime_body_sources {
             comptime_body_sources.push(source.copy())
         }
-        loop facts in module_result.compute_facts -> compute_facts.push(facts.copy())
+        if !keep_flat_calls {
+            compiler_transfer_rows<SemaComputeFunctionFacts>(compute_facts, modules[module_index].compute_facts)
+        } else {
+            loop facts in module_result.compute_facts -> compute_facts.push(facts.copy())
+        }
     }
     if trace_sink == .Val(sink) -> sink.end("sema.facts", call_facts.len())
     // A fix that rewrites `==` sites reads every module's checked calls.

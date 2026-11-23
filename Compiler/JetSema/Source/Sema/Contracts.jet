@@ -913,6 +913,46 @@ sema_contract_callee_facts: fn(func: Func) -> SemaContractCalleeFacts Never! {
     SemaContractCalleeFacts{call_checks: call_checks, is_pure: func.is_pure, root_receiver: func.params.len() > 0 && func.params[0].root, param_names: param_names, param_view_from: param_view_from}
 }
 
+sema_contract_call_site_facts_of_func: fn(func: Func) -> SemaContractCalleeFacts? Never! {
+    has_view_from := false
+    loop param in func.params {
+        if param.declared_view_from_names != None {
+            has_view_from = true
+            break
+        }
+    }
+    if !has_view_from && func.pre.len() == 0 && func.post.len() == 0 -> return None
+    call_checks := func.pre.len()
+    loop clause in func.post {
+        if clause.required -> call_checks += 1
+    }
+    if !has_view_from && call_checks == 0 -> return None
+    param_names := [String]{}
+    param_view_from := [[String]?]{}
+    if has_view_from {
+        loop param in func.params {
+            param_names.push(param.name)
+            param_view_from.push(param.declared_view_from_names)
+        }
+    }
+    Val(SemaContractCalleeFacts{call_checks: call_checks, is_pure: func.is_pure, root_receiver: func.params.len() > 0 && func.params[0].root, param_names: param_names, param_view_from: param_view_from})
+}
+
+sema_contract_call_site_facts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
+    if symbol_is_local(target) -> return None
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_row_of(graph, target) == .Val(row) {
+            if row == {
+                .Function(module_index, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
+                .Foreign(_, _) -> return None
+                .NominalMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
+                .ImplMethod(module_index, owner, index) -> return sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
+            }
+        }
+    }
+    sema_contract_function_facts(environment, program, target)
+}
+
 sema_contract_registered_facts: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {
     row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {

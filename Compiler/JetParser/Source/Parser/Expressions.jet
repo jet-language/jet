@@ -1352,6 +1352,8 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         state.pipe_step_reads[index] = nested.pipe_step_reads[index]
     }
     loop block in nested.block_spans -> state.block_spans.push(block)
+    if nested.has_scope_member -> state.has_scope_member = true
+    if nested.has_task_spawn -> state.has_task_spawn = true
     if nested.diagnostics.len() > 0 {
         parser_return_hole(state, nested)
         parser_take_nested_failure(state, nested.diagnostics)
@@ -1728,6 +1730,7 @@ parser_task_call: fn(state: &JetParserState, head: Span, method: String, method_
 }
 
 parser_task_spawn: fn(state: &JetParserState, head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
+    state.has_task_spawn = true
     lambda: Lambda{take_names: take_names, params: [LambdaParam]{}, effects: None, body: body, span: body_span, meta: ast_empty_lambda_meta()}
     body_lambda: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}
     parser_task_call(state, head, "task.spawn", head, body_lambda, body_span)

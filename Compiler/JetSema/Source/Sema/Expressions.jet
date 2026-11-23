@@ -3127,7 +3127,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
             span: span,
             caller_key: sema_scope_function_owner_key(scopes),
             callee: callee,
-            facts: checked.facts,
+            facts: SemaCallSiteFacts{effect_bound: checked.facts.effect_bound, local_lambda: checked.facts.local_lambda},
             discarded: false,
             compile_time: scopes.comptime_execution_depth > 0,
             detail: sema_call_site_detail_of(
@@ -3353,7 +3353,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
                 }
                 loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
                     // A static method (no `self`) is named through the type, never a value.
-                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name != method || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() == 0 || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters[0].symbol.name != "self" {
+                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name != method || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() == 0 || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters[0].name != "self" {
                         next
                     }
                     method_ref: TMethodRef{symbol: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.id, name: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name, mangled: true, trait_owner: None, operator_identity: None}
@@ -3409,7 +3409,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
         owner_type := sema_inference_substitute_type_bindings(owner_declared, owner_inference.substitutions)
         written_before: candidates.len()
         loop function in nominal.methods {
-            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].symbol.name != "self" {
+            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].name != "self" {
                 next
             }
             // Resolve the declared signature in the owner's module, with the
@@ -3513,7 +3513,7 @@ sema_expr_builtin_impl_method_candidates: fn(graph: SemaRegistrationGraph, recei
             next
         }
         loop function in implementation.methods {
-            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].symbol.name != "self" {
+            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].name != "self" {
                 next
             }
             generics: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
@@ -4447,7 +4447,26 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
             if builtin.handled -> return builtin
             return SemaMethodSpecialCheck{handled: false, value: None}
         }
-        .Named(_) | .Apply(_, _) | .Shared(_) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Named(name) -> {
+            if program.registration_graph == .Val(graph) && sema_registration_is_ordinary_user_type(graph, name) {
+                if method == "encode" || method == "encode_stored" {
+                    data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                    if data.handled -> return data
+                }
+                if method == "as" {
+                    err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, diagnostics)
+                    if err_as.handled -> return err_as
+                }
+                if method != "enqueue" && method != "delay" && method != "cast" && method != "swizzle" && method != "wait" && method != "start" && method != "read" && method != "write" && method != "set" && method != "clear" && method != "send" && method != "join" && method != "detach" && method != "para_map" && method != "para_filter" && method != "para_partition" && method != "para_fold" {
+                    value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                    if value_method.handled -> return value_method
+                    builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                    if builtin.handled -> return builtin
+                    return SemaMethodSpecialCheck{handled: false, value: None}
+                }
+            }
+        }
+        .Apply(_, _) | .Shared(_) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
 
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5214,15 +5233,18 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
         if type_value != None -> return type_value
     }
     // A module named as a value is its Module record (ModuleMeta.jet).
-    if unresolved_index != None && sema_expr_core_module_alias_visible(name, scopes) {
-        if program.registration_graph == .Val(graph) {
-            if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
-                read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, context, diagnostics)
-                if read.handled -> return read.value
+    if unresolved_index == .Val(alias_index) {
+        alias_kind: scopes.bindings[alias_index].symbol.kind
+        if alias_kind == SymbolKind.Module || alias_kind == SymbolKind.Import {
+            if program.registration_graph == .Val(graph) {
+                if sema_registration_lookup_qualified(graph, environment.module_identity, name, SEMA_MODULE_META) == .Val(record) {
+                    read: sema_expression_module_constant_read(graph, record, name, span, expected, environment, program, context, diagnostics)
+                    if read.handled -> return read.value
+                }
             }
         }
     }
-    value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
+    value: sema_expr_check_ident_resolved(name, span, unresolved_index, expected, environment, program, scopes, context, diagnostics) ?? {
         // A read the check refuses (the value doesn't fit here) still names
         // its binding: the error belongs to that read of that name.
         if unresolved_index == .Val(refused) {
@@ -5230,7 +5252,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
         }
         if !sema_has_error_since(diagnostics, diagnostics_before) {
             if {
-                sema_expr_core_module_alias_visible(name, scopes) -> {
+                unresolved_index == .Val(alias_idx) && (scopes.bindings[alias_idx].symbol.kind == SymbolKind.Module || scopes.bindings[alias_idx].symbol.kind == SymbolKind.Import) -> {
                     diagnostics.push(sema_module_used_as_value(name, span))
                 }
                 sema_expression_type_symbol(scopes, environment, program, name) != None -> {
@@ -5250,9 +5272,10 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == .Val(unresolved) {
         kind: scopes.bindings[unresolved].symbol.kind
         if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
-            if !sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read) {
-                return None
-            }
+            b_frame: scopes.bindings[unresolved].frame
+            visible_here: scopes.frames[b_frame].parent < 0 || scopes.position_free || scopes.bindings[unresolved].symbol.span.start <= span.start
+            noted: if visible_here -> sema_ownership_note_reference_at(state, name, span, scopes, unresolved, SemaOwnershipReferenceKind.Read) else -> sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read)
+            if !noted -> return None
         }
     }
     use_checked: if context.suppress_partial_move_root_read -> sema_ownership_check_root_base_use(state, expr, scopes, diagnostics) else -> sema_ownership_check_use(state, expr, scopes, diagnostics)
@@ -5266,17 +5289,26 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
 
 // The reference fact of a read of the binding at `binding_index`.
 sema_expr_note_name_reference: fn(span: Span, binding_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
-    symbol: sema_scope_binding_symbol(environment, scopes, binding_index)
+    // Only `.symbol.ty` is cleared on light rows, and SemaNameReferent does not store `ty`.
+    kind: scopes.bindings[binding_index].symbol.kind
     // A read of a field, variant, import, impl, foreign or label binding is
     // resolved by meaning alone.
     reference_kind := SymbolKind?{None}
-    if symbol.kind == {
+    if kind == {
         .Function | .Constant | .Parameter | .Local | .Type | .Trait | .Module -> {
-            reference_kind = Val(symbol.kind)
+            reference_kind = Val(kind)
         }
         .Impl | .Field | .Variant | .Import | .Foreign | .Label -> {}
     }
-    context.name_references.push(sema_name_reference(span, symbol, reference_kind))
+    referent: SemaNameReferent{
+        id: scopes.bindings[binding_index].symbol.id,
+        kind: kind,
+        name: scopes.bindings[binding_index].symbol.name,
+        module_identity: scopes.bindings[binding_index].symbol.module_identity,
+        owner: scopes.bindings[binding_index].symbol.owner ?? "",
+        span: scopes.bindings[binding_index].symbol.span,
+    }
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: referent, kind: reference_kind})
 }
 
 sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -5415,13 +5447,17 @@ sema_expr_ascii_letter: fn(byte: U8) -> Bool Never! {
 }
 
 sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    index: sema_scope_resolve_index(scopes, name) ?? {
+    sema_expr_check_ident_resolved(name, span, sema_scope_resolve_index(scopes, name), expected, environment, program, scopes, context, diagnostics)
+}
+
+sema_expr_check_ident_resolved: fn(name: String, span: Span, resolved_index: Int?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    index: resolved_index ?? {
         // `N` of a `<N: Int>` number parameter in scope reads as the
         // instance's number.
         loop parameter in context.generic_params {
             if parameter.number && parameter.name == name {
                 value: sema_node(context, Type.Int, NodeKind.NumberParam{param: Type.Named{name: name.copy()}}, span)
-                return sema_expr_expected(value, expected, environment, program, diagnostics)
+                return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
             }
         }
         diagnostics.push(sema_unknown_name_at(name, span, environment, program, scopes))
@@ -5449,7 +5485,7 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
         // map value, read and written as `w[0]`.
         window: if scopes.bindings[index].map_slot -> sema_expr_one_value_window(place.ty, expected) else -> None
         value: if window == .Val(window_ty) -> TExpr{ty: window_ty, kind: TExprKind.Borrow{place: place, access: AccessConvention.Write}, span: span} else -> place
-        result = sema_expr_expected(value, expected, environment, program, diagnostics)
+        result = sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
         if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, expected, environment, program, diagnostics) {
@@ -5457,7 +5493,7 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
         }
         value_ty: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_identity, expected) else -> ty
         value: sema_node(context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
-        result = sema_expr_expected(value, expected, environment, program, diagnostics)
+        result = sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     result
 }
@@ -6392,7 +6428,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         if left_number.handled -> checked_lhs = left_number.value ?? return None
     }
     // A fractional literal before a Dyn operand is a Float, not a Decimal.
-    if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) && sema_dyn_float_literal_value(left) == .Val(number) {
+    if sema_dyn_float_literal_value(left) == .Val(number) && sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) {
         checked_lhs = sema_node(context, Type.Float, NodeKind.FloatLit{value: number}, checked_lhs.span)
     }
     // A value whose type is not optional is never None, so `x == None` /
@@ -6430,8 +6466,8 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     // `x != 5` is its opposite. The plain side lifts once, so the comparison
     // is the existing optional equality.
     equality := op == BinOp.Eq || op == BinOp.Ne
-    lifted_rhs := if equality -> sema_expr_optional_lift(checked_rhs, checked_lhs.ty, checked_rhs.ty, environment, program) else -> None
-    lifted_lhs := if equality && lifted_rhs == None -> sema_expr_optional_lift(checked_lhs, checked_rhs.ty, checked_lhs.ty, environment, program) else -> None
+    lifted_rhs := if equality && sema_expr_unwrap_tag(checked_lhs.ty) == .Option(_) -> sema_expr_optional_lift(checked_rhs, checked_lhs.ty, checked_rhs.ty, environment, program) else -> None
+    lifted_lhs := if equality && lifted_rhs == None && sema_expr_unwrap_tag(checked_rhs.ty) == .Option(_) -> sema_expr_optional_lift(checked_lhs, checked_rhs.ty, checked_lhs.ty, environment, program) else -> None
     lhs: lifted_lhs ?? checked_lhs
     rhs: lifted_rhs ?? checked_rhs
     // `a + b`, `a * 2` on fixed arrays of numbers, and `a & b`, `a << 2` on

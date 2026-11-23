@@ -181,10 +181,19 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
 sema_policy_registered_calls: fn(graph: SemaRegistrationGraph, target: SymbolID) -> [Call]? Never! {
     row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {
-        .Function(module_index, index) -> Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
+        .Function(module_index, index) -> {
+            if graph.modules[module_index].functions[index].declaration.markers.len() == 0 -> return None
+            Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
+        }
         .Foreign(_, _) -> None
-        .NominalMethod(module_index, owner, index) -> Val(sema_policy_calls(graph.modules[module_index].nominals[owner].methods[index].declaration))
-        .ImplMethod(module_index, owner, index) -> Val(sema_policy_calls(graph.modules[module_index].impls[owner].methods[index].declaration))
+        .NominalMethod(module_index, owner, index) -> {
+            if graph.modules[module_index].nominals[owner].methods[index].declaration.markers.len() == 0 -> return None
+            Val(sema_policy_calls(graph.modules[module_index].nominals[owner].methods[index].declaration))
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            if graph.modules[module_index].impls[owner].methods[index].declaration.markers.len() == 0 -> return None
+            Val(sema_policy_calls(graph.modules[module_index].impls[owner].methods[index].declaration))
+        }
     }
 }
 

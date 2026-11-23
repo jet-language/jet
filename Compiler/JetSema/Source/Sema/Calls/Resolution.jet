@@ -120,8 +120,8 @@ sema_call_facts: fn(signature: Type, type_args: [Type], binding: SemaCallBinding
                 return_type: return_type,
                 failure_carrier: sema_call_failure_carrier(ret),
                 effect_bound: effects,
-                type_args: type_args,
-                default_refs: binding.default_refs,
+                type_args: [Type]{},
+                default_refs: [FunctionDefaultRef]{},
             })
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -192,7 +192,7 @@ sema_call_not_callable_value: fn(name: String, ty: Type, program: SemaProgramTab
         base_name: sema_expr_type_base_name(ty) ?? ""
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
-                receiver: function.parameters.len() > 0 && function.parameters[0].symbol.name == "self"
+                receiver: function.parameters.len() > 0 && function.parameters[0].name == "self"
                 if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) {
                     methods.push(function.symbol.name.copy())
                 }

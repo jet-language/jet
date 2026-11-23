@@ -243,6 +243,29 @@ sema_call_collections_literal_remove_mode: fn(method: String, args: [CallArg]) -
 }
 
 sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if args.len() == 0 && (method == "len" || method == "is_empty") {
+        unwrapped_fast: sema_expr_unwrap_tag(receiver_value.ty)
+        is_direct_collection: if unwrapped_fast == {
+            .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
+            .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        if is_direct_collection {
+            empty_args := [CallArg]{}
+            ownership := sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, AccessConvention.Read, false, [SemaCallParam]{}, empty_args, scopes, span, expr_span(receiver), diagnostics)
+            if !ownership.accepted || !ownership.complete {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "collection.{method}", span, [EffectRowEntry]{}, diagnostics) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            is_len: method == "len"
+            result_type: if is_len -> Type.Int else -> Type.Bool
+            builtin_op: if is_len -> TBuiltinOp.LenList else -> TBuiltinOp.IsEmpty
+            value: sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin_op, args: [TExpr]{}}, span)
+            checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: checked}
+        }
+    }
     updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -410,7 +433,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    line: sema_source_line_at(environment.source_segments, span) ?? 0
+    line: if contract.row.op == CollectionOp.ListRemove || contract.row.op == CollectionOp.PriorityQueueRemove -> sema_source_line_at(environment.source_segments, span) ?? 0 else -> 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
     result_type: sema_call_collections_fixed_join(operation, receiver_value.ty, typed) ?? listed_type
     ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)

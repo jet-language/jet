@@ -203,6 +203,7 @@ sema_state_table_of: fn(graph: SemaRegistrationGraph) -> SemaStateTable Never! {
 // registered program, with the source locations attached to its findings.
 sema_typestate_check_module: fn(graph: SemaRegistrationGraph, table: SemaStateTable, module_row: SemaGraphModuleResult) -> [Diagnostic] Never! {
     registration: sema_registration_module_index(graph, module_row.module_identity) ?? return [Diagnostic]{}
+    if sema_state_table_empty(table) && !graph.modules[registration].program.has_task_spawn -> return [Diagnostic]{}
     open_switches := [Span]{}
     loop diagnostic in module_row.diagnostics {
         if diagnostic.code == "E0307" && diagnostic.span == .Val(span) {

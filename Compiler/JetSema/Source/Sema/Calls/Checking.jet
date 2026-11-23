@@ -60,6 +60,16 @@ SemaCallTypedArguments: struct {
 }
 
 sema_call_resolved_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
+    if ty == {
+        .Int -> return Type.Int
+        .Float -> return Type.Float
+        .Bool -> return Type.Bool
+        .String -> return Type.String
+        .Char -> return Type.Char
+        .Float32 -> return Type.Float32
+        .IntN(signed, bits) -> return Type.IntN{signed: signed, bits: bits}
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
     if program.registration_graph == .Val(graph) {
         sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     } else {
@@ -574,19 +584,31 @@ sema_call_foreign_thread_safe_expr: fn(expression: Expr) -> Bool Never! {
 sema_call_lambda_escape_policy: fn(parameter: SemaCallParam, abi: SemaRegistrationCallableABI?) -> Bool? {
     if parameter.convention == AccessConvention.Move -> return Val(true)
     callable_abi: abi ?? return None
+    if !callable_abi.is_extern && !callable_abi.is_c_abi && callable_abi.callback_transport == None {
+        return if parameter.ty != None -> Val(false) else -> None
+    }
     parameter_type: sema_call_parameter_type(parameter) ?? return None
     Val(sema_registration_callback_boundary_param(callable_abi, parameter_type))
 }
 
 sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> SemaCallTypedArguments? {
     if !sema_call_validate_binding(callee, params, binding, args, span, diagnostics) -> return None
+    arg_count: args.len()
+    if arg_count == 0 {
+        return Val(SemaCallTypedArguments{values: [TExpr]{}, slots: [Int]{}, required_types: [Type]{}, source_indices: [Int]{}, pin_arguments: !binding.source_ordered, binder_site: span.start})
+    }
     values := [TExpr]{}
     slots := [Int]{}
     required_types := [Type]{}
     source_indices := [Int]{}
+    reference_starts := [Int]{}
+    values.try_reserve(arg_count) ?? panic("reserve failed")
+    slots.try_reserve(arg_count) ?? panic("reserve failed")
+    required_types.try_reserve(arg_count) ?? panic("reserve failed")
+    source_indices.try_reserve(arg_count) ?? panic("reserve failed")
+    reference_starts.try_reserve(arg_count + 1) ?? panic("reserve failed")
     pin_arguments := !binding.source_ordered
     binder_site := span.start
-    reference_starts := [Int]{}
     take_indices := [Int]{}
     take_keys := [String]{}
     // Every argument is checked, so each mismatched one is reported.
@@ -594,30 +616,34 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     call_diagnostics_start: diagnostics.len()
     // The first argument a C function receives as a callback pointer.
     c_callback := Span?{None}
-    loop index in 0..<args.len() {
+    abi_has_boundary: if abi == .Val(callable_abi) -> callable_abi.is_extern || callable_abi.is_c_abi || callable_abi.callback_transport != None else -> false
+    loop index in 0..<arg_count {
         reference_starts.push(context.name_references.len())
         slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter: params[slot]
-        // A `#caller` default is the place of this call.
-        if binding.sources[index] == .Default(_) && sema_site_is_caller(args[index].expr) {
-            args[index].expr = sema_site_location_expr("", environment, program, scopes, span)
-        }
-        // A script variable's default reads the caller's binding at the
-        // call; a caller that hasn't bound it is refused, and so is a task
-        // that would change it beside the script.
-        if binding.sources[index] == .Default(_) && sema_script_variable_default(args[index].expr, parameter) == .Val(declared) {
-            if sema_scope_resolve_index_at(scopes, parameter.name, span) == None {
-                diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, environment, program, scopes))
-                complete = false
-                next
+        is_default: binding.sources[index] == .Default(_)
+        if is_default {
+            // A `#caller` default is the place of this call.
+            if sema_site_is_caller(args[index].expr) {
+                args[index].expr = sema_site_location_expr("", environment, program, scopes, span)
             }
-            if context.taskgroups.in_spawn && parameter.convention == AccessConvention.Write {
-                diagnostics.push(sema_script_task_diagnostic(sema_call_reflection_leaf_name(callee), parameter.name, span))
-                complete = false
-                next
+            // A script variable's default reads the caller's binding at the
+            // call; a caller that hasn't bound it is refused, and so is a task
+            // that would change it beside the script.
+            if sema_script_variable_default(args[index].expr, parameter) == .Val(declared) {
+                if sema_scope_resolve_index_at(scopes, parameter.name, span) == None {
+                    diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, environment, program, scopes))
+                    complete = false
+                    next
+                }
+                if context.taskgroups.in_spawn && parameter.convention == AccessConvention.Write {
+                    diagnostics.push(sema_script_task_diagnostic(sema_call_reflection_leaf_name(callee), parameter.name, span))
+                    complete = false
+                    next
+                }
+                args[index].expr = sema_script_variable_read(parameter.name, span)
             }
-            args[index].expr = sema_script_variable_read(parameter.name, span)
         }
         required_declared: sema_call_argument_parameter_type(parameter, args[index]) ?? {
             diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
@@ -644,11 +670,8 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         binder_start: context.name_references.len()
         // A default written in another module checks in its declaring module's
         // names (sema_default_owner_scope), as a fresh value of its own.
-        owner_scope := if binding.sources[index] == .Default(_) -> sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes) else -> None
-        default_in_owner: if owner_scope == {
-            .Val(_) -> true
-            .None -> false
-        }
+        owner_scope := if is_default -> sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes) else -> None
+        default_in_owner: owner_scope != None
         // A taken argument out of pinned storage is the move E0219, reported
         // before checking the argument reads it beside the pin (E0220). A
         // take parameter takes its plain name.
@@ -659,7 +682,11 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         binder_keys := if has_binder_refs && !default_in_owner -> sema_call_enter_binder_refs(args[index].flags.binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
-        self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required, environment, program, scopes)
+        may_be_numeric: if required == {
+            .Int | .Float | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) -> true
+            .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        self_typed: may_be_numeric && sema_stmt_numeric_slot_self_typed(args[index].expr, required, environment, program, scopes)
         trait_parameter: if required == {
             .TraitObject(_) -> true
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -686,7 +713,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // lambda whose body is safe on a foreign thread; anything else is
         // E3203, reported before the argument's own type check. One that
         // reads the task context is E3218, which names the read.
-        if !default_in_owner && abi == .Val(callable_abi) {
+        if abi_has_boundary && !default_in_owner && abi == .Val(callable_abi) {
             if sema_registration_callback_boundary_param(callable_abi, required_declared) {
                 context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, environment, program, scopes) else -> String?{None}
                 if context_read == .Val(member) {
@@ -780,7 +807,11 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // union parameter takes exactly its type: a member or a smaller
         // union would be widened into a temporary the callee's writes miss.
         exact_write: parameter.convention == AccessConvention.Write && (trait_parameter || required == .Union(_))
-        compatible := if exact_write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        compatible := if {
+            exact_write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program))
+            sema_type_same_named(required, value.ty) -> true
+            else -> sema_call_type_assignable(required, value.ty, environment, program) ?? return None
+        }
         // A parameter whose written type names nothing reported E0119 at its
         // declaration; it takes any argument, so the call's own checks (the
         // moves, E0201) still run without a cascade E0112 (#6294).

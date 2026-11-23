@@ -73,7 +73,7 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
         owner_package = graph.modules[owner_row.module_index].package_identity
     }
     loop function in nominal.methods {
-        is_static: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
+        is_static: function.parameters.len() == 0 || function.parameters[0].name != "self"
         if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) {
             names.push(function.symbol.name.copy())
         }
@@ -84,7 +84,7 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         if !sema_call_impl_targets(implementation, nominal) -> next
         loop function in implementation.methods {
-            is_static: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
+            is_static: function.parameters.len() == 0 || function.parameters[0].name != "self"
             if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) {
                 names.push(function.symbol.name.copy())
             }
@@ -297,7 +297,7 @@ sema_call_static_append_registered: fn(output: &[SemaStaticMethodTarget], graph:
     if function.symbol.name == "" || sema_call_static_has_method(output, function.symbol.id) {
         return
     }
-    if function.parameters.len() > 0 && function.parameters[0].symbol.name == "self" {
+    if function.parameters.len() > 0 && function.parameters[0].name == "self" {
         return
     }
     if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) {

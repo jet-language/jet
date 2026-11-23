@@ -124,7 +124,7 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
                                     parameter: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.params[index]
                                     params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, graph.modules[module_row_index].module_identity)})
                                 }
-                                return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.body}, module_identity: graph.modules[module_row_index].module_identity})
+                                return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: sema_registration_function_body(graph.modules[module_row_index], graph.modules[module_row_index].nominals[nominal_index].methods[method_index])}, module_identity: graph.modules[module_row_index].module_identity})
                             }
                         }
                     }

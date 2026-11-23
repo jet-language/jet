@@ -2895,7 +2895,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     then_mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "if.then@{span.start}")
     sema_expression_declare_condition_bindings(condition_check.bindings, environment, program, scopes, state, true, diagnostics)
-    then_result: if caught == .Val(found) -> sema_catch_all_err_check_body(found, then_body, then_mark.saved.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.saved.loop_depth) else -> sema_check_statements(then_body, then_mark.saved.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.saved.loop_depth)
+    then_result: if caught == .Val(found) -> sema_catch_all_err_check_body(found, then_body, then_mark.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.loop_depth) else -> sema_check_statements(then_body, then_mark.return_type, environment, program, scopes, state, tail_store, context, diagnostics, then_mark.loop_depth)
     if !then_result.complete {
         sema_scope_leave(scopes, state)
         sema_scope_rollback(scopes, then_mark)
@@ -2917,15 +2917,15 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     defer_then_err: expected == None && sema_expression_uncontextual_err_arm(then_value, scopes)
     defer_then: defer_then_err || (sibling_rule && sema_expression_bare_absent_arm(then_value, false))
     then_first := TExpr?{None}
-    deferred_then_scopes := sema_scope_init(module_none())
-    deferred_then_state := sema_ownership_state_init()
+    deferred_then_scopes := [SemaScopeTable]{}
+    deferred_then_state := [SemaOwnershipState]{}
     then_path := sema_ownership_fork_base(fork)
     // The then-arm scope exit (its table is gone, so only the ownership side
     // of sema_single_use_leave_scope remains); reported after the else arm.
     then_end_diagnostics := [Diagnostic]{}
     if defer_then {
-        deferred_then_scopes = sema_scope_snapshot(scopes)
-        deferred_then_state = sema_ownership_state_snapshot(state)
+        deferred_then_scopes.push(sema_scope_snapshot(scopes))
+        deferred_then_state.push(sema_ownership_state_snapshot(state))
     } else {
         carrier_sibling: expected == None && sema_expression_uncontextual_err_arm(else_value, scopes)
         first_value: if carrier_sibling -> sema_check_expression_carrier(then_value, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(then_value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -2949,11 +2949,11 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     }
     sema_scope_rollback(scopes, then_mark)
     sema_ownership_fork_rollback(state, fork)
-    then_found: if defer_then -> deferred_then_state.share_found else -> then_path.share_found
+    then_found: if defer_then -> deferred_then_state[0].share_found else -> then_path.share_found
 
     else_mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "if.else@{span.start}")
-    else_result: sema_check_statements(else_body, else_mark.saved.return_type, environment, program, scopes, state, tail_store, context, diagnostics, else_mark.saved.loop_depth)
+    else_result: sema_check_statements(else_body, else_mark.return_type, environment, program, scopes, state, tail_store, context, diagnostics, else_mark.loop_depth)
     if !else_result.complete {
         sema_scope_leave(scopes, state)
         sema_scope_rollback(scopes, else_mark)
@@ -2984,8 +2984,8 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         // Both arms are bare `None`: neither gives the other a type, so the
         // deferred then arm is its own E0308, not hidden by the else arm's.
         if defer_then && !defer_then_err && !quiet_then && sema_expression_bare_absent_arm(else_value, true) {
-            _ := sema_check_expression(then_value, expected, environment, program, deferred_then_scopes, deferred_then_state, tail_store, context, diagnostics)
-            sema_ownership_keep_mutations(state, deferred_then_state)
+            _ := sema_check_expression(then_value, expected, environment, program, deferred_then_scopes[0], deferred_then_state[0], tail_store, context, diagnostics)
+            sema_ownership_keep_mutations(state, deferred_then_state[0])
         }
         return None
     }
@@ -2998,10 +2998,10 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     deferred_diagnostic_start: diagnostics.len()
     then_checked: then_first ?? {
         deferred_expected: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
-        sema_check_expression(then_value, deferred_expected, environment, program, deferred_then_scopes, deferred_then_state, tail_store, context, diagnostics) ?? {
-            sema_scope_leave(deferred_then_scopes, deferred_then_state)
-            sema_ownership_keep_mutations(state, deferred_then_state)
-            sema_ownership_fork_drop(state, fork, deferred_then_state.share_found, else_path.share_found)
+        sema_check_expression(then_value, deferred_expected, environment, program, deferred_then_scopes[0], deferred_then_state[0], tail_store, context, diagnostics) ?? {
+            sema_scope_leave(deferred_then_scopes[0], deferred_then_state[0])
+            sema_ownership_keep_mutations(state, deferred_then_state[0])
+            sema_ownership_fork_drop(state, fork, deferred_then_state[0].share_found, else_path.share_found)
             if quiet_then {
                 loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
             }
@@ -3011,12 +3011,12 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     if quiet_then {
         loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
     }
-    sema_ownership_keep_mutations(state, deferred_then_state)
+    if deferred_then_state.len() > 0 -> sema_ownership_keep_mutations(state, deferred_then_state[0])
     then_reaches_merge: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
     if defer_then {
-        sema_single_use_check_scope_end(deferred_then_state, diagnostics)
-        sema_ownership_leave_scope(deferred_then_state)
-        then_path = sema_ownership_fork_path(deferred_then_state, fork)
+        sema_single_use_check_scope_end(deferred_then_state[0], diagnostics)
+        sema_ownership_leave_scope(deferred_then_state[0])
+        then_path = sema_ownership_fork_path(deferred_then_state[0], fork)
     } else {
         if !quiet_then {
             loop diagnostic in then_end_diagnostics -> diagnostics.push(diagnostic)
@@ -3166,13 +3166,13 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         }
         mark: sema_scope_mark(scopes)
         arm_expected := expected.copy()
-        arm_return := mark.saved.return_type.copy()
+        arm_return := mark.return_type.copy()
         if target == .Val(arm_type) {
             actuals: [Type]{arm_type.copy()}
             if expected == .Val(declared) {
                 arm_expected = Val(sema_inference_substitute_type(declared, names, actuals))
             }
-            if mark.saved.return_type == .Val(declared) {
+            if mark.return_type == .Val(declared) {
                 arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
             }
             // After the mark, so the rollback below puts the rebound rows back.
@@ -3185,7 +3185,7 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         sema_scope_enter(scopes, state, "if.arm@{arm_span.start}")
         arm_body: if is_else -> rest_body else -> bodies[index]
         arm_value: if is_else -> rest_value else -> values[index]
-        body := sema_check_statements(arm_body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, mark.saved.loop_depth)
+        body := sema_check_statements(arm_body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, mark.loop_depth)
         value := TExpr?{None}
         if body.complete {
             value = sema_check_expression(arm_value, arm_expected, environment, program, scopes, state, tail_store, context, diagnostics)

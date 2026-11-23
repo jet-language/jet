@@ -509,6 +509,9 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
     loop importer_index in 0..<graph.modules.len() {
         loop import_index in 0..<graph.modules[importer_index].imports.len() {
             loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
+                if graph.modules[importer_index].imports[import_index].bindings[binding_index].target_symbol_row >= 0 {
+                    next
+                }
                 symbol: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.id) ?? next
                 trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
