@@ -316,6 +316,7 @@ parser_parse_lexed_lines_threads: fn(input: &&Lexed, source: [U8], line_starts: 
 // chunk's tokens/compact tables/source/line_starts in parallel, map-reduces
 // `ColonDeclarations` and post-passes, and falls back to untouched original
 // `tokens`/`tables` if any chunk reports fences, whole-file rules, or errors.
+// Runs that fit the workers are the chunk bounds as they are.
 parser_parse_runs_threads: fn(input: &&[Token], tables_input: &&TokenTables, lexer_diagnostics: &&[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tokens := input.move()
     tables := tables_input.move()
@@ -326,7 +327,18 @@ parser_parse_runs_threads: fn(input: &&[Token], tables_input: &&TokenTables, lex
         prepared := parser_prepare_tokens(tokens.move(), tables)
         return parser_parse_prepared(prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, tables.move())
     }
-    bounds: parser_group_run_bounds(runs, workers)
+    if runs.len() - 1 <= workers {
+        return parser_parse_run_chunks(tokens.move(), tables.move(), diagnostics.move(), source_end, line_starts, source, runs, threads, allow_environment_reads: allow_environment_reads)
+    }
+    parser_parse_run_chunks(tokens.move(), tables.move(), diagnostics.move(), source_end, line_starts, source, parser_group_run_bounds(runs, workers), threads, allow_environment_reads: allow_environment_reads)
+}
+
+// parser_parse_runs_threads over the chunk token `bounds` (`[0, b1, …,
+// tokens.len()]`, each on a run start).
+parser_parse_run_chunks: fn(input: &&[Token], tables_input: &&TokenTables, lexer_diagnostics: &&[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], bounds: [Int], threads: CompilerThreads, allow_environment_reads: Bool{false}) -> ParseResult {
+    tokens: input.move()
+    tables := tables_input.move()
+    diagnostics: lexer_diagnostics.move()
     if bounds.len() <= 2 {
         return parser_parse_tokens_threads(tokens.move(), tables.move(), diagnostics.move(), source_end, line_starts, source, allow_environment_reads, threads)
     }
@@ -650,11 +662,11 @@ parser_chunk_bounds_of: fn(candidates: [Int], count: Int, workers: Int) -> [Int]
     bounds
 }
 
-// Groups lexer item runs `[0, r1, …, count]` into at most `workers` balanced
-// chunk boundaries, keeping every boundary on an existing run start.
+// Groups lexer item runs `[0, r1, …, count]`, more of them than `workers`,
+// into at most `workers` balanced chunk boundaries, keeping every boundary on
+// an existing run start.
 parser_group_run_bounds: fn(runs: [Int], workers: Int) -> [Int] Never! {
     run_count: runs.len() - 1
-    if run_count <= workers -> return runs.copy()
     count: runs[runs.len() - 1]
     bounds := [Int]{0}
     run := 1
@@ -976,7 +988,8 @@ parser_chunk_scan_interp_idents: fn(tokens: [Token], tables: TokenTables, indexe
 parser_parse_slot_part: fn(marker_scopes: [ParserMarkerScope], source_end: Int, allow_environment_reads: Bool, slot: Shared<ParserChunkSlot>) -> Int {
     permit := slot.guard_edit()
     data := permit.value.prepared.pop() ?? panic("missing prepared parser chunk")
-    chosen := permit.value.chosen_heads.copy()
+    chosen := [Int]{}
+    compiler_transfer_rows<Int>(chosen, permit.value.chosen_heads)
     chunk_tokens := if chosen.len() > 0 -> parser_colon_insert_module_heads(data.tokens.move(), chosen) else -> data.tokens.move()
     word_ids: parser_word_ids_for(data.tables)
     state := JetParserState{tokens: chunk_tokens.move(), tables: [TokenTables]{data.tables.move()}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: data.line_starts.move(), sources: [[U8]]{data.source.move()}, source_offset: data.source_offset, line_base: data.line_base, allow_environment_reads: allow_environment_reads, words: word_ids}
@@ -1007,30 +1020,9 @@ parser_parse_slot_parts: fn(marker_scopes: [ParserMarkerScope], source_end: Int,
 parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], outputs: [ParserChunkOutput]) -> [String] Never! {
     candidates := [String]{}
     used := [String]{}
-    roots := name_table_sized(16)
-    rooted := [Bool]{}
-    loop declaration in imports {
-        if declaration.kind == {
-            .Unqualified(module_alias, _, imported_items, _, _) -> {
-                root: name_index(name_intern(roots, module_alias))
-                loop rooted.len() <= root -> rooted.push(false)
-                if !rooted[root] {
-                    rooted[root] = true
-                    used.push(module_alias.copy())
-                }
-                loop item in imported_items {
-                    parts: item.original.split(".").to_list()
-                    candidates.push(item.alias ?? parts[parts.len() - 1])
-                }
-            }
-            .File(_, _) | .Module(_, _) -> candidates.push(declaration.alias)
-        }
-    }
-    loop item in items {
-        if item == .CodeModule(definition) {
-            if definition.body == None -> candidates.push(definition.name)
-        }
-    }
+    // The chunks' import scans already left import spans out.
+    spans := [Span]{}
+    parser_import_roots(imports, items, used, candidates, spans)
     if candidates.len() == 0 {
         used.sort()
         return used
@@ -1041,7 +1033,7 @@ parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], output
     loop idx in 0..<outputs.len() {
         if outputs[idx].import_scan.low_level_tier -> any_low_level = true
     }
-    loop candidate in candidates {
+    loop candidate in candidates.move() {
         if name_find(used_set, candidate) != None -> next
         found := false
         loop idx in 0..<outputs.len() {
@@ -1067,7 +1059,7 @@ parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], output
         }
         if found {
             _ := name_intern(used_set, candidate)
-            used.push(candidate.copy())
+            used.push(candidate)
         }
     }
     if any_low_level {
@@ -1079,23 +1071,25 @@ parser_reduce_used_import_names: fn(imports: [ImportDecl], items: [Item], output
 
 // Runs Sync Barrier 1 (whole/fence check, cross-chunk ColonDeclarations fixed
 // point, marker scopes merge), Phase 2 (parallel parse + local post-passes),
-// and compact join over already-prepared `slots`.
-parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8], source_end: Int, allow_environment_reads: Bool, lexer_diagnostics: [Diagnostic], fenced_statements: [FencedStatement]) -> ParserChunksOutcome {
+// and compact join over already-prepared `slots`. The joined program takes
+// `fenced_statements`; an outcome that isn't `ok` hands them back in its
+// result's program for the caller's one-thread parse.
+parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8], source_end: Int, allow_environment_reads: Bool, lexer_diagnostics: [Diagnostic], fenced_input: &&[FencedStatement]) -> ParserChunksOutcome {
+    fenced_statements: fenced_input.move()
     chunk_count: slots.len()
     whole := false
     fences := false
     any_candidates := false
     marker_scopes := [ParserMarkerScope]{}
     loop chunk in 0..<chunk_count {
-        reads: slots[chunk].guard_read()
-        data: reads.value.prepared[0]
-        if data.whole -> whole = true
-        if data.fences -> fences = true
-        if data.colon.candidates.len() > 0 -> any_candidates = true
-        loop scope in data.marker_scopes -> marker_scopes.push(scope.copy())
+        permit := slots[chunk].guard_edit()
+        if permit.value.prepared[0].whole -> whole = true
+        if permit.value.prepared[0].fences -> fences = true
+        if permit.value.prepared[0].colon.candidates.len() > 0 -> any_candidates = true
+        compiler_transfer_rows<ParserMarkerScope>(marker_scopes, permit.value.prepared[0].marker_scopes)
     }
     if fences || whole {
-        return ParserChunksOutcome{ok: false, fences: fences, result: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}}
+        return ParserChunksOutcome{ok: false, fences: fences, result: parser_chunks_unjoined(fenced_statements.move())}
     }
     if marker_scopes.len() > 0 {
         file_end: source_end + 1
@@ -1125,7 +1119,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
         loop chunk in 0..<chunk_count {
             if chosen_by_chunk[chunk].len() > 0 {
                 permit := slots[chunk].guard_edit()
-                permit.value.chosen_heads = chosen_by_chunk[chunk].copy()
+                compiler_transfer_rows<Int>(permit.value.chosen_heads, chosen_by_chunk[chunk])
             }
         }
     }
@@ -1138,7 +1132,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     total_blocks := 0
     total_elses := 0
     total_debug := 0
-    seen_file_cap := false
+    file_cap := ModuleCap?{None}
     any_reexport := false
     loop slot in slots {
         permit: slot.guard_edit()
@@ -1147,7 +1141,9 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
             if diagnostic.severity == DIAGNOSTIC_ERROR -> failed = true
         }
         if output.program.file_cap != None {
-            if seen_file_cap -> failed = true else -> seen_file_cap = true
+            if file_cap != None -> failed = true
+            file_cap = output.program.file_cap.move()
+            output.program.file_cap = None
         }
         if output.has_reexport -> any_reexport = true
         total_imports += output.program.imports.len()
@@ -1158,9 +1154,10 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
         outputs.push(output.move())
     }
     if failed {
-        return ParserChunksOutcome{ok: false, fences: false, result: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}}
+        return ParserChunksOutcome{ok: false, fences: false, result: parser_chunks_unjoined(fenced_statements.move())}
     }
     program := ast_program()
+    program.file_cap = file_cap.move()
     program.has_scope_member = false
     program.has_task_spawn = false
     if total_imports > 0 -> program.imports.try_reserve(total_imports) ?? panic("reserve failed")
@@ -1179,7 +1176,6 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     loop index in 0..<outputs.len() {
         if outputs[index].has_scope_member -> program.has_scope_member = true
         if outputs[index].has_task_spawn -> program.has_task_spawn = true
-        if outputs[index].program.file_cap != None -> program.file_cap = outputs[index].program.file_cap.copy()
         compiler_transfer_rows<ImportDecl>(program.imports, outputs[index].program.imports)
         compiler_transfer_rows<Item>(program.items, outputs[index].program.items)
         compiler_transfer_rows<Stmt>(program.script_body, outputs[index].program.script_body)
@@ -1201,7 +1197,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
         program.applied_rules.push(application.copy())
         program.rule_facts.push(application)
     }
-    program.fenced_statements = fenced_statements
+    program.fenced_statements = fenced_statements.move()
     program.used_import_names = parser_reduce_used_import_names(program.imports, program.items, outputs)
     if any_reexport {
         program.items = parser_reexport_declarations(program.items.move(), program.imports)
@@ -1211,6 +1207,14 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
         parser_state_marker_migration_from_sites(program, state_marker_sites.move(), source, diagnostics)
     }
     ParserChunksOutcome{ok: true, fences: false, result: ParseResult{program: program.move(), diagnostics: diagnostics.move()}}
+}
+
+// The result of chunks that didn't join: no program, only the fenced
+// statements given back to the caller's one-thread parse.
+parser_chunks_unjoined: fn(fenced: &&[FencedStatement]) -> ParseResult {
+    program := ast_program()
+    program.fenced_statements = fenced.move()
+    ParseResult{program: program.move(), diagnostics: [Diagnostic]{}}
 }
 
 // Parses the fence-expanded stream as the chunks `bounds` names, on one
@@ -1230,12 +1234,48 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
         slots.push(Shared{ParserChunkSlot{index: chunk, is_last: chunk + 1 == chunk_count, tok_start: bounds[chunk], tok_end: bounds[chunk + 1], byte_start: byte_bounds[chunk], byte_end: byte_bounds[chunk + 1], line_idx_start: line_lo, line_idx_end: line_hi, needs_colon: false, prepared: [ParserChunkPrepared]{}, chosen_heads: [Int]{}, outputs: [ParserChunkOutput]{}}})
     }
     _ := parser_prepare_sliced_slots(tokens, owned_tables, source, line_starts, false, slots, 0)
-    outcome := parser_finish_prepared_slots(slots, source, source_end, allow_environment_reads, lexer_diagnostics, prepared.fenced_statements.copy())
+    outcome := parser_finish_prepared_slots(slots, source, source_end, allow_environment_reads, lexer_diagnostics, prepared.fenced_statements.move())
     if outcome.ok -> return outcome.result.move()
     // Recovery after an error skips to the next plausible item, which can
     // lie past the chunk's end: the one-thread parse owns every diagnostic.
+    prepared.fenced_statements = outcome.result.program.fenced_statements.move()
     prepared.tokens = tokens.move()
     parser_parse_prepared(prepared, lexer_diagnostics, source_end, line_starts, source, allow_environment_reads, owned_tables.move())
+}
+
+// The module roots `imports` read, each once, into `used`, and the names the
+// imports and the body-less modules of `items` bind, into `candidates`; the
+// span of each of those declarations goes to `spans`.
+parser_import_roots: fn(imports: [ImportDecl], items: [Item], used: &[String], candidates: &[String], spans: &[Span]) Never! {
+    // The module roots read so far, by id in a table of their own (a root
+    // may be a dotted path no token spells): `rooted[id]` once `used` has it.
+    roots := name_table_sized(16)
+    rooted := [Bool]{}
+    loop declaration in imports {
+        spans.push(declaration.span)
+        if declaration.kind == {
+            .Unqualified(module_alias, _, imported_items, _, _) -> {
+                root: name_index(name_intern(roots, module_alias))
+                loop rooted.len() <= root -> rooted.push(false)
+                if !rooted[root] {
+                    rooted[root] = true
+                    used.push(module_alias.copy())
+                }
+                loop item in imported_items {
+                    parts: item.original.split(".").to_list()
+                    candidates.push(item.alias ?? parts[parts.len() - 1])
+                }
+            }
+            .File(_, _) | .Module(_, _) -> candidates.push(declaration.alias)
+        }
+    }
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if definition.body != None -> next
+            spans.push(definition.span)
+            candidates.push(definition.name)
+        }
+    }
 }
 
 // L0103 an import's local name is read when the file spells
@@ -1246,36 +1286,8 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
 parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
     candidates := [String]{}
     used := [String]{}
-    // The module roots read so far, by id in a table of their own (a root
-    // may be a dotted path no token spells): `rooted[id]` once `used` has it.
-    roots := name_table_sized(16)
-    rooted := [Bool]{}
     import_spans := [Span]{}
-    loop declaration in imports {
-        import_spans.push(declaration.span)
-        if declaration.kind == {
-            .Unqualified(module_alias, _, items, _, _) -> {
-                root: name_index(name_intern(roots, module_alias))
-                loop rooted.len() <= root -> rooted.push(false)
-                if !rooted[root] {
-                    rooted[root] = true
-                    used.push(module_alias.copy())
-                }
-                loop item in items {
-                    parts: item.original.split(".").to_list()
-                    candidates.push(item.alias ?? parts[parts.len() - 1])
-                }
-            }
-            .File(_, _) | .Module(_, _) -> candidates.push(declaration.alias)
-        }
-    }
-    loop item in program_items {
-        if item == .CodeModule(definition) {
-            if definition.body != None -> next
-            import_spans.push(definition.span)
-            candidates.push(definition.name)
-        }
-    }
+    parser_import_roots(imports, program_items, used, candidates, import_spans)
     if candidates.len() == 0 {
         used.sort()
         return used
