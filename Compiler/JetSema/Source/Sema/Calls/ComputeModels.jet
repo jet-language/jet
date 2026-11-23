@@ -23,6 +23,7 @@ use jet_foundation.[
     TFieldRef,
     TupleField,
     Type,
+    type_none,
     TypeTupleField,
     UnOp,
     ast_binding,
@@ -165,6 +166,7 @@ sema_call_try_compute_alias: fn(module_name: String, member: String, target: Sem
     scopes.ownership_call_depth -= 1
     checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     checked.ty = sema_call_compute_alias_type(member, args) ?? panic("core.compute.{member} has an alias type")
+    checked.type_id = type_none()
     return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, diagnostics)}
 }
 

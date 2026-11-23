@@ -75,6 +75,9 @@ use jet_foundation.[
     TVisibility,
     TWebParamReconstruction,
     Type,
+    TypeID,
+    type_id_well_known,
+    type_none,
     Variant,
     ViewProvenanceMap,
     WebBucket,
@@ -389,6 +392,7 @@ TExpr: struct {
     kind: TExprKind,
     span: Span,
     id: Int{-1},
+    type_id: TypeID{type_none()},
 }
 
 // Gives `value` a type other than the one its checked source node has (a
@@ -397,6 +401,7 @@ TExpr: struct {
 tree_expr_retype: fn(value: &TExpr, ty: Type) Never! {
     value.ty = ty
     value.id = AST_NODE_GENERATED
+    value.type_id = type_id_well_known(ty)
 }
 
 TStructFieldValue: struct {

@@ -53,211 +53,209 @@ sema_type_def_instance_type: fn(def: TTypeDef, args: [Type], written: Type) -> T
 // them (sema_instance_types).
 sema_body_fact_types: fn(tree: &BodyTree, params: [BodyParameter], ret: Type?, kind: TFuncKind, failure: TFailureCarrier) Never! {
     loop parameter in params {
-        sema_fact_type(tree, parameter.ty)
-        sema_fact_local(tree, parameter.local)
+        sema_fact_type(tree.types, parameter.ty)
+        sema_fact_local(tree.types, parameter.local)
     }
-    if ret == .Val(returned) -> sema_fact_type(tree, returned)
+    if ret == .Val(returned) -> sema_fact_type(tree.types, returned)
     if kind == {
         .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> {
-            sema_fact_type(tree, owner_type)
+            sema_fact_type(tree.types, owner_type)
         }
         .TopLevel -> {}
     }
-    sema_fact_failure(tree, failure)
-    nodes: tree.nodes.copy()
-    loop node in nodes -> sema_fact_node(tree, node.kind)
-    stmts: tree.stmts.copy()
-    loop statement in stmts -> sema_fact_stmt(tree, statement)
+    sema_fact_failure(tree.types, failure)
+    loop index in 0..<tree.nodes.len() -> sema_fact_node(tree.types, tree.nodes[index].kind)
+    loop index in 0..<tree.stmts.len() -> sema_fact_stmt(tree.types, tree.stmts[index])
 }
 
 // A checked function's return `ret` and failure carrier `failure`, set after
 // its tree was flattened (sema_failure_reconcile_infallible), published in
 // its tree's types like the rest of its signature (sema_body_fact_types).
 sema_body_fact_return: fn(tree: &BodyTree, ret: Type, failure: TFailureCarrier) Never! {
-    sema_fact_type(tree, ret)
-    sema_fact_failure(tree, failure)
+    sema_fact_type(tree.types, ret)
+    sema_fact_failure(tree.types, failure)
 }
 
-sema_fact_type: fn(tree: &BodyTree, ty: Type) Never! { _: type_table_intern(tree.types, ty) }
+sema_fact_type: fn(types: &TypeTable, ty: Type) Never! { _: type_table_intern(types, ty) }
 
-sema_fact_types: fn(tree: &BodyTree, types: [Type]) Never! {
-    loop ty in types -> sema_fact_type(tree, ty)
+sema_fact_types: fn(types: &TypeTable, rows: [Type]) Never! {
+    loop ty in rows -> sema_fact_type(types, ty)
 }
 
-sema_fact_local: fn(tree: &BodyTree, local: TLocal) Never! {
-    sema_fact_type(tree, local.ty)
-    if local.persist_ty == .Val(persisted) -> sema_fact_type(tree, persisted)
-    if local.string_bytes_source == .Val(source) -> sema_fact_local(tree, source)
+sema_fact_local: fn(types: &TypeTable, local: TLocal) Never! {
+    sema_fact_type(types, local.ty)
+    if local.persist_ty == .Val(persisted) -> sema_fact_type(types, persisted)
+    if local.string_bytes_source == .Val(source) -> sema_fact_local(types, source)
 }
 
-sema_fact_failure: fn(tree: &BodyTree, failure: TFailureCarrier) Never! {
+sema_fact_failure: fn(types: &TypeTable, failure: TFailureCarrier) Never! {
     if failure == {
         .Result(success, error) -> {
-            sema_fact_type(tree, success)
-            sema_fact_type(tree, error)
+            sema_fact_type(types, success)
+            sema_fact_type(types, error)
         }
-        .Optional(value) | .Diverges(value) -> { sema_fact_type(tree, value) }
+        .Optional(value) | .Diverges(value) -> { sema_fact_type(types, value) }
         .Infallible -> {}
     }
 }
 
-sema_fact_args: fn(tree: &BodyTree, args: [BodyCallArg]) Never! {
+sema_fact_args: fn(types: &TypeTable, args: [BodyCallArg]) Never! {
     loop arg in args {
-        if arg.widen_to_union == .Val(union) -> sema_fact_type(tree, union)
-        if arg.box_as_trait == .Val(target) -> sema_fact_type(tree, target)
+        if arg.widen_to_union == .Val(union) -> sema_fact_type(types, union)
+        if arg.box_as_trait == .Val(target) -> sema_fact_type(types, target)
     }
 }
 
-sema_fact_captures: fn(tree: &BodyTree, captures: [TCapture]) Never! {
+sema_fact_captures: fn(types: &TypeTable, captures: [TCapture]) Never! {
     loop capture in captures {
-        sema_fact_type(tree, capture.ty)
-        sema_fact_local(tree, capture.local)
+        sema_fact_type(types, capture.ty)
+        sema_fact_local(types, capture.local)
     }
 }
 
-sema_fact_lambda: fn(tree: &BodyTree, lambda: BodyLambda) Never! {
-    sema_fact_types(tree, lambda.param_types)
-    if lambda.ret == .Val(returned) -> sema_fact_type(tree, returned)
-    sema_fact_captures(tree, lambda.captures)
-    sema_fact_failure(tree, lambda.failure_carrier)
+sema_fact_lambda: fn(types: &TypeTable, lambda: BodyLambda) Never! {
+    sema_fact_types(types, lambda.param_types)
+    if lambda.ret == .Val(returned) -> sema_fact_type(types, returned)
+    sema_fact_captures(types, lambda.captures)
+    sema_fact_failure(types, lambda.failure_carrier)
 }
 
-sema_fact_pattern: fn(tree: &BodyTree, pattern: BodyPattern) Never! {
-    loop binding in pattern.bindings -> sema_fact_type(tree, binding.ty)
+sema_fact_pattern: fn(types: &TypeTable, pattern: BodyPattern) Never! {
+    loop binding in pattern.bindings -> sema_fact_type(types, binding.ty)
 }
 
-sema_fact_condition: fn(tree: &BodyTree, condition: BodyIfCond) Never! {
+sema_fact_condition: fn(types: &TypeTable, condition: BodyIfCond) Never! {
     if condition == {
         .And(left, right) -> {
-            sema_fact_condition(tree, left)
-            sema_fact_condition(tree, right)
+            sema_fact_condition(types, left)
+            sema_fact_condition(types, right)
         }
-        .IfLet(pattern, _) -> { sema_fact_pattern(tree, pattern) }
+        .IfLet(pattern, _) -> { sema_fact_pattern(types, pattern) }
         .Plain(_) -> {}
     }
 }
 
-sema_fact_contract_result: fn(tree: &BodyTree, result: TContractResult) Never! {
-    sema_fact_type(tree, result.carrier_ty)
-    sema_fact_type(tree, result.binding_ty)
-    sema_fact_local(tree, result.carrier_local)
-    sema_fact_local(tree, result.binding_local)
+sema_fact_contract_result: fn(types: &TypeTable, result: TContractResult) Never! {
+    sema_fact_type(types, result.carrier_ty)
+    sema_fact_type(types, result.binding_ty)
+    sema_fact_local(types, result.carrier_local)
+    sema_fact_local(types, result.binding_local)
 }
 
-sema_fact_node: fn(tree: &BodyTree, kind: NodeKind) Never! {
+sema_fact_node: fn(types: &TypeTable, kind: NodeKind) Never! {
     if kind == {
-        .Local(local) -> { sema_fact_local(tree, local) }
+        .Local(local) -> { sema_fact_local(types, local) }
         .Call(_, type_args, args) -> {
-            sema_fact_types(tree, type_args)
-            sema_fact_args(tree, args)
+            sema_fact_types(types, type_args)
+            sema_fact_args(types, args)
         }
         .IndirectCall(_, type_args, args, signature) -> {
-            sema_fact_types(tree, type_args)
-            sema_fact_args(tree, args)
-            sema_fact_type(tree, signature)
+            sema_fact_types(types, type_args)
+            sema_fact_args(types, args)
+            sema_fact_type(types, signature)
         }
         .MethodCall(_, _, type_args, args) -> {
-            sema_fact_types(tree, type_args)
-            sema_fact_args(tree, args)
+            sema_fact_types(types, type_args)
+            sema_fact_args(types, args)
         }
         .StaticCall(_, owner_type, _, type_args, args) -> {
-            if owner_type == .Val(owner) -> sema_fact_type(tree, owner)
-            sema_fact_types(tree, type_args)
-            sema_fact_args(tree, args)
+            if owner_type == .Val(owner) -> sema_fact_type(types, owner)
+            sema_fact_types(types, type_args)
+            sema_fact_args(types, args)
         }
         .CoreCall(_, _, _, type_args, _, fallibility) -> {
-            sema_fact_types(tree, type_args)
-            sema_fact_failure(tree, fallibility)
+            sema_fact_types(types, type_args)
+            sema_fact_failure(types, fallibility)
         }
-        .AllocNew(_, args) -> { sema_fact_args(tree, args) }
-        .TraitBox(_, target) -> { sema_fact_type(tree, target) }
+        .AllocNew(_, args) -> { sema_fact_args(types, args) }
+        .TraitBox(_, target) -> { sema_fact_type(types, target) }
         .List(_, trait_coercion) -> {
-            if trait_coercion == .Val(target) -> sema_fact_type(tree, target)
+            if trait_coercion == .Val(target) -> sema_fact_type(types, target)
         }
-        .PtrFromAddr(_, element) -> { sema_fact_type(tree, element) }
-        .TypeTest(subject, _) -> { sema_fact_type(tree, subject) }
-        .TypePath(ty) -> { sema_fact_type(tree, ty) }
-        .TraitConst(owner, _, _) -> { sema_fact_type(tree, owner) }
-        .NumberParam(param) -> { sema_fact_type(tree, param) }
+        .PtrFromAddr(_, element) -> { sema_fact_type(types, element) }
+        .TypeTest(subject, _) -> { sema_fact_type(types, subject) }
+        .TypePath(ty) -> { sema_fact_type(types, ty) }
+        .TraitConst(owner, _, _) -> { sema_fact_type(types, owner) }
+        .NumberParam(param) -> { sema_fact_type(types, param) }
         .CopyPhase(_, _, _, _) -> {}
-        .Field(_, field) -> { sema_fact_type(tree, field.ty) }
+        .Field(_, field) -> { sema_fact_type(types, field.ty) }
         .StructLit(fields) -> {
-            loop field in fields -> sema_fact_type(tree, field.field.ty)
+            loop field in fields -> sema_fact_type(types, field.field.ty)
         }
         .SharedGuardMap(_, path, _) -> {
-            loop field in path -> sema_fact_type(tree, field.ty)
+            loop field in path -> sema_fact_type(types, field.ty)
         }
         .SharedGuardSplit(_, first, second, _) -> {
-            loop field in first -> sema_fact_type(tree, field.ty)
-            loop field in second -> sema_fact_type(tree, field.ty)
+            loop field in first -> sema_fact_type(types, field.ty)
+            loop field in second -> sema_fact_type(types, field.ty)
         }
-        .SharedGuardWait(_, _, predicate) -> { sema_fact_lambda(tree, predicate) }
+        .SharedGuardWait(_, _, predicate) -> { sema_fact_lambda(types, predicate) }
         .Try(_, conversion, failure) -> {
             if conversion == .Typed(_, source, target) {
-                sema_fact_type(tree, source)
-                sema_fact_type(tree, target)
+                sema_fact_type(types, source)
+                sema_fact_type(types, target)
             }
             if conversion == .TypedIntoUnion(_, source, target, _, _) {
-                sema_fact_type(tree, source)
-                sema_fact_type(tree, target)
+                sema_fact_type(types, source)
+                sema_fact_type(types, target)
             }
-            sema_fact_failure(tree, failure)
+            sema_fact_failure(types, failure)
         }
         .TryWithContext(_, _, conversion, _, _, _) -> {
             if conversion == .Typed(_, source, target) {
-                sema_fact_type(tree, source)
-                sema_fact_type(tree, target)
+                sema_fact_type(types, source)
+                sema_fact_type(types, target)
             }
             if conversion == .TypedIntoUnion(_, source, target, _, _) {
-                sema_fact_type(tree, source)
-                sema_fact_type(tree, target)
+                sema_fact_type(types, source)
+                sema_fact_type(types, target)
             }
         }
-        .Lambda(value) -> { sema_fact_lambda(tree, value) }
+        .Lambda(value) -> { sema_fact_lambda(types, value) }
         .RawAddressOf(place) -> {
-            if place == .Local(local) -> sema_fact_local(tree, local)
+            if place == .Local(local) -> sema_fact_local(types, local)
         }
         .HostCall(call) -> {
             if call == {
-                .CellGuardProject(_, _, result_type, _, _) -> { sema_fact_type(tree, result_type) }
-                .NumericBounds(ty, _) -> sema_fact_type(tree, ty)
+                .CellGuardProject(_, _, result_type, _, _) -> { sema_fact_type(types, result_type) }
+                .NumericBounds(ty, _) -> sema_fact_type(types, ty)
                 .Method(_, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) | .ContextGet(_, _, _) | .DebugTrace(_) -> {}
             }
         }
         .HandleMethod(_, operation, _) -> {
-            if operation == .DynDecode(ty, _) -> sema_fact_type(tree, ty)
+            if operation == .DynDecode(ty, _) -> sema_fact_type(types, ty)
         }
         .CoreClosureCall(closure) -> {
             if closure == {
                 .Spawn(_, _, _, executable) | .Guard(executable) | .OnCommit(_, executable) | .OnRollback(_, executable) | .UIClickSlot(executable) | .UIDropSlot(executable) | .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> {
-                    sema_fact_lambda(tree, executable)
+                    sema_fact_lambda(types, executable)
                 }
             }
         }
         .FnValue(value) -> {
             if value == {
                 .NamedFn(_, lambda) -> {
-                    if lambda == .Val(executable) -> sema_fact_lambda(tree, executable)
+                    if lambda == .Val(executable) -> sema_fact_lambda(types, executable)
                 }
                 .Policy(fn_type, policy_args, _, _, captures, _) -> {
-                    sema_fact_type(tree, fn_type)
-                    sema_fact_args(tree, policy_args)
-                    sema_fact_captures(tree, captures)
+                    sema_fact_type(types, fn_type)
+                    sema_fact_args(types, policy_args)
+                    sema_fact_captures(types, captures)
                 }
-                .Call(_, args) -> { sema_fact_args(tree, args) }
+                .Call(_, args) -> { sema_fact_args(types, args) }
                 .Send(_) -> {}
             }
         }
-        .IfExpr(condition, _, _, _, _) -> { sema_fact_condition(tree, condition) }
-        .PatternMatches(_, pattern) -> { sema_fact_pattern(tree, pattern) }
+        .IfExpr(condition, _, _, _, _) -> { sema_fact_condition(types, condition) }
+        .PatternMatches(_, pattern) -> { sema_fact_pattern(types, pattern) }
         .OrFallback(_, _, ambient_err) -> {
-            if ambient_err == .Val(local) -> sema_fact_local(tree, local)
+            if ambient_err == .Val(local) -> sema_fact_local(types, local)
         }
-        .OptMethodCall(_, binding, _, _) -> { sema_fact_local(tree, binding) }
+        .OptMethodCall(_, binding, _, _) -> { sema_fact_local(types, binding) }
         .BuiltinMethod(_, operation, _) -> {
             if operation == {
-                .Zip(_, _, _, _, _, field_types) -> { sema_fact_types(tree, field_types) }
-                .OptionZip(element) -> sema_fact_type(tree, element)
+                .Zip(_, _, _, _, _, field_types) -> { sema_fact_types(types, field_types) }
+                .OptionZip(element) -> sema_fact_type(types, element)
                 .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .StringEdit(_) | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
             }
         }
@@ -265,48 +263,48 @@ sema_fact_node: fn(tree: &BodyTree, kind: NodeKind) Never! {
     }
 }
 
-sema_fact_stmt: fn(tree: &BodyTree, statement: StmtKind) Never! {
+sema_fact_stmt: fn(types: &TypeTable, statement: StmtKind) Never! {
     if statement == {
-        .ContractScope(_, _, _, result, _) -> { sema_fact_contract_result(tree, result) }
+        .ContractScope(_, _, _, result, _) -> { sema_fact_contract_result(types, result) }
         .Let(local, let_ty, _, _, _, _) -> {
-            sema_fact_local(tree, local)
-            if let_ty == .Annotated(ty, _) -> sema_fact_type(tree, ty)
+            sema_fact_local(types, local)
+            if let_ty == .Annotated(ty, _) -> sema_fact_type(types, ty)
         }
-        .RefutableBind(pattern, _, _, _) -> sema_fact_pattern(tree, pattern)
+        .RefutableBind(pattern, _, _, _) -> sema_fact_pattern(types, pattern)
         .TupleDestructure(temp, _, _, binds, _) | .StructDestructure(temp, _, _, binds, _) -> {
-            sema_fact_local(tree, temp)
-            loop bind in binds -> sema_fact_local(tree, bind.local)
+            sema_fact_local(types, temp)
+            loop bind in binds -> sema_fact_local(types, bind.local)
         }
         .ListDestructure(temp, _, _, _, elements, _) -> {
-            sema_fact_local(tree, temp)
-            loop element in elements -> sema_fact_local(tree, element)
+            sema_fact_local(types, temp)
+            loop element in elements -> sema_fact_local(types, element)
         }
         .Assign(place, _, _, _, _) -> {
-            if place == .Local(local) -> sema_fact_local(tree, local)
+            if place == .Local(local) -> sema_fact_local(types, local)
         }
-        .ForRange(_, local, _, _, _, _, _, _, _) -> { sema_fact_local(tree, local) }
-        .Range(_, variable, _, _, _, _, _, _, _, _) -> { sema_fact_local(tree, variable) }
-        .TaskGroup(group, _, _, _) -> { sema_fact_local(tree, group) }
-        .If(condition, _, _, _, _) -> sema_fact_condition(tree, condition)
+        .ForRange(_, local, _, _, _, _, _, _, _) -> { sema_fact_local(types, local) }
+        .Range(_, variable, _, _, _, _, _, _, _, _) -> { sema_fact_local(types, variable) }
+        .TaskGroup(group, _, _, _) -> { sema_fact_local(types, group) }
+        .If(condition, _, _, _, _) -> sema_fact_condition(types, condition)
         .Match(_, arms, _, _) | .EnumMatch(_, arms, _, _, _) -> {
-            loop arm in arms -> sema_fact_pattern(tree, arm.pattern)
+            loop arm in arms -> sema_fact_pattern(types, arm.pattern)
         }
         .ForIn(_, variable, variable_two, _, _, _, method_kind, _, _, _, _, _) -> {
-            sema_fact_local(tree, variable)
-            if variable_two == .Val(second) -> sema_fact_local(tree, second)
+            sema_fact_local(types, variable)
+            if variable_two == .Val(second) -> sema_fact_local(types, second)
             if method_kind == .Val(method) {
-                if method == .Iterable(_, _, _, _, item_type) -> sema_fact_type(tree, item_type)
+                if method == .Iterable(_, _, _, _, item_type) -> sema_fact_type(types, item_type)
             }
         }
-        .Reactive(executable, _) -> { sema_fact_lambda(tree, executable) }
-        .Layout(handle, _, _, _) -> { sema_fact_local(tree, handle) }
+        .Reactive(executable, _) -> { sema_fact_lambda(types, executable) }
+        .Layout(handle, _, _, _) -> { sema_fact_local(types, handle) }
         .Transact(handle, snapshots, stm, _, _) -> {
-            if handle == .Val(local) -> sema_fact_local(tree, local)
+            if handle == .Val(local) -> sema_fact_local(types, local)
             loop snapshot in snapshots {
-                sema_fact_local(tree, snapshot.local)
-                if snapshot.rollback_type == .Val(rollback) -> sema_fact_type(tree, rollback)
+                sema_fact_local(types, snapshot.local)
+                if snapshot.rollback_type == .Val(rollback) -> sema_fact_type(types, rollback)
             }
-            if stm == .Val(local) -> sema_fact_local(tree, local)
+            if stm == .Val(local) -> sema_fact_local(types, local)
         }
         .Contract(_) | .CountedLoop(_, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .RangeSwitch(_, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Region(_, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
     }

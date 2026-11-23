@@ -508,7 +508,7 @@ sema_call_reflection_trait_holders: fn(graph: SemaRegistrationGraph, bounds: [St
     if bounds.len() != 1 -> return None
     leaf: sema_call_reflection_leaf_name(bounds[0])
     holders := SemaCallTraitHolders{impls: [SemaRegistrationRowRef]{}, nominals: [SemaRegistrationRowRef]{}}
-    if graph.impl_trait_name_slots.get(leaf) == .Val(slot) {
+    if sema_registration_impl_trait_name_slot(graph, leaf) == .Val(slot) {
         loop reference in graph.impl_trait_name_buckets[slot] {
             holders.impls.push(SemaRegistrationRowRef{module_index: reference.module_index, row: reference.row})
         }

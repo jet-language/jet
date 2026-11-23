@@ -73,6 +73,9 @@ TypeColumns: struct {
     a: [U32],
     b: [U32],
     side: [U32],
+    // Each row's canonical identity TypeID (ignoring Map key_span, non-identity
+    // tags, and Fn effect/provenance metadata), so type_id_identity_equal is O(1).
+    canonical: [U32],
     // Row `n`'s children are children[first[n]..<first[n] + count[n]].
     first: [Int],
     count: [Int],
@@ -125,6 +128,21 @@ InternerMarks: struct {
     functions: Int{0},
 }
 
+// A zero-copy worker-local delta over an immutable shared `Interner`:
+// ids below `base` live in the shared interner (read directly with zero copy);
+// ids at or above `base` live in this delta at `(id - base)`.
+InternerDelta: struct {
+    base: InternerMarks,
+    names: NameTable,
+    types: TypeColumns,
+    key_spans: TypeSides<Span>,
+    ranges: TypeSides<TypeRange>,
+    measures: TypeSides<Measure>,
+    dimensions: TypeSides<Dimension>,
+    tags: TypeSides<TagMarker>,
+    functions: TypeSides<Type>,
+}
+
 // The ids of a worker's own rows in the compilation's interner after
 // interner_merge, by own row (row - the fork's mark).
 InternerRemap: struct {
@@ -142,18 +160,18 @@ TYPE_SIDES_INITIAL_SLOTS: 64
 // constant (TYPE_INT and the rest) without the interner.
 interner: fn() -> Interner Never! {
     result := Interner{names: name_table_compilation(), types: type_columns(), key_spans: type_sides(), ranges: type_sides(), measures: type_sides(), dimensions: type_sides(), tags: type_sides(), functions: type_sides()}
-    _: type_intern(result, TypeKind.Int, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Float, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Bool, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.String, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Char, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Float32, U32{0}, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Named, NAME_UNIT.id, U32{0}, U32{0}, [U32]{})
-    _: type_intern(result, TypeKind.Named, NAME_NEVER.id, U32{0}, U32{0}, [U32]{})
+    _: type_intern_scalar(result, TypeKind.Int, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Float, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Bool, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.String, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Char, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Float32, U32{0}, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Named, NAME_UNIT.id, U32{0}, U32{0})
+    _: type_intern_scalar(result, TypeKind.Named, NAME_NEVER.id, U32{0}, U32{0})
     loop signed in 0..<2 {
         bits := 8
         loop bits <= 64 {
-            _: type_intern(result, TypeKind.IntN, U32{1 - signed}, U32{bits}, U32{0}, [U32]{})
+            _: type_intern_scalar(result, TypeKind.IntN, U32{1 - signed}, U32{bits}, U32{0})
             bits *= 2
         }
     }
@@ -193,15 +211,38 @@ TYPE_U32: TypeID{id: U32{15}}
 TYPE_U64: TypeID{id: U32{16}}
 
 type_columns: fn() -> TypeColumns Never! {
+    type_columns_sized(TYPE_COLUMNS_INITIAL_SLOTS)
+}
+
+type_columns_sized: fn(initial_slots: Int) -> TypeColumns Never! {
+    capacity := 2
+    loop capacity < initial_slots -> capacity *= 2
     slots := [Int]{}
-    loop _ in 0..<TYPE_COLUMNS_INITIAL_SLOTS -> slots.push(0)
+    slots.try_reserve(capacity) ?? panic("reserve failed")
+    loop _ in 0..<capacity -> slots.push(0)
     // Row 0 is no type.
-    TypeColumns{kind: [U8]{U8{0}}, a: [U32]{U32{0}}, b: [U32]{U32{0}}, side: [U32]{U32{0}}, first: [Int]{0}, count: [Int]{0}, children: [U32]{}, hashes: [Int]{0}, slots: slots}
+    TypeColumns{kind: [U8]{U8{0}}, a: [U32]{U32{0}}, b: [U32]{U32{0}}, side: [U32]{U32{0}}, canonical: [U32]{U32{0}}, first: [Int]{0}, count: [Int]{0}, children: [U32]{}, hashes: [Int]{0}, slots: slots}
+}
+
+type_columns_empty_sized: fn(initial_slots: Int) -> TypeColumns Never! {
+    capacity := 2
+    loop capacity < initial_slots -> capacity *= 2
+    slots := [Int]{}
+    slots.try_reserve(capacity) ?? panic("reserve failed")
+    loop _ in 0..<capacity -> slots.push(0)
+    TypeColumns{kind: [U8]{}, a: [U32]{}, b: [U32]{}, side: [U32]{}, canonical: [U32]{}, first: [Int]{}, count: [Int]{}, children: [U32]{}, hashes: [Int]{}, slots: slots}
 }
 
 type_sides: fn<T>() -> TypeSides<T> Never! {
+    type_sides_sized(TYPE_SIDES_INITIAL_SLOTS)
+}
+
+type_sides_sized: fn<T>(initial_slots: Int) -> TypeSides<T> Never! {
+    capacity := 2
+    loop capacity < initial_slots -> capacity *= 2
     slots := [Int]{}
-    loop _ in 0..<TYPE_SIDES_INITIAL_SLOTS -> slots.push(0)
+    slots.try_reserve(capacity) ?? panic("reserve failed")
+    loop _ in 0..<capacity -> slots.push(0)
     TypeSides<T>{rows: [T]{}, hashes: [Int]{}, slots: slots}
 }
 
@@ -213,8 +254,77 @@ interner_fork: fn(shared: Interner) -> Interner Never! {
     result
 }
 
+// A tiny empty interner for graphless fallback slots that are unused when a
+// registration graph owns the live Interner.
+interner_empty: fn() -> Interner Never! {
+    Interner{names: name_table_sized(2), types: type_columns_sized(2), key_spans: type_sides_sized(2), ranges: type_sides_sized(2), measures: type_sides_sized(2), dimensions: type_sides_sized(2), tags: type_sides_sized(2), functions: type_sides_sized(2)}
+}
+
+// A tiny empty delta for default-constructed check contexts before forking.
+interner_delta_empty: fn() -> InternerDelta Never! {
+    InternerDelta{
+        base: InternerMarks{},
+        names: name_table_sized(2),
+        types: type_columns_empty_sized(2),
+        key_spans: type_sides_sized(2),
+        ranges: type_sides_sized(2),
+        measures: type_sides_sized(2),
+        dimensions: type_sides_sized(2),
+        tags: type_sides_sized(2),
+        functions: type_sides_sized(2),
+    }
+}
+
+// A zero-copy worker-local delta over `shared`: copies 0 bytes from `shared`.
+interner_fork_delta: fn(shared: Interner) -> InternerDelta Never! {
+    InternerDelta{
+        base: interner_marks(shared),
+        names: name_table_sized(16),
+        types: type_columns_empty_sized(32),
+        key_spans: type_sides_sized(4),
+        ranges: type_sides_sized(4),
+        measures: type_sides_sized(4),
+        dimensions: type_sides_sized(4),
+        tags: type_sides_sized(4),
+        functions: type_sides_sized(4),
+    }
+}
+
 interner_marks: fn(table: Interner) -> InternerMarks Never! {
     InternerMarks{names: table.names.texts.len(), types: table.types.kind.len(), key_spans: table.key_spans.rows.len(), ranges: table.ranges.rows.len(), measures: table.measures.rows.len(), dimensions: table.dimensions.rows.len(), tags: table.tags.rows.len(), functions: table.functions.rows.len()}
+}
+
+// Constant well-known TypeID for scalar primitives (`TYPE_INT`..`TYPE_U64`)
+// in O(1) without touching any Interner; `type_none()` for every other type.
+type_id_well_known: fn(ty: Type) -> TypeID Never! {
+    if ty == {
+        .Int -> return TYPE_INT
+        .Float -> return TYPE_FLOAT
+        .Bool -> return TYPE_BOOL
+        .String -> return TYPE_STRING
+        .Char -> return TYPE_CHAR
+        .Float32 -> return TYPE_FLOAT32
+        .Named(name) -> {
+            if name == "Unit" -> return TYPE_UNIT
+            if name == "Never" -> return TYPE_NEVER
+            return type_none()
+        }
+        .IntN(signed, bits) -> {
+            if signed {
+                if bits == 8 -> return TYPE_I8
+                if bits == 16 -> return TYPE_I16
+                if bits == 32 -> return TYPE_I32
+                if bits == 64 -> return TYPE_I64
+            } else {
+                if bits == 8 -> return TYPE_U8
+                if bits == 16 -> return TYPE_U16
+                if bits == 32 -> return TYPE_U32
+                if bits == 64 -> return TYPE_U64
+            }
+            return type_none()
+        }
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return type_none()
+    }
 }
 
 type_none: fn() -> TypeID Never! { TypeID{id: U32{0}} }
@@ -319,6 +429,15 @@ type_kind_of_code: fn(code: U8) -> TypeKind Never! {
 
 type_hash_word: fn(hash: U32, word: U32) -> U32 Never! { wrapping((hash ~ word) * U32{0x01000193}) }
 
+type_row_hash_scalar: fn(kind: TypeKind, a: U32, b: U32, side: U32) -> Int Never! {
+    hash := type_hash_word(U32{0x811c9dc5}, U32{type_kind_code(kind)})
+    hash = type_hash_word(hash, a)
+    hash = type_hash_word(hash, b)
+    hash = type_hash_word(hash, side)
+    hash = type_hash_word(hash, U32{0})
+    Int{hash}
+}
+
 type_row_hash: fn(kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> Int Never! {
     hash := type_hash_word(U32{0x811c9dc5}, U32{type_kind_code(kind)})
     hash = type_hash_word(hash, a)
@@ -327,6 +446,11 @@ type_row_hash: fn(kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) ->
     hash = type_hash_word(hash, U32{children.len()})
     loop child in children -> hash = type_hash_word(hash, child)
     Int{hash}
+}
+
+// Whether row `row` of `table` is the 0-child row the operands give.
+type_row_equal_scalar: fn(table: TypeColumns, row: Int, hash: Int, kind_code: U8, a: U32, b: U32, side: U32) -> Bool Never! {
+    table.hashes[row] == hash && table.kind[row] == kind_code && table.a[row] == a && table.b[row] == b && table.side[row] == side && table.count[row] == 0
 }
 
 // Whether row `row` of `table` is the row the operands give.
@@ -340,6 +464,25 @@ type_row_equal: fn(table: TypeColumns, row: Int, hash: Int, kind: TypeKind, a: U
         if table.children[first + index] != child -> return false
     }
     true
+}
+
+// The slot of a 0-child row (whose type_row_hash_scalar is `hash`).
+type_slot_scalar: fn(table: TypeColumns, hash: Int, kind: TypeKind, a: U32, b: U32, side: U32) -> Int Never! {
+    mask: table.slots.len() - 1
+    hash_tag: hash & 0x3fffffff
+    kind_code: type_kind_code(kind)
+    slot := hash & mask
+    loop {
+        entry: table.slots[slot]
+        if entry == 0 -> break
+        if (entry >> 32) == hash_tag {
+            if type_row_equal_scalar(table, (entry & 0xffffffff) - 1, hash, kind_code, a, b, side) {
+                return slot
+            }
+        }
+        slot = (slot + 1) & mask
+    }
+    slot
 }
 
 // The slot of the row the operands give (whose type_row_hash is `hash`): the
@@ -361,9 +504,151 @@ type_slot: fn(table: TypeColumns, hash: Int, kind: TypeKind, a: U32, b: U32, sid
     slot
 }
 
+type_canonical_word: fn(table: Interner, word: U32) -> U32 Never! {
+    if word == 0 -> return U32{0}
+    table.types.canonical[Int{word}]
+}
+
+// Canonical identity TypeID for a newly inserted row `row`.
+type_compute_canonical: fn(table: &Interner, row: Int, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
+    none: U32{0}
+    if kind == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return U32{row}
+        .List | .Shared | .Option -> {
+            ca: type_canonical_word(table, a)
+            if ca == a -> return U32{row}
+            return type_intern_scalar(table, kind, ca, none, none).id
+        }
+        .Result -> {
+            ca: type_canonical_word(table, a)
+            cb: type_canonical_word(table, b)
+            if ca == a && cb == b -> return U32{row}
+            return type_intern_scalar(table, kind, ca, cb, none).id
+        }
+        .Case -> {
+            cb: type_canonical_word(table, b)
+            if cb == b -> return U32{row}
+            return type_intern_scalar(table, kind, a, cb, none).id
+        }
+        .Map -> {
+            ca: type_canonical_word(table, a)
+            cb: type_canonical_word(table, b)
+            if side == none && ca == a && cb == b -> return U32{row}
+            return type_intern_scalar(table, TypeKind.Map, ca, cb, none).id
+        }
+        .Tagged -> {
+            ca: type_canonical_word(table, a)
+            if side != none && !tag_is_identity_bearing(table.tags.rows[Int{side} - 1]) -> return ca
+            if ca == a -> return U32{row}
+            return type_intern_scalar(table, TypeKind.Tagged, ca, none, side).id
+        }
+        .FixedList | .InlineRange | .Quantity -> {
+            ca: type_canonical_word(table, a)
+            if ca == a -> return U32{row}
+            return type_intern_scalar(table, kind, ca, none, side).id
+        }
+        .Apply | .Union -> {
+            first: table.types.first[row]
+            count: table.types.count[row]
+            changed := false
+            loop index in 0..<count {
+                child: table.types.children[first + index]
+                if type_canonical_word(table, child) != child {
+                    changed = true
+                    break
+                }
+            }
+            if !changed -> return U32{row}
+            children := [U32]{}
+            loop index in 0..<count -> children.push(type_canonical_word(table, table.types.children[first + index]))
+            return type_intern(table, kind, a, none, none, children).id
+        }
+        .Tuple -> {
+            first: table.types.first[row]
+            count: table.types.count[row]
+            changed := false
+            loop index in 0..<count {
+                if index % 2 == 1 {
+                    child: table.types.children[first + index]
+                    if type_canonical_word(table, child) != child {
+                        changed = true
+                        break
+                    }
+                }
+            }
+            if !changed -> return U32{row}
+            children := [U32]{}
+            loop index in 0..<count {
+                child: table.types.children[first + index]
+                children.push(if index % 2 == 1 -> type_canonical_word(table, child) else -> child)
+            }
+            return type_intern(table, kind, none, none, none, children).id
+        }
+        .Fn -> {
+            first: table.types.first[row]
+            count: table.types.count[row]
+            ca: type_canonical_word(table, a)
+            canon_side := side
+            if side != none {
+                fn_ty: table.functions.rows[Int{side} - 1]
+                if fn_ty == .Fn(_, _, _, contract, metadata, _) {
+                    if contract == None && function_variadic_obligation(metadata) == None {
+                        canon_side = none
+                    }
+                }
+            }
+            changed := ca != a || canon_side != side
+            if !changed {
+                loop index in 0..<count {
+                    child: table.types.children[first + index]
+                    if type_canonical_word(table, child) != child {
+                        changed = true
+                        break
+                    }
+                }
+            }
+            if !changed -> return U32{row}
+            children := [U32]{}
+            loop index in 0..<count -> children.push(type_canonical_word(table, table.types.children[first + index]))
+            return type_intern(table, TypeKind.Fn, ca, none, canon_side, children).id
+        }
+    }
+}
+
+// Fast 0-child type interner: allocates no child list.
+type_intern_scalar: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
+    hash: type_row_hash_scalar(kind, a, b, side)
+    slot: type_slot_scalar(table.types, hash, kind, a, b, side)
+    entry: table.types.slots[slot]
+    if entry != 0 -> return TypeID{id: U32{(entry & 0xffffffff) - 1}}
+    row: table.types.kind.len()
+    table.types.kind.push(type_kind_code(kind))
+    table.types.a.push(a)
+    table.types.b.push(b)
+    table.types.side.push(side)
+    table.types.canonical.push(U32{row})
+    table.types.first.push(table.types.children.len())
+    table.types.count.push(0)
+    table.types.hashes.push(hash)
+    table.types.slots[slot] = ((hash & 0x3fffffff) << 32) | (row + 1)
+    if (row + 1) * 2 > table.types.slots.len() -> type_columns_grow(table.types)
+    canon: type_compute_canonical(table, row, kind, a, b, side)
+    table.types.canonical[row] = canon
+    TypeID{id: U32{row}}
+}
+
+// Fast 0-child type lookup: allocates no child list.
+type_find_scalar: fn(table: Interner, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID? Never! {
+    slot: type_slot_scalar(table.types, type_row_hash_scalar(kind, a, b, side), kind, a, b, side)
+    entry: table.types.slots[slot]
+    if entry == 0 -> return None
+    Val(TypeID{id: U32{(entry & 0xffffffff) - 1}})
+}
+
 // The id of the type the operands give, added on first sight. Its operand
 // ids and side rows must be the interner's.
 type_intern: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+    if children.len() == 0 -> return type_intern_scalar(table, kind, a, b, side)
     hash: type_row_hash(kind, a, b, side, children)
     slot: type_slot(table.types, hash, kind, a, b, side, children)
     entry: table.types.slots[slot]
@@ -373,30 +658,109 @@ type_intern: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32, chi
     table.types.a.push(a)
     table.types.b.push(b)
     table.types.side.push(side)
+    table.types.canonical.push(U32{row})
     table.types.first.push(table.types.children.len())
     table.types.count.push(children.len())
     loop child in children -> table.types.children.push(child)
     table.types.hashes.push(hash)
     table.types.slots[slot] = ((hash & 0x3fffffff) << 32) | (row + 1)
     if (row + 1) * 2 > table.types.slots.len() -> type_columns_grow(table.types)
+    canon: type_compute_canonical(table, row, kind, a, b, side)
+    table.types.canonical[row] = canon
     TypeID{id: U32{row}}
 }
 
 // The id of the type the operands give when the interner holds it.
 type_find: fn(table: Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID? Never! {
+    if children.len() == 0 -> return type_find_scalar(table, kind, a, b, side)
     slot: type_slot(table.types, type_row_hash(kind, a, b, side, children), kind, a, b, side, children)
     entry: table.types.slots[slot]
     if entry == 0 -> return None
     Val(TypeID{id: U32{(entry & 0xffffffff) - 1}})
 }
 
+// Zero-allocation read-only lookup of a written `Type` in an immutable shared
+// `Interner`. Returns `type_none()` when the type is not yet interned, without
+// allocating any worker-local `InternerDelta` or child list.
+type_find_syntax: fn(table: Interner, ty: Type) -> TypeID Never! {
+    wk: type_id_well_known(ty)
+    if wk.id != 0 -> return wk
+    none: U32{0}
+    if ty == {
+        .Named(name) -> {
+            found: name_find(table.names, name) ?? return type_none()
+            type_find_scalar(table, TypeKind.Named, found.id, none, none) ?? type_none()
+        }
+        .List(element) -> {
+            elem: type_find_syntax(table, element)
+            if elem.id == 0 -> return type_none()
+            type_find_scalar(table, TypeKind.List, elem.id, none, none) ?? type_none()
+        }
+        .Option(inner) -> {
+            elem: type_find_syntax(table, inner)
+            if elem.id == 0 -> return type_none()
+            type_find_scalar(table, TypeKind.Option, elem.id, none, none) ?? type_none()
+        }
+        .Shared(inner) -> {
+            elem: type_find_syntax(table, inner)
+            if elem.id == 0 -> return type_none()
+            type_find_scalar(table, TypeKind.Shared, elem.id, none, none) ?? type_none()
+        }
+        .Result(ok, err) -> {
+            ok_id: type_find_syntax(table, ok)
+            if ok_id.id == 0 -> return type_none()
+            err_id: type_find_syntax(table, err)
+            if err_id.id == 0 -> return type_none()
+            type_find_scalar(table, TypeKind.Result, ok_id.id, err_id.id, none) ?? type_none()
+        }
+        .Map(key, key_span, value) -> {
+            if key_span != None -> return type_none()
+            key_id: type_find_syntax(table, key)
+            if key_id.id == 0 -> return type_none()
+            val_id: type_find_syntax(table, value)
+            if val_id.id == 0 -> return type_none()
+            type_find_scalar(table, TypeKind.Map, key_id.id, val_id.id, none) ?? type_none()
+        }
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_none()
+    }
+}
+
+// The canonical identity TypeID of `id`.
+type_id_canonical: fn(table: Interner, id: TypeID) -> TypeID Never! {
+    TypeID{id: table.types.canonical[type_row(id)]}
+}
+
+// O(1) declaration identity comparison (same semantics as type_identity_equal).
+type_id_identity_equal: fn(table: Interner, left: TypeID, right: TypeID) -> Bool Never! {
+    if left.id == right.id -> return true
+    lc: table.types.canonical[type_row(left)]
+    rc: table.types.canonical[type_row(right)]
+    if lc == rc -> return true
+    // Rare case: two Fn types with side metadata (param_contract / variadic) that
+    // differ only in effect_bound / return_view_provenance / non-variadic metadata.
+    lk: Int{table.types.kind[Int{lc}]}
+    rk: Int{table.types.kind[Int{rc}]}
+    if lk == 11 && rk == 11 {
+        ls: table.types.side[Int{lc}]
+        rs: table.types.side[Int{rc}]
+        if ls != 0 && rs != 0 {
+            return type_identity_equal(table.functions.rows[Int{ls} - 1], table.functions.rows[Int{rs} - 1])
+        }
+    }
+    false
+}
+
 type_columns_grow: fn(table: &TypeColumns) Never! {
+    type_columns_grow_from(table, 1)
+}
+
+type_columns_grow_from: fn(table: &TypeColumns, first_row: Int) Never! {
     capacity: table.slots.len() * 2
     mask: capacity - 1
     slots := [Int]{}
     slots.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> slots.push(0)
-    loop row in 1..<table.kind.len() {
+    loop row in first_row..<table.kind.len() {
         hash: table.hashes[row]
         slot := hash & mask
         loop slots[slot] != 0 -> slot = (slot + 1) & mask
@@ -504,26 +868,26 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
         .Float32 -> TYPE_FLOAT32
         .List(element) -> {
             element_id: type_intern_syntax(table, element)
-            type_intern(table, TypeKind.List, element_id.id, none, none, [U32]{})
+            type_intern_scalar(table, TypeKind.List, element_id.id, none, none)
         }
         .Map(key, key_span, value) -> {
             key_id: type_intern_syntax(table, key)
             value_id: type_intern_syntax(table, value)
             side: if key_span == .Val(span) -> type_sides_intern(table.key_spans, Span{start: span.start, end: span.end}, span.start * 31 + span.end) else -> none
-            type_intern(table, TypeKind.Map, key_id.id, value_id.id, side, [U32]{})
+            type_intern_scalar(table, TypeKind.Map, key_id.id, value_id.id, side)
         }
         .Shared(inner) -> {
             inner_id: type_intern_syntax(table, inner)
-            type_intern(table, TypeKind.Shared, inner_id.id, none, none, [U32]{})
+            type_intern_scalar(table, TypeKind.Shared, inner_id.id, none, none)
         }
         .Option(inner) -> {
             inner_id: type_intern_syntax(table, inner)
-            type_intern(table, TypeKind.Option, inner_id.id, none, none, [U32]{})
+            type_intern_scalar(table, TypeKind.Option, inner_id.id, none, none)
         }
         .Result(ok, err) -> {
             ok_id: type_intern_syntax(table, ok)
             err_id: type_intern_syntax(table, err)
-            type_intern(table, TypeKind.Result, ok_id.id, err_id.id, none, [U32]{})
+            type_intern_scalar(table, TypeKind.Result, ok_id.id, err_id.id, none)
         }
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             children := [U32]{}
@@ -536,7 +900,7 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
             if name == "Unit" -> return TYPE_UNIT
             if name == "Never" -> return TYPE_NEVER
             name_id: name_intern(table.names, name)
-            type_intern(table, TypeKind.Named, name_id.id, none, none, [U32]{})
+            type_intern_scalar(table, TypeKind.Named, name_id.id, none, none)
         }
         .Apply(name, args) -> {
             children := [U32]{}
@@ -560,18 +924,31 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
         .FixedList(elem, len) -> {
             elem_id: type_intern_syntax(table, elem)
             side: type_sides_intern(table.measures, len, type_text_hash(measure_key(len)))
-            type_intern(table, TypeKind.FixedList, elem_id.id, none, side, [U32]{})
+            type_intern_scalar(table, TypeKind.FixedList, elem_id.id, none, side)
         }
-        .IntN(signed, bits) -> type_intern(table, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none, [U32]{})
+        .IntN(signed, bits) -> {
+            if signed {
+                if bits == 8 -> return TYPE_I8
+                if bits == 16 -> return TYPE_I16
+                if bits == 32 -> return TYPE_I32
+                if bits == 64 -> return TYPE_I64
+            } else {
+                if bits == 8 -> return TYPE_U8
+                if bits == 16 -> return TYPE_U16
+                if bits == 32 -> return TYPE_U32
+                if bits == 64 -> return TYPE_U64
+            }
+            type_intern_scalar(table, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
+        }
         .InlineRange(base, lo, hi) -> {
             base_id: type_intern_syntax(table, base)
             side: type_sides_intern(table.ranges, TypeRange{lo: lo, hi: hi}, lo * 31 + hi)
-            type_intern(table, TypeKind.InlineRange, base_id.id, none, side, [U32]{})
+            type_intern_scalar(table, TypeKind.InlineRange, base_id.id, none, side)
         }
         .Tagged(marker, inner) -> {
             inner_id: type_intern_syntax(table, inner)
             side: type_sides_intern(table.tags, marker, type_tag_hash(marker))
-            type_intern(table, TypeKind.Tagged, inner_id.id, none, side, [U32]{})
+            type_intern_scalar(table, TypeKind.Tagged, inner_id.id, none, side)
         }
         .Union(members) -> {
             children := [U32]{}
@@ -581,16 +958,16 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
         .Case(name, payload) -> {
             payload_id: type_intern_syntax(table, payload)
             name_id: name_intern(table.names, name)
-            type_intern(table, TypeKind.Case, name_id.id, payload_id.id, none, [U32]{})
+            type_intern_scalar(table, TypeKind.Case, name_id.id, payload_id.id, none)
         }
         .Quantity(base, dimension) -> {
             base_id: type_intern_syntax(table, base)
             side: type_sides_intern(table.dimensions, dimension, type_text_hash(dimension_identity(dimension)))
-            type_intern(table, TypeKind.Quantity, base_id.id, none, side, [U32]{})
+            type_intern_scalar(table, TypeKind.Quantity, base_id.id, none, side)
         }
         .Measure(measure) -> {
             side: type_sides_intern(table.measures, measure, type_text_hash(measure_key(measure)))
-            type_intern(table, TypeKind.Measure, none, none, side, [U32]{})
+            type_intern_scalar(table, TypeKind.Measure, none, none, side)
         }
     }
 }
@@ -786,6 +1163,599 @@ type_merged_name: fn(remap: InternerRemap, word: U32) -> U32 Never! {
     interner_remap_name(remap, Name{id: word}).id
 }
 
+// Fast TypeID constructors and predicates over Interner.
+type_id_list: fn(table: &Interner, element: TypeID) -> TypeID Never! {
+    type_intern_scalar(table, TypeKind.List, element.id, U32{0}, U32{0})
+}
+
+type_id_option: fn(table: &Interner, inner: TypeID) -> TypeID Never! {
+    type_intern_scalar(table, TypeKind.Option, inner.id, U32{0}, U32{0})
+}
+
+type_id_shared: fn(table: &Interner, inner: TypeID) -> TypeID Never! {
+    type_intern_scalar(table, TypeKind.Shared, inner.id, U32{0}, U32{0})
+}
+
+type_id_result: fn(table: &Interner, ok: TypeID, err: TypeID) -> TypeID Never! {
+    type_intern_scalar(table, TypeKind.Result, ok.id, err.id, U32{0})
+}
+
+type_id_map: fn(table: &Interner, key: TypeID, value: TypeID) -> TypeID Never! {
+    type_intern_scalar(table, TypeKind.Map, key.id, value.id, U32{0})
+}
+
+type_id_named: fn(table: &Interner, name: String) -> TypeID Never! {
+    if name == "Unit" -> return TYPE_UNIT
+    if name == "Never" -> return TYPE_NEVER
+    name_id: name_intern(table.names, name)
+    type_intern_scalar(table, TypeKind.Named, name_id.id, U32{0}, U32{0})
+}
+
+type_id_is_unit: fn(id: TypeID) -> Bool Never! { id.id == TYPE_UNIT.id }
+
+type_id_is_never: fn(id: TypeID) -> Bool Never! { id.id == TYPE_NEVER.id }
+
+type_id_is_numeric: fn(table: Interner, id: TypeID) -> Bool Never! {
+    code: Int{table.types.kind[type_row(id)]}
+    code == 1 || code == 2 || code == 17 || code == 19
+}
+
+type_id_unwrap_tagged: fn(table: Interner, id: TypeID) -> TypeID Never! {
+    cur := id
+    loop {
+        code: Int{table.types.kind[type_row(cur)]}
+        if code != 20 -> break
+        cur = TypeID{id: table.types.a[type_row(cur)]}
+    }
+    cur
+}
+
+type_id_base_name: fn(table: Interner, id: TypeID) -> String? Never! {
+    row: type_row(type_id_unwrap_tagged(table, id))
+    code: Int{table.types.kind[row]}
+    if code == 12 || code == 13 {
+        return Val(name_text(table.names, Name{id: table.types.a[row]}))
+    }
+    None
+}
+
+// --- Zero-copy InternerDelta operations ---
+
+delta_name_intern: fn(shared: Interner, delta: &InternerDelta, text: String) -> Name Never! {
+    hash: name_text_hash(text)
+    if name_find_hashed(shared.names, text, hash) == .Val(found) -> return found
+    own: name_intern_hashed(delta.names, text, hash)
+    if own.id == 0 -> return name_empty()
+    Name{id: U32{delta.base.names + Int{own.id} - 1}}
+}
+
+delta_name_text: fn(shared: Interner, delta: InternerDelta, name: Name) -> String Never! {
+    row: Int{name.id}
+    if row < delta.base.names -> return name_text(shared.names, name)
+    name_text(delta.names, Name{id: U32{row - delta.base.names + 1}})
+}
+
+delta_sides_intern: fn<T: Equatable>(shared: TypeSides<T>, own: &TypeSides<T>, base_mark: Int, value: T, hash: Int) -> U32 Never! {
+    shared_slot: type_sides_slot(shared, value, hash)
+    shared_entry: shared.slots[shared_slot]
+    if shared_entry != 0 -> return U32{shared_entry & 0xffffffff}
+    own_row: type_sides_intern(own, value, hash)
+    U32{base_mark + Int{own_row}}
+}
+
+delta_type_kind_code: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> U8 Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.kind[row]
+    delta.types.kind[row - delta.base.types]
+}
+
+delta_type_kind: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> TypeKind Never! {
+    type_kind_of_code(delta_type_kind_code(shared, delta, id))
+}
+
+delta_type_a: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> U32 Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.a[row]
+    delta.types.a[row - delta.base.types]
+}
+
+delta_type_b: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> U32 Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.b[row]
+    delta.types.b[row - delta.base.types]
+}
+
+delta_type_side: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> U32 Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.side[row]
+    delta.types.side[row - delta.base.types]
+}
+
+delta_type_child_count: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Int Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.count[row]
+    delta.types.count[row - delta.base.types]
+}
+
+delta_type_child: fn(shared: Interner, delta: InternerDelta, id: TypeID, index: Int) -> U32 Never! {
+    row: type_row(id)
+    if row < delta.base.types -> return shared.types.children[shared.types.first[row] + index]
+    own: row - delta.base.types
+    delta.types.children[delta.types.first[own] + index]
+}
+
+delta_type_canonical_word: fn(shared: Interner, delta: InternerDelta, word: U32) -> U32 Never! {
+    if word == 0 -> return U32{0}
+    row: Int{word}
+    if row < delta.base.types -> return shared.types.canonical[row]
+    delta.types.canonical[row - delta.base.types]
+}
+
+delta_type_id_canonical: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> TypeID Never! {
+    TypeID{id: delta_type_canonical_word(shared, delta, id.id)}
+}
+
+delta_tag_row: fn(shared: Interner, delta: InternerDelta, side: U32) -> TagMarker Never! {
+    row: Int{side}
+    if row <= delta.base.tags -> return shared.tags.rows[row - 1]
+    delta.tags.rows[row - delta.base.tags - 1]
+}
+
+delta_fn_row: fn(shared: Interner, delta: InternerDelta, side: U32) -> Type Never! {
+    row: Int{side}
+    if row <= delta.base.functions -> return shared.functions.rows[row - 1]
+    delta.functions.rows[row - delta.base.functions - 1]
+}
+
+delta_type_id_identity_equal: fn(shared: Interner, delta: InternerDelta, left: TypeID, right: TypeID) -> Bool Never! {
+    if left.id == right.id -> return true
+    lc: delta_type_canonical_word(shared, delta, left.id)
+    rc: delta_type_canonical_word(shared, delta, right.id)
+    if lc == rc -> return true
+    lk: Int{delta_type_kind_code(shared, delta, TypeID{id: lc})}
+    rk: Int{delta_type_kind_code(shared, delta, TypeID{id: rc})}
+    if lk == 11 && rk == 11 {
+        ls: delta_type_side(shared, delta, TypeID{id: lc})
+        rs: delta_type_side(shared, delta, TypeID{id: rc})
+        if ls != 0 && rs != 0 {
+            return type_identity_equal(delta_fn_row(shared, delta, ls), delta_fn_row(shared, delta, rs))
+        }
+    }
+    false
+}
+
+delta_side_in_shared: fn(kind: TypeKind, side: U32, base: InternerMarks) -> Bool Never! {
+    row: Int{side}
+    if row == 0 -> return true
+    if kind == {
+        .Map -> row <= base.key_spans
+        .InlineRange -> row <= base.ranges
+        .FixedList | .Measure -> row <= base.measures
+        .Quantity -> row <= base.dimensions
+        .Tagged -> row <= base.tags
+        .Fn -> row <= base.functions
+        .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Result | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case -> true
+    }
+}
+
+delta_a_in_shared: fn(kind: TypeKind, a: U32, base: InternerMarks) -> Bool Never! {
+    if kind == {
+        .List | .Map | .Shared | .Option | .Result | .Fn | .FixedList | .InlineRange | .Tagged | .Quantity -> Int{a} < base.types
+        .Named | .Apply | .Case -> Int{a} < base.names
+        .Int | .Float | .Bool | .String | .Char | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Measure -> true
+    }
+}
+
+delta_compute_canonical: fn(shared: Interner, delta: &InternerDelta, own_row: Int, full_id: U32, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
+    none: U32{0}
+    if kind == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return full_id
+        .List | .Shared | .Option -> {
+            ca: delta_type_canonical_word(shared, delta, a)
+            if ca == a -> return full_id
+            return delta_type_intern_scalar(shared, delta, kind, ca, none, none).id
+        }
+        .Result -> {
+            ca: delta_type_canonical_word(shared, delta, a)
+            cb: delta_type_canonical_word(shared, delta, b)
+            if ca == a && cb == b -> return full_id
+            return delta_type_intern_scalar(shared, delta, kind, ca, cb, none).id
+        }
+        .Case -> {
+            cb: delta_type_canonical_word(shared, delta, b)
+            if cb == b -> return full_id
+            return delta_type_intern_scalar(shared, delta, kind, a, cb, none).id
+        }
+        .Map -> {
+            ca: delta_type_canonical_word(shared, delta, a)
+            cb: delta_type_canonical_word(shared, delta, b)
+            if side == none && ca == a && cb == b -> return full_id
+            return delta_type_intern_scalar(shared, delta, TypeKind.Map, ca, cb, none).id
+        }
+        .Tagged -> {
+            ca: delta_type_canonical_word(shared, delta, a)
+            if side != none && !tag_is_identity_bearing(delta_tag_row(shared, delta, side)) -> return ca
+            if ca == a -> return full_id
+            return delta_type_intern_scalar(shared, delta, TypeKind.Tagged, ca, none, side).id
+        }
+        .FixedList | .InlineRange | .Quantity -> {
+            ca: delta_type_canonical_word(shared, delta, a)
+            if ca == a -> return full_id
+            return delta_type_intern_scalar(shared, delta, kind, ca, none, side).id
+        }
+        .Apply | .Union -> {
+            first: delta.types.first[own_row]
+            count: delta.types.count[own_row]
+            changed := false
+            loop index in 0..<count {
+                child: delta.types.children[first + index]
+                if delta_type_canonical_word(shared, delta, child) != child {
+                    changed = true
+                    break
+                }
+            }
+            if !changed -> return full_id
+            children := [U32]{}
+            loop index in 0..<count -> children.push(delta_type_canonical_word(shared, delta, delta.types.children[first + index]))
+            return delta_type_intern(shared, delta, kind, a, none, none, children).id
+        }
+        .Tuple -> {
+            first: delta.types.first[own_row]
+            count: delta.types.count[own_row]
+            changed := false
+            loop index in 0..<count {
+                if index % 2 == 1 {
+                    child: delta.types.children[first + index]
+                    if delta_type_canonical_word(shared, delta, child) != child {
+                        changed = true
+                        break
+                    }
+                }
+            }
+            if !changed -> return full_id
+            children := [U32]{}
+            loop index in 0..<count {
+                child: delta.types.children[first + index]
+                children.push(if index % 2 == 1 -> delta_type_canonical_word(shared, delta, child) else -> child)
+            }
+            return delta_type_intern(shared, delta, kind, none, none, none, children).id
+        }
+        .Fn -> {
+            first: delta.types.first[own_row]
+            count: delta.types.count[own_row]
+            ca: delta_type_canonical_word(shared, delta, a)
+            canon_side := side
+            if side != none {
+                fn_ty: delta_fn_row(shared, delta, side)
+                if fn_ty == .Fn(_, _, _, contract, metadata, _) {
+                    if contract == None && function_variadic_obligation(metadata) == None {
+                        canon_side = none
+                    }
+                }
+            }
+            changed := ca != a || canon_side != side
+            if !changed {
+                loop index in 0..<count {
+                    child: delta.types.children[first + index]
+                    if delta_type_canonical_word(shared, delta, child) != child {
+                        changed = true
+                        break
+                    }
+                }
+            }
+            if !changed -> return full_id
+            children := [U32]{}
+            loop index in 0..<count -> children.push(delta_type_canonical_word(shared, delta, delta.types.children[first + index]))
+            return delta_type_intern(shared, delta, TypeKind.Fn, ca, none, canon_side, children).id
+        }
+    }
+}
+
+delta_type_intern_scalar: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
+    hash: type_row_hash_scalar(kind, a, b, side)
+    b_row: Int{b}
+    if delta_a_in_shared(kind, a, delta.base) && (!type_b_is_type(kind) || b_row < delta.base.types) && delta_side_in_shared(kind, side, delta.base) {
+        shared_slot: type_slot_scalar(shared.types, hash, kind, a, b, side)
+        shared_entry: shared.types.slots[shared_slot]
+        if shared_entry != 0 -> return TypeID{id: U32{(shared_entry & 0xffffffff) - 1}}
+    }
+    slot: type_slot_scalar(delta.types, hash, kind, a, b, side)
+    entry: delta.types.slots[slot]
+    if entry != 0 -> return TypeID{id: U32{delta.base.types + (entry & 0xffffffff) - 1}}
+    own_row: delta.types.kind.len()
+    full_id: U32{delta.base.types + own_row}
+    delta.types.kind.push(type_kind_code(kind))
+    delta.types.a.push(a)
+    delta.types.b.push(b)
+    delta.types.side.push(side)
+    delta.types.canonical.push(full_id)
+    delta.types.first.push(delta.types.children.len())
+    delta.types.count.push(0)
+    delta.types.hashes.push(hash)
+    delta.types.slots[slot] = ((hash & 0x3fffffff) << 32) | (own_row + 1)
+    if (own_row + 1) * 2 > delta.types.slots.len() -> type_columns_grow_from(delta.types, 0)
+    canon: delta_compute_canonical(shared, delta, own_row, full_id, kind, a, b, side)
+    delta.types.canonical[own_row] = canon
+    TypeID{id: full_id}
+}
+
+delta_type_intern: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+    if children.len() == 0 -> return delta_type_intern_scalar(shared, delta, kind, a, b, side)
+    hash: type_row_hash(kind, a, b, side, children)
+    b_row: Int{b}
+    in_shared := delta_a_in_shared(kind, a, delta.base) && (!type_b_is_type(kind) || b_row < delta.base.types) && delta_side_in_shared(kind, side, delta.base)
+    if in_shared {
+        loop (index, child) in children {
+            limit: if type_child_is_type(kind, index) -> delta.base.types else -> delta.base.names
+            child_row: Int{child}
+            if child_row >= limit {
+                in_shared = false
+                break
+            }
+        }
+    }
+    if in_shared {
+        shared_slot: type_slot(shared.types, hash, kind, a, b, side, children)
+        shared_entry: shared.types.slots[shared_slot]
+        if shared_entry != 0 -> return TypeID{id: U32{(shared_entry & 0xffffffff) - 1}}
+    }
+    slot: type_slot(delta.types, hash, kind, a, b, side, children)
+    entry: delta.types.slots[slot]
+    if entry != 0 -> return TypeID{id: U32{delta.base.types + (entry & 0xffffffff) - 1}}
+    own_row: delta.types.kind.len()
+    full_id: U32{delta.base.types + own_row}
+    delta.types.kind.push(type_kind_code(kind))
+    delta.types.a.push(a)
+    delta.types.b.push(b)
+    delta.types.side.push(side)
+    delta.types.canonical.push(full_id)
+    delta.types.first.push(delta.types.children.len())
+    delta.types.count.push(children.len())
+    loop child in children -> delta.types.children.push(child)
+    delta.types.hashes.push(hash)
+    delta.types.slots[slot] = ((hash & 0x3fffffff) << 32) | (own_row + 1)
+    if (own_row + 1) * 2 > delta.types.slots.len() -> type_columns_grow_from(delta.types, 0)
+    canon: delta_compute_canonical(shared, delta, own_row, full_id, kind, a, b, side)
+    delta.types.canonical[own_row] = canon
+    TypeID{id: full_id}
+}
+
+delta_type_intern_syntax: fn(shared: Interner, delta: &InternerDelta, ty: Type) -> TypeID Never! {
+    none: U32{0}
+    if ty == {
+        .Int -> TYPE_INT
+        .Float -> TYPE_FLOAT
+        .Bool -> TYPE_BOOL
+        .String -> TYPE_STRING
+        .Char -> TYPE_CHAR
+        .Float32 -> TYPE_FLOAT32
+        .List(element) -> {
+            element_id: delta_type_intern_syntax(shared, delta, element)
+            delta_type_intern_scalar(shared, delta, TypeKind.List, element_id.id, none, none)
+        }
+        .Map(key, key_span, value) -> {
+            key_id: delta_type_intern_syntax(shared, delta, key)
+            value_id: delta_type_intern_syntax(shared, delta, value)
+            side: if key_span == .Val(span) -> delta_sides_intern(shared.key_spans, delta.key_spans, delta.base.key_spans, Span{start: span.start, end: span.end}, span.start * 31 + span.end) else -> none
+            delta_type_intern_scalar(shared, delta, TypeKind.Map, key_id.id, value_id.id, side)
+        }
+        .Shared(inner) -> {
+            inner_id: delta_type_intern_syntax(shared, delta, inner)
+            delta_type_intern_scalar(shared, delta, TypeKind.Shared, inner_id.id, none, none)
+        }
+        .Option(inner) -> {
+            inner_id: delta_type_intern_syntax(shared, delta, inner)
+            delta_type_intern_scalar(shared, delta, TypeKind.Option, inner_id.id, none, none)
+        }
+        .Result(ok, err) -> {
+            ok_id: delta_type_intern_syntax(shared, delta, ok)
+            err_id: delta_type_intern_syntax(shared, delta, err)
+            delta_type_intern_scalar(shared, delta, TypeKind.Result, ok_id.id, err_id.id, none)
+        }
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
+            children := [U32]{}
+            loop param in params -> children.push(delta_type_intern_syntax(shared, delta, param).id)
+            result: if ret == .Val(value) -> delta_type_intern_syntax(shared, delta, value).id else -> none
+            side: if effect_bound == None && param_contract == None && call_metadata == None && return_view_provenance == None -> none else -> delta_sides_intern(shared.functions, delta.functions, delta.base.functions, ty, type_fn_side_hash(ty))
+            delta_type_intern(shared, delta, TypeKind.Fn, result, none, side, children)
+        }
+        .Named(name) -> {
+            if name == "Unit" -> return TYPE_UNIT
+            if name == "Never" -> return TYPE_NEVER
+            name_id: delta_name_intern(shared, delta, name)
+            delta_type_intern_scalar(shared, delta, TypeKind.Named, name_id.id, none, none)
+        }
+        .Apply(name, args) -> {
+            children := [U32]{}
+            loop arg in args -> children.push(delta_type_intern_syntax(shared, delta, arg).id)
+            name_id: delta_name_intern(shared, delta, name)
+            delta_type_intern(shared, delta, TypeKind.Apply, name_id.id, none, none, children)
+        }
+        .TraitObject(bounds) -> {
+            children := [U32]{}
+            loop bound in bounds -> children.push(delta_name_intern(shared, delta, bound).id)
+            delta_type_intern(shared, delta, TypeKind.TraitObject, none, none, none, children)
+        }
+        .Tuple(fields) -> {
+            children := [U32]{}
+            loop field in fields {
+                children.push(delta_name_intern(shared, delta, field.name).id)
+                children.push(delta_type_intern_syntax(shared, delta, field.ty).id)
+            }
+            delta_type_intern(shared, delta, TypeKind.Tuple, none, none, none, children)
+        }
+        .FixedList(elem, len) -> {
+            elem_id: delta_type_intern_syntax(shared, delta, elem)
+            side: delta_sides_intern(shared.measures, delta.measures, delta.base.measures, len, type_text_hash(measure_key(len)))
+            delta_type_intern_scalar(shared, delta, TypeKind.FixedList, elem_id.id, none, side)
+        }
+        .IntN(signed, bits) -> {
+            if signed {
+                if bits == 8 -> return TYPE_I8
+                if bits == 16 -> return TYPE_I16
+                if bits == 32 -> return TYPE_I32
+                if bits == 64 -> return TYPE_I64
+            } else {
+                if bits == 8 -> return TYPE_U8
+                if bits == 16 -> return TYPE_U16
+                if bits == 32 -> return TYPE_U32
+                if bits == 64 -> return TYPE_U64
+            }
+            delta_type_intern_scalar(shared, delta, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
+        }
+        .InlineRange(base, lo, hi) -> {
+            base_id: delta_type_intern_syntax(shared, delta, base)
+            side: delta_sides_intern(shared.ranges, delta.ranges, delta.base.ranges, TypeRange{lo: lo, hi: hi}, lo * 31 + hi)
+            delta_type_intern_scalar(shared, delta, TypeKind.InlineRange, base_id.id, none, side)
+        }
+        .Tagged(marker, inner) -> {
+            inner_id: delta_type_intern_syntax(shared, delta, inner)
+            side: delta_sides_intern(shared.tags, delta.tags, delta.base.tags, marker, type_tag_hash(marker))
+            delta_type_intern_scalar(shared, delta, TypeKind.Tagged, inner_id.id, none, side)
+        }
+        .Union(members) -> {
+            children := [U32]{}
+            loop member in members -> children.push(delta_type_intern_syntax(shared, delta, member).id)
+            delta_type_intern(shared, delta, TypeKind.Union, none, none, none, children)
+        }
+        .Case(name, payload) -> {
+            payload_id: delta_type_intern_syntax(shared, delta, payload)
+            name_id: delta_name_intern(shared, delta, name)
+            delta_type_intern_scalar(shared, delta, TypeKind.Case, name_id.id, payload_id.id, none)
+        }
+        .Quantity(base, dimension) -> {
+            base_id: delta_type_intern_syntax(shared, delta, base)
+            side: delta_sides_intern(shared.dimensions, delta.dimensions, delta.base.dimensions, dimension, type_text_hash(dimension_identity(dimension)))
+            delta_type_intern_scalar(shared, delta, TypeKind.Quantity, base_id.id, none, side)
+        }
+        .Measure(measure) -> {
+            side: delta_sides_intern(shared.measures, delta.measures, delta.base.measures, measure, type_text_hash(measure_key(measure)))
+            delta_type_intern_scalar(shared, delta, TypeKind.Measure, none, none, side)
+        }
+    }
+}
+
+delta_type_syntax: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Type Never! {
+    if type_row(id) < delta.base.types -> return type_syntax(shared, id)
+    side: Int{delta_type_side(shared, delta, id)}
+    if delta_type_kind(shared, delta, id) == {
+        .Int -> Type.Int
+        .Float -> Type.Float
+        .Bool -> Type.Bool
+        .String -> Type.String
+        .Char -> Type.Char
+        .Float32 -> Type.Float32
+        .List -> Type.List{element: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
+        .Map -> {
+            key_span: if side == 0 -> Span?{None} else if side <= delta.base.key_spans -> Val(shared.key_spans.rows[side - 1]) else -> Val(delta.key_spans.rows[side - delta.base.key_spans - 1])
+            Type.Map{key: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), key_span: key_span, value: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}
+        }
+        .Shared -> Type.Shared{inner: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
+        .Option -> Type.Option{inner: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
+        .Result -> Type.Result{ok: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), err: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}
+        .Fn -> {
+            if side != 0 -> return delta_fn_row(shared, delta, U32{side})
+            params := [Type]{}
+            loop index in 0..<delta_type_child_count(shared, delta, id) {
+                params.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
+            }
+            result: TypeID{id: delta_type_a(shared, delta, id)}
+            ret: if type_is_none(result) -> Type?{None} else -> Val(delta_type_syntax(shared, delta, result))
+            Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+        }
+        .Named -> Type.Named{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)})}
+        .Apply -> {
+            args := [Type]{}
+            loop index in 0..<delta_type_child_count(shared, delta, id) {
+                args.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
+            }
+            Type.Apply{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)}), args: args}
+        }
+        .TraitObject -> {
+            bounds := [String]{}
+            loop index in 0..<delta_type_child_count(shared, delta, id) {
+                bounds.push(delta_name_text(shared, delta, Name{id: delta_type_child(shared, delta, id, index)}))
+            }
+            Type.TraitObject{bounds: bounds}
+        }
+        .Tuple -> {
+            fields := [TypeTupleField]{}
+            loop index in 0..<delta_type_child_count(shared, delta, id) {
+                if index % 2 == 1 -> next
+                fields.push(TypeTupleField{name: delta_name_text(shared, delta, Name{id: delta_type_child(shared, delta, id, index)}), ty: delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index + 1)})})
+            }
+            Type.Tuple{fields: fields}
+        }
+        .FixedList -> {
+            len: if side <= delta.base.measures -> shared.measures.rows[side - 1] else -> delta.measures.rows[side - delta.base.measures - 1]
+            Type.FixedList{elem: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), len: len}
+        }
+        .IntN -> Type.IntN{signed: delta_type_a(shared, delta, id) != U32{0}, bits: Int{delta_type_b(shared, delta, id)}}
+        .InlineRange -> {
+            bounds: if side <= delta.base.ranges -> shared.ranges.rows[side - 1] else -> delta.ranges.rows[side - delta.base.ranges - 1]
+            Type.InlineRange{base: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), lo: bounds.lo, hi: bounds.hi}
+        }
+        .Tagged -> Type.Tagged{marker: delta_tag_row(shared, delta, U32{side}), inner: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
+        .Union -> {
+            members := [Type]{}
+            loop index in 0..<delta_type_child_count(shared, delta, id) {
+                members.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
+            }
+            Type.Union{members: members}
+        }
+        .Case -> Type.Case{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)}), payload: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}
+        .Quantity -> {
+            dim: if side <= delta.base.dimensions -> shared.dimensions.rows[side - 1] else -> delta.dimensions.rows[side - delta.base.dimensions - 1]
+            Type.Quantity{base: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), dimension: dim}
+        }
+        .Measure -> {
+            meas: if side <= delta.base.measures -> shared.measures.rows[side - 1] else -> delta.measures.rows[side - delta.base.measures - 1]
+            Type.Measure{measure: meas}
+        }
+    }
+}
+
+// Deterministically merges a worker's zero-copy InternerDelta into `into`.
+interner_merge_delta: fn(into: &Interner, delta: &InternerDelta) -> InternerRemap Never! {
+    marks: delta.base
+    remap := InternerRemap{marks: marks, names: name_table_merge(into.names, delta.names, 1), types: [TypeID]{}}
+    key_spans: type_sides_merge(into.key_spans, delta.key_spans, 0)
+    ranges: type_sides_merge(into.ranges, delta.ranges, 0)
+    measures: type_sides_merge(into.measures, delta.measures, 0)
+    dimensions: type_sides_merge(into.dimensions, delta.dimensions, 0)
+    tags: type_sides_merge(into.tags, delta.tags, 0)
+    functions: type_sides_merge(into.functions, delta.functions, 0)
+    loop row in 0..<delta.types.kind.len() {
+        kind: type_kind_of_code(delta.types.kind[row])
+        a: type_merged_a(remap, kind, delta.types.a[row])
+        b_word: delta.types.b[row]
+        b: if type_b_is_type(kind) -> type_merged_type(remap, b_word) else -> b_word
+        side: delta.types.side[row]
+        merged_side: if kind == {
+            .Map -> type_remap_side(side, marks.key_spans, key_spans)
+            .InlineRange -> type_remap_side(side, marks.ranges, ranges)
+            .FixedList | .Measure -> type_remap_side(side, marks.measures, measures)
+            .Quantity -> type_remap_side(side, marks.dimensions, dimensions)
+            .Tagged -> type_remap_side(side, marks.tags, tags)
+            .Fn -> type_remap_side(side, marks.functions, functions)
+            .Int | .Float | .Bool | .String | .Char | .List | .Shared | .Option | .Result | .Named | .Apply | .TraitObject | .Tuple | .IntN | .Float32 | .Union | .Case -> side
+        }
+        count: delta.types.count[row]
+        if count == 0 {
+            remap.types.push(type_intern_scalar(into, kind, a, b, merged_side))
+        } else {
+            children := [U32]{}
+            first: delta.types.first[row]
+            loop index in 0..<count {
+                child: delta.types.children[first + index]
+                children.push(if type_child_is_type(kind, index) -> type_merged_type(remap, child) else -> type_merged_name(remap, child))
+            }
+            remap.types.push(type_intern(into, kind, a, b, merged_side, children))
+        }
+    }
+    remap
+}
+
 #Test("equal types are one id, and children and operands tell types apart") {
     table := interner()
     list: type_intern(table, TypeKind.List, TYPE_INT.id, U32{0}, U32{0}, [U32]{})
@@ -833,6 +1803,14 @@ type_merged_name: fn(remap: InternerRemap, word: U32) -> U32 Never! {
     // A key span is part of the Map's identity, as Type's equality has it.
     other: type_intern_syntax(table, Type.Map{key: Type.String, key_span: None, value: Type.List{element: Type.Named{name: "Point"}}})
     assert(other != type_intern_syntax(table, shapes[0]))
+    // Canonical identity ignores Map key_span, non-identity tags, and Fn effect bounds.
+    assert(type_id_identity_equal(table, other, type_intern_syntax(table, shapes[0])))
+    tagged_float: type_intern_syntax(table, Type.Tagged{marker: TagMarker.User{name: "Celsius"}, inner: Type.Float})
+    assert(type_id_identity_equal(table, tagged_float, TYPE_FLOAT))
+    crypto_id: type_intern_syntax(table, Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.String})
+    assert(!type_id_identity_equal(table, crypto_id, TYPE_STRING))
+    plain_fn: type_intern_syntax(table, Type.Fn{params: [Type]{Type.Int, Type.Option{inner: Type.Char}}, ret: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    assert(type_id_identity_equal(table, plain_fn, type_intern_syntax(table, shapes[1])))
 }
 
 #Test("a worker's own types merge to the ids a serial intern gives") {
@@ -845,6 +1823,29 @@ type_merged_name: fn(remap: InternerRemap, word: U32) -> U32 Never! {
     own: type_intern_syntax(worker, nested)
     assert(type_row(own) >= worker.from.types)
     remap: interner_merge(shared, worker)
+    merged: interner_remap_type(remap, own)
+    assert_eq(type_syntax(shared, merged), nested)
+    serial := interner()
+    _: type_intern_syntax(serial, Type.Named{name: "Point"})
+    assert_eq(type_intern_syntax(serial, nested), merged)
+    assert_eq(interner_remap_type(remap, point), point)
+}
+
+#Test("zero-copy InternerDelta reads shared rows and merges deterministically") {
+    shared := interner()
+    point: type_intern_syntax(shared, Type.Named{name: "Point"})
+    delta := interner_fork_delta(shared)
+    assert_eq(delta_type_intern_syntax(shared, delta, Type.Named{name: "Point"}), point)
+    assert_eq(delta.types.kind.len(), 0)
+    nested: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "here", ty: Type.List{element: Type.Named{name: "Point"}}}, TypeTupleField{name: "span", ty: Type.Map{key: Type.Int, key_span: Val(Span{start: 1, end: 4}), value: Type.Named{name: "Fresh"}}}}}
+    own: delta_type_intern_syntax(shared, delta, nested)
+    assert(type_row(own) >= delta.base.types)
+    assert_eq(delta_type_syntax(shared, delta, own), nested)
+    no_span: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "here", ty: Type.List{element: Type.Named{name: "Point"}}}, TypeTupleField{name: "span", ty: Type.Map{key: Type.Int, key_span: None, value: Type.Named{name: "Fresh"}}}}}
+    own_plain: delta_type_intern_syntax(shared, delta, no_span)
+    assert(own != own_plain)
+    assert(delta_type_id_identity_equal(shared, delta, own, own_plain))
+    remap: interner_merge_delta(shared, delta)
     merged: interner_remap_type(remap, own)
     assert_eq(type_syntax(shared, merged), nested)
     serial := interner()

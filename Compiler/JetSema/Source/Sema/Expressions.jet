@@ -25,7 +25,6 @@ use {
         effect_scope_name,
         foundation_link_inner,
         foundation_named_type,
-        type_table_intern,
         Call,
         CallArg,
         CallContractRow,
@@ -126,6 +125,9 @@ use {
         IR_RUNTIME_HANDLES,
         ir_runtime_handle_row,
         module_text,
+        TypeID,
+        type_id_well_known,
+        type_none,
     ]
 }
 
@@ -133,7 +135,7 @@ use {
 // around their checked children, and copying it copied the whole subtree.
 sema_tree_node: fn(ty: Type, kind: &&TExprKind, span: Span) -> TExpr Never! {
     // copy: node types are shared with the caller's checked children and context.
-    TExpr{ty: ty.copy(), kind: kind.move(), span: span}
+    TExpr{ty: ty.copy(), kind: kind.move(), span: span, type_id: type_id_well_known(ty)}
 }
 
 // A checked node of `kind` built flat: a row of the context's arena, whose
@@ -142,10 +144,12 @@ sema_tree_node: fn(ty: Type, kind: &&TExprKind, span: Span) -> TExpr Never! {
 // lands on the handle, BodyFlatten.jet body_flat_arena_node).
 sema_node: fn(context: &SemaCheckContext, ty: Type, kind: &&NodeKind, span: Span) -> TExpr Never! {
     context.arena.tree.nodes.push(BodyNode{id: AST_NODE_GENERATED, kind: kind.move(), span: span})
-    row_type: type_table_intern(context.arena.tree.types, ty)
+    wk: type_id_well_known(ty)
+    row_type: body_flat_intern_type(context.arena, ty, wk)
     context.arena.tree.expr_types.push(TExprType{id: AST_NODE_GENERATED, ty: row_type})
+    context.arena.type_ids.push(TypeID{id: wk.id})
     // copy: the row keeps its type; the handle carries its own.
-    TExpr{ty: ty.copy(), kind: .Flat{index: context.arena.tree.node_base + context.arena.tree.nodes.len() - 1}, span: span}
+    TExpr{ty: ty.copy(), kind: .Flat{index: context.arena.tree.node_base + context.arena.tree.nodes.len() - 1}, span: span, type_id: wk}
 }
 
 // The arena row index of checked child `value`, for a flat node's kind: a
@@ -171,9 +175,15 @@ sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
         panic("sema_arena_take_back: the enclosing check minted symbols while a nested check ran")
     }
     compiler_transfer_rows<BodyNode>(context.arena.tree.nodes, nested.tree.nodes)
-    loop row in nested.tree.expr_types {
-        ty: type_table_intern(context.arena.tree.types, nested.tree.types.types[row.ty])
+    has_delta: context.type_delta.len() > 0
+    shared_bound: if has_delta -> context.type_delta[0].base.types else -> 0
+    loop (idx, row) in nested.tree.expr_types {
+        raw_tid: if idx < nested.type_ids.len() -> nested.type_ids[idx] else -> type_none()
+        raw_int: Int{raw_tid.id}
+        safe_tid: if !has_delta || raw_int <= 16 || raw_int < shared_bound -> raw_tid else -> type_none()
+        ty: body_flat_intern_type(context.arena, nested.tree.types.types[row.ty], safe_tid)
         context.arena.tree.expr_types.push(TExprType{id: row.id, ty: ty})
+        context.arena.type_ids.push(safe_tid)
     }
     compiler_transfer_rows<StmtKind>(context.arena.tree.stmts, nested.tree.stmts)
     context.arena.tree.symbols = nested.tree.symbols.move()
@@ -210,11 +220,10 @@ sema_expr_unwrap_tag: fn(ty: Type) -> Type Never! {
 }
 
 sema_expr_is_integer: fn(ty: Type) -> Bool Never! {
-    if sema_expr_unwrap_tag(ty) == {
-        .Int -> true
-        .IntN(_, _) -> true
-        .InlineRange(_, _, _) -> true
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    if ty == {
+        .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        .Tagged(_, inner) -> sema_expr_is_integer(inner)
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -872,7 +881,7 @@ sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal:
     // index built they are read from the trait-name rows (module/row order,
     // so the candidates land in the order the module scan produced them).
     if graph.impl_traits_indexed {
-        if graph.impl_trait_name_slots.get(trait_name) == .Val(found) {
+        if sema_registration_impl_trait_name_slot(graph, trait_name) == .Val(found) {
             loop impl_row in graph.impl_trait_name_buckets[found] {
                 if impl_row.module_index != module_index -> next
                 sema_expr_operator_nominal_impl_candidates(graph, graph.modules[module_index].impls[impl_row.row], nominal, module_index, owner_inference.substitutions, owner_type, self_rhs, receiver_owner, rhs_type, trait_name, method, require_commutative, span, caller_module, caller_package, environment, program, diagnostics, candidates)
@@ -3336,7 +3345,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     receiver_name: sema_expr_type_base_name(lookup_type) ?? return sema_expr_builtin_impl_method_candidates(graph, lookup_type, method, type_args, caller_module, caller_package, span, environment, program, diagnostics)
     // Native carrier methods live on registered impls, never fake nominals;
     // only the Core source modules indexed as owning this name's impls.
-    if graph.source_impl_owner_modules.get(receiver_name) == .Val(owner_modules) {
+    if sema_registration_source_impl_owners(graph, receiver_name) == .Val(owner_modules) {
         loop owner_index in owner_modules {
             loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
                 if graph.modules[owner_index].impls[implementation_index].target_type_name != receiver_name {
@@ -3555,7 +3564,7 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
         // A builtin handle declares no methods; a program type of its name is
         // spelled by its owner (sema_type_is_builtin_handle).
         if sema_type_is_builtin_handle(receiver_type, base_name) -> return false
-        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
             loop owner_index in owner_modules {
                 loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
                     if graph.modules[owner_index].impls[implementation_index].target_type_name != base_name {
@@ -3607,7 +3616,7 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
 sema_expr_declares_own_method: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
-        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
             loop owner_index in owner_modules {
                 loop implementation in graph.modules[owner_index].impls {
                     if implementation.target_type_name != base_name || sema_derive_is_codec_trait(implementation.trait_name ?? "") {
@@ -8153,7 +8162,7 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
                 if ranged && sema_expression_is_place(expr) {
                     span: expr_span(expr)
                     window: Expr.Place{value: expr, access: PlaceAccess.Read, span: span, id: AST_NODE_GENERATED}
-                    return sema_check_expression_recorded(expr, sema_expr_check_place_expr(window, expr, PlaceAccess.Read, span, expected, environment, program, scopes, state, tail_store, context, diagnostics), context)
+                    return sema_check_expression_recorded(expr, sema_expr_check_place_expr(window, expr, PlaceAccess.Read, span, expected, environment, program, scopes, state, tail_store, context, diagnostics), program, context)
                 }
             }
         }
@@ -8164,13 +8173,13 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     // position, materializes one owned copy.
     if expected == .Val(destination) && expr == .Ident(view_name, view_span, _) {
         if sema_read_view_owning_read(view_name, destination, scopes, context) || (!context.borrow_ctx && sema_string_view_owning_read(expr, destination, scopes)) {
-            return sema_check_expression_recorded(expr, sema_string_view_materialize(view_name, view_span, expected, environment, program, scopes, state, context, diagnostics), context)
+            return sema_check_expression_recorded(expr, sema_string_view_materialize(view_name, view_span, expected, environment, program, scopes, state, context, diagnostics), program, context)
         }
     }
     // A type written where a `TypeId` is expected is that type's TypeId.
     if expected == .Val(.Named(wanted)) && wanted == "TypeId" {
         if sema_expr_type_id_written(expr, environment, program) == .Val(found) {
-            return sema_check_expression_recorded(expr, sema_expr_expected(found, expected, environment, program, diagnostics), context)
+            return sema_check_expression_recorded(expr, sema_expr_expected(found, expected, environment, program, diagnostics), program, context)
         }
     }
     // Only a bare member chain can be handled there; testing that here keeps
@@ -8181,7 +8190,7 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
             if bare_member.value == None {
                 sema_expr_mark_failed_call_reads(environment.tables, expr, scopes, state)
             }
-            return sema_check_expression_recorded(expr, bare_member.value, context)
+            return sema_check_expression_recorded(expr, bare_member.value, program, context)
         }
     }
     if !sema_enter_source_nesting(context, expr_span(expr), diagnostics) -> return None
@@ -8215,9 +8224,12 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
         sema_expr_mark_failed_call_reads(environment.tables, expr, scopes, state)
         return None
     }
-    if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
+    if !context.exact_int_reachable && sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
     sema_cell_guard_check_construct(expr, value.ty, diagnostics)
     sema_check_record_expr_id(expr, value, context)
+    if value.type_id.id == 0 {
+        value.type_id = type_id_well_known(value.ty)
+    }
     Val(value.move())
 }
 
@@ -8261,9 +8273,12 @@ sema_expr_mark_named_reads: fn(names: [String], scopes: SemaScopeTable, state: &
 // An expression form checked outside the common exit (a ranged view
 // argument, a materialized view read, a bare member chain) files its node id
 // there.
-sema_check_expression_recorded: fn(expr: Expr, checked: TExpr?, context: &SemaCheckContext) -> TExpr? Never! {
+sema_check_expression_recorded: fn(expr: Expr, checked: TExpr?, program: SemaProgramTables, context: &SemaCheckContext) -> TExpr? Never! {
     value := checked ?? return None
     sema_check_record_expr_id(expr, value, context)
+    if value.type_id.id == 0 {
+        value.type_id = type_id_well_known(value.ty)
+    }
     Val(value.move())
 }
 

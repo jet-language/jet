@@ -332,7 +332,7 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     }
     trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
     if !trail.nominal_indexes_saved {
-        trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_slots, buckets: graph.nominal_row_buckets})
+        trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_names, buckets: graph.nominal_row_buckets})
         trail.nominal_indexes_saved = true
     }
     sema_registration_index_nominal_rows(graph, module_index, first_nominal)
@@ -451,10 +451,10 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
     loop projection in projections {
         module_index: projection.module_index
         // copy: the projected declaration is a new row; the old row stays on the trail.
-        updated := graph.modules[module_index].functions[projection.row].declaration.copy()
+        updated := sema_registration_function_with_body(graph.modules[module_index], graph.modules[module_index].functions[projection.row])
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
-        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, module_text(graph.module_table, graph.modules[module_index].module_identity), None, graph.symbols, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
+        row := sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, module_text(graph.module_table, graph.modules[module_index].module_identity), None, graph.symbols, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics, false, graph.modules[module_index].functions[projection.row].item_index)
         if declaring_slot[module_index] < 0 {
             declaring_slot[module_index] = declaring.len()
             declaring.push(module_index)

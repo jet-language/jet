@@ -2283,10 +2283,6 @@ sema_codec_set_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: I
         name: graph.modules[module_index].impls[row].methods[method_index].declaration.name.copy()
         graph.modules[module_index].impls[row].methods[method_index].declaration.body = sema_serde_items_method_body(generated, name)
     }
-    loop method_index in 0..<graph.modules[module_index].impls[row].declaration.methods.len() {
-        name: graph.modules[module_index].impls[row].declaration.methods[method_index].name.copy()
-        graph.modules[module_index].impls[row].declaration.methods[method_index].body = sema_serde_items_method_body(generated, name)
-    }
     item_index: position ?? return
     updated := graph.modules[module_index].program.items[item_index].copy()
     if updated == .Impl(implementation) {

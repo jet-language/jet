@@ -61,7 +61,6 @@ use {
         ModuleCap,
         NamedSpan,
         NamedType,
-        NameRows,
         NameTable,
         OperatorMarker,
         Param,
@@ -121,18 +120,14 @@ use {
         name_count,
         name_find,
         name_find_bytes,
+        name_find_hashed,
         name_index,
         name_intern,
-        name_rows,
-        name_rows_get,
-        name_rows_get_text,
-        name_rows_hash,
-        name_rows_remove,
-        name_rows_set,
-        name_rows_set_hashed,
+        name_intern_hashed,
         name_table,
         name_table_sized,
         name_text,
+        name_text_hash,
         owned_trait_codec,
         owned_trait_codec_marker,
         owned_trait_is_operator,
@@ -150,10 +145,13 @@ use {
         symbol_table_of,
         symbol_table_open,
         type_identity_key,
+        type_id_named,
         type_name,
         type_with_effective_parameter_fn_return,
         unit_family_distinct_defs,
         CModule,
+        Interner,
+        interner,
         TCompilerBuiltin,
         foundation_byte_text,
     ]
@@ -517,6 +515,9 @@ SemaRegistrationFunction: struct {
     // Solved or stated receiver field footprint (sorted stored field names);
     // None when the method touches whole `self` or has no non-consuming receiver.
     receiver_footprint: [String]?{None},
+    // Index in `module_row.program.items` for a top-level function whose body
+    // lives only on the program item; -1 for methods or standalone declarations.
+    item_index: Int{-1},
 }
 
 SemaRegistrationField: struct {
@@ -742,8 +743,9 @@ SemaRegistrationModule: struct {
     // `nominal_symbol_rows` answers for it. A resolved symbol carries it, so
     // the hot nominal-row lookups never search the long-key map.
     symbol_nominal_rows: [Int]{[Int]{}},
-    // Symbol name -> its `symbols` row, over interned names (A1).
-    symbol_positions: NameRows,
+    // Symbol name -> its `symbols` row, over interned names.
+    symbol_names: NameTable,
+    symbol_rows: [Int],
     declaration_positions: [String:Int],
     impls: [SemaRegistrationImpl],
     functions: [SemaRegistrationFunction],
@@ -762,7 +764,8 @@ SemaRegistrationModule: struct {
     // Local import name -> its binding (Rust `Checker.imports`). Import
     // names are unique per module, so each name has one row; the row packs
     // the import and binding positions (sema_registration_import_binding_at).
-    import_binding_rows: NameRows,
+    import_binding_names: NameTable,
+    import_binding_values: [Int],
     // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
     // metadata asks once per query instead of rescanning the declarations.
     declared_trait_impls: [String:Bool],
@@ -975,24 +978,25 @@ SemaRegistrationGraph: struct {
     callables: [SemaRegistrationCallableRow]{[SemaRegistrationCallableRow]{}},
     // Base type name -> nominal rows (by `sema_expr_type_base_name`) and impl
     // rows (by `target_type_name`), in module/row order, so operator and
-    // method dispatch read only the rows of their receiver type. A name maps
-    // to its bucket slot; buckets grow in place (Rust `entry().or_default()`).
-    nominal_row_slots: [String:Int],
+    // method dispatch read only the rows of their receiver type. Each name's
+    // `name_index` indexes directly into its bucket list (row 0 unused).
+    nominal_row_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     nominal_row_buckets: [[SemaRegistrationRowRef]],
-    impl_row_slots: [String:Int],
+    impl_row_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     impl_row_buckets: [[SemaRegistrationRowRef]],
     // Nominal SymbolID -> first registered nominal row. Kept current from
     // graph construction on: every nominal row pushed later (compiler
     // builtins, user templates, minted failure unions) is indexed as it lands.
     nominal_symbol_rows: [U32:SemaRegistrationRowRef],
-    // Source package identity -> its slot in `package_reach`: per module row,
+    // Source package identity -> its row in `package_reach`: per module row,
     // whether the package's own modules reach it through their imports
     // (sema_registration_index_package_reach). Empty until every import is
     // bound.
-    package_reach_slots: [String:Int]{[String:Int]{}},
+    package_reach_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     package_reach: [[Bool]]{[[Bool]]{}},
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
-    compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}},
+    compiler_builtin_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    compiler_builtin_refs: [SemaRegistrationRowRef?]{[SemaRegistrationRowRef?]{}},
     // Resolved trait symbol id -> the impl rows implementing it, in
     // module/row order (Rust's keyed trait registry), built with the callable
     // index; a bound query before then (`impl_traits_indexed` false) scans
@@ -1005,7 +1009,7 @@ SemaRegistrationGraph: struct {
     // built with the trait index above. The copy-facts and close-owner
     // queries match impls by trait name (sema_copy_nominal_has_impl), so
     // they read one name's rows instead of every impl of the graph.
-    impl_trait_name_slots: [String:Int]{[String:Int]{}},
+    impl_trait_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}},
     // The impl rows that implement core.prelude's CheckedText
     // (sema_type_graph_is_checked_text_impl), in module/row order, built with
@@ -1017,7 +1021,8 @@ SemaRegistrationGraph: struct {
     // (`sema_registration_source_owns_impl`), in module order. Built once with
     // the graph, so method lookup reads only the owning modules instead of
     // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
-    source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}},
+    source_impl_owner_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    source_impl_owner_rows: [[Int]]{[[Int]]{}},
     // Whether some registered function marks its first parameter `#Root`
     // (sema_registration_note_root_functions). Set when the graph is built and
     // when a user template registers more functions, never cleared, so a
@@ -1084,8 +1089,9 @@ SemaRegistrationGraph: struct {
     // `NameLedger.namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
     // module order, then declaration order.
-    namespace_slots: [String:Int]{[String:Int]{}},
-    namespace_tables: [NameRows]{[NameRows]{}},
+    namespace_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    namespace_tables: [NameTable]{[NameTable]{}},
+    namespace_table_entries: [[Int]]{[[Int]]{}},
     namespace_entries: [[Int]]{[[Int]]{}},
     namespace_entry_modules: [Int]{[Int]{}},
     namespace_entry_names: [String]{[String]{}},
@@ -1174,6 +1180,10 @@ SemaRegistrationGraph: struct {
     // for a compile with none. Their answers come back in the check's result
     // (SemaGraphResult.eval_answers).
     eval_probes: SemaEvalProbes?{None},
+    // The compilation's shared type and name interner (JetFoundation TypeIDs.jet),
+    // seeded once at graph preparation and read zero-copy through worker-local
+    // InternerDeltas during parallel body checks.
+    interner: Interner,
 }
 
 // `{module_name}.{name}` of every nominal row registered by the end of graph
@@ -1187,7 +1197,8 @@ SemaCanonicalNominals: struct {
     // `.` (sema_type_graph_lookup_symbol_at) also finds unless the name holds a
     // `.` itself, as a protocol's `Payment.Client` does: only this table finds
     // those. Spellings whose module is not registered are left out.
-    rows: NameRows,
+    rows: NameTable,
+    row_slots: [Int],
     owners: [Int],
     leaves: [String],
 }
@@ -1566,7 +1577,202 @@ sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, modul
 
 // `module_id` is the declaring module and `module_identity` its identity
 // text, which the function's symbol keys spell; `symbols` mints them.
-sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id: ModuleID, module_identity: String, owner: SymbolID?, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationFunction {
+sema_registration_func_header: fn(func: Func) -> Func Never! {
+    Func{
+        span: func.span,
+        is_pub: func.is_pub,
+        is_package_pub: func.is_package_pub,
+        is_comptime: func.is_comptime,
+        external_type: func.external_type,
+        name: func.name,
+        name_span: func.name_span,
+        meta: func.meta,
+        type_params: func.type_params,
+        head_pattern: func.head_pattern,
+        params: func.params,
+        return_type: func.return_type,
+        return_type_span: func.return_type_span,
+        return_view_provenance: func.return_view_provenance,
+        declared_return_view_provenance: func.declared_return_view_provenance,
+        gc_return: func.gc_return,
+        diverges: func.diverges,
+        gc_scope: func.gc_scope,
+        is_unsafe: func.is_unsafe,
+        unsafe_reason: func.unsafe_reason,
+        unsafe_span: func.unsafe_span,
+        is_pure: func.is_pure,
+        scrub_tag: func.scrub_tag,
+        declared_effects: func.declared_effects,
+        effect_via: func.effect_via,
+        is_reactive: func.is_reactive,
+        reactive_upgrades: func.reactive_upgrades,
+        is_replayable: func.is_replayable,
+        replayable_span: func.replayable_span,
+        is_job: func.is_job,
+        job_span: func.job_span,
+        job_metadata: func.job_metadata,
+        every: func.every,
+        is_must_use: func.is_must_use,
+        must_use_span: func.must_use_span,
+        maturity: func.maturity,
+        maturity_span: func.maturity_span,
+        kernel: func.kernel,
+        is_inline: func.is_inline,
+        is_inline_always: func.is_inline_always,
+        inline_span: func.inline_span,
+        web_marker: func.web_marker,
+        pre: func.pre,
+        post: func.post,
+        inline_foreign: func.inline_foreign,
+        undo: func.undo,
+        markers: func.markers,
+        compiler_generated: func.compiler_generated,
+        body: [Stmt]{},
+        module_caps: func.module_caps,
+        definition_module: func.definition_module,
+        site_names: func.site_names,
+        max_depth: func.max_depth,
+        state_types: func.state_types,
+    }
+}
+
+sema_registration_trait_impl_block_header: fn(block: TraitImplBlock) -> TraitImplBlock Never! {
+    methods: loop method in block.methods -> sema_registration_func_header(method)
+    TraitImplBlock{
+        trait_name: block.trait_name,
+        trait_span: block.trait_span,
+        operator_rhs: block.operator_rhs,
+        operator_marker: block.operator_marker,
+        methods: methods,
+        compiler_generated: block.compiler_generated,
+        assoc_type_impls: block.assoc_type_impls,
+        constants: block.constants,
+        delegation_field: block.delegation_field,
+        markers: block.markers,
+        os_target: block.os_target,
+        span: block.span,
+    }
+}
+
+sema_registration_impl_header: fn(definition: ImplDef) -> ImplDef Never! {
+    methods: loop method in definition.methods -> sema_registration_func_header(method)
+    ImplDef{
+        span: definition.span,
+        type_name: definition.type_name,
+        type_span: definition.type_span,
+        trait_name: definition.trait_name,
+        trait_span: definition.trait_span,
+        operator_rhs: definition.operator_rhs,
+        operator_marker: definition.operator_marker,
+        methods: methods,
+        delegation_field: definition.delegation_field,
+        assoc_type_impls: definition.assoc_type_impls,
+        constants: definition.constants,
+        is_generated_serde: definition.is_generated_serde,
+        os_target: definition.os_target,
+        markers: definition.markers,
+        type_params: definition.type_params,
+    }
+}
+
+sema_registration_struct_header: fn(definition: StructDef) -> StructDef Never! {
+    methods: loop method in definition.methods -> sema_registration_func_header(method)
+    trait_impls: loop block in definition.trait_impls -> sema_registration_trait_impl_block_header(block)
+    StructDef{
+        span: definition.span,
+        is_pub: definition.is_pub,
+        is_package_pub: definition.is_package_pub,
+        compiler_builtin_error: definition.compiler_builtin_error,
+        name: definition.name,
+        name_span: definition.name_span,
+        type_params: definition.type_params,
+        fields: definition.fields,
+        state: definition.state,
+        methods: methods,
+        cli_bindings: definition.cli_bindings,
+        trait_impls: trait_impls,
+        derives: definition.derives,
+        auto_derive_default: definition.auto_derive_default,
+        is_published_schema: definition.is_published_schema,
+        published_schema_span: definition.published_schema_span,
+        is_single_use: definition.is_single_use,
+        single_use_span: definition.single_use_span,
+        is_must_use: definition.is_must_use,
+        must_use_span: definition.must_use_span,
+        layout: definition.layout,
+        layout_span: definition.layout_span,
+        layout_alignment_span: definition.layout_alignment_span,
+        serde_markers: definition.serde_markers,
+        type_markers: definition.type_markers,
+        validate_block: definition.validate_block,
+        validate_span: definition.validate_span,
+        marker: definition.marker,
+        marker_span: definition.marker_span,
+        marker_expand_span: definition.marker_expand_span,
+        effect_impl: definition.effect_impl,
+        fact: definition.fact,
+        cap: definition.cap,
+        inline_module: definition.inline_module,
+    }
+}
+
+sema_registration_enum_header: fn(definition: EnumDef) -> EnumDef Never! {
+    methods: loop method in definition.methods -> sema_registration_func_header(method)
+    trait_impls: loop block in definition.trait_impls -> sema_registration_trait_impl_block_header(block)
+    EnumDef{
+        span: definition.span,
+        is_pub: definition.is_pub,
+        is_package_pub: definition.is_package_pub,
+        name: definition.name,
+        name_span: definition.name_span,
+        type_params: definition.type_params,
+        variants: definition.variants,
+        methods: methods,
+        trait_impls: trait_impls,
+        derives: definition.derives,
+        auto_derive_default: definition.auto_derive_default,
+        is_single_use: definition.is_single_use,
+        single_use_span: definition.single_use_span,
+        is_must_use: definition.is_must_use,
+        must_use_span: definition.must_use_span,
+        serde_markers: definition.serde_markers,
+        type_markers: definition.type_markers,
+        groups: definition.groups,
+        effect_impl: definition.effect_impl,
+        cap: definition.cap,
+        state: definition.state,
+    }
+}
+
+// Canonical body of a registered function: reads the program item in place when
+// the registration row stores only a header (`item_index >= 0`).
+sema_registration_function_body: fn(module_row: SemaRegistrationModule, function: SemaRegistrationFunction) -> [Stmt] Never! {
+    if function.declaration.body.len() > 0 -> return function.declaration.body
+    index: function.item_index
+    if index >= 0 && index < module_row.program.items.len() {
+        if module_row.program.items[index] == .Func(item_func) {
+            if item_func.name == function.declaration.name && item_func.span == function.declaration.span {
+                return item_func.body
+            }
+        }
+    }
+    loop item in module_row.program.items {
+        if item == .Func(item_func) {
+            if item_func.name == function.declaration.name && item_func.span == function.declaration.span {
+                return item_func.body
+            }
+        }
+    }
+    function.declaration.body
+}
+
+sema_registration_function_with_body: fn(module_row: SemaRegistrationModule, function: SemaRegistrationFunction) -> Func Never! {
+    updated := sema_registration_func_header(function.declaration)
+    updated.body = sema_registration_function_body(module_row, function)
+    updated
+}
+
+sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id: ModuleID, module_identity: String, owner: SymbolID?, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic], keep_body: Bool{true}, item_index: Int{-1}) -> SemaRegistrationFunction {
     owner_key: if owner == .Val(value) -> symbol_table_key(symbols, value) else -> ""
     symbol_kind: SymbolKind.Function
     symbol_id_value: symbol_mint(symbols, symbol_kind, module_identity, owner_key, func.name)
@@ -1598,13 +1804,14 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id:
     }
     SemaRegistrationFunction{
         symbol: symbol,
-        // copy: the function row owns its declaration; the program keeps its item.
-        declaration: func.copy(),
+        // copy: methods own their declaration; top-level functions store a header and read their body from program.items.
+        declaration: if keep_body -> func.copy() else -> sema_registration_func_header(func),
         signature: signature,
         generic_params: generic_params,
         parameters: parameters,
         abi: abi,
         raw_protocol_return: raw_protocol_return,
+        item_index: item_index,
     }
 }
 
@@ -1706,18 +1913,17 @@ sema_registration_index_nominal_names: fn(graph: &SemaRegistrationGraph, module_
     loop row in first_row..<graph.modules[module_index].nominals.len() {
         name: sema_expr_type_base_name(graph.modules[module_index].nominals[row].ty) ?? next
         reference: SemaRegistrationRowRef{module_index: module_index, row: row}
-        if graph.nominal_row_slots.get(name) == .Val(slot) {
-            graph.nominal_row_buckets[slot].push(reference)
-        } else {
-            graph.nominal_row_slots[name] = graph.nominal_row_buckets.len()
-            graph.nominal_row_buckets.push([SemaRegistrationRowRef]{reference})
-        }
+        slot: name_index(name_intern(graph.nominal_row_names, name))
+        loop graph.nominal_row_buckets.len() <= slot -> graph.nominal_row_buckets.push([SemaRegistrationRowRef]{})
+        graph.nominal_row_buckets[slot].push(reference)
     }
 }
 
 // The nominal rows registered under base type name `name`, in module/row order.
 sema_registration_nominal_rows_named: fn(graph: SemaRegistrationGraph, name: String) -> [SemaRegistrationRowRef] {
-    slot: graph.nominal_row_slots.get(name) ?? return [SemaRegistrationRowRef]{}
+    found: name_find(graph.nominal_row_names, name) ?? return [SemaRegistrationRowRef]{}
+    slot: name_index(found)
+    if slot >= graph.nominal_row_buckets.len() -> return [SemaRegistrationRowRef]{}
     graph.nominal_row_buckets[slot]
 }
 
@@ -1727,7 +1933,9 @@ sema_registration_nominal_rows_named: fn(graph: SemaRegistrationGraph, name: Str
 // nothing.
 sema_registration_reaches: fn(graph: SemaRegistrationGraph, from: Int, to: Int) -> Bool Never! {
     if from < 0 || from >= graph.modules.len() || to < 0 -> return false
-    slot: graph.package_reach_slots.get(graph.modules[from].package_identity) ?? return false
+    found: name_find(graph.package_reach_names, graph.modules[from].package_identity) ?? return false
+    slot: name_index(found)
+    if slot >= graph.package_reach.len() -> return false
     to < graph.package_reach[slot].len() && graph.package_reach[slot][to]
 }
 
@@ -1737,19 +1945,16 @@ sema_registration_reaches: fn(graph: SemaRegistrationGraph, from: Int, to: Int) 
 // see each other's names; an import of a Core module reaches that module
 // and what it imports.
 sema_registration_index_package_reach: fn(graph: &SemaRegistrationGraph) Never! {
-    slots := [String:Int]{}
-    members := [[Int]]{}
+    names := name_table_sized(16)
+    members := [[Int]]{[Int]{}}
     loop row in 0..<graph.modules.len() {
         if module_is_core(graph.modules[row].module_identity) -> next
-        if slots.get(graph.modules[row].package_identity) == .Val(slot) {
-            members[slot].push(row)
-            next
-        }
-        slots[graph.modules[row].package_identity] = members.len()
-        members.push([Int]{row})
+        slot: name_index(name_intern(names, graph.modules[row].package_identity))
+        loop members.len() <= slot -> members.push([Int]{})
+        members[slot].push(row)
     }
-    reach := [[Bool]]{}
-    loop slot in 0..<members.len() {
+    reach := [[Bool]]{[Bool]{}}
+    loop slot in 1..<members.len() {
         seen := (loop _ in 0..<graph.modules.len() -> false)
         pending := [Int]{}
         loop member in members[slot] {
@@ -1760,7 +1965,9 @@ sema_registration_index_package_reach: fn(graph: &SemaRegistrationGraph) Never! 
             from: pending.pop() ?? break
             loop import in graph.modules[from].imports {
                 if !module_is_core(import.target_module_identity) {
-                    target_slot: slots.get(import.target_package_identity) ?? next
+                    target_found: name_find(names, import.target_package_identity) ?? next
+                    target_slot: name_index(target_found)
+                    if target_slot >= members.len() -> next
                     loop member in members[target_slot] {
                         if seen[member] -> next
                         seen[member] = true
@@ -1776,13 +1983,15 @@ sema_registration_index_package_reach: fn(graph: &SemaRegistrationGraph) Never! 
         }
         reach.push(seen.move())
     }
-    graph.package_reach_slots = slots.move()
+    graph.package_reach_names = names.move()
     graph.package_reach = reach.move()
 }
 
 // The impl rows registered under target type name `name`, in module/row order.
 sema_registration_impl_rows_named: fn(graph: SemaRegistrationGraph, name: String) -> [SemaRegistrationRowRef] {
-    slot: graph.impl_row_slots.get(name) ?? return [SemaRegistrationRowRef]{}
+    found: name_find(graph.impl_row_names, name) ?? return [SemaRegistrationRowRef]{}
+    slot: name_index(found)
+    if slot >= graph.impl_row_buckets.len() -> return [SemaRegistrationRowRef]{}
     graph.impl_row_buckets[slot]
 }
 
@@ -1809,25 +2018,26 @@ sema_registration_keyed_rows_sort: fn(rows: &[SemaRegistrationKeyedRow]) Never! 
 }
 
 SemaRegistrationBuckets: struct {
-    slots: [String:Int],
+    names: NameTable,
     buckets: [[SemaRegistrationRowRef]],
 }
 
 // Buckets sorted keyed rows by key: one slot per key, in ascending key
 // order, each bucket in registration order.
 sema_registration_bucket_sorted_rows: fn(rows: [SemaRegistrationKeyedRow]) -> SemaRegistrationBuckets Never! {
-    slots := [String:Int]{}
-    buckets := [[SemaRegistrationRowRef]]{}
+    names := name_table_sized(rows.len() * 2 + 2)
+    buckets := [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}
     loop at in 0..<rows.len() {
         if at == 0 || rows[at - 1].key != rows[at].key {
-            slots[rows[at].key] = buckets.len()
-            buckets.push([SemaRegistrationRowRef]{rows[at].reference})
+            slot: name_index(name_intern(names, rows[at].key))
+            loop buckets.len() <= slot -> buckets.push([SemaRegistrationRowRef]{})
+            buckets[slot].push(rows[at].reference)
         } else {
             last: buckets.len() - 1
             buckets[last].push(rows[at].reference)
         }
     }
-    SemaRegistrationBuckets{slots: slots.move(), buckets: buckets.move()}
+    SemaRegistrationBuckets{names: names.move(), buckets: buckets.move()}
 }
 
 // Graph construction: every module's nominal SymbolID rows (the first row of
@@ -1853,16 +2063,18 @@ sema_registration_index_canonical_nominals: fn(graph: &SemaRegistrationGraph) Ne
     loop module_index in 0..<graph.modules.len() {
         total_nominals += graph.modules[module_index].nominals.len()
     }
-    table := SemaCanonicalNominals{names: [[String]]{}, rows: name_rows(total_nominals), owners: [Int]{}, leaves: [String]{}}
+    table := SemaCanonicalNominals{names: [[String]]{}, rows: name_table_sized(total_nominals * 2 + 2), row_slots: [Int]{-1}, owners: [Int]{}, leaves: [String]{}}
     loop module_index in 0..<graph.modules.len() {
         names := [String]{}
         loop row in 0..<graph.modules[module_index].nominals.len() {
             spelling: "{module_text(graph.module_table, graph.modules[module_index].nominals[row].symbol.module_identity)}.{graph.modules[module_index].nominals[row].symbol.name}"
             names.push(spelling.copy())
             owner: sema_registration_module_index(graph, graph.modules[module_index].nominals[row].symbol.module_identity) ?? next
-            hash: name_rows_hash(spelling)
-            if name_rows_get(table.rows, spelling, hash) != None -> next
-            name_rows_set_hashed(table.rows, spelling, hash, table.owners.len())
+            hash: name_text_hash(spelling)
+            id: name_index(name_intern_hashed(table.rows, spelling, hash))
+            loop table.row_slots.len() <= id -> table.row_slots.push(-1)
+            if table.row_slots[id] >= 0 -> next
+            table.row_slots[id] = table.owners.len()
             table.owners.push(owner)
             table.leaves.push(graph.modules[module_index].nominals[row].symbol.name)
         }
@@ -1892,7 +2104,7 @@ sema_registration_index_all_nominal_names: fn(graph: &SemaRegistrationGraph) Nev
     }
     sema_registration_keyed_rows_sort(name_rows)
     named := sema_registration_bucket_sorted_rows(name_rows)
-    graph.nominal_row_slots = named.slots.move()
+    graph.nominal_row_names = named.names.move()
     graph.nominal_row_buckets = named.buckets.move()
 }
 
@@ -1941,7 +2153,7 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
     }
     sema_registration_keyed_rows_sort(impl_rows)
     targets := sema_registration_bucket_sorted_rows(impl_rows)
-    graph.impl_row_slots = targets.slots.move()
+    graph.impl_row_names = targets.names.move()
     graph.impl_row_buckets = targets.buckets.move()
 }
 
@@ -2008,8 +2220,8 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph, threads: 
     }
     graph.impl_trait_slots = [U32:Int]{}
     graph.impl_trait_buckets = [[SemaRegistrationRowRef]]{}
-    graph.impl_trait_name_slots = [String:Int]{}
-    graph.impl_trait_name_buckets = [[SemaRegistrationRowRef]]{}
+    graph.impl_trait_names = name_table_sized(64)
+    graph.impl_trait_name_buckets = [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}
     checked_text := [SemaRegistrationRowRef]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
@@ -2050,12 +2262,16 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph, threads: 
 }
 
 sema_registration_impl_trait_name_push: fn(graph: &SemaRegistrationGraph, trait_name: String, reference: SemaRegistrationRowRef) Never! {
-    if graph.impl_trait_name_slots.get(trait_name) == .Val(slot) {
-        graph.impl_trait_name_buckets[slot].push(reference.copy())
-    } else {
-        graph.impl_trait_name_slots[trait_name] = graph.impl_trait_name_buckets.len()
-        graph.impl_trait_name_buckets.push([SemaRegistrationRowRef]{reference})
-    }
+    slot: name_index(name_intern(graph.impl_trait_names, trait_name))
+    loop graph.impl_trait_name_buckets.len() <= slot -> graph.impl_trait_name_buckets.push([SemaRegistrationRowRef]{})
+    graph.impl_trait_name_buckets[slot].push(reference.copy())
+}
+
+sema_registration_impl_trait_name_slot: fn(graph: SemaRegistrationGraph, trait_name: String) -> Int? Never! {
+    found: name_find(graph.impl_trait_names, trait_name) ?? return None
+    slot: name_index(found)
+    if slot < graph.impl_trait_name_buckets.len() && graph.impl_trait_name_buckets[slot].len() > 0 -> return Val(slot)
+    None
 }
 
 sema_registration_named_symbol: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
@@ -2276,7 +2492,7 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
                     methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: sema_registration_struct_fields(definition, module_identity, symbol, symbols, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: Item.Struct{value: sema_registration_struct_header(definition)}}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: sema_registration_struct_fields(definition, module_identity, symbol, symbols, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
         }
         .Enum(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
@@ -2294,7 +2510,7 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
                     methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: Item.Enum{value: sema_registration_enum_header(definition)}}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
         .Distinct(definition) -> {
             ty: Type.Named{name: definition.name}
@@ -2581,11 +2797,15 @@ sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identi
 }
 
 sema_registration_module_has_name: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
-    name_rows_get_text(module_row.symbol_positions, name) != None
+    found: name_find(module_row.symbol_names, name) ?? return false
+    id: name_index(found)
+    id < module_row.symbol_rows.len() && module_row.symbol_rows[id] >= 0
 }
 
 sema_registration_module_has_import_name: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
-    name_rows_get_text(module_row.import_binding_rows, name) != None
+    found: name_find(module_row.import_binding_names, name) ?? return false
+    id: name_index(found)
+    id < module_row.import_binding_values.len() && module_row.import_binding_values[id] >= 0
 }
 
 // A body-less `name: module` binds its file as a file import aliased `name`.
@@ -2628,27 +2848,42 @@ sema_registration_file_name_taken_over: fn(module_row: SemaRegistrationModule, n
     false
 }
 
-// The `symbols` row of `name` (whose name_rows_hash is `hash`) in `module_row`.
+sema_registration_set_symbol_position: fn(module_row: &SemaRegistrationModule, name: String, row: Int) Never! {
+    id: name_index(name_intern(module_row.symbol_names, name))
+    loop module_row.symbol_rows.len() <= id -> module_row.symbol_rows.push(-1)
+    module_row.symbol_rows[id] = row
+}
+
+// The `symbols` row of `name` (whose name_text_hash is `hash`) in `module_row`.
 sema_registration_symbol_position: fn(module_row: SemaRegistrationModule, name: String, hash: Int) -> Int? Never! {
-    name_rows_get(module_row.symbol_positions, name, hash)
+    found: name_find_hashed(module_row.symbol_names, name, hash) ?? return None
+    id: name_index(found)
+    if id < module_row.symbol_rows.len() && module_row.symbol_rows[id] >= 0 -> return Val(module_row.symbol_rows[id])
+    None
 }
 
 // Unbinds a symbol name (sema_graph_module_rollback).
 sema_registration_forget_symbol_position: fn(module_row: &SemaRegistrationModule, name: String) Never! {
-    name_rows_remove(module_row.symbol_positions, name)
+    found: name_find(module_row.symbol_names, name) ?? return
+    id: name_index(found)
+    if id < module_row.symbol_rows.len() -> module_row.symbol_rows[id] = -1
 }
 
-// `import_binding_rows` packs a binding reference as one row.
+// `import_binding_values` packs a binding reference as one row.
 SEMA_IMPORT_BINDING_STRIDE: 4294967296
 
-// The import binding `name` (whose name_rows_hash is `hash`) binds in `module_row`.
+// The import binding `name` (whose name_text_hash is `hash`) binds in `module_row`.
 sema_registration_import_binding_at: fn(module_row: SemaRegistrationModule, name: String, hash: Int) -> SemaRegistrationImportBindingRef? Never! {
-    packed: name_rows_get(module_row.import_binding_rows, name, hash) ?? return None
+    found: name_find_hashed(module_row.import_binding_names, name, hash) ?? return None
+    id: name_index(found)
+    if id >= module_row.import_binding_values.len() -> return None
+    packed: module_row.import_binding_values[id]
+    if packed < 0 -> return None
     Val(SemaRegistrationImportBindingRef{import_index: packed /% SEMA_IMPORT_BINDING_STRIDE, binding: packed % SEMA_IMPORT_BINDING_STRIDE})
 }
 
 sema_registration_import_binding_named: fn(module_row: SemaRegistrationModule, name: String) -> SemaRegistrationImportBindingRef? Never! {
-    sema_registration_import_binding_at(module_row, name, name_rows_hash(name))
+    sema_registration_import_binding_at(module_row, name, name_text_hash(name))
 }
 
 // The E0105 for import `declaration` binding `local` a second time. A
@@ -2670,7 +2905,9 @@ sema_registration_import_twice: fn(module_row: SemaRegistrationModule, declarati
 sema_registration_push_import_binding: fn(graph: &SemaRegistrationGraph, module_index: Int, import_index: Int, binding: SemaRegistrationImportBinding) Never! {
     if !sema_registration_module_has_import_name(graph.modules[module_index], binding.local) {
         packed: import_index * SEMA_IMPORT_BINDING_STRIDE + graph.modules[module_index].imports[import_index].bindings.len()
-        name_rows_set(graph.modules[module_index].import_binding_rows, binding.local, packed)
+        id: name_index(name_intern(graph.modules[module_index].import_binding_names, binding.local))
+        loop graph.modules[module_index].import_binding_values.len() <= id -> graph.modules[module_index].import_binding_values.push(-1)
+        graph.modules[module_index].import_binding_values[id] = packed
     }
     graph.modules[module_index].imports[import_index].bindings.push(binding.copy())
 }
@@ -2684,7 +2921,7 @@ sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule,
             next
         }
         registered: sema_registration_foreign_function(function, module_row.module_identity, module_text, owner, symbols, foreign_library, foreign_library_span)
-        name_rows_set(module_row.symbol_positions, registered.symbol.name, module_row.symbols.len())
+        sema_registration_set_symbol_position(module_row, registered.symbol.name, module_row.symbols.len())
         module_row.symbols.push(registered.symbol)
         module_row.symbol_nominal_rows.push(-1)
         module_row.foreign_functions.push(registered)
@@ -2694,7 +2931,7 @@ sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule,
 
 // `module_text` is the row's identity text, which its symbol keys spell;
 // `symbols` mints them.
-sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text: String, symbols: &SymbolTable, item: Item, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
+sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text: String, symbols: &SymbolTable, item: Item, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic], item_index: Int{-1}) -> Bool {
     if item == {
         .ExternRust(block) -> {
             complete: sema_registration_add_foreign_functions(module_row, module_text, symbols, block.functions, SemaRegistrationForeignOwner.ExternRust, block.crate_spec, block.crate_span, diagnostics)
@@ -2727,7 +2964,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
     }
     if !sema_registration_value_type_rules(module_row, item, diagnostics) -> return false
     function: if item == {
-        .Func(value) -> Val(sema_registration_function(value, false, module_row.module_identity, module_text, None, symbols, source_file, source_origin, source_segments, diagnostics))
+        .Func(value) -> Val(sema_registration_function(value, false, module_row.module_identity, module_text, None, symbols, source_file, source_origin, source_segments, diagnostics, item_index < 0, item_index))
         .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
     symbol: if function == {
@@ -2736,7 +2973,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
         None -> sema_registration_root_symbol(item, module_row.module_identity, module_text, symbols, source_file, source_origin, source_segments, diagnostics) ?? return false
     }
     nominal: sema_registration_nominal(item, module_row.module_identity, module_text, symbols, source_file, source_origin, source_segments, diagnostics)
-    name_rows_set(module_row.symbol_positions, name, module_row.symbols.len())
+    sema_registration_set_symbol_position(module_row, name, module_row.symbols.len())
     module_row.declaration_positions[name] = module_row.declarations.len()
     module_row.symbols.push(symbol.copy())
     module_row.symbol_nominal_rows.push(if nominal != None -> module_row.nominals.len() else -> -1)
@@ -2776,28 +3013,18 @@ sema_registration_push_declaration: fn(module_row: &SemaRegistrationModule, item
 }
 
 // The declaration registry's row for `item`. Its readers take names, spans
-// and signatures, never a function body, so a function and an impl's methods
-// are kept without their bodies: the program items hold the only bodies.
+// and signatures, never a function body, so functions, impls, structs, and
+// enums are kept without method bodies: the program items hold the only bodies.
 sema_registration_declared_item: fn(item: Item) -> Item Never! {
+    if item == {
+        .Func(source) -> return Item.Func{value: sema_registration_func_header(source)}
+        .Impl(source) -> return Item.Impl{value: sema_registration_impl_header(source)}
+        .Struct(source) -> return Item.Struct{value: sema_registration_struct_header(source)}
+        .Enum(source) -> return Item.Enum{value: sema_registration_enum_header(source)}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
     // copy: the declaration registry owns its row; the program keeps its own item.
-    declared := item.copy()
-    if item == .Func(_) {
-        if declared.move() == .Func(source) {
-            header := source.move()
-            header.body = [Stmt]{}
-            return Item.Func{value: header.move()}
-        }
-        panic("a copied function item is not a function")
-    }
-    if item == .Impl(_) {
-        if declared.move() == .Impl(source) {
-            header := source.move()
-            loop index in 0..<header.methods.len() -> header.methods[index].body = [Stmt]{}
-            return Item.Impl{value: header.move()}
-        }
-        panic("a copied impl item is not an impl")
-    }
-    declared
+    item.copy()
 }
 
 // E0106: the Rust reference's `register_struct`/`register_enum`/
@@ -2962,7 +3189,7 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
     }
     SemaRegistrationImpl{
         symbol: symbol,
-        declaration: definition,
+        declaration: sema_registration_impl_header(definition),
         source_module_identity: module_row.module_identity,
         source_package_identity: module_row.package_identity,
         target_module_identity: target_module_identity,
@@ -3094,7 +3321,8 @@ sema_registration_core_handle_owner: fn(module_name: String, name: String) -> Bo
 // type at once: `name` maps to module `m` exactly when
 // `sema_registration_source_owns_impl(graph.modules[m], name)` holds.
 sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
-    owners := [String:[Int]]{}
+    owner_names := name_table_sized(32)
+    owner_rows := [[Int]]{[Int]{}}
     loop module_index in 0..<graph.modules.len() {
         module_row: graph.modules[module_index]
         if !module_is_core(module_row.module_identity) -> next
@@ -3112,14 +3340,22 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
                 if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) {
                     next
                 }
-                modules := owners.get(owner) ?? [Int]{}
-                if modules.contains(module_index) -> next
-                modules.push(module_index)
-                owners[owner] = modules.move()
+                slot: name_index(name_intern(owner_names, owner))
+                loop owner_rows.len() <= slot -> owner_rows.push([Int]{})
+                if owner_rows[slot].contains(module_index) -> next
+                owner_rows[slot].push(module_index)
             }
         }
     }
-    graph.source_impl_owner_modules = owners.move()
+    graph.source_impl_owner_names = owner_names.move()
+    graph.source_impl_owner_rows = owner_rows.move()
+}
+
+sema_registration_source_impl_owners: fn(graph: SemaRegistrationGraph, name: String) -> [Int]? Never! {
+    found: name_find(graph.source_impl_owner_names, name) ?? return None
+    slot: name_index(found)
+    if slot < graph.source_impl_owner_rows.len() && graph.source_impl_owner_rows[slot].len() > 0 -> return Val(graph.source_impl_owner_rows[slot])
+    None
 }
 
 // Sets graph.root_functions when module `module_index` registers a function
@@ -3238,7 +3474,12 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
             // The first registration already reported the methods' own
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
-            row: sema_registration_impl(graph.modules[module_index], module_text(graph.module_table, graph.modules[module_index].module_identity), graph.symbols, definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
+            row := sema_registration_impl(graph.modules[module_index], module_text(graph.module_table, graph.modules[module_index].module_identity), graph.symbols, definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
+            loop m_idx in 0..<row.methods.len() {
+                if m_idx < graph.modules[module_index].impls[impl_index].methods.len() {
+                    row.methods[m_idx].declaration.body = graph.modules[module_index].impls[impl_index].methods[m_idx].declaration.body
+                }
+            }
             // Only the attached registration knows the owner's parameters.
             if definition.type_params.len() > 0 {
                 refused := [Diagnostic]{}
@@ -3324,7 +3565,8 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         source: owned.source,
         symbols: [Symbol]{},
         declarations: [Item]{},
-        symbol_positions: name_rows(),
+        symbol_names: name_table_sized(16),
+        symbol_rows: [Int]{-1},
         declaration_positions: [String:Int]{},
         impls: [SemaRegistrationImpl]{},
         functions: [SemaRegistrationFunction]{},
@@ -3333,7 +3575,8 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         constants: [SemaRegistrationConstant]{},
         imports: [SemaRegistrationImport]{},
         exports: [SemaRegistrationExport]{},
-        import_binding_rows: name_rows(),
+        import_binding_names: name_table_sized(16),
+        import_binding_values: [Int]{-1},
         declared_trait_impls: [String:Bool]{},
         namespace: owned.namespace,
         namespace_names: owned.namespace_names,
@@ -3368,7 +3611,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         }
         nominal: sema_registration_foreign_handle_nominal(facts, module_row.module_identity, module_text, symbols, diagnostics)
         if nominal == .Val(value) {
-            name_rows_set(module_row.symbol_positions, value.symbol.name, module_row.symbols.len())
+            sema_registration_set_symbol_position(module_row, value.symbol.name, module_row.symbols.len())
             module_row.symbols.push(value.symbol)
             module_row.symbol_nominal_rows.push(module_row.nominals.len())
             module_row.nominals.push(value)
@@ -3459,7 +3702,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     items := module_row.program.items.move()
     module_row.program.items = [Item]{}
     loop index in 0..<items.len() {
-        if !sema_registration_add_root(module_row, module_text, symbols, items[index], row_source_file, row_source_origin, row_source_segments, diagnostics) {
+        if !sema_registration_add_root(module_row, module_text, symbols, items[index], row_source_file, row_source_origin, row_source_segments, diagnostics, index) {
 
         }
         // The first declaration remains the lookup winner after a collision.
@@ -4849,7 +5092,7 @@ sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: St
     // The module's own declarations first: they carry the live symbol (a constant's staged type
     // lands on it after registration), while an export row holds a registration-time copy. A
     // module's symbol names are distinct, so its position map finds the one row of `name`.
-    if sema_registration_symbol_position(module_row, name, name_rows_hash(name)) == .Val(index) {
+    if sema_registration_symbol_position(module_row, name, name_text_hash(name)) == .Val(index) {
         declaration_position: sema_registration_declaration_position(module_row, module_row.symbols[index])
         return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration_position: declaration_position, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
     }
@@ -5202,7 +5445,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     if sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
                         slot: graph.modules[target_index].namespace_slot
                         if slot >= 0 {
-                            if name_rows_get_text(graph.namespace_tables[slot], item.original) == .Val(entry) {
+                            if sema_registration_namespace_entry_hashed(graph, slot, item.original, name_text_hash(item.original)) == .Val(entry) {
                                 export_index = graph.namespace_entry_modules[entry]
                             }
                         }
@@ -5433,7 +5676,7 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
     // Resolve implicit compiler names to genuine ordinary declarations in the
     // marked owner's module; emitted aliases never choose this owner.
     loop (row, nominal) in graph.modules[owner.module_index].nominals {
-        graph.compiler_builtin_rows[nominal.symbol.name] = SemaRegistrationRowRef{module_index: owner.module_index, row: row}
+        sema_registration_set_compiler_builtin(graph, nominal.symbol.name, SemaRegistrationRowRef{module_index: owner.module_index, row: row})
     }
     compiler_enums: [String]{"Ordering", "RemoveBy", "TaskPauseMode", "UnitScaleProvenanceKind"}
     loop name in compiler_enums {
@@ -5444,7 +5687,7 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
         nominal: sema_registration_compiler_owned_enum(graph.modules[module_index].module_identity, module_identity, graph.symbols, name, variants)
         graph.modules[module_index].nominals.push(nominal)
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
-        graph.compiler_builtin_rows[name] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
+        sema_registration_set_compiler_builtin(graph, name, SemaRegistrationRowRef{module_index: module_index, row: first_nominal})
     }
     loop codec in ([SerdeCodec#2]{.Encode, .Decode}) {
         reference: builtin_codec_trait_ref(codec)
@@ -5454,14 +5697,23 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
         nominal: sema_registration_compiler_owned_codec_trait(graph.modules[module_index].module_identity, module_identity, graph.symbols, reference)
         graph.modules[module_index].nominals.push(nominal)
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
-        graph.compiler_builtin_rows[reference.name] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
+        sema_registration_set_compiler_builtin(graph, reference.name, SemaRegistrationRowRef{module_index: module_index, row: first_nominal})
     }
+}
+
+sema_registration_set_compiler_builtin: fn(graph: &SemaRegistrationGraph, name: String, ref: SemaRegistrationRowRef) Never! {
+    id: name_index(name_intern(graph.compiler_builtin_names, name))
+    loop graph.compiler_builtin_refs.len() <= id -> graph.compiler_builtin_refs.push(None)
+    graph.compiler_builtin_refs[id] = Val(ref)
 }
 
 // Compiler names resolve to ordinary original Prelude declarations or the
 // existing runtime enum rows. The DefaultErr role comes only from its marker.
 sema_registration_compiler_builtin_row: fn(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationRowRef? {
-    graph.compiler_builtin_rows.get(name)
+    found: name_find(graph.compiler_builtin_names, name) ?? return None
+    id: name_index(found)
+    if id < graph.compiler_builtin_refs.len() -> return graph.compiler_builtin_refs[id]
+    None
 }
 
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
@@ -5617,7 +5869,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     if package_identity == "" || module_is_none(entry_module_identity) {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, impl_row_buckets: [[SemaRegistrationRowRef]]{[SemaRegistrationRowRef]{}}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}, interner: interner()}
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
     loop module_index in 0..<graph.modules.len() {
@@ -5892,12 +6144,19 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // in place; every other item stays where it is, uncopied.
     loop erased_index in 0..<graph.modules.len() {
         item_index := 0
+        removed := false
         loop item_index < graph.modules[erased_index].program.items.len() {
             if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
                 erased_cap: sema_registration_template_cap(graph.modules[erased_index].program.items[item_index])
                 if erased_cap == .Val(cap) -> graph.modules[erased_index].template_caps.push(cap)
                 _ := graph.modules[erased_index].program.items.remove(item_index, .Slot)
+                removed = true
             } else { item_index += 1 }
+        }
+        if removed {
+            loop fn_row in 0..<graph.modules[erased_index].functions.len() {
+                graph.modules[erased_index].functions[fn_row].item_index = -1
+            }
         }
     }
     // User derives and declared marker
@@ -5932,7 +6191,25 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     graph = sema_divergence_solve(graph, threads)
     // Each test's id once the user templates have generated theirs.
     loop row_index in 0..<graph.modules.len() -> sema_registration_mint_tests(graph, row_index)
+    sema_registration_seed_interner(graph)
     graph
+}
+
+// Seeds the graph's shared Interner with every registered nominal spelling
+// once, so parallel body workers hit the read-only shared tables with zero copies.
+sema_registration_seed_interner: fn(graph: &SemaRegistrationGraph) Never! {
+    loop module_index in 0..<graph.modules.len() {
+        loop nominal in graph.modules[module_index].nominals {
+            _: type_id_named(graph.interner, nominal.symbol.name)
+        }
+    }
+    if graph.canonical_nominals == .Val(canonical) {
+        loop mod_names in canonical.names {
+            loop spelling in mod_names {
+                _: type_id_named(graph.interner, spelling)
+            }
+        }
+    }
 }
 
 sema_registration_item_is_expanded_template: fn(item: Item) -> Bool Never! {
@@ -6029,21 +6306,27 @@ SemaRegistrationNamespaceName: struct {
     entry: Int,
 }
 
+sema_registration_canonical_nominal_row: fn(table: SemaCanonicalNominals, name: String, hash: Int) -> Int? Never! {
+    found: name_find_hashed(table.rows, name, hash) ?? return None
+    id: name_index(found)
+    if id < table.row_slots.len() && table.row_slots[id] >= 0 -> return Val(table.row_slots[id])
+    None
+}
+
 sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
     rows := [SemaRegistrationNamespaceName]{}
     loop module_index in 0..<graph.modules.len() {
         namespace: graph.modules[module_index].namespace
         if namespace == "" -> next
-        slot := graph.namespace_slots.get(namespace) ?? -1
-        if slot < 0 {
-            slot = graph.namespace_tables.len()
-            graph.namespace_slots[namespace] = slot
-            graph.namespace_tables.push(name_rows())
+        slot: name_index(name_intern(graph.namespace_names, namespace)) - 1
+        loop graph.namespace_tables.len() <= slot {
+            graph.namespace_tables.push(name_table_sized(16))
+            graph.namespace_table_entries.push([Int]{-1})
             graph.namespace_entries.push([Int]{})
         }
         graph.modules[module_index].namespace_slot = slot
-        loop name_index in 0..<graph.modules[module_index].namespace_names.len() {
-            name: graph.modules[module_index].namespace_names[name_index]
+        loop name_idx in 0..<graph.modules[module_index].namespace_names.len() {
+            name: graph.modules[module_index].namespace_names[name_idx]
             entry: graph.namespace_entry_modules.len()
             // copy: the sorted rows fill the tables; the entry list keeps the name.
             rows.push(SemaRegistrationNamespaceName{slot: slot, name: name.copy(), entry: entry})
@@ -6054,8 +6337,18 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
     }
     rows.sort_by(fn(left: SemaRegistrationNamespaceName, right: SemaRegistrationNamespaceName) { (left.slot <=> right.slot).then(left.name <=> right.name).then(left.entry <=> right.entry) })
     loop at in 0..<rows.len() {
-        name_rows_set(graph.namespace_tables[rows[at].slot], rows[at].name, rows[at].entry)
+        slot: rows[at].slot
+        id: name_index(name_intern(graph.namespace_tables[slot], rows[at].name))
+        loop graph.namespace_table_entries[slot].len() <= id -> graph.namespace_table_entries[slot].push(-1)
+        graph.namespace_table_entries[slot][id] = rows[at].entry
     }
+}
+
+sema_registration_namespace_entry_hashed: fn(graph: SemaRegistrationGraph, slot: Int, name: String, hash: Int) -> Int? Never! {
+    found: name_find_hashed(graph.namespace_tables[slot], name, hash) ?? return None
+    id: name_index(found)
+    if id < graph.namespace_table_entries[slot].len() && graph.namespace_table_entries[slot][id] >= 0 -> return Val(graph.namespace_table_entries[slot][id])
+    None
 }
 
 // (Rust `NameLedger.namespace_owner`): the registered symbol
@@ -6064,14 +6357,14 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
 // declaration that did not register).
 sema_registration_namespace_owner: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SemaRegistrationRowRef? Never! {
     if graph.modules[module_index].namespace_slot < 0 -> return None
-    sema_registration_namespace_owner_at(graph, module_index, name, name_rows_hash(name))
+    sema_registration_namespace_owner_at(graph, module_index, name, name_text_hash(name))
 }
 
-// sema_registration_namespace_owner of `name`, whose name_rows_hash is `hash`.
+// sema_registration_namespace_owner of `name`, whose name_text_hash is `hash`.
 sema_registration_namespace_owner_at: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, hash: Int) -> SemaRegistrationRowRef? Never! {
     slot: graph.modules[module_index].namespace_slot
     if slot < 0 -> return None
-    entry: name_rows_get(graph.namespace_tables[slot], name, hash) ?? return None
+    entry: sema_registration_namespace_entry_hashed(graph, slot, name, hash) ?? return None
     owner: graph.namespace_entry_modules[entry]
     if owner == module_index -> return None
     row: sema_registration_symbol_position(graph.modules[owner], name, hash) ?? return None
@@ -6109,12 +6402,12 @@ sema_registration_bind_namespace_module: fn(graph: SemaRegistrationGraph, own_sy
         entries = graph.namespace_entries[slot]
     } else {
         loop name in graph.modules[module_index].namespace_refs {
-            if name_rows_get_text(graph.namespace_tables[slot], name) == .Val(entry) {
+            if sema_registration_namespace_entry_hashed(graph, slot, name, name_text_hash(name)) == .Val(entry) {
                 entries.push(entry)
             }
         }
         loop name in SEMA_PRELUDE_DERIVE_WORDS {
-            if name_rows_get_text(graph.namespace_tables[slot], name) == .Val(entry) {
+            if sema_registration_namespace_entry_hashed(graph, slot, name, name_text_hash(name)) == .Val(entry) {
                 entries.push(entry)
             }
         }
@@ -6126,7 +6419,7 @@ sema_registration_bind_namespace_module: fn(graph: SemaRegistrationGraph, own_sy
         if entry == previous -> next
         previous = entry
         name: graph.namespace_entry_names[entry]
-        own: name_rows_get_text(graph.modules[module_index].symbol_positions, name) ?? -1
+        own: sema_registration_symbol_position(graph.modules[module_index], name, name_text_hash(name)) ?? -1
         if (own >= 0 && own < own_symbols[module_index]) || sema_registration_module_has_import_name(graph.modules[module_index], name) {
             next
         }
@@ -6210,7 +6503,7 @@ sema_registration_lookup_name: fn(graph: SemaRegistrationGraph, module_identity:
 // sema_registration_lookup_name in the module row `module_index` (the row of
 // `module_identity`), for a caller that already holds it.
 sema_registration_lookup_name_at: fn(graph: SemaRegistrationGraph, module_index: Int, module_identity: ModuleID, name: String) -> SemaRegistrationResolvedSymbol? {
-    sema_registration_lookup_name_hashed(graph, module_index, module_identity, name, name_rows_hash(name))
+    sema_registration_lookup_name_hashed(graph, module_index, module_identity, name, name_text_hash(name))
 }
 
 // sema_registration_lookup_name_at for a caller that already computed

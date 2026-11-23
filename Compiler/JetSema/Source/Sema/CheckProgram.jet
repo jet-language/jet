@@ -1906,6 +1906,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         // lines, which each call checks where it is made.
         if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
             default_context := sema_check_context_init()
+            default_context.is_snapshot = true
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params.copy()
             default_context.host_hooks = context.host_hooks
@@ -2227,7 +2228,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.origin_facts = [TOriginProjection]{}
     context.typed_goals = [TTypedGoal]{}
     context.index_proofs = [TIndexProof]{}
-    flat := body_flat_function(built, context.arena.tree)
+    flat := body_flat_function(built, context.arena.tree, context.arena.type_ids)
     if sema_footprint_has_receiver(func) {
         if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, flat.module_identity) == .Val(module_index) {
@@ -2477,7 +2478,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         .Function(declaring, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
             // copy: the source is the caller's own; the row stays in the graph.
-            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].functions[index].declaration.copy(), symbol: graph.modules[declaring].functions[index].symbol.copy(), kind: TFuncKind.TopLevel, raw_protocol_return: graph.modules[declaring].functions[index].raw_protocol_return})
+            return Val(SemaComptimeFunctionSource{declaration: sema_registration_function_with_body(graph.modules[declaring], graph.modules[declaring].functions[index]), symbol: graph.modules[declaring].functions[index].symbol.copy(), kind: TFuncKind.TopLevel, raw_protocol_return: graph.modules[declaring].functions[index].raw_protocol_return})
         }
         .NominalMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
@@ -7328,7 +7329,7 @@ SemaGraphUndo: enum {
     ExportRow(module_index: Int, position: Int, old: SemaRegistrationExport),
     ImportBindingRow(module_index: Int, import_index: Int, binding: Int, old: SemaRegistrationImportBinding),
     ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String),
-    NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]]),
+    NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: NameTable, buckets: [[SemaRegistrationRowRef]]),
     Counting(old: Bool),
     CoreBodiesHeld(old: Bool),
     FailureSolved(old: Bool),
@@ -7462,7 +7463,7 @@ sema_graph_trail_undo_to: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
             }
             .NominalIndexes(symbol_rows, slots, buckets) -> {
                 graph.nominal_symbol_rows = symbol_rows
-                graph.nominal_row_slots = slots
+                graph.nominal_row_names = slots
                 graph.nominal_row_buckets = buckets
                 trail.nominal_indexes_saved = false
             }

@@ -280,12 +280,13 @@ sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaS
             return None
         }
         declaration: graph.modules[module_index].functions[index].declaration
-        if declaration.type_params.len() > 0 || declaration.head_pattern != None || call.type_args.len() > 0 || declaration.body.len() != 1 {
+        function_body: sema_registration_function_body(graph.modules[module_index], graph.modules[module_index].functions[index])
+        if declaration.type_params.len() > 0 || declaration.head_pattern != None || call.type_args.len() > 0 || function_body.len() != 1 {
             return None
         }
         if call.args.len() > declaration.params.len() -> return None
         caller: sema_scope_caller_index(environment, graph) ?? return None
-        if declaration.body[0] == .Expr(value) {
+        if function_body[0] == .Expr(value) {
             body := SemaLifecycleInlineBody{uses: [SemaLifecycleInlineUse]{}, free_names: [Span]{}, effects: 0}
             if !sema_lifecycle_inline_walk(value, declaration.params, false, false, body) {
                 return None

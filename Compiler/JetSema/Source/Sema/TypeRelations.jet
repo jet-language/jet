@@ -57,7 +57,6 @@ use jet_foundation.[
     type_name,
     type_union_member_tag,
     type_unqualified_nominals,
-    name_rows_get,
     name_rows_get_text,
     name_rows_hash,
     core_identity_in_module,
@@ -1071,7 +1070,7 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
     if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" {
         return false
     }
-    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None {
+    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || sema_registration_compiler_builtin_row(graph, name) != None || sema_type_builtin_trait_symbol(name) != None {
         return false
     }
     if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None {
@@ -1838,7 +1837,7 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
     // A canonical nominal spelling's owner and whole name (SemaCanonicalNominals),
     // which the cut below also finds unless the name itself holds a `.`.
     if graph.canonical_nominals == .Val(canonical_table) {
-        if name_rows_get(canonical_table.rows, name, hash) == .Val(row) {
+        if sema_registration_canonical_nominal_row(canonical_table, name, hash) == .Val(row) {
             return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
         }
     }
@@ -2501,7 +2500,7 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
     // built they are read from that name's rows instead of every impl.
     if {
         graph.impl_traits_indexed -> {
-            if graph.impl_trait_name_slots.get(bound_name) == .Val(found) {
+            if sema_registration_impl_trait_name_slot(graph, bound_name) == .Val(found) {
                 loop impl_row in graph.impl_trait_name_buckets[found] {
                     if sema_type_builtin_bound_impl_matches(graph, graph.modules[impl_row.module_index].impls[impl_row.row], nominal, bound_name, unresolved_impl) {
                         return Val(true)

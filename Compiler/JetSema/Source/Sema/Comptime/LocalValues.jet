@@ -245,7 +245,8 @@ sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source
             next
         }
         function_key: symbol_table_key(graph.symbols, function.symbol.id)
-        sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function.declaration, function.declaration.body)
+        function_body: sema_registration_function_body(source_module, function)
+        sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function.declaration, function_body, function_body)
     }
     sources
 }
@@ -253,11 +254,11 @@ sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source
 // Whether `function` may bind `name`: a parameter or a local of the blocks
 // sema_comptime_local_value_ahead_stmts reads is named so, or a local
 // destructures its value.
-sema_comptime_local_value_ahead_binds: fn(function: Func, name: String) -> Bool Never! {
+sema_comptime_local_value_ahead_binds: fn(function: Func, function_body: [Stmt], name: String) -> Bool Never! {
     loop parameter in function.params {
         if parameter.name == name -> return true
     }
-    sema_comptime_local_value_ahead_declares(function.body, name)
+    sema_comptime_local_value_ahead_declares(function_body, name)
 }
 
 sema_comptime_local_value_ahead_declares: fn(body: [Stmt], name: String) -> Bool Never! {
@@ -292,7 +293,7 @@ sema_comptime_local_value_ahead_declares: fn(body: [Stmt], name: String) -> Bool
 
 // Stages each local of `body` (and the blocks it reads, as
 // sema_comptime_local_value_ahead_declares does) to be computed ahead.
-sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], source_module: SemaRegistrationModule, function_key: String, function: Func, body: [Stmt]) Never! {
+sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], source_module: SemaRegistrationModule, function_key: String, function: Func, function_body: [Stmt], body: [Stmt]) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {
@@ -300,7 +301,7 @@ sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], so
                     next
                 }
                 scan := SemaComptimeLocalValueAheadScan{calls: false, readable: true}
-                sema_comptime_local_value_ahead_expr(binding.init, function, scan)
+                sema_comptime_local_value_ahead_expr(binding.init, function, function_body, scan)
                 if !scan.calls || !scan.readable -> next
                 source_span: expr_span(binding.init)
                 sources.push(
@@ -322,20 +323,20 @@ sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], so
                 )
             }
             .While(_, inner, _, _, _) | .Loop(inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .CountedLoop(_, _, _, inner, _, _, _) -> {
-                sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, inner)
+                sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, function_body, inner)
             }
             .Switch(_, arms, else_body, _) -> {
                 loop arm in arms {
-                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, arm.body)
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, function_body, arm.body)
                 }
                 if else_body == .Val(inner) {
-                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, inner)
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, function_body, inner)
                 }
             }
             .Expr(value) -> {
                 if value == .If(_, then_body, _, else_body, _, _, _) {
-                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, then_body)
-                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, else_body)
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, function_body, then_body)
+                    sema_comptime_local_value_ahead_stmts(sources, source_module, function_key, function, function_body, else_body)
                 }
             }
             .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> {}
@@ -351,26 +352,26 @@ SemaComptimeLocalValueAheadScan: struct {
     readable: Bool,
 }
 
-sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, scan: &SemaComptimeLocalValueAheadScan) Never! {
+sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_body: [Stmt], scan: &SemaComptimeLocalValueAheadScan) Never! {
     if !scan.readable {
         return
     }
     if expr == {
         .Ident(name, _, _) -> {
-            if sema_comptime_local_value_ahead_binds(function, name) -> scan.readable = false
+            if sema_comptime_local_value_ahead_binds(function, function_body, name) -> scan.readable = false
         }
         .Call(call, _) -> {
             scan.calls = true
-            if sema_comptime_local_value_ahead_binds(function, call.name) -> scan.readable = false
+            if sema_comptime_local_value_ahead_binds(function, function_body, call.name) -> scan.readable = false
             loop argument in call.args {
-                sema_comptime_local_value_ahead_expr(argument.expr, function, scan)
+                sema_comptime_local_value_ahead_expr(argument.expr, function, function_body, scan)
             }
         }
         .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
             scan.calls = true
-            sema_comptime_local_value_ahead_expr(receiver, function, scan)
+            sema_comptime_local_value_ahead_expr(receiver, function, function_body, scan)
             loop argument in args {
-                sema_comptime_local_value_ahead_expr(argument.expr, function, scan)
+                sema_comptime_local_value_ahead_expr(argument.expr, function, function_body, scan)
             }
         }
         .TypedLit(_, body, _, _) -> {
@@ -378,64 +379,64 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, scan: &Sema
             if body == {
                 .Fields(fields) -> {
                     loop field in fields {
-                        sema_comptime_local_value_ahead_expr(field.value, function, scan)
+                        sema_comptime_local_value_ahead_expr(field.value, function, function_body, scan)
                     }
                 }
                 .Elements(elements) -> {
                     loop element in elements {
-                        sema_comptime_local_value_ahead_expr(element, function, scan)
+                        sema_comptime_local_value_ahead_expr(element, function, function_body, scan)
                     }
                 }
                 .Entries(entries) -> {
                     loop entry in entries {
-                        sema_comptime_local_value_ahead_expr(entry.key, function, scan)
-                        sema_comptime_local_value_ahead_expr(entry.value, function, scan)
+                        sema_comptime_local_value_ahead_expr(entry.key, function, function_body, scan)
+                        sema_comptime_local_value_ahead_expr(entry.value, function, function_body, scan)
                     }
                 }
-                .Value(value) -> sema_comptime_local_value_ahead_expr(value, function, scan)
+                .Value(value) -> sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
                 .ByteText(_) | .Empty -> {}
             }
         }
         .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(inner, _) {
-                    sema_comptime_local_value_ahead_expr(inner, function, scan)
+                    sema_comptime_local_value_ahead_expr(inner, function, function_body, scan)
                 }
             }
         }
         .ListLit(items, _, _) | .CompareChain(items, _, _, _, _) -> {
-            loop item in items -> sema_comptime_local_value_ahead_expr(item, function, scan)
+            loop item in items -> sema_comptime_local_value_ahead_expr(item, function, function_body, scan)
         }
         .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Copy(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> {
-            sema_comptime_local_value_ahead_expr(inner, function, scan)
+            sema_comptime_local_value_ahead_expr(inner, function, function_body, scan)
         }
         .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) -> {
-            sema_comptime_local_value_ahead_expr(left, function, scan)
-            sema_comptime_local_value_ahead_expr(right, function, scan)
+            sema_comptime_local_value_ahead_expr(left, function, function_body, scan)
+            sema_comptime_local_value_ahead_expr(right, function, function_body, scan)
         }
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                sema_comptime_local_value_ahead_expr(entry.key, function, scan)
-                sema_comptime_local_value_ahead_expr(entry.value, function, scan)
+                sema_comptime_local_value_ahead_expr(entry.key, function, function_body, scan)
+                sema_comptime_local_value_ahead_expr(entry.value, function, function_body, scan)
             }
         }
         .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields {
-                sema_comptime_local_value_ahead_expr(field.value, function, scan)
+                sema_comptime_local_value_ahead_expr(field.value, function, function_body, scan)
             }
         }
         .TupleLit(fields, _, _, _) -> {
             loop field in fields {
-                sema_comptime_local_value_ahead_expr(field.value, function, scan)
+                sema_comptime_local_value_ahead_expr(field.value, function, function_body, scan)
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 if argument == {
                     .Positional(value) -> {
-                        sema_comptime_local_value_ahead_expr(value, function, scan)
+                        sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
                     }
-                    .Named(_, value) -> sema_comptime_local_value_ahead_expr(value, function, scan)
+                    .Named(_, value) -> sema_comptime_local_value_ahead_expr(value, function, function_body, scan)
                 }
             }
         }
