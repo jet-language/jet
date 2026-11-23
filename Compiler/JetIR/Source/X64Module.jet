@@ -886,7 +886,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     m := program.move()
     // A fast O0 module moves its Drops per body (Opt.jet ir_opt_o0_bodies,
     // or ir_x64_select_function_in's drop plan); its tail calls are jumps
-    // as on every level (D-TAIL-CALL1), so the tail-call pass runs for it
+    // as on every level, so the tail-call pass runs for it
     // too and the stencil emitter jumps (X64Patch.jet patch_tail_jump).
     if !m.fast_o0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
@@ -2415,7 +2415,7 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
 }
 
 // walk(n, acc) returns walk(n - 1, acc + n): in a fast O0 module, which the
-// stencil emitter compiles, the call is a jump to walk (D-TAIL-CALL1), so the
+// stencil emitter compiles, the call is a jump to walk, so the
 // recursion runs in constant stack; no `call` reaches walk.
 #Test("a fast O0 module's tail call is a jump") {
     m := ir_module_new()
