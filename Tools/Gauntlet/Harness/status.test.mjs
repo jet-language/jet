@@ -107,7 +107,7 @@ function fixture(scope = "partial_entry") {
 }
 
 test("projects counts, deterministic verdict ordering, and null measurements", () => {
-  const status = projectStatus(fixture(), "Tools/Gauntlet/results/fixture.json");
+  const status = projectStatus(fixture(), "Tools/Gauntlet/Results/fixture.json");
   assert.deepEqual(status.summary, {
     cells: 4,
     win: 1,
@@ -128,7 +128,7 @@ test("projects counts, deterministic verdict ordering, and null measurements", (
   assert.equal(loss.peers[0].tiers.run.jet, null);
   assert.equal(loss.peers[0].tiers.run.peer, null);
   assert.equal(loss.peers[0].tiers.run.ratio, null);
-  assert.equal(status.source.report_path, "Tools/Gauntlet/results/fixture.json");
+  assert.equal(status.source.report_path, "Tools/Gauntlet/Results/fixture.json");
 });
 
 test("partial scope can never publish as complete", () => {
@@ -232,8 +232,8 @@ test("merges partial reports by cell, tier, and metric without erasing measureme
     entries: [],
   };
   const merged = mergeStatus([
-    { report: mergeReport("2026-09-01", "run-old", [oldCell]), reportPath: "Tools/Gauntlet/results/2026-09-01.json" },
-    { report: mergeReport("2026-09-02", "run-new", [newerPartial, newCell]), reportPath: "Tools/Gauntlet/results/2026-09-02.json" },
+    { report: mergeReport("2026-09-01", "run-old", [oldCell]), reportPath: "Tools/Gauntlet/Results/2026-09-01.json" },
+    { report: mergeReport("2026-09-02", "run-new", [newerPartial, newCell]), reportPath: "Tools/Gauntlet/Results/2026-09-02.json" },
   ]);
   const old = merged.cells.find((cell) => cell.id === "text.kernel");
   const fresh = merged.cells.find((cell) => cell.id === "text.regex");
@@ -269,8 +269,8 @@ test("latest explicit unavailable tiers cannot reuse older measured samples", ()
   partial.options = { scope: "partial_entry" };
 
   const merged = mergeStatus([
-    { report: full, reportPath: "Tools/Gauntlet/results/2026-09-03.json" },
-    { report: partial, reportPath: "Tools/Gauntlet/results/2026-09-15-text-kernel.json" },
+    { report: full, reportPath: "Tools/Gauntlet/Results/2026-09-03.json" },
+    { report: partial, reportPath: "Tools/Gauntlet/Results/2026-09-15-text-kernel.json" },
   ]);
   const cell = merged.cells[0];
   const rust = cell.peers.find((peer) => peer.peer === "rust");
@@ -319,8 +319,8 @@ test("axis-only receipts keep language cells and take the latest axis row", () =
     },
   };
   const merged = mergeStatus([
-    { report: full, reportPath: "Tools/Gauntlet/results/2026-09-03.json" },
-    { report: axis, reportPath: "Tools/Gauntlet/results/2026-09-15-axis-live_reload.json" },
+    { report: full, reportPath: "Tools/Gauntlet/Results/2026-09-03.json" },
+    { report: axis, reportPath: "Tools/Gauntlet/Results/2026-09-15-axis-live_reload.json" },
   ]);
   assert.equal(merged.summary.cells, 1);
   assert.deepEqual(merged.cells[0].peers.map((peer) => peer.peer).sort(), ["python", "rust"]);
@@ -334,11 +334,11 @@ test("applies the strict <1 boundary to Rust exactly as to every other peer", ()
       rust: { aot: { ratio: rustRatio, verdict: null }, run: { ratio: 0.99, verdict: null } },
       python: { aot: { ratio: 0.99, verdict: null }, run: { ratio: 1, verdict: null } },
     })]);
-    const status = projectStatus(report, "Tools/Gauntlet/results/2026-09-03.json");
+    const status = projectStatus(report, "Tools/Gauntlet/Results/2026-09-03.json");
     const cell = status.cells[0];
     assert.equal(cell.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, null);
     assert.equal(cell.metric_verdicts.runtime_wall_seconds, "loss");
-    const merged = mergeStatus([{ report, reportPath: "Tools/Gauntlet/results/2026-09-03.json" }]);
+    const merged = mergeStatus([{ report, reportPath: "Tools/Gauntlet/Results/2026-09-03.json" }]);
     const rust = merged.cells[0].peers.find((peer) => peer.peer === "rust");
     const python = merged.cells[0].peers.find((peer) => peer.peer === "python");
     assert.equal(rust.metric_comparisons.runtime_wall_seconds.tiers.aot.verdict, null);

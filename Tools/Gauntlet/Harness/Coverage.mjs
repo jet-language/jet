@@ -8,7 +8,7 @@
 // and every ScriptBench workload (Tools/Perf/Scriptbench/manifest.json, each
 // with its peer.* twins), so a fix that only helps a measured cell is caught
 // by the programs that use the same feature differently. REPORT is a
-// gauntlet run (Tools/Gauntlet/results/<date>.json from run.mjs) and DIR a
+// gauntlet run (Tools/Gauntlet/Results/<date>.json from run.mjs) and DIR a
 // ScriptBench --out directory (its cells.tsv). For every program, matched
 // peer and metric (the program's time metric and peak memory) the census
 // takes the release-binary reading: the gauntlet's aot tier, ScriptBench's

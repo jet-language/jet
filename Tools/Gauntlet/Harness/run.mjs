@@ -4961,7 +4961,7 @@ async function main() {
   // day's full report (status.mjs merges every file in this directory).
   // A run with standings is copied to the machine's shared results directory,
   // where Tower's Gauntlet page finds a run made in any checkout.
-  const resultDir = path.join(repoDir, "Tools/Gauntlet/results");
+  const resultDir = path.join(repoDir, "Tools/Gauntlet/Results");
   await fs.mkdir(resultDir, { recursive: true });
   const languagesTag = options.languages === null ? null : `languages-${options.languages.join("-")}`;
   const resultName = axisOnly
