@@ -1186,8 +1186,12 @@ a call watch heard. The finding's type has an `impl Diagnostic`: its `code`
 constant names the report (the type path, such as `mypkg.NoPrintInLib`, when
 it writes none), its `tier` says what the report fails, and `what`, `why`
 and `fix` word it. When the build returns, an `.Error` finding fails the
-build; a `.Tidy` one fails `jet build` but not `jet run`, `jet dev` or
-`jet test`; a `.Report` one is advice for lint alone and fails nothing. A
+build; a `.Tidy` one fails `jet build` and `jet check` but not `jet run`,
+`jet dev` or `jet test`; a `.Report` one is advice for lint alone and fails
+nothing. The watches run under every command that runs the package's build,
+`jet check` and `jet run` as `jet build`, and a handler that panics stops
+each of them with E3010
+([`meta_events_run_under_check_and_run`](../../../Tests/Cases/BuildEntry/meta_events_run_under_check_and_run.case)). A
 value whose type has no `impl Diagnostic` is refused (E0905). Reporting
 needs no Meta effect, and the build refuses a value whose build has returned.
 A finding can carry a machine fix: `structured_fix: syntax.rewrite(callee:

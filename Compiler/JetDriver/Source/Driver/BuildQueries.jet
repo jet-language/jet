@@ -416,8 +416,14 @@ JetDriverBuildQueryResult: struct {
     // checked compile's reports name, so they render against generated text.
     generated_source_files: [SourceFile]{[SourceFile]{}},
     // The `.Tidy` findings `meta.report` raised (jet_driver_build_findings):
-    // `jet build` fails on them, a run or a test doesn't.
+    // `jet build` and `jet check` fail on them, a run or a test doesn't.
     tidy: [Diagnostic]{[Diagnostic]{}},
+    // A failed build's own reports when its staging check passed: a call
+    // watch handler's stop, an `.Error` finding, a refused call. They are
+    // also in `diagnostics`, after the compile's; a compile that runs no
+    // build of its own reports them beside its check (JetCLI InspectBuild.jet
+    // jet_cli_generated_request), which restates the compile's.
+    build_reports: [Diagnostic]{[Diagnostic]{}},
 }
 
 JetDriverBuildQueryResponse: struct {
@@ -441,15 +447,20 @@ jet_driver_build_rule_report: fn(error: BuildSessionDiagnostic) -> Diagnostic Ne
 // A build that failed: the compile's `errors`, then the build's own reports
 // `ran`. After a failed staging check (`staged`) the build's reports come
 // first: what the build refused is why the staged check missed the modules
-// it would have generated.
+// it would have generated. Otherwise `ran` is also the answer's
+// `build_reports`.
 jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
+    // copy: the build's own reports stand apart as well as in the answer.
+    own: if staged -> [Diagnostic]{} else -> ran.copy()
     reports := errors.move()
     at := if staged -> 0 else -> reports.len()
     loop error in ran.move() {
         reports.insert(at, error)
         at += 1
     }
-    jet_driver_build_query_empty(request, reports, false, None)
+    failed := jet_driver_build_query_empty(request, reports, false, None)
+    failed.query.build_reports = own
+    failed
 }
 
 // A build query that stopped before its plan: the compile's `errors` (after a
@@ -459,16 +470,21 @@ jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&
 // failed. Without one, a staged query whose build refused a call, or was
 // stopped by its step limit or from outside (jet_driver_build_cut_short),
 // reports that first, and a staged run that stopped at a trap restates the
-// staged reports, so they stand alone.
+// staged reports, so they stand alone. An unstaged query without one also
+// answers `ran` as its `build_reports`.
 jet_driver_build_query_stopped: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool, refused: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
     if problem == None && staged && (refused || jet_driver_build_cut_short(ran)) {
         return jet_driver_build_query_failed(request, errors, ran, true)
     }
+    // copy: the build's own reports stand apart as well as in the answer.
+    own: if problem == None && !staged -> ran.copy() else -> [Diagnostic]{}
     reports := errors.move()
     if problem != None || !staged {
         loop error in ran.move() -> reports.push(error)
     }
-    jet_driver_build_query_empty(request, reports, false, problem)
+    stopped := jet_driver_build_query_empty(request, reports, false, problem)
+    stopped.query.build_reports = own
+    stopped
 }
 
 // Whether the build was cut short rather than stopped by its own code: it
@@ -500,10 +516,12 @@ jet_driver_build_load_aside: fn(threads: CompilerThreads, load: &&JetDriverLoadR
 
 // The entry package's build plan. `generated_only`: the query stops once
 // `build: fn` has run, answering complete with the modules it generated and
-// nothing else: no plan, no final checked compile, and none of the build's
-// own reports. A compile that runs no build of its own (`jet check`) folds
-// those modules alone (JetCLI Request.jet jet_cli_generated_request); what
-// the build reports stays `jet build`'s.
+// the `.Tidy` findings its call watches raised, and nothing else: no plan
+// and no final checked compile. A build that fails answers as `jet build`'s
+// does, with its own reports apart (`build_reports`). A compile that runs no
+// build of its own (`jet check`) folds those modules alone and reports the
+// findings and failures beside its check (JetCLI InspectBuild.jet
+// jet_cli_generated_request).
 jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, generated_only: Bool{false}) -> JetDriverBuildQueryResponse {
     request := owned_request.move()
     // The plan reads the entry package's modules (its `build: fn`) and
@@ -703,16 +721,17 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         }
         generated.push(row)
     }
-    if generated_only {
-        only := jet_driver_build_query_empty(request, [Diagnostic]{}, true, None)
-        only.query.generated = generated.move()
-        return only
-    }
     tidy := [Diagnostic]{}
     jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
     if jet_driver_has_errors(ran) {
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)
         return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
+    }
+    if generated_only {
+        only := jet_driver_build_query_empty(request, [Diagnostic]{}, true, None)
+        only.query.generated = generated.move()
+        only.query.tidy = tidy.move()
+        return only
     }
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}

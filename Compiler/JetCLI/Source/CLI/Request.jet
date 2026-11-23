@@ -2646,7 +2646,12 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.capture_cost_report = capture_cost_report
             // A Prelude source's check and `jet check Core` check no package
             // a build generates for.
-            if load_generated && !prelude && !every_core_body -> selected = jet_cli_generated_request(selected)
+            build_reports := [Diagnostic]{}
+            if load_generated && !prelude && !every_core_body {
+                generated: jet_cli_generated_request(selected)
+                selected = generated.request.move()
+                build_reports = generated.reports.move()
+            }
             // A check of a program over the built-in Core loads that Core's
             // function checks as a bound native compile does. Neither a
             // Prelude source's check nor `jet check Core` does, as they check
@@ -2663,6 +2668,9 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
             result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(selected, prefix, cli_sys.get(ENV_JET_FRONT_LIBRARY_LIFECYCLE), compiler_threads, trace_sink) else -> jet_cli_compile_request(selected, trace_sink)
+            // What the build's call watches raised, and a failed build's own
+            // reports, follow the compile's (jet_cli_generated_request).
+            loop report in build_reports.move() -> result.diagnostics.push(report)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.

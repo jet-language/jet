@@ -1074,8 +1074,11 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
     // A `panic`/`assert`/`require` stop (Trap.jet jet_rt_require_stop), which
     // a comptime item's unhandled failure raises too (JetIR
     // ir_failure_stop): an equality stop (kind 1) carries its two
-    // sides, every other its message. In a comptime evaluation it is a
-    // user-authored compile error (S26).
+    // sides, every other its message. In code the build runs it is a
+    // user-authored compile error (S26): a comptime evaluation, and a
+    // `build: fn` or `dev: fn` invocation with the `meta.events` handlers
+    // it registers, which run as a program does. Only `jet eval`'s run
+    // (`eval_entry`) is the program's own stop.
     if kind == X64_COMPTIME_STOP_REQUIRE {
         message := ""
         if a == 1 {
@@ -1083,12 +1086,12 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
             left: jet_eval_ir_text(s, c) ?? return
             message = "expected: {right}, got: {left}"
         } else if b != 0 { message = jet_eval_ir_text(s, b) ?? return }
-        if s.runtime_execution {
+        if s.runtime_execution && s.eval_entry {
             jet_eval_ir_source_fail(s, message)
             return
         }
         if s.failure == None {
-            s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `#run` value is a compile error", "handle the failure inside the `#run` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
+            s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in code the build runs (a `#run` value, a `build: fn` or a handler it registers) is a compile error", "handle the failure where the compile-time code meets it (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
         }
         return
     }
