@@ -7,7 +7,8 @@
 // probes, so each level's run reports alike.
 use {
     cli_files: core.files
-    jet_foundation.[ENV_JET_COV_OUT, FnBody, TTestFact, Type, type_name, type_unqualified_nominals]
+    jet_foundation.[ENV_JET_COV_OUT, FnBody, TTestFact, Type, name_find, name_intern, name_table_sized, type_name, type_unqualified_nominals]
+    jet_ir.[IRCoverage, ir_coverage, ir_coverage_put]
 }
 
 JET_CLI_COVERAGE_ENV: ENV_JET_COV_OUT
@@ -24,12 +25,12 @@ JetCLICoverageFunction: struct {
 // and methods, none synthetic, none a #Test or an output check
 // (`harnessed`, checked keys), and not `run`.
 jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestFact], harnessed: [String]) -> [JetCLICoverageFunction] Never! {
-    excluded := [String:Bool]{}
-    loop test in tests -> excluded[test.function.key.copy()] = true
-    loop key in harnessed -> excluded[key.copy()] = true
+    excluded := name_table_sized(functions.len())
+    loop test in tests -> _ := name_intern(excluded, test.function.key)
+    loop key in harnessed -> _ := name_intern(excluded, key)
     out := [JetCLICoverageFunction]{}
     loop function in functions {
-        if function.synthetic || function.source_file != file || function.name == "run" || excluded.get(function.key) != None {
+        if function.synthetic || function.source_file != file || function.name == "run" || name_find(excluded, function.key) != None {
             next
         }
         name: if function.kind == {
@@ -38,7 +39,7 @@ jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestF
             .TraitMethod(_, _, owner, _, _) -> "{jet_cli_coverage_owner(owner)}.{function.name}"
         }
         // A generic function's instances share its key.
-        excluded[function.key.copy()] = true
+        _ := name_intern(excluded, function.key)
         out.push(JetCLICoverageFunction{key: function.key.copy(), name: name, line: function.line})
     }
     out.sort_by(fn(left: JetCLICoverageFunction, right: JetCLICoverageFunction) { (left.line <=> right.line).then(left.name <=> right.name) })
@@ -53,9 +54,9 @@ jet_cli_coverage_owner: fn(owner: Type) -> String Never! {
 }
 
 // The probes the harness builds: each coverable function's line by key.
-jet_cli_coverage_probes: fn(functions: [JetCLICoverageFunction]) -> [String:Int] Never! {
-    probes := [String:Int]{}
-    loop function in functions -> probes[function.key.copy()] = function.line
+jet_cli_coverage_probes: fn(functions: [JetCLICoverageFunction]) -> IRCoverage Never! {
+    probes := ir_coverage()
+    loop function in functions -> ir_coverage_put(probes, function.key, function.line)
     probes
 }
 

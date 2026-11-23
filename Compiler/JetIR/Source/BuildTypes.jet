@@ -1979,7 +1979,9 @@ ir_render_has_display: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slo
 // owner is the value's nominal type, checked as a TraitMethod or, when Debug
 // does not resolve in the implementing module, as the owner's plain Method).
 ir_render_debug_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
-    candidates: p.trait_methods.get("Debug|debug") ?? return -1
+    debug_impls: ir_trait_method_slot(p.trait_methods, "Debug|debug")
+    if debug_impls == 0 -> return -1
+    candidates: p.trait_methods.rows[debug_impls]
     receiver_ty: ir_row_ty(m, p, b.f.slot_type[slot])
     if ir_nominal_name(ir_untag(receiver_ty)) == None -> return -1
     key: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, receiver_ty)

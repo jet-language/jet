@@ -456,7 +456,7 @@ ir_method_key: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef)
     if ir_function_row(p, method_key) != None -> return method_key
     owner: method.trait_owner ?? return method_key
     concrete: ir_trait_identity(p, receiver)
-    candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{ir_short_name(ir_symbol_key(p, owner))}|{method.name}")]
     loop row in candidates {
         implementer: ir_trait_implementer(p, row, owner) ?? next
         if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
@@ -495,7 +495,7 @@ ir_trait_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner
         return ir_decode_env_names(m, p, b, ty, concrete, span)
     }
     exact: ir_trait_constant_key(trait_short, ir_trait_identity(p, concrete), name)
-    if p.constants.get(exact) != None -> return ir_constant(m, p, b, ty, exact, span)
+    if ir_constant_row(p, exact) != None -> return ir_constant(m, p, b, ty, exact, span)
     head: ir_trait_head_identity(p, concrete) ?? return ir_fail_slot(b, span, "no `{trait_short}` constant `{name}` for {ir_type_name(concrete)}")
     ir_constant(m, p, b, ty, ir_trait_constant_key(trait_short, head, name), span)
 }
@@ -640,7 +640,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     // result the call marks lent.
     lent := false
     short: ir_short_name(ir_symbol_key(p, owner))
-    candidates: p.trait_methods.get("{short}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{short}|{method.name}")]
     // The implementations for exact types come first; a generic owner's
     // (`impl Box.Shape`) then serves each instance of it the program boxes
     // as the trait's values (p.trait_boxed) that no exact one claimed.

@@ -2313,14 +2313,16 @@ jet_driver_comptime_prefetch_node: fn(index: JetDriverComptimeRunIndex, seen: &[
 // jet_driver_comptime_stage) the declared IR program every evaluation that
 // reaches a declaration builds over and lays values out by, `landed`
 // counting the values whose constant rows it took over and `taken` their
-// keys (jet_driver_comptime_ir_build); `declared` the declaration pass's
+// keys, at each key's id in `taken_keys` (jet_driver_comptime_ir_build);
+// `declared` the declaration pass's
 // modules (moved in, or empty), handed back at the run's end; `sites` the
 // value sites of the program's graph, through which landings apply.
 JetDriverComptimeStaging: struct {
     staged: Bool,
     program: Shared<[IRProgram]>,
     landed: Int,
-    taken: [String:Bool],
+    taken_keys: NameTable{name_column_table()},
+    taken: [Int]{name_column()},
     declared: [SemaGraphModuleResult],
     sites: SemaComptimeValueSites,
     module_count: Int{0},
@@ -3557,7 +3559,7 @@ jet_driver_run_comptime_carried: fn(
     environment.boxed_edges = [U32:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
-    staging := if carried_staging.len() > 0 -> carried_staging.pop() ?? panic("carried staging slot lost") else -> JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, taken: [String:Bool]{}, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
+    staging := if carried_staging.len() > 0 -> carried_staging.pop() ?? panic("carried staging slot lost") else -> JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
     staging.declared = declared.move()
     staging.sites = sema_comptime_value_sites_empty()
     // Each in a one-row slot: a pass's prechecks move them into the threads'

@@ -212,7 +212,7 @@ ir_static_edge: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, r
     if node.kind == .ConstRef(symbol) {
         key: ir_body_symbol_key(p, b, symbol)
         if ir_function_row(p, key) != None -> return -1
-        at: p.constants.get(key) ?? return -1
+        at: ir_constant_row(p, key) ?? return -1
         definition: p.constant_defs[at]
         if definition.shared_holder || definition.is_storage -> return -1
         return ir_static_wrapper(m, p, b, ty, row, key, definition.value)

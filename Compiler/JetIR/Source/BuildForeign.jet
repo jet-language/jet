@@ -6,7 +6,7 @@
 // is its assembled template.
 use {
     jet_backend.[x64_assemble_template]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, type_carrier_identity]
+    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, name_column, name_column_get, name_column_set, name_column_table, type_carrier_identity]
     jet_sema.[SEMA_GUEST_RUNTIME_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
 }
 
@@ -23,19 +23,24 @@ IRForeignHandle: struct {
 // handle type they name, with its close. The rows replace any a previous
 // build over the same declared program indexed (ir_program_bind).
 ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], decls: DeclTable) Never! {
-    p.foreign = [String:SemaCheckedForeignFunction]{}
+    p.foreign_keys = name_column_table(foreign.len())
+    p.foreign = name_column(foreign.len())
     p.foreign_rows = [SemaCheckedForeignFunction]{}
     p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
     loop row in foreign -> ir_foreign_handle_note(p, row)
     loop row in foreign.move() {
         key: ir_symbol_key(p, row.symbol_id)
-        if p.foreign.get(key) != None -> next
-        if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) {
-            p.decl_foreign[id.row.index()] = p.foreign_rows.len()
-            p.foreign_rows.push(row.copy())
-        }
-        p.foreign[key] = row
+        if name_column_get(p.foreign_keys, p.foreign, key) != None -> next
+        if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) -> p.decl_foreign[id.row.index()] = p.foreign_rows.len()
+        name_column_set(p.foreign_keys, p.foreign, key, p.foreign_rows.len())
+        p.foreign_rows.push(row)
     }
+}
+
+// The checked foreign function whose calls name function `key`, if any.
+ir_foreign_of: fn(p: IRProgram, key: String) -> SemaCheckedForeignFunction? Never! {
+    row: name_column_get(p.foreign_keys, p.foreign, key) ?? return None
+    Val(p.foreign_rows[row])
 }
 
 // The C handle a foreign row names (its handle_key `c.<library>.<Name>`):
@@ -60,10 +65,14 @@ ir_foreign_handle_add: fn(p: &IRProgram, ty: Type, leaf: String, close_foreign: 
     if ir_short_name(name) != leaf {
         return
     }
-    handle := p.foreign_handles.get(leaf) ?? IRForeignHandle{}
-    if close_foreign != None -> handle.close_foreign = close_foreign.copy()
-    if close_function != None -> handle.close_function = close_function.copy()
-    p.foreign_handles[leaf.copy()] = handle
+    row := name_column_get(p.foreign_handles_keys, p.foreign_handles, leaf) ?? -1
+    if row < 0 {
+        row = p.foreign_handle_rows.len()
+        name_column_set(p.foreign_handles_keys, p.foreign_handles, leaf, row)
+        p.foreign_handle_rows.push(IRForeignHandle{})
+    }
+    if close_foreign != None -> p.foreign_handle_rows[row].close_foreign = close_foreign.copy()
+    if close_function != None -> p.foreign_handle_rows[row].close_function = close_function.copy()
 }
 
 // Whether `ty` is a List `[T]` (a C array of T at the boundary).
@@ -77,7 +86,8 @@ ir_foreign_list: fn(ty: Type) -> Bool Never! {
 ir_foreign_handle_of: fn(p: IRProgram, ty: Type) -> IRForeignHandle? Never! {
     name: ir_nominal_name(ir_untag(ty)) ?? return None
     if ir_type_args(ty).len() != 0 || ir_type_def(p, name) != None -> return None
-    p.foreign_handles.get(ir_short_name(name))
+    row: name_column_get(p.foreign_handles_keys, p.foreign_handles, ir_short_name(name)) ?? return None
+    Val(p.foreign_handle_rows[row])
 }
 
 // Whether `ty` is a C handle type (IRProgram.foreign_handles).
@@ -98,7 +108,7 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
     identity: type_carrier_identity(bare)
     c_symbol := ""
     if handle.close_foreign == .Val(key) {
-        if p.foreign.get(key) == .Val(close) -> c_symbol = close.symbol.copy()
+        if ir_foreign_of(p, key) == .Val(close) -> c_symbol = close.symbol.copy()
     }
     callee := -1
     if c_symbol == "" && handle.close_function == .Val(key) {
@@ -861,7 +871,7 @@ ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction,
 // The template of an `#FFI(asm)` function: the first triple-quoted body
 // within its checked span.
 ir_asm_source: fn(p: IRProgram, foreign: SemaCheckedForeignFunction) -> String? Never! {
-    row: p.source_rows.get(foreign.source_file) ?? return None
+    row: ir_source_row(p, foreign.source_file) ?? return None
     start: foreign.span.start
     end: foreign.span.end
     if start < 0 || end < start || end > p.source_bytes[row].len() -> return None
