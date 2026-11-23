@@ -100,7 +100,6 @@ JetEvalConfig: struct {
     fuel: Int,
     max_call_depth: Int,
     max_collection_len: Int,
-    globals: [String:TComptimeValue],
     runtime_execution: Bool,
     build_host_adapter: JetEvalBuildHostAdapter?{None},
     comptime_input_adapter: JetEvalComptimeInputAdapter?{None},
@@ -132,7 +131,7 @@ JetEvalConfig: struct {
 }
 
 jet_eval_default_config: fn() -> JetEvalConfig Never! {
-    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: Val(sema_numeric_unit_conversion_exact_service)}}}
+    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, runtime_execution: false, host_hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: Val(sema_numeric_unit_conversion_exact_service)}}}
 }
 
 // Read-fork a fresh runtime configuration before an owning request is moved.
@@ -146,7 +145,6 @@ jet_eval_runtime_config: fn(config: JetEvalConfig) -> JetEvalConfig {
         fuel: config.fuel,
         max_call_depth: config.max_call_depth,
         max_collection_len: config.max_collection_len,
-        globals: config.globals,
         runtime_execution: true,
         build_host_adapter: build_host_adapter,
         host_hooks: config.host_hooks,

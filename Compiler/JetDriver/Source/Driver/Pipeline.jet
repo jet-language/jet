@@ -293,8 +293,11 @@ use {
         interner_merge_delta,
         type_syntax,
         name_column,
+        name_column_get,
         name_column_get_hashed,
+        name_column_set,
         name_column_set_hashed,
+        name_column_value,
         name_column_table,
         name_text_hash,
         Name,
@@ -1069,10 +1072,11 @@ jet_driver_selected_target_machine: fn(
 // first owner lookup (`owners_built`), not for a run whose items reach no
 // function by key.
 JetDriverComptimeRunIndex: struct {
-    // Function key -> the module that registers it; `ambiguous_owners` holds
-    // the keys registered more than once, which have no unique owner.
-    owners: [String:ModuleID],
-    ambiguous_owners: [String:Bool],
+    // Function key -> the module that registers it: at the key's id in
+    // `owner_keys`, `owners` holds the module's id, or -1 for a key
+    // registered by more than one module, which has no unique owner.
+    owner_keys: NameTable{name_column_table()},
+    owners: [Int]{name_column()},
     owners_built: Bool,
     // Each function any closure or prefetch of the run named, by its node
     // id: `node_names` interns `module\nkey`, `node_ids` holds the node id at
@@ -1171,7 +1175,7 @@ JetDriverComptimeClosureRow: struct {
 }
 
 jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult], values: [SemaComptimeItemValue]) -> JetDriverComptimeRunIndex Never! {
-    index := JetDriverComptimeRunIndex{owners: [String:ModuleID]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, waiting_functions: [SemaComptimeFunctionResult]{}}
+    index := JetDriverComptimeRunIndex{owners_built: false, waiting_functions: [SemaComptimeFunctionResult]{}}
     loop (row, checked) in checked_functions {
         node: jet_driver_comptime_node_id(index, checked.module_identity, checked.function_key)
         if index.checked_at[node] < 0 -> index.checked_at[node] = row
@@ -1241,8 +1245,8 @@ jet_driver_comptime_value_scalar: fn(value: TComptimeValue) -> Bool Never! {
 // registration order (module, then its free functions, nominal methods and
 // impl methods): a key's first registration owns it and a later one from
 // another module marks it ambiguous. One module lists an impl method both on
-// its nominal and on its impl block, which is the same owner. A String-keyed
-// Map is hashed, so a key inserted in any order is a constant-time append.
+// its nominal and on its impl block, which is the same owner. The key column
+// is hashed, so a key inserted in any order is a constant-time append.
 jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex) Never! {
     index.owners_built = true
     loop source_module in graph.modules {
@@ -1264,18 +1268,19 @@ jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDr
 
 // Records that `module_identity` registers `key` (jet_driver_comptime_owners_build).
 jet_driver_comptime_owner_add: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, key: String) Never! {
-    if index.owners.get(key) == .Val(owner) {
-        if owner != module_identity -> index.ambiguous_owners[key] = true
+    id: Int{module_identity.id}
+    if name_column_value(index.owner_keys, index.owners, key) == .Val(owner) {
+        if owner >= 0 && owner != id -> name_column_set(index.owner_keys, index.owners, key, -1)
         return
     }
-    index.owners[key] = module_identity
+    name_column_set(index.owner_keys, index.owners, key, id)
 }
 
 // The one module that registers `function_key`, or None when no module or
-// more than one does (the owner maps are built: jet_driver_comptime_owners_build).
+// more than one does (the owner column is built: jet_driver_comptime_owners_build).
 jet_driver_comptime_function_owner: fn(index: JetDriverComptimeRunIndex, function_key: String) -> ModuleID? {
-    if index.ambiguous_owners.get(function_key) != None -> return None
-    index.owners.get(function_key)
+    owner: name_column_get(index.owner_keys, index.owners, function_key) ?? return None
+    Val(ModuleID{id: U32{owner}})
 }
 
 JetDriverComptimeFunctionRef: struct {
@@ -2191,8 +2196,8 @@ jet_driver_comptime_prefetch_keep_in: fn(program: SemaProgramTables, index: &Jet
     if eligible.len() >= 4 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
         snapshot: JetDriverComptimeRunIndex{
+            owner_keys: index.owner_keys,
             owners: index.owners,
-            ambiguous_owners: index.ambiguous_owners,
             owners_built: true,
             waiting_functions: [SemaComptimeFunctionResult]{},
             render: index.render,
@@ -2347,14 +2352,17 @@ JetDriverComptimeEntry: struct {
 JetDriverComptimeBatch: struct {
     entries: [JetDriverComptimeEntry],
     // The union of the entries' checked closures, each function once, in
-    // the order the entries first name them; `function_rows` maps each
-    // function's `module\nkey` to its position.
+    // the order the entries first name them; `function_rows` holds each
+    // function's position at its `module\nkey`'s id in `function_rows_keys`.
     functions: [FnBody],
-    function_rows: [String:Int],
+    function_rows_keys: NameTable{name_column_table()},
+    function_rows: [Int]{name_column()},
     // The source key of every entry: an item check that waits on one of
-    // them reads a value the batch still holds back. True for a computed
-    // entry (JetDriverComptimeEntry.computed), which a later entry may read.
-    keys: [String:Bool],
+    // them reads a value the batch still holds back. `key_computed` holds 1
+    // at a computed entry's id in `keys` (JetDriverComptimeEntry.computed),
+    // which a later entry may read, and 0 at any other entry's.
+    keys: NameTable{name_column_table()},
+    key_computed: [Int]{name_column()},
     // Whether no evaluated entry reaches a declaration or has a closure
     // (jet_driver_comptime_entry_bare), so the batch builds with no
     // declaration rows.
@@ -2457,7 +2465,6 @@ jet_driver_comptime_eval_config: fn(original: JetEvalConfig, inputs: &&JetEvalCo
         fuel: original.fuel,
         max_call_depth: original.max_call_depth,
         max_collection_len: original.max_collection_len,
-        globals: [String:TComptimeValue]{},
         runtime_execution: false,
         build_host_adapter: build_host_adapter,
         comptime_input_adapter: inputs.move(),
@@ -2558,7 +2565,7 @@ jet_driver_comptime_prechecked: fn(precheck: &&SemaComptimeItemCheck?, available
     if jet_driver_comptime_any_available(available, check.dependencies) -> return None
     if available.typed > typed_from {
         loop dependency in check.dependencies {
-            if batch.keys.get(dependency) ?? false -> return None
+            if jet_driver_comptime_batch_computed(batch, dependency) -> return None
         }
     }
     Val(check.move())
@@ -2636,11 +2643,43 @@ jet_driver_comptime_computed_waits: fn(batch: JetDriverComptimeBatch, checked: S
     jet_driver_comptime_batch_computes(batch, checked.waiting_dependencies)
 }
 
+// The waits of each pending item (`module\nkey`) whose last check, with its
+// closure, reported nothing: until one of those keys has a value, checking
+// it again gives the same waits (it names no other unvalued constant), so
+// the run reuses them instead of checking it once per pass; a dependency
+// chain declared in reverse order would otherwise check every waiting item
+// on every pass.
+JetDriverComptimeSettledWaits: struct {
+    keys: NameTable{name_table_sized(2)},
+    // Each item's row of `waits` at its key's id in `keys`; -1 once its
+    // waits no longer stand.
+    rows: [Int]{name_column()},
+    waits: [[String]],
+}
+
+jet_driver_comptime_settled_put: fn(settled: &JetDriverComptimeSettledWaits, key: String, waits: &&[String]) Never! {
+    if name_column_get(settled.keys, settled.rows, key) == .Val(row) {
+        settled.waits[row] = waits.move()
+        return
+    }
+    name_column_set(settled.keys, settled.rows, key, settled.waits.len())
+    settled.waits.push(waits.move())
+}
+
+jet_driver_comptime_settled_drop: fn(settled: &JetDriverComptimeSettledWaits, key: String) Never! {
+    if name_column_get(settled.keys, settled.rows, key) != None -> name_column_set(settled.keys, settled.rows, key, -1)
+}
+
+// Whether `batch` computes the constant `key` (JetDriverComptimeEntry.computed).
+jet_driver_comptime_batch_computed: fn(batch: JetDriverComptimeBatch, key: String) -> Bool Never! {
+    (name_column_get(batch.keys, batch.key_computed, key) ?? 0) == 1
+}
+
 // Whether `batch` computes every constant of `keys`
 // (JetDriverComptimeEntry.computed).
 jet_driver_comptime_batch_computes: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
     loop key in keys {
-        if !(batch.keys.get(key) ?? false) -> return false
+        if !jet_driver_comptime_batch_computed(batch, key) -> return false
     }
     keys.len() > 0
 }
@@ -2938,7 +2977,7 @@ jet_driver_comptime_all_ahead: fn(pending: [SemaComptimeItemSource]) -> Bool Nev
 // Whether `batch` holds one of the items `keys`.
 jet_driver_comptime_batch_holds: fn(batch: JetDriverComptimeBatch, keys: [String]) -> Bool Never! {
     loop key in keys {
-        if batch.keys.get(key) != None -> return true
+        if name_column_get(batch.keys, batch.key_computed, key) != None -> return true
     }
     false
 }
@@ -2985,7 +3024,7 @@ jet_driver_comptime_batchable: fn(source: SemaComptimeItemSource) -> Bool Never!
 }
 
 jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
-    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [FnBody]{}, function_rows: [String:Int]{}, keys: [String:Bool]{}, bare: true}
+    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [FnBody]{}, bare: true}
 }
 
 // Appends an item to `batch`, moving the functions of its checked closure
@@ -3015,13 +3054,14 @@ jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaCo
             break
         }
         key: "{function.module_identity.id}\n{function.key}"
-        function_keys.push(key.copy())
-        if batch.function_rows.get(key) != None -> next
-        batch.function_rows[key] = batch.functions.len()
-        batch.functions.push(function)
+        if name_column_get(batch.function_rows_keys, batch.function_rows, key) == None {
+            name_column_set(batch.function_rows_keys, batch.function_rows, key, batch.functions.len())
+            batch.functions.push(function)
+        }
+        function_keys.push(key)
     }
     if !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
-    batch.keys[source.key] = computed
+    name_column_set(batch.keys, batch.key_computed, source.key, if computed -> 1 else -> 0)
     batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys, computed: computed})
 }
 
@@ -3031,13 +3071,13 @@ jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) 
     single := jet_driver_comptime_batch_new()
     entry: batch.entries[index]
     loop key in entry.function_keys {
-        row: batch.function_rows.get(key) ?? next
-        single.function_rows[key] = single.functions.len()
+        row: name_column_get(batch.function_rows_keys, batch.function_rows, key) ?? next
+        name_column_set(single.function_rows_keys, single.function_rows, key, single.functions.len())
         single.functions.push(batch.functions[row])
     }
     if !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
     single.foreign = batch.foreign.copy()
-    single.keys[entry.source.key] = true
+    name_column_set(single.keys, single.key_computed, entry.source.key, 1)
     single.entries.push(entry.copy())
     single
 }
@@ -3398,13 +3438,13 @@ jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch) -> String Nev
 }
 
 // `known` holds the `module\nkey` of every source already pending or staged.
-jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSource], known: &[String:Bool], evaluation: SemaCheckedTextEvaluation) Never! {
+jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSource], known: &NameTable, evaluation: SemaCheckedTextEvaluation) Never! {
     source := sema_comptime_checked_text_source(evaluation)
     key: "{source.module_identity.id}\n{source.key}"
-    if known.get(key) != None {
+    if name_find(known, key) != None {
         return
     }
-    known[key] = true
+    _ := name_intern(known, key)
     sources.push(source)
 }
 
@@ -3428,7 +3468,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
     // `row\nkey` of every function a row holds, read once per row the first
     // time a staged function names it: a staged function its module already
     // holds (checked by the body pass, or staged before it) is skipped.
-    held := [String:Bool]{}
+    held := name_table_sized(2)
     keyed := (loop _ in 0..<graph.modules.len() -> false)
     loop checked in functions {
         function: checked.function ?? return Val("staged function `{checked.function_key}` of `{module_text(table, checked.module_identity)}` has no checked body")
@@ -3437,10 +3477,10 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
             return Val("staged function `{function.key}` names module `{module_text(table, checked.module_identity)}`, which the checked graph does not hold")
         }
         if !keyed[row] {
-            loop existing in graph.modules[row].functions -> held["{row}\n{existing.key}"] = true
+            loop existing in graph.modules[row].functions -> _ := name_intern(held, "{row}\n{existing.key}")
             keyed[row] = true
         }
-        if held.get("{row}\n{function.key}") != None -> next
+        if name_find(held, "{row}\n{function.key}") != None -> next
         if !checked.complete && !(checked.obligations_pending && module_is_core(checked.module_identity)) {
             reasons := ""
             loop reason in checked.incomplete_reasons {
@@ -3454,7 +3494,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
         if !sema_comptime_append_checked_function_to_module(checked, graph.modules[row]) {
             return Val("staged function `{function.key}` could not join module `{module_text(table, checked.module_identity)}`")
         }
-        held["{row}\n{function.key}"] = true
+        _ := name_intern(held, "{row}\n{function.key}")
         loop fact in checked.call_facts -> graph.call_facts.push(fact.copy())
         loop request in checked.calls -> graph.comptime_requests.push(request.copy())
     }
@@ -3634,8 +3674,8 @@ jet_driver_comptime_run: fn(
     trace := jet_driver_empty_compile_trace()
     pending := sources
     // The `module\nkey` of every source pending or staged in this run.
-    known_sources := [String:Bool]{}
-    loop source in sources -> known_sources["{source.module_identity.id}\n{source.key}"] = true
+    known_sources := name_column_table(sources.len())
+    loop source in sources -> _ := name_intern(known_sources, "{source.module_identity.id}\n{source.key}")
     // The module scope every item and function check of the run checks in.
     comptime_scopes := sema_comptime_scopes_init(sema_host_hook_access(request.eval_config.host_hooks))
     resolved_count := values.len()
@@ -3689,13 +3729,7 @@ jet_driver_comptime_run: fn(
     // (in the batch or later in the pass) waits on that site, keeping its
     // other function checks (jet_driver_comptime_site_waits).
     batch := jet_driver_comptime_batch_new()
-    // The waits of each pending item (`module\nkey`) whose last check, with
-    // its closure, reported nothing: until one of those keys has a value,
-    // checking it again gives the same waits (it names no other unvalued
-    // constant), so the run reuses them instead of checking it once per
-    // pass; a dependency chain declared in reverse order would otherwise
-    // check every waiting item on every pass.
-    settled_waits := [String:[String]]{}
+    settled_waits := JetDriverComptimeSettledWaits{waits: [[String]]{}}
     loop pending.len() > 0 {
         next_pending := [SemaComptimeItemSource]{}
         wait_rows := [JetDriverComptimeWaitRow]{}
@@ -3775,7 +3809,8 @@ jet_driver_comptime_run: fn(
                 source_key: "{source.module_identity.id}\n{source.key}"
                 // Its waits stand until one of them lands, unless the batch
                 // computes them all, which it may read in the batch's program.
-                if settled_waits.get(source_key) == .Val(previous_waits) {
+                if name_column_get(settled_waits.keys, settled_waits.rows, source_key) == .Val(settled_row) {
+                    previous_waits: settled_waits.waits[settled_row]
                     if !jet_driver_comptime_any_available(available, previous_waits) && !jet_driver_comptime_batch_computes(batch, previous_waits) {
                         wait_rows.push(
                             JetDriverComptimeWaitRow{
@@ -3855,8 +3890,8 @@ jet_driver_comptime_run: fn(
                 }
                 if checked_item.waiting_dependencies.len() > 0 {
                     if checked_item.diagnostics.len() == 0 {
-                        settled_waits[source_key] = checked_item.waiting_dependencies
-                    } else { _ := settled_waits.remove(source_key) }
+                        jet_driver_comptime_settled_put(settled_waits, source_key, checked_item.waiting_dependencies)
+                    } else { jet_driver_comptime_settled_drop(settled_waits, source_key) }
                     wait_rows.push(
                         JetDriverComptimeWaitRow{
                             key: source.key,
@@ -4115,8 +4150,8 @@ jet_driver_comptime_run: fn(
                     // A wait on a body site is checked again next pass: a
                     // site's value never joins the available constants.
                     if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start && !closure.site_waits {
-                        settled_waits[source_key] = dependencies.copy()
-                    } else { _ := settled_waits.remove(source_key) }
+                        jet_driver_comptime_settled_put(settled_waits, source_key, dependencies.copy())
+                    } else { jet_driver_comptime_settled_drop(settled_waits, source_key) }
                     wait_rows.push(
                         JetDriverComptimeWaitRow{
                             key: source.key,
@@ -4149,8 +4184,8 @@ jet_driver_comptime_run: fn(
                         if !site.local_value || site.local_binding -> next
                         ahead: sema_comptime_local_value_ahead_site(site)
                         ahead_key: "{ahead.module_identity.id}\n{ahead.key}"
-                        if known_sources.get(ahead_key) != None -> next
-                        known_sources[ahead_key] = true
+                        if name_find(known_sources, ahead_key) != None -> next
+                        _ := name_intern(known_sources, ahead_key)
                         next_pending.push(ahead)
                         made_progress = true
                     }
@@ -4692,14 +4727,16 @@ JetDriverDeepChecks: struct {
 jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], request: DeepChecks) -> JetDriverDeepChecks Never! {
     found := JetDriverDeepChecks{selected: [String]{}, diagnostics: [Diagnostic]{}}
     if deep_checks_off(request) -> return found
-    packages := [String:String]{}
-    loop package in load.packages -> packages[package.identity] = package.name.copy()  // copy: the load keeps its package rows.
+    // Each package's row of `load.packages` at its identity's id.
+    package_keys := name_column_table(load.packages.len())
+    package_rows := name_column()
+    loop (row, package) in load.packages -> name_column_set(package_keys, package_rows, package.identity, row)
     modules := [U32:Int]{}
     names := [NameModule]{}
     loop (index, loaded) in load.modules {
         if !jet_driver_unit_is_core(load.source_units[loaded.source_unit_index]) {
             modules[loaded.module_identity.id] = index
-            package: packages.get(loaded.package_identity) ?? ""
+            package: if name_column_get(package_keys, package_rows, loaded.package_identity) == .Val(row) -> load.packages[row].name else -> ""
             if package != "" {
                 alias: if loaded.declared_module == "" -> package else -> "{package}.{loaded.declared_module}"
                 jet_driver_deep_check_module(names, alias, loaded.package_identity)
@@ -4717,7 +4754,7 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
         if function.synthetic -> next
         at: modules.get(function.module_identity.id) ?? next
         loaded: load.modules[at]
-        package: packages.get(loaded.package_identity) ?? ""
+        package: if name_column_get(package_keys, package_rows, loaded.package_identity) == .Val(row) -> load.packages[row].name else -> ""
         if package == "" -> next
         // The key names the function's module, its owner (a method's owner
         // by the owner's own key) and its name (symbol_key_parts).
@@ -4770,13 +4807,14 @@ jet_driver_deep_check_module: fn(names: &[NameModule], alias: String, identity: 
 // Outputs, in declaration order. A Check Output whose callable did not check
 // is an E0003.
 jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table: ModuleTable, functions: [FnBody], tests: &[TTestFact], output_checks: &[TOutputCheckFact], diagnostics: &[Diagnostic]) Never! {
-    checked := [String:Int]{}
-    loop (index, function) in functions -> checked[function.key] = index
+    checked_keys := name_column_table(functions.len())
+    checked := name_column()
+    loop (index, function) in functions -> name_column_set(checked_keys, checked, function.key, index)
     loop module_index in 0..<graph.modules.len() {
         graph_module: graph.modules[module_index]
         if test_modules.get(graph_module.module_identity.id) == None -> next
         loop fact in graph_module.tests {
-            if checked.get(fact.function.key) != None -> tests.push(fact.copy())
+            if name_column_get(checked_keys, checked, fact.function.key) != None -> tests.push(fact.copy())
         }
         loop constant in graph_module.constants {
             if constant.declaration.resolved_output == .Val(output) {
@@ -4787,7 +4825,7 @@ jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table
                 }
                 owner: graph.modules[output.module_id]
                 function_key: symbol_key_text(SymbolKind.Function, module_text(table, owner.module_identity), "", output.semantic_name)
-                row: checked.get(function_key) ?? {
+                row: name_column_get(checked_keys, checked, function_key) ?? {
                     diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output entry has no unique checked function identity", "Check Outputs invoke their registered checked callable", "retain the canonical function key through checking"))
                     next
                 }
@@ -4913,21 +4951,21 @@ jet_driver_prunable_core_modules: fn(load: JetDriverLoadResult, core_sources: [J
 // is not the entry's is listed; a source root's loose files belong to the
 // entry. A module with foreign rows stays rooted, as in Core.
 jet_driver_prunable_dependency_modules: fn(load: JetDriverLoadResult, modules: [SemaGraphModuleResult]) -> [ModuleID] Never! {
-    dependencies := [String:Bool]{}
+    dependencies := name_table_sized(2)
     loop package in load.packages {
         if package.identity != load.package_identity && !package.identity.starts_with("source-root:") {
-            dependencies[package.identity] = true
+            _ := name_intern(dependencies, package.identity)
         }
     }
     identities := [ModuleID]{}
-    if dependencies.len() == 0 -> return identities
+    if name_count(dependencies) <= 1 -> return identities
     loop semantic_module in modules {
         if semantic_module.foreign_functions.len() > 0 || semantic_module.foreign_providers.len() > 0 {
             next
         }
         loop module_row in load.modules {
             if module_row.module_identity != semantic_module.module_identity -> next
-            if dependencies.get(module_row.package_identity) != None {
+            if name_find(dependencies, module_row.package_identity) != None {
                 identities.push(semantic_module.module_identity)
             }
         }
@@ -5090,7 +5128,7 @@ JetDriverKeepGoingLog: struct {
     rows: [String],
     // Row bodies (all but the phase) already recorded, so a failure seen by
     // two phases is one row.
-    seen: [String:Bool],
+    seen: NameTable{name_table_sized(2)},
     // No index mark: each call reads the whole stage list and `seen` keeps
     // one row per report, so a stage that rebuilds or replaces its list
     // still has every error recorded (#5662).
@@ -5099,7 +5137,7 @@ JetDriverKeepGoingLog: struct {
 }
 
 jet_driver_keep_going_log: fn(options: JetDriverKeepGoing?) -> JetDriverKeepGoingLog Never! {
-    log := JetDriverKeepGoingLog{enabled: false, skip: [String]{}, rows: [String]{}, seen: [String:Bool]{}, streamed: 0}
+    log := JetDriverKeepGoingLog{enabled: false, skip: [String]{}, rows: [String]{}, streamed: 0}
     if options == .Val(value) {
         log.enabled = true
         log.skip = value.skip
@@ -5116,10 +5154,10 @@ jet_driver_keep_going_row: fn(kg: &JetDriverKeepGoingLog, phase: String, item: S
         return
     }
     body: "{jet_driver_keep_going_field(item)}\t{jet_driver_keep_going_field(code)}\t{jet_driver_keep_going_field(message)}\t{jet_driver_keep_going_field(span)}"
-    if kg.seen.get(body) != None {
+    if name_find(kg.seen, body) != None {
         return
     }
-    kg.seen[body] = true
+    _ := name_intern(kg.seen, body)
     kg.rows.push("{phase}\t{body}")
 }
 
@@ -5196,9 +5234,9 @@ jet_driver_keep_going_incomplete_modules: fn(kg: &JetDriverKeepGoingLog, phase: 
     }
 }
 
-jet_driver_keep_going_skip_set: fn(skip: [String]) -> [String:Bool] Never! {
-    set := [String:Bool]{}
-    loop entry in skip -> set[entry] = true
+jet_driver_keep_going_skip_set: fn(skip: [String]) -> NameTable Never! {
+    set := name_column_table(skip.len())
+    loop entry in skip -> _ := name_intern(set, entry)
     set
 }
 
@@ -5228,7 +5266,7 @@ jet_driver_keep_going_trap_body: fn(function: FnBody, reason: String) -> FnBody 
 jet_driver_keep_going_trap_lowering: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody]) {
     skip: jet_driver_keep_going_skip_set(kg.skip)
     loop position in 0..<functions.len() {
-        if skip.get("lower:{functions[position].name}@{position}") == None -> next
+        if name_find(skip, "lower:{functions[position].name}@{position}") == None -> next
         // The report and the trap read the row in place; the slot is written
         // only after the trap row is built, when no view of it is live.
         trap: jet_driver_keep_going_trap_body_row(kg, functions[position], "lowered as a trap: an earlier keep-going run crashed lowering it", "keep-going trap: lowering this function crashed an earlier run")
@@ -5985,14 +6023,14 @@ jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load:
     root_index: jet_driver_entry_package_index(load) ?? return
     root: load.packages[root_index]
     names := JetDriverDependencyNames{}
-    dependency_roots: jet_driver_dependency_roots(load, names)
+    dependency_count: jet_driver_dependency_roots(load, names)
     loop (index, package) in load.packages {
         if index >= policies.len() -> break
         if index == root_index {
             policies[index].expert_held = root.authority_allow ?? [String]{}
             next
         }
-        if dependency_roots.len() == 0 -> next
+        if dependency_count == 0 -> next
         name: jet_driver_dependency_name(names, package.identity) ?? next
         policies[index].grant_name = name.copy()
         loop grant in root.authority_grants {
@@ -7238,13 +7276,15 @@ jet_driver_release_aside: fn(checked: Int, state: &&JetDriverHeldState) {
 // modules' types, the solved effect rows of the checked functions by key
 // (`rows`), and each checked module by its source file, the display path
 // the compile gives it (jet_driver_display_path), which a check enters
-// (`modules`). The registration's symbol table and the checked types are
-// not the probe's own: the program's lowering holds them
+// (`modules`, the module id at the file's id in `module_files`;
+// jet_driver_held_eval_module). The registration's symbol table and the
+// checked types are not the probe's own: the program's lowering holds them
 // (JetDriverHeldOpened) and lends them to each check.
 JetDriverHeldEval: struct {
     probe: SemaScriptProbe,
     rows: SemaEvalHeldRows,
-    modules: [String:ModuleID],
+    module_files: NameTable{name_column_table()},
+    modules: [Int]{name_column()},
     // The program's memory plan, whose rewrite of a function is the body a
     // check of it reads (jet_driver_held_eval_answer).
     plan: SemaFunctionMemoryPlan,
@@ -7268,8 +7308,9 @@ JetDriverHeldOpened: struct {
 // module.
 jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, threads: CompilerThreads) -> JetDriverHeldOpened? {
     taken := held.move()
-    modules := [String:ModuleID]{}
-    loop checked in taken.modules -> modules["{checked.source_file}"] = checked.module_identity
+    module_files := name_column_table(taken.modules.len())
+    modules := name_column()
+    loop checked in taken.modules -> name_column_set(module_files, modules, "{checked.source_file}", Int{checked.module_identity.id})
     probe := sema_script_probe_over(taken.registration, taken.modules, taken.load.entry_module_identity) ?? return None
     graph := probe.program.registration_graph.move() ?? return None
     plan: sema_function_memory_plan_from_graph(graph, threads)
@@ -7283,7 +7324,13 @@ jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, threads: CompilerThrea
     sources := ir_source_texts(taken.load.source_files)
     rows: sema_eval_held_rows(taken.functions)
     inputs := JetDriverLoweringInputs{functions: taken.functions.move(), modules: taken.modules.move(), decls: DeclTable{}, symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: taken.load.entry_module_identity, canonical_effect_module_identity: taken.canonical_effect_module_identity, module_table: taken.load.module_table.move(), entry_key: None}
-    Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move(), rows: rows.move(), modules: modules.move(), plan: plan.move()}, inputs: inputs.move(), types: types.move()})
+    Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move(), rows: rows.move(), module_files: module_files.move(), modules: modules.move(), plan: plan.move()}, inputs: inputs.move(), types: types.move()})
+}
+
+// The checked module whose source file is `path` (JetDriverHeldEval.modules).
+jet_driver_held_eval_module: fn(held: JetDriverHeldEval, path: String) -> ModuleID? Never! {
+    id: name_column_get(held.module_files, held.modules, path) ?? return None
+    Val(ModuleID{id: U32{id}})
 }
 
 // The function in the source `text`, the debugger's expression function
@@ -7312,7 +7359,7 @@ jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, path: String, functions
         // The module scope reads the symbol table, so the probe enters the
         // module while the table is lent.
         checked := SemaScriptProbeChecked{function: None, diagnostics: [Diagnostic]{}, complete: false}
-        if held.modules.get(path) == .Val(module_identity) {
+        if jet_driver_held_eval_module(held, path) == .Val(module_identity) {
             if sema_script_probe_enter(held.probe, module_identity) {
                 checked = sema_script_probe_check_func(held.probe, func)
             }
@@ -7361,7 +7408,7 @@ jet_driver_held_eval_answer: fn(held: &JetDriverHeldEval, path: String, offset: 
     held.probe.program.registration_graph = going.graph.move()
     held.probe.program.checked_types = going.types.move()
     answer := SemaEvalProbeAnswer?{None}
-    if held.modules.get(path) == .Val(module_identity) {
+    if jet_driver_held_eval_module(held, path) == .Val(module_identity) {
         if sema_script_probe_enter(held.probe, module_identity) {
             answer = jet_driver_held_eval_answer_in(held, path, offset, text)
         }
@@ -7414,7 +7461,7 @@ jet_driver_held_eval_append: fn(held: &JetDriverHeldEval, path: String, function
     // The module scope reads the symbol table, so the probe enters the
     // module while the table is lent.
     appended := SemaScriptProbeAppended?{None}
-    if held.modules.get(path) == .Val(module_identity) {
+    if jet_driver_held_eval_module(held, path) == .Val(module_identity) {
         if sema_script_probe_enter(held.probe, module_identity) {
             appended = sema_script_probe_append(held.probe, item.move(), functions, held.rows)
         }
@@ -7559,19 +7606,18 @@ jet_driver_effect_budget_root: fn(load: JetDriverLoadResult) -> Int? Never! {
     Val(index)
 }
 
-// Each dependency's source root by its name (Rust `ProgramBundle.dep_roots`),
-// and in `names` its name by its package identity. The entry package is no
-// dependency of itself.
-jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &JetDriverDependencyNames) -> [String:String] Never! {
-    roots := [String:String]{}
+// Into `names`, each dependency's source root by its name (Rust
+// `ProgramBundle.dep_roots`) and its name by its package identity; the
+// count of the dependencies. The entry package is no dependency of itself.
+jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &JetDriverDependencyNames) -> Int Never! {
     loop package in load.packages {
         loop dependency in package.dependencies {
-            if roots.has_key(dependency.name) -> next
+            if name_find(names.roots, dependency.name) != None -> next
             loop target in load.packages {
                 if target.root_index != dependency.target_root_index || target.identity == load.package_identity {
                     next
                 }
-                roots[dependency.name] = target.root_path
+                if name_index(name_intern(names.roots, dependency.name)) == names.root_paths.len() -> names.root_paths.push(target.root_path)
                 known: name_count(names.identities)
                 if name_index(name_intern(names.identities, target.identity)) == known {
                     names.by_identity.push(name_intern(names.names, dependency.name))
@@ -7580,16 +7626,19 @@ jet_driver_dependency_roots: fn(load: JetDriverLoadResult, names: &JetDriverDepe
             }
         }
     }
-    roots
+    name_count(names.roots) - 1
 }
 
 // Each dependency's name (jet_driver_dependency_roots): a table of the
 // dependencies' package identities, and by each one's id there the id of
-// its name in a table of the names.
+// its name in a table of the names; and a table of the dependencies' names,
+// by each one's id there its source root.
 JetDriverDependencyNames: struct {
     identities: NameTable{name_table_sized(2)},
     names: NameTable{name_table_sized(2)},
     by_identity: [Name]{[Name]{name_empty()}},
+    roots: NameTable{name_table_sized(2)},
+    root_paths: [String]{[String]{""}},
 }
 
 // The name of the dependency whose package identity is `identity`, if the
@@ -7645,7 +7694,7 @@ jet_driver_budget_facts: fn(load: JetDriverLoadResult, graph: SemaRegistrationGr
         }
     }
     names := JetDriverDependencyNames{}
-    roots: jet_driver_dependency_roots(load, names)
+    dependency_count: jet_driver_dependency_roots(load, names)
     solved := [String]{}
     loop body in functions {
         if !users.has_key(body.module_identity.id) -> next
@@ -7653,13 +7702,30 @@ jet_driver_budget_facts: fn(load: JetDriverLoadResult, graph: SemaRegistrationGr
             if !solved.contains(name) -> solved.push(name.copy())  // copy: the checked function keeps its effects.
         }
     }
-    JetDriverBudgetFacts{public_api_items: public_items, dependency_count: roots.len(), effect_count: solved.len()}
+    JetDriverBudgetFacts{public_api_items: public_items, dependency_count: dependency_count, effect_count: solved.len()}
+}
+
+// The name span of each function and method a build's packages register, at
+// its function key's id in `keys`.
+JetDriverBudgetNameSpans: struct {
+    keys: NameTable{name_table_sized(2)},
+    spans: [Span?]{[Span?]{None}},
+}
+
+jet_driver_budget_name_span_put: fn(table: &JetDriverBudgetNameSpans, key: String, span: Span) Never! {
+    id: name_index(name_intern(table.keys, key))
+    if id == table.spans.len() -> table.spans.push(Val(span)) else -> table.spans[id] = Val(span)
+}
+
+jet_driver_budget_name_span_of: fn(table: JetDriverBudgetNameSpans, key: String) -> Span? Never! {
+    id: name_find(table.keys, key) ?? return None
+    table.spans[name_index(id)]
 }
 
 // The name span of each function and method the build's packages register,
 // by function key; empty when no budget is written.
-jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> [String:Span] Never! {
-    spans := [String:Span]{}
+jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> JetDriverBudgetNameSpans Never! {
+    spans := JetDriverBudgetNameSpans{}
     if jet_driver_effect_budget_root(load) == None -> return spans
     loop registered in graph.modules {
         built := false
@@ -7668,11 +7734,11 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
         }
         if !built -> next
         loop function in registered.functions {
-            spans[symbol_table_key(graph.symbols, function.symbol.id)] = function.symbol.span
+            jet_driver_budget_name_span_put(spans, symbol_table_key(graph.symbols, function.symbol.id), function.symbol.span)
         }
         loop nominal in registered.nominals {
             loop method in nominal.methods {
-                spans[symbol_table_key(graph.symbols, method.symbol.id)] = method.symbol.span
+                jet_driver_budget_name_span_put(spans, symbol_table_key(graph.symbols, method.symbol.id), method.symbol.span)
             }
         }
     }
@@ -7690,7 +7756,7 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
 jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> JetDriverPackageEffectRoots Never! {
     roots := JetDriverPackageEffectRoots{}
     names := JetDriverDependencyNames{}
-    if jet_driver_dependency_roots(load, names).len() == 0 -> return roots
+    if jet_driver_dependency_roots(load, names) == 0 -> return roots
     // The effects the build's packages declare, each parent resolved.
     built := (loop _ in graph.modules -> false)
     effects := [SemaLibraryEffect]{}
@@ -7810,17 +7876,20 @@ jet_driver_budget_edge_chunk: fn(callees: &&[[Int]], extra: &&[[Int]]) -> JetDri
     JetDriverBudgetEdgeChunk{callees: callees.move(), extra: extra.move()}
 }
 
-jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String:Span], package_roots: JetDriverPackageEffectRoots, threads: CompilerThreads) -> JetDriverPackageEffectRows? {
+jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: JetDriverBudgetNameSpans, package_roots: JetDriverPackageEffectRoots, threads: CompilerThreads) -> JetDriverPackageEffectRows? {
     root: load.packages[jet_driver_entry_package_index(load) ?? return None]
     // Each dependency's name, by its source root and by its package identity.
     dep_names := JetDriverDependencyNames{}
-    dep_roots := jet_driver_dependency_roots(load, dep_names)
-    if dep_roots.len() == 0 && jet_driver_effect_budget_root(load) == None -> return None
+    dependency_count: jet_driver_dependency_roots(load, dep_names)
+    if dependency_count == 0 && jet_driver_effect_budget_root(load) == None -> return None
     by_key := IRFunctionRows{keys: name_column_table(), rows: name_column()}
+    // The budget package reads each dependency's source root by its name.
+    dep_roots := [String:String]{}
+    loop id in 1..<name_count(dep_names.roots) -> dep_roots[name_text(dep_names.roots, Name{id: U32{id}})] = dep_names.root_paths[id]
     program := EffectBudgetProgram{entry: -1, modules: [EffectBudgetModule]{}, dep_roots: dep_roots.move(), selected_output: None}
     module_identities := [ModuleID]{}
     module_rows := [U32:Int]{}
-    aliases := [String:Bool]{}
+    aliases := name_table_sized(2)
     owners := [String]{}
     rows := [Int]{}
     rows.try_reserve(functions.len()) ?? panic("reserve failed")
@@ -7836,10 +7905,10 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             // already shows keeps its full identity.
             segments: loaded.module_name.split(".").to_list()
             alias := if segments.len() > 0 -> segments[segments.len() - 1].copy() else -> loaded.module_name.copy()
-            if alias.len() == 0 || aliases.has_key(alias) {
+            if alias.len() == 0 || name_find(aliases, alias) != None {
                 alias = module_text(load.module_table, loaded.module_identity)
             }
-            aliases[alias] = true
+            _ := name_intern(aliases, alias)
             module_rows[loaded.module_identity.id] = program.modules.len()
             module_identities.push(loaded.module_identity)
             program.modules.push(EffectBudgetModule{path: jet_driver_physical_path(root.root_path, unit.path), alias: alias, function_keys: [String]{}, function_spans: [String:Span]{}, imports: [EffectBudgetImport]{}, has_build_entry: false})
@@ -8242,7 +8311,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             loop index in sited {
                 function: functions[index]
                 row: rows[index]
-                program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
+                program.modules[row].function_spans[effect_keys[index]] = jet_driver_budget_name_span_of(name_spans, function.key) ?? function.source_span
             }
             summaries = t_summaries.join() ?? panic(compiler_threads_failure_text(err))
             solved = t_solved.join() ?? panic(compiler_threads_failure_text(err))
@@ -8253,7 +8322,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             row: rows[index]
             // A witness is the function's name; a function registration does not
             // name (a lambda, a generated body) is its declaration.
-            program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
+            program.modules[row].function_spans[effect_keys[index]] = jet_driver_budget_name_span_of(name_spans, function.key) ?? function.source_span
             // A same-package edge names its callee's site, and one to a callee
             // with no site leaves, built from the already-resolved BFS edges.
             kept_edges := [String]{}
