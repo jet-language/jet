@@ -1254,10 +1254,10 @@ sema_core_demand_join_callees: fn(graph: SemaRegistrationGraph, join: SemaCoreDe
             sema_core_demand_calls_func_body(graph.modules[owner_module].functions[index].declaration, sema_registration_function_body(graph.modules[owner_module], graph.modules[owner_module].functions[index]), calls)
         }
         .NominalMethod(owner_module, owner, index) -> {
-            sema_core_demand_calls_func(graph.modules[owner_module].nominals[owner].methods[index].declaration, calls)
+            sema_core_demand_calls_func_body(graph.modules[owner_module].nominals[owner].methods[index].declaration, sema_registration_function_body(graph.modules[owner_module], graph.modules[owner_module].nominals[owner].methods[index]), calls)
         }
         .ImplMethod(owner_module, owner, index) -> {
-            sema_core_demand_calls_func(graph.modules[owner_module].impls[owner].methods[index].declaration, calls)
+            sema_core_demand_calls_func_body(graph.modules[owner_module].impls[owner].methods[index].declaration, sema_registration_function_body(graph.modules[owner_module], graph.modules[owner_module].impls[owner].methods[index]), calls)
         }
         .Foreign(_, _) -> {}
     }
@@ -1291,13 +1291,9 @@ sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistra
     found.push(callee)
 }
 
-// The calls of function `declaration` (SemaCoreDemandCalls): none for a
-// compiler-generated function or one a template of another module wrote,
-// whose names resolve elsewhere.
-sema_core_demand_calls_func: fn(declaration: Func, calls: &SemaCoreDemandCalls) Never! {
-    sema_core_demand_calls_func_body(declaration, declaration.body, calls)
-}
-
+// The calls of function `declaration`, whose body is `body`
+// (SemaCoreDemandCalls): none for a compiler-generated function or one a
+// template of another module wrote, whose names resolve elsewhere.
 sema_core_demand_calls_func_body: fn(declaration: Func, body: [Stmt], calls: &SemaCoreDemandCalls) Never! {
     if declaration.compiler_generated || declaration.definition_module != "" {
         return
