@@ -116,10 +116,16 @@ ir_build_waves: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, thre
 
 // More than 12 independent IRModule parts duplicates types, helpers, and drop
 // glues across every extra part without adding wall-time speedup (ir.build
-// averages ~8 cores), inflating peak RSS by ~400 MiB and merge work.
+// averages ~8 cores), inflating peak RSS by ~400 MiB and merge work. Measured
+// again at 32 threads on the 1.09M-line compiler corpus: as many parts as
+// threads doubled ir.build's CPU (15.7 s to 29.5 s) for no wall gain.
 IR_BUILD_MAX_PARTS: 12
 
-// ir_build_waves, handing the checked program back with the build.
+// ir_build_waves, handing the checked program back with the build, on as
+// many parts as the threads admit for the program's functions
+// (ir_x64_admit), at most IR_BUILD_MAX_PARTS. The merge takes the jobs in
+// rank order, whichever part built each (ir_build_waves_finish), so the build
+// is the same for any part count.
 ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool, threads: CompilerThreads, trace_sink: CompilerTraceSink?, release_program: Bool{false}) -> IRBuildKept Never! {
     admitted: ir_x64_admit(threads, program.functions.len(), program.functions.len(), IR_BUILD_NS_PER_FUNCTION)
     count: if admitted > IR_BUILD_MAX_PARTS -> IR_BUILD_MAX_PARTS else -> admitted

@@ -228,7 +228,7 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, ma
     if granted.move() == {
         .Refused(output) -> Val(JetCLIBuilt.Failed{output: output})
         .Granted(grants, probes) -> {
-            ran := build_execute_actions(hermetic, steps, step.root, None, grants, probes, cli_sys.cpu_count(), None)
+            ran := build_execute_actions(hermetic, steps, step.root, None, grants, probes, cli_sys.cpu_count(), None, None)
             outcome: ran.pop() ?? panic("the executor answered no outcome for the {step.kind}")
             if outcome == .Err(error) {
                 if error == .Reported(report) {

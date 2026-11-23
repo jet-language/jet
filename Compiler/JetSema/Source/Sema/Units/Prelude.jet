@@ -219,7 +219,7 @@ sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: Mo
     // copy: the names are catalog-sized and every scanning thread reads them.
     shared_state: Shared{SemaUnitsScanShared{inputs: [SemaRegistrationModuleInput]{}, names: [SemaUnitsCatalogNames]{names.copy()}, order: order.move()}}
     sema_units_scan_fill(shared_state, inputs)
-    queue: Shared{SemaUnitsScanQueue{next: 0}}
+    queue: SemaUnitsScanQueue{next: 0}
     sema_units_scanners(shared_state, queue, 0, workers, rows)
     sema_units_scan_take(shared_state, inputs)
     rows
@@ -239,9 +239,10 @@ SemaUnitsScanShared: struct {
     order: [Int],
 }
 
-// The next unclaimed rank.
+// The next unclaimed rank, taken with one atomic add; every thread reads the
+// queue in place.
 SemaUnitsScanQueue: struct {
-    next: Int,
+    next: Atomic<Int>,
 }
 
 // One input's mentions, scanned by one thread.
@@ -262,7 +263,7 @@ sema_units_scan_take: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[Se
 
 // Runs scanning threads `from..<workers`, one task each, and moves every row
 // a thread returned into its input's slot of `rows`.
-sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
+sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: SemaUnitsScanQueue, from: Int, workers: Int, rows: &[SemaUnitSourceMentions]) {
     if from >= workers {
         return
     }
@@ -278,7 +279,7 @@ sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared
 }
 
 // One thread: scans the inputs it claims.
-sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Shared<SemaUnitsScanQueue>) -> [SemaUnitsScanned] {
+sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: SemaUnitsScanQueue) -> [SemaUnitsScanned] {
     inputs: shared_state.guard_read()
     claimed := [SemaUnitsScanned]{}
     loop {
@@ -292,12 +293,7 @@ sema_units_scan_claimed: fn(shared_state: Shared<SemaUnitsScanShared>, queue: Sh
     claimed
 }
 
-sema_units_scan_claim: fn(queue: Shared<SemaUnitsScanQueue>) -> Int {
-    permit: queue.guard_edit()
-    rank: permit.value.next
-    permit.value.next = rank + 1
-    rank
-}
+sema_units_scan_claim: fn(queue: SemaUnitsScanQueue) -> Int { queue.next.add(1) }
 
 // `mentions` is the input's sema_units_scan_mentions row.
 sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyDef], names: SemaUnitsCatalogNames, mentions: SemaUnitSourceMentions) Never! {

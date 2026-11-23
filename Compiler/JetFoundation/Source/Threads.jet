@@ -53,13 +53,48 @@ compiler_threads_admit: fn(threads: CompilerThreads, items: Int, work: Int, min_
 }
 
 // The most threads `threads` admits for any step: its cap, or its cores when
-// it has none, never more than the cores and at least one.
+// it has none, never more than the cores and at least one; while other
+// compiles run in this process (compiler_threads_join), this compile's share
+// of that (compiler_threads_share).
 compiler_threads_limit: fn(threads: CompilerThreads) -> Int Never! {
     cores: if threads.cores < 1 -> 1 else -> threads.cores
-    limit: threads.cap ?? cores
-    if limit > cores -> return cores
-    if limit < 1 -> return 1
-    limit
+    limit := threads.cap ?? cores
+    if limit > cores -> limit = cores
+    if limit < 1 -> limit = 1
+    permit: COMPILER_THREADS_COMPILES.guard_read()
+    compiler_threads_share(limit, permit.value)
+}
+
+// The compiles of this process that run at once on its threads, each
+// counted from its compiler_threads_join to its compiler_threads_leave. A
+// process compiles one program at a time unless it says otherwise: a
+// `jet build` compiling two targets at once (BuildExecute.jet), the toolchain's
+// runtime library beside its Core library (Request.jet
+// jet_cli_runtime_with_core). Each such compile admits its share of the
+// limit at every step, so together they never take more than the limit,
+// and one left alone takes the whole of it from its next step on.
+COMPILER_THREADS_COMPILES: Shared{0}
+
+// One more compile runs at once with the others of this process.
+compiler_threads_join: fn() Never! {
+    held := COMPILER_THREADS_COMPILES.guard_edit()
+    held.value += 1
+}
+
+// A compile that joined (compiler_threads_join) ends, or waits on work
+// outside the compiler holding none of its threads.
+compiler_threads_leave: fn() Never! {
+    held := COMPILER_THREADS_COMPILES.guard_edit()
+    if held.value > 0 -> held.value -= 1
+}
+
+// One of `compiles` compiles' share of `limit` threads: an equal part,
+// rounded down, at least one; the whole limit for a compile alone.
+compiler_threads_share: fn(limit: Int, compiles: Int) -> Int Never! {
+    if compiles < 2 -> return limit
+    share: limit /% compiles
+    if share < 1 -> return 1
+    share
 }
 
 // `threads` capped at `count` threads (at least one).
@@ -87,6 +122,22 @@ compiler_threads_beside: fn(threads: CompilerThreads, held: Int) -> CompilerThre
     assert_eq(compiler_threads_limit(compiler_threads_beside(threads, 16)), 1)
     assert_eq(compiler_threads_limit(compiler_threads_capped(CompilerThreads{cap: None, cores: 8, memory_available: None}, 2)), 2)
     assert_eq(compiler_threads_limit(compiler_threads_capped(CompilerThreads{cap: Val(40), cores: 8, memory_available: None}, 64)), 8)
+}
+
+#Test("compiles at once share the limit, and one alone takes all of it") {
+    assert_eq(compiler_threads_share(32, 0), 32)
+    assert_eq(compiler_threads_share(32, 1), 32)
+    assert_eq(compiler_threads_share(32, 2), 16)
+    assert_eq(compiler_threads_share(32, 3), 10)
+    assert_eq(compiler_threads_share(1, 2), 1)
+    assert_eq(compiler_threads_share(3, 8), 1)
+    // Together the shares never take more than the limit while it covers
+    // one thread each.
+    loop limit in 1..<65 {
+        loop compiles in 1..<9 {
+            if limit >= compiles -> assert(compiler_threads_share(limit, compiles) * compiles <= limit, "{compiles} compiles over {limit} threads take more than the limit")
+        }
+    }
 }
 
 // Consecutive parts for `workers` threads over jobs of the given `weights`:

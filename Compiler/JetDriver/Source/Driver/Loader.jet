@@ -5631,8 +5631,8 @@ JetDriverParseInputs: struct {
     spellings: [NameTable],
 }
 
-// The next unclaimed rank, taken with one atomic add under a read guard each
-// thread holds for its run.
+// The next unclaimed rank, taken with one atomic add; every thread reads the
+// queue in place.
 JetDriverParseQueue: struct {
     next: Atomic<Int>,
 }
@@ -5653,7 +5653,7 @@ JetDriverParseThread: struct {
 // Runs claiming threads `from..<workers`, one task each, moves every unit a
 // thread parsed into its position's slot of `placed` and adds the spellings
 // each thread met first to `spellings`.
-jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>, from: Int, workers: Int, placed: &[JetDriverParsedUnit?], spellings: &[NameTable]) {
+jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: JetDriverParseQueue, from: Int, workers: Int, placed: &[JetDriverParsedUnit?], spellings: &[NameTable]) {
     if from >= workers {
         return
     }
@@ -5671,13 +5671,12 @@ jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: Share
 }
 
 // One thread: parses the jobs it claims until none is left.
-jet_driver_parse_claimed: fn(inputs: Shared<JetDriverParseInputs>, queue: Shared<JetDriverParseQueue>) -> JetDriverParseThread {
+jet_driver_parse_claimed: fn(inputs: Shared<JetDriverParseInputs>, queue: JetDriverParseQueue) -> JetDriverParseThread {
     rows: inputs.guard_read()
-    ranks: queue.guard_read()
     claimed := [JetDriverParseClaimed]{}
     own := name_table()
     loop {
-        rank: ranks.value.next.add(1)
+        rank: queue.next.add(1)
         if rank >= rows.value.order.len() -> break
         position: rows.value.order[rank]
         // Passed straight through: a local binding of a guarded row would copy it.
@@ -5773,7 +5772,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
         // idle while the ones holding the largest files finished.
         count: jobs.len()
         inputs: Shared{JetDriverParseInputs{jobs: jobs.move(), order: compiler_threads_heaviest_first(weights), spellings: [NameTable]{pooled.move()}}}
-        queue: Shared{JetDriverParseQueue{next: 0}}
+        queue: JetDriverParseQueue{next: 0}
         placed := [JetDriverParsedUnit?]{}
         loop _ in 0..<count -> placed.push(None)
         met := [NameTable]{}

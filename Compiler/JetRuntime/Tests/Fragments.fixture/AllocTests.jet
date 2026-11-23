@@ -93,11 +93,10 @@ alloc_test_row_classes: fn() {
 }
 
 alloc_test_reuse: fn() {
-    // Every refill below runs from this frame, so one stack band and with it
-    // one arena (alloc_arena) serves them all. A block an earlier test left
-    // cached may come from another band's arena: its frames sat deeper, and
-    // under ASLR an 8 MiB band boundary can fall between the two depths. So
-    // the cache starts empty, and `first` comes from this frame's refill.
+    // Every refill below runs on this thread, so one arena (alloc_arena)
+    // serves them all. A block an earlier test left cached may come from
+    // another arena (one a thread without a TCB chose by its stack band), so
+    // the cache starts empty, and `first` comes from this thread's refill.
     alloc_cache_flush()
     first: jet_rt_alloc(I64{8}, I64{8})
     arena := I64{0}
@@ -278,8 +277,9 @@ alloc_test_full_slabs: fn() {
 }
 
 // Ten slabs of class 4096 emptied at once: the class keeps at most
-// ALLOC_RETAINED_EMPTY_SLABS of them, the rest go on the free-slab stack
-// still mapped, and the next slab mapped for any class is the stack's top.
+// ALLOC_RETAINED_EMPTY_SLABS of them, the rest go on the arena's free-slab
+// stack still mapped, and the arena's next slab of any class is the stack's
+// top.
 alloc_test_slab_stack: fn() {
     alloc_cache_flush()
     chain := I64{0}
@@ -300,17 +300,23 @@ alloc_test_slab_stack: fn() {
         jet_rt_free(pointer, I64{2048}, I64{16})
     }
     alloc_cache_flush()
+    arena: alloc_arena()
     stacked := I64{0}
     #Unsafe("this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped") {
-        stacked = os_load_i64(wrapping(alloc_root + I64{760}))
+        // A spill past ALLOC_ARENA_FREE_SLAB_CAP leaves the arena more
+        // slabs than it moves, so the stack is never empty after a retire.
+        stacked = os_load_i64(wrapping(arena + I64{216}))
         alloc_test_require(stacked != I64{0})
         os_store_i64(wrapping(stacked + I64{8}), I64{1})
     }
-    taken: alloc_slab_map()
+    alloc_lock(arena)
+    taken: alloc_slab_map(arena)
     alloc_test_require(taken == stacked)
-    alloc_slab_retire(taken)
+    // One slab fewer on the stack and then one more: no spill.
+    alloc_slab_retire(arena, taken)
+    alloc_unlock(arena)
     #Unsafe("the retired slab is the stack's top again; its pages were never unmapped") {
-        alloc_test_require(os_load_i64(wrapping(alloc_root + I64{760})) == stacked)
+        alloc_test_require(os_load_i64(wrapping(arena + I64{216})) == stacked)
         alloc_test_require(os_load_i64(wrapping(stacked + I64{8})) == I64{1})
     }
 }

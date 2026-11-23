@@ -418,11 +418,11 @@ task_run_stolen: fn(child: I64) {
     }
     root: scheduler_root_required()
     sync_thread_lock(root)
-    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    _ := sync_add(wrapping(root + I64{40}), I64{1})
     sync_thread_unlock(root)
     task_run(child)
     sync_thread_lock(root)
-    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+    _ := sync_add(wrapping(root + I64{40}), I64{-1})
     _ := sync_add(wrapping(root + I64{280}), I64{-1})
     sync_thread_unlock(root)
 }
@@ -448,7 +448,7 @@ task_run_joined: fn(child: I64) -> Bool {
     sync_store(wrapping(record + I64{24}), base)
     sync_store(wrapping(fiber + I64{56}), child)
     sync_thread_lock(root)
-    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    _ := sync_add(wrapping(root + I64{40}), I64{1})
     sync_thread_unlock(root)
     joiner: scheduler_control_current()
     forward: joiner != I64{0} && !scheduler_shielded() && !scheduler_control_is_root(joiner)

@@ -36,6 +36,7 @@ use jet_foundation.[
     BodyRequireKind,
     BodyTree,
     CompilerThreads,
+    CompilerTraceSink,
     core_identity_is_module,
     DeclID,
     DeclTable,
@@ -5605,7 +5606,7 @@ sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffe
     if count > job_node.len() -> count = job_node.len()
     bounds: compiler_threads_partition(weights, count)
     jobs: SemaStackJobs{module_index: job_module.move(), function: job_function.move(), node: job_node.move(), closed: closed}
-    queue: Shared{SemaEffectCollectQueue{next: 0}}
+    queue: SemaEffectCollectQueue{next: 0}
     parts := [SemaStackBodies]{}
     loop _ in 0..<count -> parts.push(sema_effect_stack_bodies_empty())
     sema_effect_stack_bodies_claimers(modules, nodes, calls, types, jobs, bounds, queue, 0, workers, parts)
@@ -5643,7 +5644,7 @@ sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodi
 
 // Runs frame-sizing threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[SemaStackBodies]) {
+sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[SemaStackBodies]) {
     if from >= workers {
         return
     }
@@ -5659,11 +5660,10 @@ sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [
 }
 
 // One thread: sizes the parts it claims, each into its own rows.
-sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaStackBodiesPart] {
+sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue) -> [SemaStackBodiesPart] {
     claimed := [SemaStackBodiesPart]{}
-    ranks: queue.guard_read()
     loop {
-        part: ranks.value.next.add(1)
+        part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
         bodies := sema_effect_stack_bodies_empty()
         loop job in bounds[part]..<bounds[part + 1] {
@@ -6703,7 +6703,8 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // selected machine when it has no heap ("" when it has one), and `entries`
 // are the keys of the functions the program starts at, from which nothing
 // may allocate (sema_effect_check_heap_free).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, table: ModuleTable, prep_functions: NameTable, threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, table: ModuleTable, prep_functions: NameTable, threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, trace_sink: CompilerTraceSink?{None}) -> SemaEffectGraphResult {
+    sema_effect_trace_step(trace_sink, "", "sema.effects.tables")
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -6767,12 +6768,15 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
     node_modules := loop node in nodes -> node.module_identity
     calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementer_rows: tables.implementer_groups.move(), trait_implementer_lists: tables.implementer_lists.move(), trait_impl_rows: tables.trait_impl_rows.move(), trait_impl_values: tables.trait_impl_values.move(), dyn_impl_rows: tables.dyn_groups.move(), dyn_impl_lists: dyn_impl_lists.move(), trait_caps: trait_caps.copy(), close_method_rows: close_method_rows.move(), close_method_lists: close_method_lists.move(), unsafe_keys: unsafe_keys.move(), unsafe_name_texts: unsafe_name_texts.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), node_modules: node_modules.move(), published_keys: published_keys.move(), published_texts: published_texts.move(), symbols: symbols.move(), interner: interner.move()}
+    sema_effect_trace_step(trace_sink, "sema.effects.tables", "sema.effects.collect")
     module_has_unsafe: sema_effect_modules_have_unsafe(modules, inputs, calls)
     function_nodes: sema_effect_function_nodes(modules, inputs, calls, threads)
     sema_effect_collect_threads(modules, inputs, function_nodes, nodes, calls, module_has_unsafe, diagnostics, threads)
+    sema_effect_trace_step(trace_sink, "sema.effects.collect", "sema.effects.resolve")
     sema_effect_resolve_type_params(nodes, calls)
     sema_effect_resolve_edges(nodes, calls, threads)
     sema_effect_check_expanding_instances(nodes, inputs, diagnostics)
+    sema_effect_trace_step(trace_sink, "sema.effects.resolve", "sema.effects.solve")
     callers: sema_effect_callers(nodes, table)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
@@ -6811,6 +6815,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     dispatch_reach: reaches.dispatch
     pure_nodes := [Int]{}
     pure_rows := [[String]]{}
+    sema_effect_trace_step(trace_sink, "sema.effects.solve", "sema.effects.nodes")
     sema_effect_check_nodes_parallel(nodes, inputs, solved, secret_reach, library_reach, dispatch_reach, threads, diagnostics, pure_nodes, pure_rows)
     loop node_index in 0..<nodes.len() {
         rare: nodes[node_index].rare ?? next
@@ -6860,6 +6865,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     sema_effect_check_trait_bounds_parallel(modules, inputs, source_indices, nodes, calls, solved, threads, diagnostics)
     // Every call path's stack, by the frame model; FnBody keeps each frame
     // bound and each entry's path bound.
+    sema_effect_trace_step(trace_sink, "sema.effects.nodes", "sema.effects.stack")
     bodies := sema_effect_stack_bodies_empty()
     sema_effect_stack_bodies(modules, inputs, function_nodes, nodes, calls, threads, bodies, closed: closed)
     frames: sema_effect_stack_frames(nodes, bodies, closed: closed)
@@ -6868,6 +6874,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // does: a memory or stack denial, a kernel's obligations, a cap over a
     // program function. A Core stand-in has no call edges, so such a walk
     // reads less of the program than the run binds (CoreSeal.jet).
+    sema_effect_trace_step(trace_sink, "sema.effects.stack", "sema.effects.denials")
     walks := false
     loop node_index in 0..<nodes.len() {
         if nodes[node_index].rare == None && nodes[node_index].kernel == None -> next
@@ -6983,6 +6990,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // implementation of its methods, in any package. A cap whose entries
     // scope FS or Net also binds at run time: its frame is entered with the
     // function's own (FnBody.effect_scope).
+    sema_effect_trace_step(trace_sink, "sema.effects.denials", "sema.effects.caps")
     cap_frames := [String]{}
     loop node_index in 0..<nodes.len() {
         graph_module: inputs[nodes[node_index].module_index].module_index
@@ -7018,10 +7026,12 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, cap_diagnostics)
     }
+    sema_effect_trace_step(trace_sink, "sema.effects.caps", "sema.effects.passes")
     sema_effect_check_module_passes_parallel(modules, inputs, source_indices, solved, calls, nodes, threads, diagnostics)
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
     // function's heap and stack bounds.
+    sema_effect_trace_step(trace_sink, "sema.effects.passes", "sema.effects.stamp")
     called: sema_effect_called(nodes)
     heaps := [String]{}
     stacks := [String]{}
@@ -7062,6 +7072,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // e3401 names the first impure call and its chain; the reached row is the
     // report when no single call carries it.
+    sema_effect_trace_step(trace_sink, "sema.effects.stamp", "sema.effects.pure")
     exact_errors := 0
     loop (pending, node_index) in pure_nodes {
         pure_diagnostics := [Diagnostic]{}
@@ -7070,8 +7081,17 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
     core_seal: if seal -> sema_effect_core_seal_rows(nodes.move(), solved, table) else -> [SemaCoreSealEffects]{}
+    sema_effect_trace_step(trace_sink, "sema.effects.pure", "")
     complete: !sema_has_error_since(diagnostics, 0)
     SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), core_seal: core_seal, walks: walks, exact_errors: exact_errors, symbols: calls.symbols.move(), interner: calls.interner.move()}
+}
+
+// Ends the effect pass's step `ended` and begins `begun` (either may be
+// empty) on the run's trace, so each step's wall and CPU time shows.
+sema_effect_trace_step: fn(trace_sink: CompilerTraceSink?, ended: String, begun: String) {
+    sink: trace_sink ?? return
+    if ended != "" -> sink.end(ended, -1)
+    if begun != "" -> sink.begin(begun, "", -1, -1)
 }
 
 SemaEffectNodeCheckPart: struct {
@@ -7609,7 +7629,7 @@ sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaE
     bounds: compiler_threads_partition(unit_weights, count)
     module_rows := loop module_row in inputs -> module_row.module_index
     jobs: SemaEffectCollectJobs{module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), module_has_unsafe: module_has_unsafe}
-    queue: Shared{SemaEffectCollectQueue{next: 0}}
+    queue: SemaEffectCollectQueue{next: 0}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(modules, nodes, calls, jobs, bounds, queue, 0, workers, parts)
@@ -7630,8 +7650,8 @@ SemaEffectCollectJobs: struct {
     module_has_unsafe: [Bool],
 }
 
-// The next unclaimed part of the collection, taken with one atomic add under
-// a read guard each thread holds for its run.
+// The next unclaimed part of the collection, taken with one atomic add;
+// every thread reads the queue in place.
 SemaEffectCollectQueue: struct {
     next: Atomic<Int>,
 }
@@ -7676,7 +7696,7 @@ sema_effect_collect_place: fn(nodes: &[SemaEffectNode], jobs: SemaEffectCollectJ
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
+sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
     if from >= workers {
         return
     }
@@ -7693,11 +7713,10 @@ sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaE
 
 // One thread: collects the parts it claims, in order, each unit into its own
 // copy of the unit's node row.
-sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
+sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue) -> [SemaEffectCollectedPart] {
     claimed := [SemaEffectCollectedPart]{}
-    ranks: queue.guard_read()
     loop {
-        part: ranks.value.next.add(1)
+        part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
         collected := [SemaEffectCollected]{}
         loop unit in bounds[part]..<bounds[part + 1] {

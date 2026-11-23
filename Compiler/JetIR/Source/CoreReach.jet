@@ -1131,7 +1131,7 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights
         return ir_core_reach_part_targets(slot, rows, 0, weights.len(), progress, trace_sink)
     }
     bounds: compiler_threads_partition(weights, count)
-    queue: Shared{IRPartQueue{next: 0}}
+    queue: IRPartQueue{next: 0}
     parts := [[Int]]{}
     loop _ in 0..<count -> parts.push([Int]{})
     ir_core_reach_claimers(slot, rows, bounds, queue, 0, workers, parts, progress, trace_sink)
@@ -1143,7 +1143,7 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights
 // Runs claiming threads `from..<workers`, one task each and the last on this
 // thread, the one that reports `lower` progress to `trace_sink`, and moves
 // every part a thread returned into `parts`.
-ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: Shared<IRPartQueue>, from: Int, workers: Int, parts: &[[Int]], progress: IRReachProgress, trace_sink: CompilerTraceSink?) {
+ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: IRPartQueue, from: Int, workers: Int, parts: &[[Int]], progress: IRReachProgress, trace_sink: CompilerTraceSink?) {
     if from >= workers - 1 {
         own := ir_core_reach_claimed(slot, rows, bounds, queue, progress, trace_sink)
         ir_core_reach_place(own, parts)
@@ -1166,11 +1166,10 @@ ir_core_reach_place: fn(claimed: &[IRReachPart], parts: &[[Int]]) {
 }
 
 // One thread: the rows named by the parts it claims until none is left.
-ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: Shared<IRPartQueue>, progress: IRReachProgress, trace_sink: CompilerTraceSink?) -> [IRReachPart] {
+ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: IRPartQueue, progress: IRReachProgress, trace_sink: CompilerTraceSink?) -> [IRReachPart] {
     claimed := [IRReachPart]{}
-    claims: queue.guard_read()
     loop {
-        part: claims.value.next.add(1)
+        part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
         claimed.push(IRReachPart{part: part, targets: ir_core_reach_part_targets(slot, rows, bounds[part], bounds[part + 1], progress, trace_sink)})
     }
