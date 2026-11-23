@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113307,
+    "rev": 113313,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52598,6 +52598,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Antigravity #6794 work folded into ParallelS2S3's slices, saved 2026-11-23: $JET_SCRATCH_ROOT/tmp/parked_arch/6794-taskgraph.tar (JetFoundation TaskGraph.jet + its test: dependency-driven node schedule with no phase barriers, from the earlier Speed-3-2 park; on no branch) and $JET_SCRATCH_ROOT/tmp/parked_arch/6794_s1.patch (work-stealing scheduler + sharded allocator; S1r2 carries 156 of its 320 changed Alloc lines; the rest is to be folded or dropped with a stated reason)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "S1 rev 2 (IR_BUILD_MAX_PARTS 12 and the quarter-thread taint-walk cap restored) measured 2026-11-23 on dev 03f1442ac1: Throughput --against the dev-tip compiler, O0, --threads 32, n=3: wall 39.33 -> 39.33 s median, cpu +0.3%, instructions -0.0%, ir.build cpu 15.66 -> 15.57 s (the S1 v1 regression to 29.5 s is gone), gate INCONCLUSIVE only on build.step spread. Neutral: no gain and no regression. S2 (two ready targets at once, the thread cap split between compiles and passed to child jets, Core leaves the pool while it waits on the runtime image) is frozen; S1r2+S2 is under A/B with thread-count byte identity. The worker's trace analysis: the c1 critical path is jet-bare (about 14 s) then the runtime step (about 20 s); Tier-1 load streaming can win at most 0.3 s and is parked; the jet-bare finalize tail is under 0.2 s; splitting the runtime unit (about 2 s) is deferred for its blast radius; the runtime-overlap option is written up in Docs/Audits/2026-11-23-parallel-pipeline-runtime-overlap.md and is not built: it speeds only the compiler's self-build and moves the pack identity contract, so it needs an adversarial review against the no-cell-tailoring rule first."
         },
         {
@@ -52660,7 +52665,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T15:04:43.918Z",
+      "updated": "2026-11-23T15:33:41.507Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -52775,6 +52780,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Unlanded Antigravity Slice 1 (c2-c4: chunk boundary protocol, contiguous-run merge, per-chunk TokenTables), saved 2026-11-23 as $JET_SCRATCH_ROOT/tmp/parked_arch/6796_s1.patch (13 files, 859 added lines, JetLexer/JetParser only; applies cleanly to dev af651a6949). Design and review are on dev (Docs/Audits/2026-11-23-parallel-lex-parse-*). Next: batch-compiler build, 1/16-thread byte identity, golden/ui/cases."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Parked 2026-11-23 06:48 when staffing was cut to 2 agents: S1 diff (lexer Chunks/Payload/Scan, parser Entry/ColonDeclarations/markers) at $JET_SCRATCH_ROOT/tmp/parked_arch/6796_s1.patch, base 93bd9dc289. Worktree was force-removed; new files would not be in the diff (master-mirror exclude hides them)."
         },
         {
@@ -52839,7 +52849,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-23T12:56:57.277Z",
+      "updated": "2026-11-23T15:33:40.470Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
@@ -55011,6 +55021,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Worktree saves from 2026-11-21 still partly off dev af651a6949 (share of added lines present): $JET_SCRATCH_ROOT/lanes/Main/wt-save/Lens-6841-1522.diff 74% (Image/Loader, CLI/Perf/Counts, Outside, Session), $JET_SCRATCH_ROOT/lanes/Main/wt-save/Rivet-6841.diff 70% (CLI/Perf/SourceSampling, Tests/Perf, JetDebug/NativeDump, JetRuntime/PerfSamples), $JET_SCRATCH_ROOT/lanes/Main/wt-save/lens-stash1.diff 75% (CLI/DebugDump, InspectCompiler, Perf/Outside, Perf/Session), $JET_SCRATCH_ROOT/lanes/Main/wt-save/lens-stash2.diff 52%, $JET_SCRATCH_ROOT/lanes/Main/wt-save/Rivet-c113.diff 74% (Docs/Spec/Reference/core-library.md, Docs/Spec/safety.md). The missing lines may have been rewritten rather than lost; the next worker on this card checks each file before writing new code."
+        },
+        {
           "at": "2026-11-22",
           "by": "Main",
           "text": "Handover 2026-11-21 20:40 (owner paused this stream for an uninterrupted compiler-performance session). c94: Rivet-6841-c94-attach-window landed as 5c61361976 (p438, dev d643d1e71a). On the gate-p438 jet, `jet test Compiler --profile cases --filter Perf/attach` passes 11 of 12; Perf/attach_samples_a_command still fails at its unchanged hot-function check (\"% total · unit.rt_text_append_owner\"), because the comptime child's samples are unnamed (#6995 c11). That root is Lens-6995-c11-comptime-names.r1, landing in p439; once it is on dev, rerun the Perf/attach filter and meet c94 if all 12 pass. c39 stays open: the review's verdict does not hold on every axis yet (Docs/Audits/2026-11-19-debug-profile-best-in-existence.md). c108 waits on its ballot for the Canvas Debug panels. A stale worktree (IfHole-6-1, base 50b6fec6e7) held an uncommitted, earlier version of the c95/c106 disassembly work that landed as c0e8fae53e and 04181acf9c (its cases pass on a0.0.46); it was removed, and its diff is kept at $JET_SCRATCH_ROOT/lanes/Main/handover/IfHole-6-1-uncommitted.patch."
@@ -56578,7 +56593,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-23T14:42:42.506Z",
+      "updated": "2026-11-23T15:33:49.396Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 120
     },
@@ -56861,7 +56876,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Unlanded Antigravity work, saved 2026-11-23: c11-c13 patch $JET_SCRATCH_ROOT/tmp/parked_arch/parked_g1_6846_c11_c13.patch (InspectBuild, Request, JetEval CompilerValueMethods, build.jet, EntityBuckets case; conflicts with dev af651a6949, 7% present, needs a rebase) and its new files $JET_SCRATCH_ROOT/tmp/parked_arch/6846-untracked-goalsorder.tar (Compiler/Toolchain/CompilerValueMethods.jet, JetEval/Tests/CompilerValueMethods.jet, Tests/Cases/BuildEntry/build_fn_generated_modules_load_across_run_check_and_build)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -57034,7 +57055,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-22T03:09:09.411Z",
+      "updated": "2026-11-23T15:33:39.573Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 13
     },
@@ -57729,6 +57750,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Unlanded Antigravity work for the growing-enum criterion (D-GROWING-ENUM1), saved 2026-11-23: compiler half $JET_SCRATCH_ROOT/tmp/parked_arch/parked_g1_6853_c7.patch (21 files, 376 added lines; applies cleanly to dev af651a6949, 15% present) and its tests, example and site pages $JET_SCRATCH_ROOT/tmp/parked_arch/6853-c7-open-enum-tests.tar (Tests/UI/open_not_public_enum, OpenEnumExternalNoElse, OpenEnumNestedNoCatchAll, Examples/Modules/Packages/OpenEnum, Docs/Site/Dist/e/E1137). Lands as one submission after a batch-compiler ui/golden/cases run."
+        },
+        {
           "at": "2026-11-22",
           "by": "Orchestrator",
           "text": "Posted full-profile ballot D-GROWING-ENUM1 for c7 (growing public enum marker: A #Open, B #NonExhaustive, C #Growing, D open-by-default/#Closed), validated 0 gaps by Validate.jet and independently reviewed by GoalsOrder against live Markers.jet, Spellings.jet, Coverage.jet, and PublicAPI.jet."
@@ -57844,8 +57870,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-22T21:07:47.163Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T15:33:38.634Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
     {
@@ -62707,6 +62733,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Worktree save $JET_SCRATCH_ROOT/lanes/Main/wt-save/Rivet-6893.diff (2026-11-21; CoreSignatures, BuildRoutes, RuntimeRoutes, Prelude/Core.rows) has 12% of its 16 added lines on dev af651a6949: unlanded."
+        },
+        {
           "at": "2026-11-21",
           "by": "Main",
           "text": "c1 stays open after D-PLUGIN-ENGINE1=A was ratified: A keeps run-time loads off until its own build is done (the separate x64 checker, the guard reservations, the instance split, the memory-key gates, SA_ONSTACK, the sealed child translator, the per-block jump fix, the spec runner and the fuzzer), the spec suite's core tests pass, the fuzzer has no open crash or checker refusal, and the time check holds. Loading a run-time path before then would let a guest escape. The unlanded sema and route surface for c1 (4 files) is saved as $JET_SCRATCH_ROOT/lanes/Main/wt-save/Rivet-6893-1545.diff and lands with that build."
@@ -62760,8 +62791,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-22T02:10:23.723Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-23T15:33:50.864Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0gxq09x",
@@ -134830,6 +134861,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T15:33:50.864Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T15:33:49.396Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T15:33:41.507Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T15:33:40.471Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0okfgjw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T15:33:39.573Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T15:33:38.634Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c06r6neu",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T15:04:43.918Z",
       "by": "Orchestrator",
