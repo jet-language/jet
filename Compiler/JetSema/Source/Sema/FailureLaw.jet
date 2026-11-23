@@ -23,6 +23,7 @@ use {
         Expr,
         FnBody,
         Func,
+        InternerDelta,
         Item,
         JET_CORE_OWNER_ANNOTATION_SUFFIXES,
         JET_TYPE_NAMES,
@@ -1107,7 +1108,7 @@ sema_prelude_conversion_demands: fn(module_identity: String, functions: [FnBody]
 // a conversion whose body fails to check is kept as its typed trap.
 // `walked` holds the demands of the functions a compiler thread walked, by
 // position in `functions` (sema_prelude_conversion_demands).
-sema_inject_prelude_error_conversions: fn(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[FnBody], walked: [Int:[SemaPreludeConversionDemand]], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+sema_inject_prelude_error_conversions: fn(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[FnBody], walked: [Int:[SemaPreludeConversionDemand]], type_delta: &[InternerDelta], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     demands: sema_prelude_conversion_demands(module_identity, functions, walked)
     complete := true
     loop demand in demands {
@@ -1145,7 +1146,9 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
         }
         before: diagnostics.len()
         references_before: name_references.len()
-        checked: sema_function_check(conversion, key, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+        requests_before: comptime_requests.len()
+        scopes.type_delta = [InternerDelta]{}
+        checked := sema_function_check(conversion, key, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
         // The routine is the shipped Prelude declaration checked under this
         // module's name: its spans are offsets into that generated text, not
         // into anything the author wrote, so its warnings and lints are dropped.
@@ -1154,9 +1157,11 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             complete = false
             if keep_going {
                 trap := sema_keep_going_trap_references(name_references, references_before, checked, sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                if &trap == .Val(trapped) -> sema_drain_scope_delta(program, type_delta, scopes, trapped.value, comptime_requests, requests_before) else -> scopes.type_delta = [InternerDelta]{}
                 sema_keep_going_push_stub(trap, label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, before), functions, reasons)
                 next
             }
+            scopes.type_delta = [InternerDelta]{}
             loop reason in checked.incomplete_reasons -> reasons.push("{label}: {reason}")
             if checked.incomplete_reasons.len() == 0 {
                 // A check that records no reason stopped on a report; name the
@@ -1171,6 +1176,7 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             }
             next
         }
+        sema_drain_scope_delta(program, type_delta, scopes, checked.value, comptime_requests, requests_before)
         if !sema_append_function(functions, checked.value.move()) {
             complete = false
             reasons.push("{label}: checked routine could not be recorded")

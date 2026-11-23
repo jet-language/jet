@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, module_none, name_count, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, interner_empty, module_none, name_count, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -174,12 +174,12 @@ ir_trait_boxed: fn(p: IRProgram) -> IRTraitBoxed Never! {
         loop node in function.tree.nodes {
             if node.kind == {
                 .TraitBox(value, target) -> {
-                    ir_trait_boxed_put(p, boxed, seen, body_type(function.tree, value), target)
+                    ir_trait_boxed_put(p, boxed, seen, body_type(p.interner, function.tree, value), target)
                 }
                 .List(values, coercion) -> {
                     if coercion == .Val(target) {
                         loop value in values {
-                            ir_trait_boxed_put(p, boxed, seen, body_type(function.tree, value), target)
+                            ir_trait_boxed_put(p, boxed, seen, body_type(p.interner, function.tree, value), target)
                         }
                     }
                 }
@@ -198,7 +198,7 @@ ir_trait_boxed: fn(p: IRProgram) -> IRTraitBoxed Never! {
 ir_trait_boxed_args: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop arg in args {
         if arg.box_as_trait == .Val(target) {
-            ir_trait_boxed_put(p, boxed, seen, body_type(tree, arg.value), target)
+            ir_trait_boxed_put(p, boxed, seen, body_type(p.interner, tree, arg.value), target)
         }
     }
 }
@@ -216,7 +216,7 @@ IRBodyScanBoxed: struct {
 // One function's spawn sites and generic trait-box candidates collected in a
 // single pass over `function.tree.nodes`. `check_boxed` is true for
 // non-generic bodies (where trait boxing candidates are valid).
-ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, spawns: &[IRBodyScanSpawn], boxed: &[IRBodyScanBoxed]) Never! {
+ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: &[IRBodyScanSpawn], boxed: &[IRBodyScanBoxed]) Never! {
     loop node in function.tree.nodes {
         if node.kind == {
             .CoreClosureCall(kind) -> {
@@ -226,14 +226,14 @@ ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, spa
             }
             .TraitBox(value, target) -> {
                 if check_boxed {
-                    ir_trait_boxed_candidate(body_type(function.tree, value), target, boxed)
+                    ir_trait_boxed_candidate(body_type(interner, function.tree, value), target, boxed)
                 }
             }
             .List(values, coercion) -> {
                 if check_boxed {
                     if coercion == .Val(target) {
                         loop value in values {
-                            ir_trait_boxed_candidate(body_type(function.tree, value), target, boxed)
+                            ir_trait_boxed_candidate(body_type(interner, function.tree, value), target, boxed)
                         }
                     }
                 }
@@ -242,7 +242,7 @@ ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, spa
                 if check_boxed {
                     loop arg in args {
                         if arg.box_as_trait == .Val(target) {
-                            ir_trait_boxed_candidate(body_type(function.tree, arg.value), target, boxed)
+                            ir_trait_boxed_candidate(body_type(interner, function.tree, arg.value), target, boxed)
                         }
                     }
                 }
@@ -343,7 +343,7 @@ ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     a := ir_builder_new(m.functions[id].copy())
     at: ir_new_slot(a, row, IRSlotKind.Param, ir_intern_name(m, "value"))
     owners := [Type]{}
-    if ir_untag(m.types[row].ty) == .TraitObject(bounds) {
+    if ir_untag(ir_row_ty(m, p, row)) == .TraitObject(bounds) {
         if bounds.len() == 1 -> owners = ir_trait_implementers(p, bounds[0])
     }
     key: ir_load_word(m, a, at, 0)
@@ -379,7 +379,7 @@ ir_trait_box_bytes: fn(m: IRModule, payload_row: Int) -> Int Never! {
 // values shows each value. A key of no implementer adds nothing.
 ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
     owners := [Type]{}
-    if ir_untag(m.types[b.f.slot_type[slot]].ty) == .TraitObject(bounds) {
+    if ir_untag(ir_row_ty(m, p, b.f.slot_type[slot])) == .TraitObject(bounds) {
         if bounds.len() == 1 -> owners = ir_trait_implementers(p, bounds[0])
     }
     key: ir_load_word(m, b, slot, 0)
@@ -547,11 +547,11 @@ ir_trait_implementer: fn(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never
 }
 
 // The list literal values boxed as trait values of `target`.
-ir_trait_boxes: fn(p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> [Int] Never! {
+ir_trait_boxes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> [Int] Never! {
     boxed := [Int]{}
     loop value in values {
         value_span: ir_body_node(p, b, value).span
-        boxed.push(ir_node(b, target, NodeKind.TraitBox{value: value, target: target}, value_span))
+        boxed.push(ir_node(m, p, b, target, NodeKind.TraitBox{value: value, target: target}, value_span))
     }
     boxed
 }
@@ -571,7 +571,7 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
     if bounds.len() != 1 {
         return ir_fail_slot(b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait")
     }
-    concrete: ir_ty(p, b, value)
+    concrete: ir_ty(m, p, b, value)
     if ir_untag(concrete) == .TraitObject(_) -> return ir_expr(m, p, b, value)
     // A dynamic call selects among the generic instances non-generic bodies
     // box (p.trait_boxed): one only an instance of a generic body boxes has
@@ -765,7 +765,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
 // optional is that value, not a carrier to unwrap.
 ir_trait_propagate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMethodRef, slot: Int, checked: Type, span: Span) -> Int Never! {
     if method.trait_owner == None || slot < 0 || ir_failed(b) -> return slot
-    returned: m.types[b.f.slot_type[slot]].ty
+    returned: ir_row_ty(m, p, b.f.slot_type[slot])
     checked_success: ir_untag(ir_never_carrier_success(checked) ?? checked)
     carried: if ir_untag(returned) == {
         .Result(_, _) -> !(ir_untag(checked) == .Result(_, _))
@@ -792,7 +792,7 @@ ir_trait_arm_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, i
     written: Type.Named{name: identity}
     wanted: ir_trait_identity(p, written)
     held := Type?{None}
-    if ir_untag(m.types[b.f.slot_type[subject]].ty) == .TraitObject(bounds) {
+    if ir_untag(ir_row_ty(m, p, b.f.slot_type[subject])) == .TraitObject(bounds) {
         if bounds.len() == 1 {
             loop implementer in ir_trait_implementers(p, bounds[0]) {
                 if ir_trait_identity(p, implementer) == wanted || type_carrier_identity(ir_untag(implementer)) == identity || ir_trait_arm_instance(p, implementer) == identity {
@@ -866,7 +866,7 @@ ir_test_empty_impl: fn(owner: Type) -> TImplDef Never! {
 
 #Test("an implementation that declares no method makes its owner an implementer of its trait, once") {
     impls := [TImplDef]{ir_test_empty_impl(Type.Int), ir_test_empty_impl(Type.String), ir_test_empty_impl(Type.Int)}
-    p := ir_program_declared([TTypeDef]{}, impls, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p := ir_program_declared([TTypeDef]{}, impls, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     owners: ir_trait_implementers(p, "main.Bare")
     assert(owners.len() == 2)
     assert(owners[0] == Type.Int)

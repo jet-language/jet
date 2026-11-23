@@ -62,12 +62,12 @@ ir_pool_shape: fn(m: &IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never
 // `Pool<T>.new()`: no entries.
 ir_pool_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    ir_list_empty(m, b, row)
+    ir_list_empty(m, p, b, row)
 }
 
 // `pool.add(value)`, `pool.remove(id)` and `pool.ids()`.
 ir_pool_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
-    receiver_ty: ir_ty(p, b, receiver)
+    receiver_ty: ir_ty(m, p, b, receiver)
     inner: ir_pool_inner(receiver_ty) ?? return ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
     shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, receiver_ty)
     if method == "add" && args.len() == 1 {
@@ -166,7 +166,7 @@ ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPo
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
-    result: ir_list_empty(m, b, row)
+    result: ir_list_empty(m, p, b, row)
     word_row: ir_word_row(m)
     stride: ir_list_stride(m, shape.entry)
     length: ir_load_word(m, b, pool, 0)
@@ -197,7 +197,7 @@ ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPo
 // `pool[id]`: the address of the live value `id` names; a stale ID stops at
 // the indexing line.
 ir_pool_slot_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pool_node: Int, id_node: Int, line: Int, source_line: String, span: Span) -> Int Never! {
-    pool_ty: ir_ty(p, b, pool_node)
+    pool_ty: ir_ty(m, p, b, pool_node)
     inner: ir_pool_inner(pool_ty) ?? return ir_fail_slot(b, span, "Pool slot of {ir_type_name(pool_ty)}")
     shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, pool_ty)
     pool: ir_expr(m, p, b, pool_node)

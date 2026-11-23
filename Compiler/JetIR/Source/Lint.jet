@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_rows_value, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_rows_value, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -449,6 +449,7 @@ ir_lint_module: fn(m: &IRModule, pass: String, threads: CompilerThreads) -> [IRL
     slots.reverse()
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
+    compiler_transfer_rows<Interner>(view.interner, m.interner)
     reads: Shared{IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}}
     _: ir_lint_threads(slots, reads, 0) ?? panic("the IR Lint threads failed")
     loop slot in slots {
@@ -458,6 +459,7 @@ ir_lint_module: fn(m: &IRModule, pass: String, threads: CompilerThreads) -> [IRL
     }
     held := reads.guard_edit()
     compiler_transfer_rows<IRType>(m.types, held.value.views[0].types)
+    compiler_transfer_rows<Interner>(m.interner, held.value.views[0].interner)
     out
 }
 
@@ -673,13 +675,14 @@ ir_lint_finding: fn(f: IRFunction, pass: String, rule: String, message: String) 
 // layout is its kind's.
 ir_lint_types: fn(m: IRModule, pass: String, out: &[IRLintFinding]) Never! {
     loop (row, ty) in m.types {
-        allowed: ir_lint_type_kinds(ty.ty)
+        written: ir_module_row_ty(m, row)
+        allowed: ir_lint_type_kinds(written)
         if allowed & ir_lint_kind_bit(ty.kind) == 0 {
-            out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_KIND, message: "type row {row} of {type_name(ty.ty)} is {ir_kind_name(ty.kind)}, not {ir_lint_kinds_text(allowed)}"})
+            out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_KIND, message: "type row {row} of {type_name(written)} is {ir_kind_name(ty.kind)}, not {ir_lint_kinds_text(allowed)}"})
         }
-        problem: ir_lint_layout_problem(ty)
+        problem: ir_lint_layout_problem(ty, written)
         if problem != "" {
-            out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_LAYOUT, message: "type row {row} of {type_name(ty.ty)}: {problem}"})
+            out.push(IRLintFinding{function: "-", key: "", pass: pass.copy(), rule: IR_LINT_TYPE_LAYOUT, message: "type row {row} of {type_name(written)}: {problem}"})
         }
     }
 }
@@ -711,8 +714,9 @@ ir_lint_type_kinds: fn(ty: Type) -> Int Never! {
 }
 
 // What breaks row `ty`'s layout for its kind, "" when nothing does. A
-// fixed-width integer's row also carries its checked width and sign.
-ir_lint_layout_problem: fn(ty: IRType) -> String Never! {
+// fixed-width integer's row also carries its checked width and sign
+// (`written`, the row's type).
+ir_lint_layout_problem: fn(ty: IRType, written: Type) -> String Never! {
     if ty.clone != "" && ty.drop == "" -> return "clone {ty.clone} without a drop"
     if ty.kind == {
         .Unit -> {
@@ -752,9 +756,9 @@ ir_lint_layout_problem: fn(ty: IRType) -> String Never! {
                 return "Word of {ty.bits} bits in {ty.size} bytes"
             }
             if ty.class != .Integer -> return "Word of class {ty.class}"
-            if ir_lint_untag(ty.ty) == .IntN(signed, bits) {
+            if ir_lint_untag(written) == .IntN(signed, bits) {
                 if bits != ty.bits || signed != ty.signed {
-                    return "Word of {ty.bits} bits (signed {ty.signed}) for {type_name(ty.ty)}"
+                    return "Word of {ty.bits} bits (signed {ty.signed}) for {type_name(written)}"
                 }
             }
         }
@@ -1079,9 +1083,9 @@ ir_lint_transfer: fn(m: IRModule, from: Int, to: Int) -> Bool Never! {
 ir_lint_row_text: fn(m: IRModule, row: Int) -> String Never! {
     kind: m.types[row].kind
     if kind == .Word || kind == .Aggregate {
-        return "{ir_kind_name(kind)}/{m.types[row].size} ({type_name(m.types[row].ty)})"
+        return "{ir_kind_name(kind)}/{m.types[row].size} ({ir_module_row_type_name(m, row)})"
     }
-    "{ir_kind_name(kind)} ({type_name(m.types[row].ty)})"
+    "{ir_kind_name(kind)} ({ir_module_row_type_name(m, row)})"
 }
 
 // Instruction `at`'s typing rule `typing` (its operands are in range). Two
@@ -1340,7 +1344,7 @@ ir_lint_source_at: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
 // is checked by its roles and carriers only.
 ir_lint_indirect: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, pass: String, out: &[IRLintFinding]) Never! {
     code: f.a[at]
-    if ir_lint_untag(m.types[f.slot_type[code]].ty) == .Apply(name, args) {
+    if ir_lint_untag(ir_module_row_ty(m, f.slot_type[code])) == .Apply(name, args) {
         if name != IR_CODE_TYPE || args.len() != 1 {
             return
         }

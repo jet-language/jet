@@ -21,15 +21,20 @@
 // drops the tag), but not one a constant makes. IR Lint follows the values
 // computed from these after the build and after each pass (Lint.jet
 // ir_lint_fixed).
-use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, body_type_id, FnBody, Span, TBinaryOp, Type]
+use jet_foundation.[BodyIfCond, BodyPlace, body_stmt, body_type_id, FnBody, Span, TBinaryOp, Type, type_kind, type_syntax]
 
 // Which types of the checked body's type table are fixed (IRBuilder.fixed_ids).
 // An instance's types are its own, so it marks none.
-ir_fixed_types: fn(b: &IRBuilder, function: FnBody) Never! {
+ir_fixed_types: fn(p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     if function.fixed_tags.len() == 0 || b.instance.names.len() > 0 {
         return
     }
-    loop ty in function.tree.types.types -> b.fixed_ids.push(ir_fixed_type(function.fixed_tags, ty))
+    loop row in function.tree.expr_types {
+        if b.fixed_ids.has_key(row.ty.id) -> next
+        if type_kind(p.interner, row.ty) == .Tagged && ir_fixed_type(function.fixed_tags, type_syntax(p.interner, row.ty)) {
+            b.fixed_ids[row.ty.id] = true
+        }
+    }
 }
 
 // Whether `ty` carries one of `fixed_tags` on its own value.
@@ -60,12 +65,15 @@ ir_fix_slot: fn(m: IRModule, b: &IRBuilder, slot: Int) Never! {
 // Marks `slot`, the value of node `expression`, when the node's checked
 // type is fixed or the node reads an element of a list of fixed elements.
 ir_fix_expr: fn(m: IRModule, p: IRProgram, b: &IRBuilder, expression: Int, slot: Int) Never! {
-    if slot < 0 || b.row < 0 || b.fixed_ids.len() == 0 || expression <= IR_FIRST_NODE_ID {
+    if slot < 0 || b.row < 0 || expression <= IR_FIRST_NODE_ID {
         return
     }
     function: p.functions[b.row]
+    if function.fixed_tags.len() == 0 || b.instance.names.len() > 0 {
+        return
+    }
     id: body_type_id(function.tree, expression)
-    if id < b.fixed_ids.len() && b.fixed_ids[id] {
+    if b.fixed_ids.has_key(id.id) {
         ir_fix_slot(m, b, slot)
         return
     }
@@ -73,7 +81,7 @@ ir_fix_expr: fn(m: IRModule, p: IRProgram, b: &IRBuilder, expression: Int, slot:
         if (kind != .List && kind != .FixedListProof) || base <= IR_FIRST_NODE_ID {
             return
         }
-        if ir_fixed_element(function.fixed_tags, function.tree.types.types[body_type_id(function.tree, base)]) {
+        if ir_fixed_element(function.fixed_tags, type_syntax(p.interner, body_type_id(function.tree, base))) {
             ir_fix_slot(m, b, slot)
         }
     }
@@ -212,8 +220,8 @@ ir_masked_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: BodyPlace
     }
     result := right
     if op == .Val(binary) {
-        left_ty: m.types[b.f.slot_type[current]].ty
-        right_ty: ir_ty(p, b, value)
+        left_ty: ir_row_ty(m, p, b.f.slot_type[current])
+        right_ty: ir_ty(m, p, b, value)
         result = ir_binary(m, p, b, binary, ir_assign_overflow(binary), b.line, left_ty, current, right, right_ty, span)
         if ir_failed(b) || result < 0 {
             return

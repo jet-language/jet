@@ -1222,141 +1222,8 @@ symbol_kind_name: fn(kind: SymbolKind) -> String Never! {
     }
 }
 
-// A hash of `ty`'s shape for interning (type_table_intern): equal types hash
-// equal. It reads variants, names and child types and skips spans, contracts
-// and measures, which only the equality check that follows compares.
-type_shape_hash: fn(ty: Type) -> Int Never! {
-    Int{type_shape_hash_into(U64{0xcbf29ce484222325}, ty) & U64{0x3fffffff}}
-}
-
-type_hash_mix: fn(hash: U64, value: U64) -> U64 Never! {
-    wrapping((hash ~ value) * U64{0x100000001b3})
-}
-
-type_shape_hash_list: fn(hash: U64, types: [Type]) -> U64 Never! {
-    mixed := hash
-    loop member in types -> mixed = type_shape_hash_into(mixed, member)
-    type_hash_mix(mixed, U64{0x5f})
-}
-
-type_shape_hash_into: fn(hash: U64, ty: Type) -> U64 Never! {
-    if ty == {
-        .Int -> type_hash_mix(hash, U64{1})
-        .Float -> type_hash_mix(hash, U64{2})
-        .Bool -> type_hash_mix(hash, U64{3})
-        .String -> type_hash_mix(hash, U64{4})
-        .Char -> type_hash_mix(hash, U64{5})
-        .List(element) -> type_shape_hash_into(type_hash_mix(hash, U64{6}), element)
-        .Map(key, _, value) -> type_shape_hash_into(type_shape_hash_into(type_hash_mix(hash, U64{7}), key), value)
-        .Shared(inner) -> type_shape_hash_into(type_hash_mix(hash, U64{8}), inner)
-        .Option(inner) -> type_shape_hash_into(type_hash_mix(hash, U64{9}), inner)
-        .Result(ok, err) -> type_shape_hash_into(type_shape_hash_into(type_hash_mix(hash, U64{10}), ok), err)
-        .Fn(params, ret, _, _, _, _) -> {
-            mixed: type_shape_hash_list(type_hash_mix(hash, U64{11}), params)
-            if ret == .Val(value) -> type_shape_hash_into(mixed, value) else -> mixed
-        }
-        .Named(name) -> type_hash_mix(type_hash_mix(hash, U64{12}), name.hash())
-        .Apply(name, args) -> type_shape_hash_list(type_hash_mix(type_hash_mix(hash, U64{13}), name.hash()), args)
-        .TraitObject(bounds) -> {
-            mixed := type_hash_mix(hash, U64{14})
-            loop bound in bounds -> mixed = type_hash_mix(mixed, bound.hash())
-            mixed
-        }
-        .Tuple(fields) -> {
-            mixed := type_hash_mix(hash, U64{15})
-            loop field in fields {
-                mixed = type_shape_hash_into(type_hash_mix(mixed, field.name.hash()), field.ty)
-            }
-            mixed
-        }
-        .FixedList(elem, _) -> type_shape_hash_into(type_hash_mix(hash, U64{16}), elem)
-        .IntN(signed, _) -> type_hash_mix(hash, if signed -> U64{17} else -> U64{18})
-        .InlineRange(base, _, _) -> type_shape_hash_into(type_hash_mix(hash, U64{19}), base)
-        .Float32 -> type_hash_mix(hash, U64{20})
-        .Tagged(_, inner) -> type_shape_hash_into(type_hash_mix(hash, U64{21}), inner)
-        .Union(members) -> type_shape_hash_list(type_hash_mix(hash, U64{22}), members)
-        .Case(name, payload) -> type_shape_hash_into(type_hash_mix(type_hash_mix(hash, U64{25}), name.hash()), payload)
-        .Quantity(base, _) -> type_shape_hash_into(type_hash_mix(hash, U64{23}), base)
-        .Measure(_) -> type_hash_mix(hash, U64{24})
-    }
-}
-
-// Each distinct Type once, named by its index (s3 TypeId): a side table whose
-// rows name types by Int. `hashes` holds each type's type_shape_hash; `slots`
-// is open addressing over them, 0 when empty, else the type's index plus one.
-TypeTable: struct {
-    types: [Type]{[Type]{}},
-    hashes: [Int]{[Int]{}},
-    slots: [Int]{[Int]{}},
-}
-
-TYPE_TABLE_INITIAL_SLOTS: 16
-
-// The index of `ty` in `table.types`, added on first sight: equal types
-// share one index, and only a new type is copied. When `indexed` is false and
-// the table has no index slots yet, appends directly without hashing.
-type_table_intern: fn(table: &TypeTable, ty: Type, indexed: Bool{true}) -> Int Never! {
-    use_index: indexed || table.slots.len() > 0
-    hash := 0
-    slot := 0
-    mask := 0
-    if use_index {
-        hash = type_shape_hash(ty)
-        if table.slots.len() == 0 -> type_table_grow(table, TYPE_TABLE_INITIAL_SLOTS)
-        mask = table.slots.len() - 1
-        slot = hash & mask
-        loop table.slots[slot] != 0 {
-            index: table.slots[slot] - 1
-            if table.hashes[index] == hash && table.types[index] == ty -> return index
-            slot = (slot + 1) & mask
-        }
-    }
-    index: table.types.len()
-    // copy: `ty` is the caller's read value; the table owns this one
-    table.types.push(ty.copy())
-    if use_index {
-        table.hashes.push(hash)
-        table.slots[slot] = index + 1
-        if (index + 1) * 2 > mask -> type_table_grow(table, (mask + 1) * 2)
-    }
-    index
-}
-
-// The index of `ty` in `table.types`; None when the table never interned it.
-type_table_find: fn(table: TypeTable, ty: Type) -> Int? Never! {
-    if table.slots.len() == 0 -> return None
-    hash: type_shape_hash(ty)
-    mask: table.slots.len() - 1
-    slot := hash & mask
-    loop table.slots[slot] != 0 {
-        index: table.slots[slot] - 1
-        if table.hashes[index] == hash && table.types[index] == ty -> return Val(index)
-        slot = (slot + 1) & mask
-    }
-    None
-}
-
-// Rebuilds the slots at a power-of-two capacity at least `min_capacity` and
-// strictly above `2 * table.types.len()` from the stored hashes.
-type_table_grow: fn(table: &TypeTable, min_capacity: Int) Never! {
-    capacity := if min_capacity < 2 -> 2 else -> min_capacity
-    loop table.types.len() * 2 >= capacity -> capacity *= 2
-    slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
-    loop _ in 0..<capacity -> slots.push(0)
-    if table.hashes.len() < table.types.len() {
-        table.hashes = [Int]{}
-        table.hashes.try_reserve(table.types.len()) ?? panic("reserve failed")
-        loop ty in table.types -> table.hashes.push(type_shape_hash(ty))
-    }
-    mask: capacity - 1
-    loop index in 0..<table.types.len() {
-        slot := table.hashes[index] & mask
-        loop slots[slot] != 0 -> slot = (slot + 1) & mask
-        slots[slot] = index + 1
-    }
-    table.slots = slots.move()
-}
+// The spelling of a shared cell of a type spelled `inner`.
+type_shared_text: fn(inner: String) -> String Never! { "Shared<{inner}>" }
 
 type_carrier_identity: fn(ty: Type) -> String Never! {
     if ty == {
@@ -1367,7 +1234,7 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
         .Char -> "Char"
         .List(inner) -> "[{type_carrier_identity(inner)}]"
         .Map(key, _, value) -> "[{type_carrier_identity(key)}:{type_carrier_identity(value)}]"
-        .Shared(inner) -> "Shared<{type_carrier_identity(inner)}>"
+        .Shared(inner) -> type_shared_text(type_carrier_identity(inner))
         .Option(inner) -> "?{type_carrier_identity_grouped(inner)}"
         .Result(ok, err) -> "{type_carrier_identity_grouped(ok)} ! {type_carrier_identity_grouped(err)}"
         .Fn(params, ret, _, _, _, _) -> {
@@ -1474,7 +1341,7 @@ type_name: fn(ty: Type) -> String Never! {
         }
         .List(inner) -> "[{type_name(inner)}]"
         .Map(key, _, value) -> "[{type_name(key)}:{type_name(value)}]"
-        .Shared(inner) -> "Shared<{type_name(inner)}>"
+        .Shared(inner) -> type_shared_text(type_name(inner))
         .Option(inner) -> "{type_marked_name(inner)}?"
         .Result(ok, err) -> result_surface_name(ok, err)
         // A callable type's surface spelling: `fn(T) -> U`, `fn(T) -[E]> U`,

@@ -43,6 +43,7 @@ use jet_foundation.[
     BodyCallArg,
     BodyNode,
     CompilerThreads,
+    InternerDelta,
     CompilerTraceSink,
     DeclID,
     DeclTable,
@@ -513,6 +514,7 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         held := program.registration_graph.move()
         program.registration_graph = None
         pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
+        sema_merge_module_type_deltas(pass_graph, modules)
         pass_graph.core_stand_in_wave = false
         sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, host_hooks, threads)
         size = wave.len()
@@ -569,6 +571,7 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
         item_count: sema_check_registered_module_item_count(environment, program, module_index)
         return_view_rows := [U32:Int]{}
         ready := bodies.bodies.move()
+        ready_deltas := bodies.body_deltas.move()
         functions_checked := 0
         // The functions already in the result made their conversion demands.
         loop position in 0..<before -> prelude_demands[position] = [SemaPreludeConversionDemand]{}
@@ -578,17 +581,21 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
             }
             started: if timed -> sema_core_bound_clock(trace_sink) else -> 0
             count: result.functions.len()
-            sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, functions_checked)
+            sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready, ready_deltas, host_hooks, comptime_functions, comptime_rows, result, prelude_demands, scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, functions_checked)
             if timed -> sema_core_bound_charge(trace_sink, started, count, result)
         }
     }
     method_ready := [SemaParallelBody]{}
-    if bodies.methods_prepared && !scopes_changed -> method_ready = bodies.methods.move()
+    method_deltas := [InternerDelta?]{}
+    if bodies.methods_prepared && !scopes_changed {
+        method_ready = bodies.methods.move()
+        method_deltas = bodies.method_deltas.move()
+    }
     scanned := 0
     loop job in sema_check_registered_method_jobs(environment, program, module_index, scanned, false) {
         started: if timed -> sema_core_bound_clock(trace_sink) else -> 0
         count: result.functions.len()
-        if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, result.diagnostics, result.functions, prelude_demands, result.call_facts, result.hardware_use, result.comptime_requests, result.name_references, result.comptime_body_sources, result.compute_facts, result.failure_facts, result.exact_int_reachable, result.copy_events, result.eval_answers, result.core_bodies, result.incomplete_reasons, keep_going, pending_obligations) {
+        if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready, method_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, result.diagnostics, result.functions, prelude_demands, result.type_delta, result.call_facts, result.hardware_use, result.comptime_requests, result.name_references, result.comptime_body_sources, result.compute_facts, result.failure_facts, result.exact_int_reachable, result.copy_events, result.eval_answers, result.core_bodies, result.incomplete_reasons, keep_going, pending_obligations) {
             result.complete = false
         }
         if timed -> sema_core_bound_charge(trace_sink, started, count, result)
@@ -596,7 +603,7 @@ sema_check_demand_module_lent: fn(environment: &SemaScopeEnvironment, program: S
     if core {
         module_identity: sema_check_registered_module_identity(environment, program, module_index)
         injected_from := result.functions.len()
-        if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, module_identity), environment, program, scopes, host_hooks, result.functions, prelude_demands, result.diagnostics, result.call_facts, result.comptime_requests, result.name_references, result.incomplete_reasons, keep_going) {
+        if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, module_identity), environment, program, scopes, host_hooks, result.functions, prelude_demands, result.type_delta, result.diagnostics, result.call_facts, result.comptime_requests, result.name_references, result.incomplete_reasons, keep_going) {
             result.complete = false
         }
         loop index in injected_from..<result.functions.len() {

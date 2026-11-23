@@ -282,7 +282,7 @@ ir_range_length_load: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.b[at] != 0 || f.a[at] < 0 || f.a[at] >= f.slot_type.len() -> return false
     row: f.slot_type[f.a[at]]
     if m.types[row].kind != .Aggregate -> return false
-    ir_untag(m.types[row].ty) == .List(_)
+    ir_untag(ir_module_row_ty(m, row)) == .List(_)
 }
 
 ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {

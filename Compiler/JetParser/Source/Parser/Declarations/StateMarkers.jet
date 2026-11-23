@@ -52,6 +52,11 @@ StateMarkerSite: struct {
 parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: &[Diagnostic]) Never! {
     sites := [StateMarkerSite]{}
     parser_state_marker_sites(program.items, sites)
+    parser_state_marker_migration_from_sites(program, sites.move(), source, diagnostics)
+}
+
+parser_state_marker_migration_from_sites: fn(program: Program, sites_input: &&[StateMarkerSite], source: [U8], diagnostics: &[Diagnostic]) Never! {
+    sites := sites_input.move()
     if sites.len() == 0 {
         return
     }

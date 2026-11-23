@@ -21,6 +21,7 @@ use {
         EffectRowEntry,
         ExprNode,
         Func,
+        Interner,
         Item,
         LValue,
         DerivationMethod,
@@ -2742,9 +2743,9 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
 }
 
 // `build_symbol_db` + `SymbolDB.finalize_index`: the semantic index of the
-// checked user modules. `effect_projection` is the application authority of the
-// same program.
-semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectProjection) -> SemIndex {
+// checked user modules. `interner` names the TypeIDs of their checked bodies;
+// `effect_projection` is the application authority of the same program.
+semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_projection: SemEffectProjection) -> SemIndex {
     db := semindex_db()
     // A reference's symbol names its module by ModuleID; each checked module
     // carries its own, so the id finds the module's path directly.
@@ -2783,7 +2784,7 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
             module_paths: module_paths.copy(),
             written_returns: semindex_written_returns(doc_module),
             local_types: semindex_local_types(doc_module),
-            local_stages: semindex_local_stages(doc_module, summaries),
+            local_stages: semindex_local_stages(doc_module, summaries, interner),
         }
         loop item in doc_module.items -> semindex_item(item, db, ctx, modules)
         semindex_apply_inferred_rows(db, doc_module, summaries)

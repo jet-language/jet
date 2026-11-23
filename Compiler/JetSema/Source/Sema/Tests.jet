@@ -2,6 +2,7 @@ use jet_foundation.[
     Diagnostic,
     FnBody,
     Func,
+    InternerDelta,
     Item,
     TFuncKind,
     TestDef,
@@ -87,6 +88,7 @@ SemaTestFunctionCheckResult: struct {
     incomplete_reasons: [String],
     // The answers of the debugger's probes inside the test (EvalProbe.jet).
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+    type_delta: [InternerDelta]{[InternerDelta]{}},
 }
 
 sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
@@ -155,6 +157,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
         comptime_body_sources: checked.comptime_body_sources.copy(),
         incomplete_reasons: checked.incomplete_reasons.move(),
         eval_answers: checked.eval_answers.move(),
+        type_delta: scopes.type_delta.move(),
     }
 }
 

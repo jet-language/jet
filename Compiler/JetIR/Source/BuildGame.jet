@@ -11,7 +11,7 @@ ir_game_on_frame: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, a
     if args.len() != 1 {
         return ir_fail_slot(b, span, "GameScene.on_frame with {args.len()} arguments")
     }
-    closure_ty: ir_ty(p, b, args[0])
+    closure_ty: ir_ty(m, p, b, args[0])
     write_metadata: ir_host_write_metadata(p, b, args[0])
     callback_ty := closure_ty
     if ir_untag(closure_ty) == .Fn(params, ret, effect_bound, param_contract, _, return_view_provenance) {

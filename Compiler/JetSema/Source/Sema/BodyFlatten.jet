@@ -58,7 +58,6 @@ use jet_foundation.[
     body_tree_sealed,
     type_id_well_known,
     type_none,
-    type_table_intern,
 ]
 
 // The flattener's rows go to `tree`. Into the output tree a child is named by
@@ -78,71 +77,58 @@ BodyFlat: struct {
     local_kinds: [NodeKind]{[NodeKind]{}},
     local_next: [Int]{[Int]{}},
     local_first: [Int:Int]{[Int:Int]{}},
-    // TypeID (`u32`) per row of `tree` (in `into_arena` mode) and of `arena`
-    // (when flattening out into `FnBody`), plus O(1) TypeID -> TypeTable index
-    // caches so repeated scalar and interned types skip `type_shape_hash` and
-    // structural `Type == Type`.
-    type_ids: [TypeID]{[TypeID]{}},
-    arena_type_ids: [TypeID]{[TypeID]{}},
-    well_known_slots: [Int]{[Int]{}},
-    type_id_keys: [U32]{[U32]{}},
-    type_id_vals: [Int]{[Int]{}},
-    type_id_slots: [U32:Int]{[U32:Int]{}},
-    keep_type_index: Bool{true},
-    allow_delta_type_ids: Bool{true},
+    // The written Type of each arena row the checker left uninterned (a row
+    // with a well-known TypeID holds Type.Int).
+    arena_syntax: [Type]{[Type]{}},
+    // When flattening out into a FnBody or BodyExpr, the output rows whose
+    // type is not yet interned, resolved in one pass through `(program,
+    // context)` at the end of `body_flat_function` /
+    // `sema_publish_expression` (body_flat_resolve_types): a row copied from
+    // the arena names its arena row in `out_arena` (its written type is the
+    // source arena's syntax row), any other row its written type in
+    // `out_syntax`.
+    out_syntax: [Type]{[Type]{}},
+    out_syntax_rows: [Int]{[Int]{}},
+    out_arena: [Int]{[Int]{}},
+    out_arena_rows: [Int]{[Int]{}},
 }
 
-// Interns `ty` (whose interned `TypeID` is `tid_in`, or `type_none()`) into
-// `flat.tree.types` without hashing or deep-comparing `Type` on cache hits.
-// For non-generic output functions (`!flat.keep_type_index`), distinct
-// `TypeID`s push directly into `flat.tree.types.types` with zero `hashes` or
-// `slots` allocations unless an uninterned `TypeID` triggers table indexing.
-body_flat_intern_type: fn(flat: &BodyFlat, ty: Type, tid_in: TypeID) -> Int Never! {
-    tid := if tid_in.id != 0 -> tid_in else -> type_id_well_known(ty)
-    if tid.id != 0 {
-        raw: Int{tid.id}
-        if raw <= 16 {
-            if flat.well_known_slots.len() == 0 {
-                flat.well_known_slots.try_reserve(17) ?? panic("reserve failed")
-                loop _ in 0..<17 -> flat.well_known_slots.push(-1)
-            }
-            existing: flat.well_known_slots[raw]
-            if existing >= 0 -> return existing
-            idx: type_table_intern(flat.tree.types, ty, indexed: flat.keep_type_index)
-            flat.well_known_slots[raw] = idx
-            return idx
-        }
-        if flat.allow_delta_type_ids {
-            if flat.type_id_slots.len() == 0 {
-                count: flat.type_id_keys.len()
-                loop i in 0..<count {
-                    if flat.type_id_keys[i] == tid.id -> return flat.type_id_vals[i]
-                }
-                idx: type_table_intern(flat.tree.types, ty, indexed: flat.keep_type_index)
-                if count < 16 {
-                    flat.type_id_keys.push(tid.id)
-                    flat.type_id_vals.push(idx)
-                } else {
-                    loop i in 0..<count -> flat.type_id_slots[flat.type_id_keys[i]] = flat.type_id_vals[i]
-                    flat.type_id_slots[tid.id] = idx
-                }
-                return idx
-            }
-            if flat.type_id_slots.get(tid.id) == .Val(existing) -> return existing
-            idx: type_table_intern(flat.tree.types, ty, indexed: flat.keep_type_index)
-            flat.type_id_slots[tid.id] = idx
-            return idx
-        }
+// Records `tid_in` (or well-known TypeID for `ty`), deferring non-well-known
+// written types to `flat.out_syntax` (output mode) or `flat.arena_syntax`
+// (arena mode) so every flattened tree row gets a real TypeID.
+body_flat_record_type: fn(flat: &BodyFlat, ty: Type, tid_in: TypeID) -> TypeID Never! {
+    tid: if tid_in.id != 0 -> TypeID{id: tid_in.id} else -> type_id_well_known(ty)
+    if flat.into_arena {
+        flat.arena_syntax.push(if tid.id != 0 -> Type.Int else -> ty)
+        return tid
     }
-    type_table_intern(flat.tree.types, ty)
+    if tid.id == 0 {
+        flat.out_syntax_rows.push(flat.tree.expr_types.len())
+        // copy: a TExpr-sourced type outlives the read node until it is interned at publish.
+        flat.out_syntax.push(ty.copy())
+    }
+    tid
+}
+
+// Resolves the deferred rows (BodyFlat.out_syntax, BodyFlat.out_arena, whose
+// written types are rows of `source`, the source arena's syntax column) into
+// canonical TypeIDs in `(program, context.type_delta)`.
+body_flat_resolve_types: fn(flat: &BodyFlat, source: [Type], program: SemaProgramTables, context: &SemaCheckContext) Never! {
+    loop i in 0..<flat.out_syntax_rows.len() {
+        row: flat.out_syntax_rows[i]
+        flat.tree.expr_types[row].ty = sema_intern_type_force(program, context, flat.out_syntax[i])
+    }
+    loop i in 0..<flat.out_arena_rows.len() {
+        row: flat.out_arena_rows[i]
+        flat.tree.expr_types[row].ty = sema_intern_type_force(program, context, source[flat.out_arena[i]])
+    }
 }
 
 // The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
-body_flat_function: fn(value: &&TFunc, arena: &&BodyTree, arena_type_ids: &&[TypeID]{[TypeID]{}}) -> FnBody Never! {
+body_flat_function: fn(value: &&TFunc, arena: &&BodyTree, arena_syntax: &&[Type], program: SemaProgramTables, context: &SemaCheckContext) -> FnBody Never! {
     owned_value := value.move()
     owned_arena := arena.move()
-    owned_type_ids := arena_type_ids.move()
-    is_generic: owned_value.generic_params.len() > 0
+    owned_syntax := arena_syntax.move()
     reserved_nodes: owned_arena.nodes.len()
     reserved_stmts: owned_arena.stmts.len()
     out_tree := body_tree_new()
@@ -153,22 +139,20 @@ body_flat_function: fn(value: &&TFunc, arena: &&BodyTree, arena_type_ids: &&[Typ
     if reserved_stmts > 0 {
         out_tree.stmts.try_reserve(reserved_stmts) ?? panic("reserve failed")
     }
-    flat := BodyFlat{tree: out_tree.move(), arena: owned_arena.move(), into_arena: false, arena_type_ids: owned_type_ids.move(), keep_type_index: is_generic, allow_delta_type_ids: false}
+    flat := BodyFlat{tree: out_tree.move(), arena: owned_arena.move(), into_arena: false}
     params: body_flat_list_parameter(owned_value.params, flat)
-    flat.allow_delta_type_ids = true
     body: body_flat_list_stmt(owned_value.body, flat)
-    flat.allow_delta_type_ids = false
     pre: body_flat_list_contract(owned_value.pre, flat)
+    body_flat_resolve_types(flat, owned_syntax, program, context)
     tree := flat.tree.move()
     // The body's own symbol keys (SYMBOL_LOCAL_BIT ids) leave with it, so a
     // reader after the check names its locals (symbol_key).
     tree.symbols = flat.arena.symbols.move()
     body_tree_finish(tree)
-    sema_body_fact_types(tree, params, owned_value.ret, owned_value.kind, owned_value.failure_carrier)
-    sema_loop_facts(tree, owned_value.is_scalar)
+    sema_loop_facts(tree, owned_value.is_scalar, program, context)
     nodes_fitted: tree.nodes.len() == reserved_nodes
     stmts_fitted: tree.stmts.len() == reserved_stmts
-    tree = body_tree_sealed(tree, is_generic, nodes_fitted, stmts_fitted)
+    tree = body_tree_sealed(tree, nodes_fitted, stmts_fitted)
     FnBody{
         name: owned_value.name.move(),
         module_name: owned_value.module_name.move(),
@@ -329,10 +313,9 @@ body_flat_expr: fn(value: TExpr, flat: &BodyFlat) -> Int Never! {
 body_flat_row: fn(value: TExpr, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
     id: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    ty: body_flat_intern_type(flat, value.ty, value.type_id)
+    ty: body_flat_record_type(flat, value.ty, value.type_id)
     flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     if flat.into_arena {
-        flat.type_ids.push(value.type_id)
         return flat.tree.node_base + flat.tree.nodes.len() - 1
     }
     id
@@ -372,22 +355,23 @@ body_flat_arena_node: fn(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never
         if row_index < 0 {
             panic("body_flat_arena_node: arena row {index} precedes this check's rows")
         }
-        same_type: if value.type_id.id != 0 && row_index < flat.type_ids.len() && flat.type_ids[row_index].id != 0 -> flat.type_ids[row_index].id == value.type_id.id else -> flat.tree.types.types[flat.tree.expr_types[row_index].ty] == value.ty
+        row_tid: flat.tree.expr_types[row_index].ty
+        val_tid: if value.type_id.id != 0 -> TypeID{id: value.type_id.id} else -> type_id_well_known(value.ty)
+        same_type: if row_tid.id != 0 && val_tid.id != 0 -> row_tid.id == val_tid.id else -> row_tid.id == 0 && val_tid.id == 0 && flat.arena_syntax[row_index] == value.ty
         if flat.tree.nodes[row_index].id == value.id && same_type {
             return index
         }
         row: flat.tree.nodes[row_index]
         flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
-        ty: body_flat_intern_type(flat, value.ty, value.type_id)
+        ty: body_flat_record_type(flat, value.ty, value.type_id)
         flat.tree.expr_types.push(TExprType{id: value.id, ty: ty})
-        flat.type_ids.push(value.type_id)
         return flat.tree.node_base + flat.tree.nodes.len() - 1
     }
     row: flat.arena.nodes[index]
     kind: body_copy_expr_kind(row.kind, flat)
     id: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    ty: body_flat_intern_type(flat, value.ty, value.type_id)
+    ty: body_flat_record_type(flat, value.ty, value.type_id)
     flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }
@@ -414,9 +398,12 @@ body_copy_row: fn(index: Int, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
     row: flat.arena.nodes[index]
     id: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
     flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: row.span})
-    arena_type: flat.arena.types.types[flat.arena.expr_types[index].ty]
-    tid: if index < flat.arena_type_ids.len() -> flat.arena_type_ids[index] else -> type_none()
-    ty: body_flat_intern_type(flat, arena_type, tid)
+    arena_tid: flat.arena.expr_types[index].ty
+    ty := if arena_tid.id != 0 -> TypeID{id: arena_tid.id} else -> type_none()
+    if ty.id == 0 {
+        flat.out_arena_rows.push(flat.tree.expr_types.len())
+        flat.out_arena.push(index)
+    }
     flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }

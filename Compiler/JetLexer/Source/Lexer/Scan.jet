@@ -556,6 +556,7 @@ RawScanStop: struct {
     stop: Int,
     bodies_local: Bool,
     has_paste: Bool{false},
+    unclosed_block_comment: Bool{false},
 }
 
 // Scans `source[from..<to]` appending its facts to `facts`. A token that
@@ -570,6 +571,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
     fn_in_range := false
     bodies_local := true
     has_paste := false
+    unclosed_block_comment := false
     i := from
     count: source.len()
     if i == 0 && count >= 3 && source[0] == (U8{35}) && source[1] == (U8{33}) && source[2] == (U8{47}) {
@@ -770,6 +772,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     }
                     value == BLOCK_OPEN_FIRST && next1 == BLOCK_OPEN_SECOND -> {
                         end: scan_block_comment_end(source, start)
+                        if end < 0 -> unclosed_block_comment = true
                         i = if end < 0 -> -end - 1 else -> end
                         emit(facts, TOKEN_BLOCK_COMMENT, start, i, false)
                     }
@@ -1129,7 +1132,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         }
     }
     if to >= count -> emit(facts, TOKEN_EOF, count, count, false)
-    RawScanStop{stop: i, bodies_local: bodies_local, has_paste: has_paste}
+    RawScanStop{stop: i, bodies_local: bodies_local, has_paste: has_paste, unclosed_block_comment: unclosed_block_comment}
 }
 
 terminator_events_scanned: fn(source: [U8], config_surface: Bool) -> [Int] {

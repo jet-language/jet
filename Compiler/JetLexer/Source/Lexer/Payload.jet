@@ -507,6 +507,22 @@ shifted_diagnostic: fn(diagnostic: &Diagnostic, offset: Int) Never! {
 // lands before its fact's token, and its diagnostics go to
 // `terminator_diagnostics`.
 lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables, terminator_diagnostics: &[Diagnostic]) -> LexedTokens {
+    bidi_diagnostics := [Diagnostic]{}
+    lexed := lex_payload_from_facts_range(source, facts, events, config_surface, allow_reserved_identifiers, depth, from, to, false, tables, terminator_diagnostics, bidi_diagnostics)
+    if bidi_diagnostics.len() > 0 {
+        diagnostics := lexed.diagnostics.move()
+        diagnostics.extend(bidi_diagnostics)
+        return LexedTokens{tokens: lexed.tokens.move(), diagnostics: diagnostics.move()}
+    }
+    lexed
+}
+
+// Like `lex_payload_from_facts`, with `skip_first` omitting a seeded leading
+// `}` fact in place (starting the gap cursor right after that `}`) and
+// recording E0088 bidirectional-control diagnostics in `bidi_diagnostics` so
+// chunked lexing keeps payload, bidi and terminator diagnostics in exact
+// one-thread order.
+lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, skip_first: Bool, tables: &TokenTables, terminator_diagnostics: &[Diagnostic], bidi_diagnostics: &[Diagnostic]) -> LexedTokens {
     fact_count: facts.len() /% 4
     event_count: events.len() /% 3
     tokens := [Token]{}
@@ -514,6 +530,10 @@ lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_sur
     diagnostics := [Diagnostic]{}
     cursor := from
     index := 0
+    if skip_first && fact_count > 0 {
+        cursor = facts[2]
+        index = 1
+    }
     event_index := 0
     source_len: source.len()
     loop index < fact_count {
@@ -575,7 +595,7 @@ lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_sur
     }
     // An interpolation's nested source is a copy of bytes the depth-0 range
     // already covers.
-    if depth == 0 -> lexer_report_bidi_controls(source, from, to, diagnostics)
+    if depth == 0 -> lexer_report_bidi_controls(source, from, to, bidi_diagnostics)
     LexedTokens{tokens: tokens.move(), diagnostics: diagnostics.move()}
 }
 

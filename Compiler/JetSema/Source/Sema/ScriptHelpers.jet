@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_type, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, diagnostic_with_label, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_empty, interner_merge_delta, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -124,7 +124,22 @@ sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
     requests := [SemaComptimeRequest]{}
     references := [SemaNameReferenceFact]{}
     checked := sema_function_check_registered(job, probe.module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
-    checked.value.move()
+    function := checked.value.move() ?? return None
+    sema_script_probe_merge_types(probe, function)
+    Val(function.move())
+}
+
+// The type rows the probe's last check interned (its scopes' type delta,
+// sema_function_check_pass) merged into the held graph's interner, with
+// `function`, that check's body, renumbered to name them there.
+sema_script_probe_merge_types: fn(probe: &SemaScriptProbe, function: &FnBody) Never! {
+    delta := probe.scopes.type_delta.pop() ?? return
+    if &probe.program.registration_graph == .Val(graph) {
+        if delta_has_rows(delta) {
+            remap: interner_merge_delta(graph.interner, delta.move())
+            body_tree_remap_types(function.tree, remap)
+        }
+    }
 }
 
 // A function no registration holds, checked by a probe
@@ -164,6 +179,7 @@ sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScr
     checked := sema_function_check_shared(func, key, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, diagnostics, call_facts, requests, references)
     sema_scope_rollback(probe.scopes, mark)
     function := checked.value.move() ?? return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
+    sema_script_probe_merge_types(probe, function)
     sema_script_probe_call_effects(probe.program, function, call_facts)
     SemaScriptProbeChecked{function: Val(function.move()), diagnostics: diagnostics, complete: checked.complete, failure: checked.failure.move()}
 }
@@ -364,12 +380,21 @@ sema_script_probe_append: fn(probe: &SemaScriptProbe, item: &&Item, functions: [
     references := [SemaNameReferenceFact]{}
     checked := sema_function_check_registered(job, module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, diagnostics, calls, requests, references)
     function := checked.value.move() ?? return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
+    sema_script_probe_merge_types(probe, function)
     if !checked.complete || requests.len() > 0 || sema_script_probe_failed(diagnostics) {
         return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     }
     sema_script_probe_call_effects(probe.program, function, calls)
     sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)
-    if (candidate && function.failure_carrier != .Infallible) || !sema_script_probe_pure(function, functions, by_key) {
+    pure := false
+    if probe.program.registration_graph == .Val(graph_ro) {
+        pure = sema_script_probe_pure(graph_ro.interner, function, functions, by_key)
+    } else if probe.program.interner == .Val(fallback) {
+        pure = sema_script_probe_pure(fallback, function, functions, by_key)
+    } else {
+        pure = sema_script_probe_pure(interner_empty(), function, functions, by_key)
+    }
+    if (candidate && function.failure_carrier != .Infallible) || !pure {
         return sema_script_probe_unappend(probe, module_index, mark_at, scope_mark, name)
     }
     decl := DeclID?{None}
@@ -408,17 +433,17 @@ sema_script_probe_failed: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 // (sema_eval_held_effect_refusals), it writes no module state, and it
 // takes no function as a value, a trait value's method included, which
 // only the effect pass's value edges would follow.
-sema_script_probe_pure: fn(function: FnBody, functions: [FnBody], by_key: SemaEvalHeldRows) -> Bool {
+sema_script_probe_pure: fn(interner: Interner, function: FnBody, functions: [FnBody], by_key: SemaEvalHeldRows) -> Bool {
     if function.effects.module_writes.len() > 0 || sema_eval_held_effect_refusals(function, functions, by_key, function.source_span).len() > 0 {
         return false
     }
     loop node in function.tree.nodes {
         if node.kind == .FnValue(_) -> return false
-        if node.kind == .ConstRef(_) && body_type(function.tree, node.id) == .Fn(_, _, _, _, _, _) {
+        if node.kind == .ConstRef(_) && type_kind(interner, body_type_id(function.tree, node.id)) == TypeKind.Fn {
             return false
         }
         if node.kind == .MethodCall(receiver, _, _, _) {
-            if body_type(function.tree, receiver) == .TraitObject(_) -> return false
+            if type_kind(interner, body_type_id(function.tree, receiver)) == TypeKind.TraitObject -> return false
         }
     }
     true

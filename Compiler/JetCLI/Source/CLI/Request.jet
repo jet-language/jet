@@ -485,7 +485,7 @@ jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExpor
         }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    library := ir_build_library(owned.functions.move(), owned.decls, owned.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), owned.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_rows, compiler_threads)
+    library := ir_build_library(owned.functions.move(), owned.decls, owned.symbols.move(), owned.interner.move(), declarations.type_defs.move(), declarations.impls.move(), owned.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_rows, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
     refused: issues.len() > 0

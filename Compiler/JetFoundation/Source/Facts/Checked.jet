@@ -433,11 +433,11 @@ TUnitRoundingMode: enum {
     NearestEven,
 }
 
-// One row of a function's expression-type column: the type of the nodes
-// whose `id` is `id`, as its index in the tree's `types` (type_table_intern).
+// One row of a function's expression-type column: the interned TypeID of
+// node `id` in the compilation's Interner.
 TExprType: struct {
     id: Int,
-    ty: Int,
+    ty: TypeID,
 }
 
 TIntegerWidth: struct {
@@ -963,10 +963,10 @@ TCostState: enum {
     OptimizerRemoved,
 }
 
-// The index in the tree's `types` that a body's sorted rows
-// (BodyTree.expr_types) file for node id `id`. The row as far from the end as
-// `id` is from the last id is tried first, as body_node does.
-checked_expr_type_id: fn(rows: [TExprType], id: Int) -> Int? Never! {
+// The interned TypeID that a body's sorted rows (BodyTree.expr_types) file
+// for node id `id`. The row as far from the end as `id` is from the last id
+// is tried first, as body_node does.
+checked_expr_type_id: fn(rows: [TExprType], id: Int) -> TypeID? Never! {
     count: rows.len()
     if count > 0 {
         last_idx: count - 1

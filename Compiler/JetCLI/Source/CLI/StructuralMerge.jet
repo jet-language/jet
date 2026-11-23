@@ -4,7 +4,7 @@ use {
     cli_process: core.process
     cli_struct_text: core.text
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, diagnostic_headline, sha256_hex]
+    jet_foundation.[Diagnostic, diagnostic_headline, interner_empty, sha256_hex]
     jet_parser.[jet_format_source]
     jet_semindex.[SemDefinitionFact, semindex_doc_text]
 }
@@ -112,7 +112,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 cursor = fact.span.end
             }
             hash: sha256_hex(source)
-            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_modules, jet_cli_sem_normalize(path))}}
+            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash), failures: jet_cli_failure_functions(result.doc_interner ?? interner_empty(), result.doc_modules, jet_cli_sem_normalize(path))}}
         }
     }
 }

@@ -206,7 +206,7 @@ ir_static_literal_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
 // (ir_wrapper_drop) off it, as for a static struct's own wrappers.
 ir_static_edge: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, row: Int) -> Int Never! {
     if m.types[row].kind != .Aggregate -> return -1
-    ty: ir_ty(p, b, expression)
+    ty: ir_ty(m, p, b, expression)
     if (ir_value_type(m, p, ty) ?? -1) != row || ir_host_value_held(p, ty) -> return -1
     node: ir_body_node(p, b, expression)
     if node.kind == .ConstRef(symbol) {
@@ -481,7 +481,7 @@ ir_static_enum: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot
             }
         }
     }
-    slot_args: ir_row_args(m, slot_type)
+    slot_args: ir_row_args(m, p, slot_type)
     members: ir_variant_members(m, p, row, slot_args, index) ?? return None
     if members.len() != types.len() -> return None
     size: ir_enum_variant_box_size(m, p, row, slot_args, index) ?? return None
@@ -582,8 +582,8 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             shape: ir_map_shape(m, p, row) ?? return false
             if entries.len() == 0 -> return true
             order: ir_static_map_order(m, p, shape, entries) ?? return false
-            key_ty: m.types[shape.key.ty].ty.copy()
-            value_ty: m.types[shape.value.ty].ty.copy()
+            key_ty: ir_row_ty(m, p, shape.key.ty)
+            value_ty: ir_row_ty(m, p, shape.value.ty)
             key_row: ir_value_type(m, p, key_ty) ?? return false
             value_row: ir_value_type(m, p, value_ty) ?? return false
             data: ir_static_new(s, order.len() * shape.stride)
@@ -730,7 +730,7 @@ ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: 
 // index whatever its impls (ir_order_into).
 ir_static_own_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.types[row].kind == .Word -> return false
-    ty: ir_untag(m.types[row].ty)
+    ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Tuple(declared) {
         tuple_members: ir_tuple_members(m, p, declared) ?? return false
         return ir_static_own_members(m, p, tuple_members)
@@ -738,7 +738,7 @@ ir_static_own_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
     if p.render_impls.rows.len() > 0 {
-        type_key: ir_render_type_key(p.type_rows, p.types, m.types[row].ty)
+        type_key: ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))
         if name_rows_value(p.render_impls, "KeyBy|{type_key}") != None -> return true
         if name_rows_value(p.render_impls, "Comparable|{type_key}") == .Val(index) && !p.functions[index].synthetic {
             return true
@@ -792,7 +792,7 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
             true
         }
         .Tuple(fields) -> {
-            declared: if ir_untag(m.types[row].ty) == .Tuple(declared_fields) -> declared_fields else -> {
+            declared: if ir_untag(ir_row_ty(m, p, row)) == .Tuple(declared_fields) -> declared_fields else -> {
                 return false
             }
             members: ir_tuple_members(m, p, declared) ?? return false
@@ -804,7 +804,7 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
             true
         }
         .Struct(_, fields) -> {
-            ty: ir_untag(m.types[row].ty)
+            ty: ir_untag(ir_row_ty(m, p, row))
             nominal: ir_nominal_name(ty) ?? return false
             definition: ir_type_def(p, nominal) ?? return false
             members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
@@ -812,7 +812,7 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
             // (ir_compare_impl): a derived impl compares the declared fields
             // in order; a written one runs code this does not. With none, the
             // order helper compares the members in turn (ir_order_nominal).
-            selected: if p.render_impls.rows.len() == 0 -> None else -> name_rows_value(p.render_impls, "Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}")
+            selected: if p.render_impls.rows.len() == 0 -> None else -> name_rows_value(p.render_impls, "Comparable|{ir_render_type_key(p.type_rows, p.types, ir_row_ty(m, p, row))}")
             if selected == .Val(index) {
                 if !p.functions[index].synthetic -> return false
                 if p.types[definition].kind == .Struct(declared, _) {
@@ -854,14 +854,14 @@ ir_static_member_atoms: fn(m: &IRModule, p: IRProgram, members: [IRMember], name
 // index (ir_static_enum), which ir_order_into compares as a word.
 ir_static_variant_word: fn(m: &IRModule, p: IRProgram, row: Int, variant: String) -> Int? Never! {
     if m.types[row].kind != .Word -> return None
-    nominal: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
+    nominal: ir_nominal_name(ir_untag(ir_row_ty(m, p, row))) ?? return None
     definition: ir_type_def(p, nominal) ?? ir_enum_def(m, p, row) ?? return None
     ir_variant_index(p, definition, variant)
 }
 
 // The members of the tuple or struct type row `row` (ir_member_of).
 ir_static_members: fn(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
-    ty: ir_untag(m.types[row].ty)
+    ty: ir_untag(ir_row_ty(m, p, row))
     if ty == .Tuple(fields) -> return ir_tuple_members(m, p, fields)
     nominal: ir_nominal_name(ty) ?? return None
     definition: ir_type_def(p, nominal) ?? return None

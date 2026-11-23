@@ -24,6 +24,7 @@ use {
         MARKER_CLI,
         MARKER_DEPRECATED,
         MARKER_DOC,
+        MARKER_OPEN,
         MARKER_RENAME,
         codable_form,
         codable_marker,
@@ -605,6 +606,9 @@ SemaRegistrationNominal: struct {
     // foreign handles or user declarations.
     compiler_owned: Bool,
     generated_provenance: String?,
+    // Public enum marked `#Open`: external matches and nested patterns require
+    // a catch-all (`else` or `_`).
+    is_open: Bool{false},
 }
 
 // A module constant's row. `typed` when the binding writes its type: the
@@ -2743,7 +2747,7 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
                     methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics, item_index < 0, item_index, method_index, block_index))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: Item.Enum{value: sema_registration_enum_header(definition)}}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: Item.Enum{value: sema_registration_enum_header(definition)}}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None, is_open: sema_registration_has_open_marker(definition.type_markers)})
         }
         .Distinct(definition) -> {
             ty: Type.Named{name: definition.name}
@@ -3884,6 +3888,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     // on the parsed items, inline module bodies included, before inline
     // modules are lowered.
     sema_registration_deprecated_visibility(module_row.program.items, diagnostics)
+    // E1137: `#Open` is valid only on public enums (inline module bodies
+    // included), checked before inline modules are lowered.
+    sema_registration_open_enum_markers(module_row.program.items, true, diagnostics)
     loop facts in owned.foreign_handles {
         if sema_registration_module_has_name(module_row, facts.jet_name) {
             diagnostics.push(sema_defined_twice(facts.jet_name, "module declarations share one namespace", facts.source_span))
@@ -5089,6 +5096,51 @@ sema_registration_deprecated_markers: fn(markers: [Marker], is_public: Bool, dia
     loop marker in markers {
         if marker.name == MARKER_DEPRECATED {
             diagnostics.push(sema_error("E0932", marker.span, "`#Deprecated` requires a public item", "the lifecycle marker retires stable public declarations; an item inside a `priv module` is not part of the public surface", "move the item out of its `priv module`, or remove `#Deprecated`"))
+        }
+    }
+}
+
+sema_registration_has_open_marker: fn(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name == MARKER_OPEN && !marker.negated -> return true
+    }
+    false
+}
+
+// E1137: `#Open` is valid only on public (non-`priv`) enums. Structs,
+// distinct types, and private enums (including enums inside a `priv` module)
+// are refused before inline module lowering.
+sema_registration_open_enum_markers: fn(items: [Item], in_public_module: Bool, diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                sema_registration_reject_open_marker(definition.type_markers, "struct", definition.name, false, diagnostics)
+            }
+            .Distinct(definition) -> {
+                sema_registration_reject_open_marker(definition.type_markers, "distinct type", definition.name, false, diagnostics)
+            }
+            .Enum(definition) -> {
+                is_public: in_public_module && definition.is_pub && !definition.is_package_pub
+                if !is_public {
+                    sema_registration_reject_open_marker(definition.type_markers, "private enum", definition.name, true, diagnostics)
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    sema_registration_open_enum_markers(body, in_public_module && code_module.is_pub && !code_module.is_package_pub, diagnostics)
+                }
+            }
+            .Func(_) | .Impl(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+sema_registration_reject_open_marker: fn(markers: [Marker], kind: String, name: String, is_private_enum: Bool, diagnostics: &[Diagnostic]) {
+    loop marker in markers {
+        if marker.name == MARKER_OPEN {
+            why: if is_private_enum -> "`#Open` governs cross-package matches on public enums; a private enum is never matched outside its declaring package" else -> "`#Open` marks a public enum whose variants may grow across releases without breaking external matches"
+            fix: if is_private_enum -> "remove `#Open`, or make `{name}` public by removing `priv`" else -> "remove `#Open` from `{name}`"
+            diagnostics.push(sema_error("E1137", marker.span, "`#Open` is on {kind} `{name}`, not a public enum", why, fix))
         }
     }
 }

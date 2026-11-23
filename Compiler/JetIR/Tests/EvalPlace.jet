@@ -4,7 +4,7 @@
 // reference, call a function value or run an `#FFI(asm)` template, in its
 // own code or in a function it calls.
 use {
-    jet_foundation.[Type]
+    jet_foundation.[TYPE_STRING]
     jet_ir.[IRAsmLeaf, IRClass, IRFunction, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_STOP_TRAP_KEY, ir_args, ir_emit, ir_eval_place_refusal, ir_function_new, ir_intern_name, ir_intern_type, ir_module_new, ir_slot]
 }
 
@@ -118,7 +118,7 @@ place_test_module: fn(body: &&IRFunction, callee: &&IRFunction) -> IRModule {
 
 // A String type that drops through the runtime, as a program's does.
 place_test_string: fn(m: &IRModule) -> Int {
-    ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"})
+    ir_intern_type(m, "String", IRType{ty: TYPE_STRING, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"})
 }
 
 #Test("a condition copies and drops the text it made in the program; a parameter's text keeps it out") {

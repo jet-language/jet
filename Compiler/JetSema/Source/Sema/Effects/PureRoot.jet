@@ -12,6 +12,7 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     diagnostic_with_rights,
+    interner_empty,
     name_rows,
     name_rows_set,
     symbol_key,
@@ -170,7 +171,7 @@ sema_pure_root_find: fn(entry_key: String, modules: [SemaGraphModuleResult], dec
     position: positions.get(entry_key) ?? return None
     root: modules[position.module_index].functions[position.function_index]
     // One call index serves every module; each lookup names its module.
-    calls: SemaEffectCallIndex{modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key}
+    calls: SemaEffectCallIndex{modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key, interner: interner_empty()}
     visited := [String:Bool]{}
     path := [String]{}
     sema_pure_root_function(root.name, modules, decls, symbols, positions, calls, root, shallow, visited, path)

@@ -421,6 +421,16 @@ Specified: struct {
     }
 }
 
+// Marks a public enum that may add new variants across releases without
+// breaking callers: external matches and nested patterns must include a
+// catch-all (`else` or `_`), while matches inside the declaring package stay
+// exhaustive.
+Open: struct {
+    impl Marker {
+        sites: [.Type],
+    }
+}
+
 // After a match arm's body, the next arm's body runs too, without the next
 // arm's bindings: `1 -> { a() } #Through`. The last arm has no next arm
 // (E1126), the next body may not read its own arm's bindings (E1127), and an

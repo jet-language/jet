@@ -12,6 +12,7 @@ use {
         failure_contract_shown_name,
         failure_contract_shown_type,
         failure_contract_source,
+        interner_empty,
         name_facts_leaf,
         type_name,
     ]
@@ -51,7 +52,7 @@ use {
 // consumer (semindex, doc, impact, find, help, expand, blame, review, codemod)
 // reads this one index.
 jet_cli_checked_semindex: fn(result: JetDriverCompileResult) -> SemIndex {
-    semindex_build(result.doc_modules, jet_cli_effect_projection(jet_cli_application_authority(result, None)))
+    semindex_build(result.doc_modules, result.doc_interner ?? interner_empty(), jet_cli_effect_projection(jet_cli_application_authority(result, None)))
 }
 
 jet_cli_sem_json_span: fn(span: Span) -> String Never! {

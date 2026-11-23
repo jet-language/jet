@@ -17178,6 +17178,32 @@ RewriteIncompatible: struct {
     }
 }
 
+OpenNotPublicEnum: struct {
+    name: String,
+    kind: String,
+
+    impl Diagnostic {
+        code: "E1137",
+        safety_class: .Soundness,
+        safety_reason: "`#Open` governs cross-package matches on public enums; putting it on a non-enum or private enum would make a promise no caller can observe.",
+        expert_path: "none: only a public enum may carry `#Open`",
+        meaning: "`#Open` on a declaration that is not a public enum",
+        detail: true,
+
+        what: fn(self) -> String {
+            "`#Open` is on {self.kind} `{self.name}`, not a public enum."
+        }
+
+        why: fn(self) -> String {
+            "`#Open` marks a public enum whose variants may grow across releases without breaking external matches."
+        }
+
+        fix: fn(self) -> String {
+            "Remove `#Open` from `{self.name}`, or use it on a public `enum`."
+        }
+    }
+}
+
 UndischargedTask: struct {
     impl Diagnostic {
         code: "L1101",

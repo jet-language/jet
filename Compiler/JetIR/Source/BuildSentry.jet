@@ -209,7 +209,7 @@ ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String,
     if ir_failed(b) || second < 0 -> return -1
     counted: ir_expr(m, p, b, args[2])
     if ir_failed(b) || counted < 0 -> return -1
-    count: ir_native_index(m, b, counted, span)
+    count: ir_native_index(m, p, b, counted, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, counted)
     stride: ir_list_stride(m, row)
@@ -254,7 +254,7 @@ ir_core_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], 
     if ir_failed(b) || pointer < 0 -> return -1
     counted: ir_expr(m, p, b, args[2])
     if ir_failed(b) || counted < 0 -> return -1
-    count: ir_native_index(m, b, counted, span)
+    count: ir_native_index(m, p, b, counted, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, counted)
     stride: ir_list_stride(m, row)
@@ -293,7 +293,7 @@ ir_core_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], 
         ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
         ir_end(b.f, b.line)
         grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-        data: ir_list_grow_buffer(m, b, list, grown_bytes, true, row)
+        data: ir_list_grow_buffer(m, p, b, list, grown_bytes, true, row)
         made: ir_bool_op(m, b, IROp.Ne, data, zero)
         ir_open_if(b.f, made, b.line)
         old_data: ir_load_word(m, b, list, 16)
@@ -341,12 +341,12 @@ ir_core_list_copy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], ty
     if ir_failed(b) || list < 0 -> return -1
     first: ir_expr(m, p, b, args[2])
     if ir_failed(b) || first < 0 -> return -1
-    start: ir_native_index(m, b, first, span)
+    start: ir_native_index(m, p, b, first, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, first)
     counted: ir_expr(m, p, b, args[3])
     if ir_failed(b) || counted < 0 -> return -1
-    count: ir_native_index(m, b, counted, span)
+    count: ir_native_index(m, p, b, counted, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, counted)
     finish: ir_word_op(m, b, IROp.Add, start, count)
@@ -426,10 +426,10 @@ ir_core_alloc_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], sp
     if ir_failed(b) || sized < 0 -> return -1
     aligned: ir_expr(m, p, b, args[1])
     if ir_failed(b) || aligned < 0 -> return -1
-    size: ir_native_index(m, b, sized, span)
+    size: ir_native_index(m, p, b, sized, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, sized)
-    align: ir_native_index(m, b, aligned, span)
+    align: ir_native_index(m, p, b, aligned, span)
     if ir_failed(b) -> return -1
     ir_release(m, b, aligned)
     word_row: ir_word_row(m)
@@ -449,7 +449,7 @@ ir_core_alloc_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], sp
     eight: ir_word_const(m, b, 8)
     near: ir_bool_op(m, b, IROp.Le, align, eight)
     ir_open_if(b.f, near, b.line)
-    raw_row: ir_alloc_row(m, word_row, Type.Apply{name: "Ptr", args: [Type]{Type.IntN{signed: false, bits: 8}}})
+    raw_row: ir_alloc_row(m, p, word_row, Type.Apply{name: "Ptr", args: [Type]{Type.IntN{signed: false, bits: 8}}})
     block: ir_runtime(m, b, "jet_rt_alloc_try", [Int]{size, eight}, raw_row)
     held: ir_bool_op(m, b, IROp.Ne, block, zero)
     ir_open_if(b.f, held, b.line)

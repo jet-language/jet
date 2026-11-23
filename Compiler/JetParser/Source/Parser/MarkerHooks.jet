@@ -32,6 +32,21 @@ ParserMarkerBrace: struct {
 // a struct body opens after `struct Name` and a code module body after
 // `module name`, with the moved `:` as trivia between.
 parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
+    scopes := parser_marker_scopes_chunk(tokens, tables)
+    if scopes.len() == 0 -> return scopes
+    // A file-scope declaration (and one whose module never closed) resolves
+    // to the end of the file.
+    file_end: if tokens.len() > 0 -> tokens[tokens.len() - 1].span.end + 1 else -> 1
+    loop at in 0..<scopes.len() {
+        if scopes[at].end < 0 -> scopes[at].end = file_end
+    }
+    scopes
+}
+
+// Like `parser_marker_scopes` over one depth-0 chunk: module-scoped markers
+// carry their exact `start..<end` byte range, while file-scope markers leave
+// `end = -1` so the join fills in the whole file's end.
+parser_marker_scopes_chunk: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
     if name_find(tables.names, "Marker") == None -> return [ParserMarkerScope]{}
     scopes := [ParserMarkerScope]{}
     braces := [ParserMarkerBrace]{}
@@ -68,12 +83,6 @@ parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerS
         }
         before = last
         last = index
-    }
-    // A file-scope declaration (and one whose module never closed) resolves
-    // to the end of the file.
-    file_end: if tokens.len() > 0 -> tokens[tokens.len() - 1].span.end + 1 else -> 1
-    loop at in 0..<scopes.len() {
-        if scopes[at].end < 0 -> scopes[at].end = file_end
     }
     scopes
 }

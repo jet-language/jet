@@ -11,7 +11,7 @@
 // - `(h & IR_LINK_BRIEF_TAG) == 0 && (h & IR_LINK_SHARED_TAG) != 0`: kept
 //   shared block from `jet_rt_link_alloc_shared`; block is `h ^ 1`, payload
 //   lives at `(h ^ 1) + 24`.
-use jet_foundation.[BodyCallArg, FnBody, Span, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, foundation_link_inner, symbol_table, type_carrier_identity]
+use jet_foundation.[interner_empty, BodyCallArg, FnBody, Span, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, foundation_link_inner, symbol_table, type_carrier_identity]
 
 IR_LINK_HEADER_BYTES: 24
 
@@ -52,7 +52,8 @@ ir_link_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == ir
 // so recursive structs (`next: @Node?`) break cycles cleanly.
 ir_link_row_for: fn(m: &IRModule, p: IRProgram, ty: Type, inner: Type, laying: [String]) -> Int? Never! {
     if !ir_pointee_lays_out(m, p, inner, laying) -> return None
-    interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+    tid: ir_intern_tid(m, p, ty)
+    interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, tid, 8, 8, IRClass.Pointer, false, 64, ""))
     if laying.len() == 0 && m.list_elements.get(interned) == None {
         m.list_elements[interned] = ir_value_type_in(m, p, inner, laying) ?? -1
     }
@@ -90,7 +91,7 @@ ir_link_retain: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Neve
 // Drop glue body for a `@T` row: releases a kept link; when the last owner
 // leaves, drops the inline `T` payload at `block + 24` and frees the block.
 ir_link_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, at: Int) Never! {
-    inner_ty: ir_link_inner(m.types[row].ty) ?? return
+    inner_ty: ir_link_inner(ir_row_ty(m, p, row)) ?? return
     inner_row: ir_value_type(m, p, inner_ty) ?? return
     word_row: ir_word_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -264,13 +265,13 @@ ir_link_same: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg],
 ir_link_brief_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
     node: ir_body_node(p, b, place)
     if node.kind == .Deref(pointer) {
-        if ir_link_inner(ir_ty(p, b, pointer)) != None {
+        if ir_link_inner(ir_ty(m, p, b, pointer)) != None {
             link: ir_expr(m, p, b, pointer)
             if ir_failed(b) || link < 0 -> return -1
             ir_link_read_enter(m, b, link)
             data: ir_link_data_ptr(m, b, link)
             ir_link_read_leave(m, b, link)
-            place_ty: ir_ty(p, b, place)
+            place_ty: ir_ty(m, p, b, place)
             row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
             pointer_row: ir_pointer_row(m)
             address: if m.types[row].kind == .Aggregate -> ir_temp(m, b, row) else -> ir_temp(m, b, pointer_row)
@@ -279,7 +280,7 @@ ir_link_brief_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int,
         }
     }
     if node.kind == .Field(receiver, field) {
-        if ir_body_node(p, b, receiver).kind == .Deref(pointer) && ir_link_inner(ir_ty(p, b, pointer)) != None {
+        if ir_body_node(p, b, receiver).kind == .Deref(pointer) && ir_link_inner(ir_ty(m, p, b, pointer)) != None {
             base: ir_link_brief_address(m, p, b, receiver, span)
             if ir_failed(b) || base < 0 -> return -1
             member: ir_member_of(m, p, b, base, field.name) ?? return ir_fail_slot(b, span, "brief link to field {field.name}")
@@ -379,7 +380,7 @@ ir_link_write_deref_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: 
 
 #Test("live link type row layout and share/drop metadata") {
     m := ir_module_new()
-    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.Int}}
     row: ir_value_type(m, p, link_ty) ?? -1
     assert(row >= 0)
@@ -394,7 +395,7 @@ ir_link_write_deref_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: 
 
 #Test("live link drop glue builds cleanly and passes IR lint") {
     m := ir_module_new()
-    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.String}}
     row: ir_value_type(m, p, link_ty) ?? -1
     assert(row >= 0)
@@ -405,7 +406,7 @@ ir_link_write_deref_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: 
 
 #Test("live link retain, data pointer, and dynamic exclusivity ops pass IR lint") {
     m := ir_module_new()
-    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     link_ty: Type.Apply{name: "@", args: [Type]{Type.Int}}
     row: ir_value_type(m, p, link_ty) ?? -1
     assert(row >= 0)

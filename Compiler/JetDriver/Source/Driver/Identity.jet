@@ -21,6 +21,7 @@ use {
         GateSet,
         PolicyDeclaration,
         ImportDecl,
+        Interner,
         Item,
         JetTargetLayout,
         AllocatorPolicy,
@@ -950,6 +951,7 @@ JetDriverLoadResult: struct {
     names: NameLedger?{None},
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}},
+    doc_interner: Interner?{None},
     build_program: TComptimeValue?{None},
     // Whether a loaded unit outside Core spells the word `program` or
     // `compiler` outside its comments, strings included (Loader.jet). A body
@@ -1019,6 +1021,7 @@ JetDriverCompileResult: struct {
     authority_policy: JetDriverAuthorityPolicy?{None},
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}},
+    doc_interner: Interner?{None},
     // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal, so
     // `jet check` prints the goal cards from a Doc projection.
     typed_goals: Bool{false},

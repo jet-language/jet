@@ -1906,7 +1906,7 @@ ir_x64_alloc_type: fn(m: IRModule, f: IRFunction, dst: Int, symbol: String) -> I
     if !m.alloc_types || dst < 0 || !symbol.starts_with("jet_rt_alloc") -> return -1
     row: f.slot_type[dst]
     if ir_box_row(m, row) -> return row
-    if m.types[row].ty == .Apply(name, _) {
+    if ir_module_row_ty(m, row) == .Apply(name, _) {
         if name == IR_ALLOC_TYPE -> return row
     }
     -1
@@ -5651,7 +5651,7 @@ ir_x64_log_text: fn(m: IRModule, f: IRFunction, code: X64Code) -> [String] Never
         lines.push(sites.join(" "))
     }
     loop slot in 0..<f.slot_type.len() {
-        lines.push("type s{slot} {ir_type_name(m.types[f.slot_type[slot]].ty)}")
+        lines.push("type s{slot} {ir_type_name(ir_module_row_ty(m, f.slot_type[slot]))}")
     }
     loop row in code.log -> lines.push(x64_emit_row_text(row))
     lines.push("end")
@@ -8172,7 +8172,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         m := ir_module_new()
         m.alloc_types = checked
         word: ir_word_row(m)
-        typed: ir_list_alloc_row(m, word)
+        typed: ir_list_alloc_row(m, ir_program_standalone(), word)
         f := ir_function_new("grab", "test:alloc.jet.grab", "", "alloc.jet", 1)
         n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
         f.result = word
@@ -8294,7 +8294,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("An aggregate parameter is its entry value, the address its caller passed") {
     m := ir_module_new()
     word: ir_word_row(m)
-    pair: ir_intern_type(m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
+    pair_tid: ir_module_intern_tid(m, Type.Named{name: "Pair"})
+    pair: ir_intern_type(m, "Pair", IRType{ty: pair_tid, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
     f := ir_function_new("second", "test:entry.jet.second", "", "entry.jet", 1)
     _ := ir_slot(f, pair, IRSlotKind.Param, ir_intern_name(m, "pair"), 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)

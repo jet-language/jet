@@ -34,6 +34,7 @@ use {
         ir_intern_type,
         ir_lint_module,
         ir_lint_text,
+        ir_module_intern_tid,
         ir_module_new,
         ir_open,
         ir_open_if,
@@ -45,7 +46,7 @@ use {
         ir_x64_tables,
     ]
     jet_backend.[LINK_BASE, x64_link_executable]
-    jet_foundation.[CompilerThreads, Type, compiler_threads_single, name_rows_set]
+    jet_foundation.[CompilerThreads, TYPE_BOOL, TYPE_FLOAT, TYPE_I32, TYPE_INT, TYPE_POINTER, TYPE_STRING, TYPE_U64, TYPE_U8, Type, compiler_threads_single, name_rows_set]
     files: core.files
     process: core.process
     time: core.time
@@ -69,17 +70,18 @@ XPProgram: struct {
 }
 
 xp_types: fn(m: &IRModule) -> XPTypes {
+    point_tid: ir_module_intern_tid(m, Type.Named{name: "Point"})
     XPTypes{
-        int: ir_intern_type(m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
-        bool: ir_intern_type(m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
-        string: ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
-        float: ir_intern_type(m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
-        i32: ir_intern_type(m, "I32", IRType{ty: Type.IntN{signed: true, bits: 32}, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: true, bits: 32, drop: ""}),
-        u8: ir_intern_type(m, "U8", IRType{ty: Type.IntN{signed: false, bits: 8}, kind: IRTypeKind.Word, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
-        u64: ir_intern_type(m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
-        pointer: ir_intern_type(m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        int: ir_intern_type(m, "Int", IRType{ty: TYPE_INT, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
+        bool: ir_intern_type(m, "Bool", IRType{ty: TYPE_BOOL, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        string: ir_intern_type(m, "String", IRType{ty: TYPE_STRING, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
+        float: ir_intern_type(m, "Float", IRType{ty: TYPE_FLOAT, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
+        i32: ir_intern_type(m, "I32", IRType{ty: TYPE_I32, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: true, bits: 32, drop: ""}),
+        u8: ir_intern_type(m, "U8", IRType{ty: TYPE_U8, kind: IRTypeKind.Word, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        u64: ir_intern_type(m, "U64", IRType{ty: TYPE_U64, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        pointer: ir_intern_type(m, "Pointer", IRType{ty: TYPE_POINTER, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // Point: struct { x: Int, y: Int }: a slot holds a pointer to its 16 bytes.
-        point: ir_intern_type(m, "Point", IRType{ty: Type.Named{name: "Point"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        point: ir_intern_type(m, "Point", IRType{ty: point_tid, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
     }
 }
 

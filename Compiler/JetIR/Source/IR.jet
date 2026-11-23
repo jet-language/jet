@@ -100,7 +100,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 use {
-    jet_foundation.[NameRows, NameTable, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, name_table_sized, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+    jet_foundation.[Interner, InternerDelta, NameRows, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, name_table_sized, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
     jet_backend.[X64DebugSource]
 }
 
@@ -250,7 +250,7 @@ IRClass: enum {
 // marks one whose absent word is null, not that niche (an optional raw
 // pointer).
 IRType: struct {
-    ty: Type,
+    ty: TypeID,
     kind: IRTypeKind,
     size: Int,
     align: Int,
@@ -563,14 +563,14 @@ IRDataReloc: struct {
 // `function_rows` maps a function key to its id (row of `functions`);
 // `entry` is the program entry (`run: fn`), -1 for a library. `layouts`,
 // `layout_low`, `struct_members`, `variant_members`, `enum_sizes`,
-// `handle_rows`, `value_types` and `value_rows` are the builder's layout memo
+// `handle_rows` and `value_rows` are the builder's layout memo
 // (BuildTypes.jet ir_struct_row, ir_struct_members, ir_variant_members,
 // ir_enum_box_size, ir_handle_row, ir_value_type_in): a
 // struct instance's row by identity (-1 when it does not lay out) and its
 // resolved members (an index into `member_lists`), an enum instance variant's
 // members (likewise) by "<declaration row>|<identity>#<index>" and its box
 // size by "<declaration row>|<identity>",
-// each type interned in `value_types`, by its index, with no struct being
+// and each type's row by its TypeID's id, with no struct being
 // laid out (-1: none; -2: being laid out). `close_free` holds
 // the type rows BuildOwn.jet ir_close_parts_reach proved free of a Close
 // method at any depth. `scalar_rows` holds the row of each scalar checked
@@ -658,7 +658,16 @@ IRModule: struct {
     member_lists: [[IRMember]],
     enum_sizes: NameRows,
     handle_rows: NameRows,
-    value_types: TypeTable{TypeTable{}},
+    // The module's Interner, once it has one: the program's, moved in when a
+    // build finishes (ir_module_finalize_interner, ir_merge_with), or a
+    // standalone module's own (ir_module_intern_tid). A shard building
+    // against IRProgram.interner holds none. A one-row list, so a view of the
+    // module (ir_opt_view, ir_lint_module) lends it and gives it back whole.
+    interner: [Interner]{[Interner]{}},
+    // At most one worker-local InternerDelta forked lazily from IRProgram.interner
+    // for IR-synthesized types, deterministically merged in ir_merge_with.
+    type_delta: [InternerDelta]{[InternerDelta]{}},
+    // Dense layout-row memo indexed directly by TypeID.id (-2 unknown, -1 none, >=0 row).
     value_rows: [Int]{[Int]{}},
     close_free: [Int:Bool],
     scalar_rows: [Int],
@@ -716,6 +725,9 @@ IRModule: struct {
     // Per IRModule.types row: 0 unknown, 1 cloneable, -1 not cloneable (BuildLazy.jet).
     lazy_can_clone: [Int]{[Int]{}},
     list_elements: [Int:Int]{[Int:Int]{}},
+    // An inline `[T#N]` row's literal length N (BuildTypes.jet
+    // ir_value_type_in, ir_fixed_count); merged rows in the merged module.
+    fixed_counts: [Int:Int]{[Int:Int]{}},
     debug_variants: [Int:Int]{[Int:Int]{}},
     variant_lists: [IRDebugVariants]{[IRDebugVariants]{}},
     // The data rows that are Core cells of the runtime image the program
@@ -727,6 +739,76 @@ IRModule: struct {
 
 ir_module_new: fn() -> IRModule Never! {
     IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}}
+}
+
+// Whether `table` holds the compilation's rows (interner()), rather than
+// only interner_empty()'s row 0.
+ir_interner_live: fn(table: Interner) -> Bool Never! {
+    table.types.kind.len() > 1
+}
+
+// Interns `ty` directly into a standalone IRModule's interner (used by IR
+// unit tests and post-merge helpers that have no IRProgram), giving the
+// module the compilation's rows first.
+ir_module_intern_tid: fn(m: &IRModule, ty: Type) -> TypeID Never! {
+    if m.interner.len() == 0 -> m.interner.push(interner())
+    type_intern_syntax(m.interner[0], ty)
+}
+
+// The written Type of `tid` in `m`'s own interner. A standalone module whose
+// types are only well-known scalars (ir_type_row) never gets an interner,
+// and those ids read without one.
+ir_module_tid_syntax: fn(m: IRModule, tid: TypeID) -> Type Never! {
+    if m.interner.len() > 0 -> return type_syntax(m.interner[0], tid)
+    type_id_well_known_syntax(tid) ?? panic("type {tid.id} is not in the module's interner")
+}
+
+// The kind of `tid` in `m`'s own interner (ir_module_tid_syntax).
+ir_module_tid_kind: fn(m: IRModule, tid: TypeID) -> TypeKind Never! {
+    if m.interner.len() > 0 -> return type_kind(m.interner[0], tid)
+    type_id_well_known_kind(tid) ?? panic("type {tid.id} is not in the module's interner")
+}
+
+// The display name of `tid` in `m`'s own interner (ir_module_tid_syntax).
+ir_module_tid_name: fn(m: IRModule, tid: TypeID) -> String Never! {
+    if m.interner.len() > 0 -> return type_id_name(m.interner[0], tid)
+    type_name(ir_module_tid_syntax(m, tid))
+}
+
+// Written Type of `m.types[row].ty` in `m`'s own interner (post-merge / standalone).
+ir_module_row_ty: fn(m: IRModule, row: Int) -> Type Never! {
+    ir_module_tid_syntax(m, m.types[row].ty)
+}
+
+// Display name of `m.types[row].ty` in `m`'s own interner.
+ir_module_row_type_name: fn(m: IRModule, row: Int) -> String Never! {
+    ir_module_tid_name(m, m.types[row].ty)
+}
+
+// Carrier identity (ir_type_name) of `m.types[row].ty` in `m`'s own interner.
+ir_module_row_identity: fn(m: IRModule, row: Int) -> String Never! {
+    tid: m.types[row].ty
+    if m.interner.len() > 0 -> return type_id_carrier_identity(m.interner[0], tid)
+    ir_type_name(ir_module_tid_syntax(m, tid))
+}
+
+// Finalizes a single-module IR build: the program's interner `base` becomes
+// the module's, with `m.type_delta` merged into it and `m.types` remapped.
+// A standalone program's empty interner leaves the module its own.
+ir_module_finalize_interner: fn(m: &IRModule, base: &&Interner) Never! {
+    if !ir_interner_live(base) -> return
+    m.interner = [Interner]{base.move()}
+    if m.type_delta.len() > 0 {
+        if m.type_delta.pop() == .Val(delta) {
+            mut_delta := delta
+            if delta_has_rows(mut_delta) {
+                remap: interner_merge_delta(m.interner[0], mut_delta)
+                loop i in 0..<m.types.len() {
+                    m.types[i].ty = type_id_remap(m.types[i].ty, remap)
+                }
+            }
+        }
+    }
 }
 
 // Frees every per-part build memo that ir_merge never reads (everything
@@ -744,7 +826,6 @@ ir_module_drop_build_memos: fn(m: &IRModule) Never! {
     m.variant_members = name_rows()
     m.enum_sizes = name_rows()
     m.handle_rows = name_rows()
-    m.value_types = TypeTable{}
     m.value_rows = [Int]{}
     m.close_free = [Int:Bool]{}
     m.scalar_rows = [Int]{}
@@ -1147,7 +1228,7 @@ ir_op_code: fn(op: IROp) -> Int Never! {
 // structured nesting. Names and data resolve through `m`, so the text is
 // the function's content.
 ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
-    result: if f.result >= 0 -> ir_type_name(m.types[f.result].ty) else -> "none"
+    result: if f.result >= 0 -> ir_type_name(ir_module_row_ty(m, f.result)) else -> "none"
     lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={result}"}
     if f.asm == .Val(leaf) {
         code: loop byte in leaf.code -> "{byte}"

@@ -120,12 +120,17 @@ publication_api_owner: fn(items: [PublicAPIItem], kind: String, member: String) 
     None
 }
 
-// A new variant breaks every exhaustive match, a new required member every
-// implementation, and a new field without a default every literal of a
-// struct dependents can build. Members of a new owner are new API.
+// A new variant breaks every exhaustive match on a closed enum (an `#Open`
+// enum requires external catch-alls, so adding a variant is compatible), a new
+// required member breaks every implementation, and a new field without a
+// default breaks every literal of a struct dependents can build. Members of a
+// new owner are new API.
 publication_api_addition_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem], item: PublicAPIItem) -> Bool Never! {
     if item.kind == {
-        "variant" -> publication_api_owner(old, "enum", item.name) != None
+        "variant" -> {
+            owner: publication_api_owner(old, "enum", item.name) ?? return false
+            !owner.signature.ends_with(" #Open")
+        }
         "require" -> publication_api_owner(old, "trait", item.name) != None
         "field" -> {
             if item.signature.ends_with(" = _") || publication_api_owner(old, "struct", item.name) == None {

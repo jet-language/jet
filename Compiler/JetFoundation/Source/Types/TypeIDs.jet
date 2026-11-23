@@ -175,6 +175,9 @@ interner: fn() -> Interner Never! {
             bits *= 2
         }
     }
+    // The IR's address word (JetIR ir_pointer_row), a nominal no source
+    // spells as a built-in, so a phase without the interner names it.
+    _: type_intern_scalar(result, TypeKind.Named, NAME_POINTER.id, U32{0}, U32{0})
     result
 }
 
@@ -209,6 +212,8 @@ TYPE_U16: TypeID{id: U32{14}}
 TYPE_U32: TypeID{id: U32{15}}
 
 TYPE_U64: TypeID{id: U32{16}}
+
+TYPE_POINTER: TypeID{id: U32{17}}
 
 type_columns: fn() -> TypeColumns Never! {
     type_columns_sized(TYPE_COLUMNS_INITIAL_SLOTS)
@@ -295,7 +300,8 @@ interner_marks: fn(table: Interner) -> InternerMarks Never! {
 }
 
 // Constant well-known TypeID for scalar primitives (`TYPE_INT`..`TYPE_U64`)
-// in O(1) without touching any Interner; `type_none()` for every other type.
+// and the IR's `TYPE_POINTER` in O(1) without touching any Interner;
+// `type_none()` for every other type.
 type_id_well_known: fn(ty: Type) -> TypeID Never! {
     if ty == {
         .Int -> return TYPE_INT
@@ -307,6 +313,7 @@ type_id_well_known: fn(ty: Type) -> TypeID Never! {
         .Named(name) -> {
             if name == "Unit" -> return TYPE_UNIT
             if name == "Never" -> return TYPE_NEVER
+            if name == "Pointer" -> return TYPE_POINTER
             return type_none()
         }
         .IntN(signed, bits) -> {
@@ -1780,7 +1787,8 @@ interner_merge_delta: fn(into: &Interner, delta: &InternerDelta) -> InternerRema
     assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 8}), TYPE_U8)
     assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 64}), TYPE_U64)
     assert_eq(type_intern_syntax(table, Type.Float32), TYPE_FLOAT32)
-    assert_eq(type_count(table), 17)
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Pointer"}), TYPE_POINTER)
+    assert_eq(type_count(table), 18)
 }
 
 #Test("a written type round-trips through its id") {

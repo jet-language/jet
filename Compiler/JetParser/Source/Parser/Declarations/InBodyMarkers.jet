@@ -219,6 +219,10 @@ parser_merge_inbody_markers: fn(state: &JetParserState, above: [Marker], inside:
     loop marker in inside -> merged.push(marker.copy())
     if above.len() == 0 || parser_aborting(state) -> return merged
     diagnostic: diagnostic_from_registry("E0942", Val(inside[0].span), "{noun} writes markers both above it and inside its body", "a declaration's markers are one set, written in one place, so a reader finds all of them together", "move every marker above {noun}, or every marker into its body as `#X: value` lines")
+    if state.source_offset != 0 {
+        state.diagnostics.push(diagnostic)
+        return merged
+    }
     upward: parser_marker_move_edit(state.sources[0], merged, head, close, false, false) ?? {
         state.diagnostics.push(diagnostic)
         return merged

@@ -9,14 +9,13 @@
 // its TExprKind name and payload order.
 
 // One function's (or one standalone expression's) flat rows: nodes and the
-// expression-type column sorted by id, statements in post order. The
-// expression-type rows name their types by index into `types`, which holds
-// each distinct type once (type_table_intern).
+// expression-type column sorted by id, statements in post order. Each
+// expression-type row names its type by its interned `TypeID` in the
+// compilation's `Interner`.
 BodyTree: struct {
     nodes: [BodyNode],
     stmts: [StmtKind],
     expr_types: [TExprType],
-    types: TypeTable{TypeTable{}},
     // A nested check's arena continues its enclosing check's rows: its first
     // node row is index `node_base` and its first statement row `stmt_base`,
     // and every row index into it subtracts them. Every other tree starts at 0.
@@ -28,7 +27,7 @@ BodyTree: struct {
 }
 
 // One expression: its node id, its checked form and its source span. Its type
-// is the tree's expression-type row (body_type).
+// is the tree's expression-type row (body_type_id).
 BodyNode: struct {
     id: Int,
     kind: NodeKind,
@@ -47,12 +46,8 @@ body_tree_new: fn() -> BodyTree Never! {
 
 // A checked body's tree, sealed (body_flat_function): its rows stop growing,
 // so each row list moves to a buffer of exactly its length and the symbol
-// keys drop their slots (symbol_local_keys_seal). Every sealed body is held
-// until the whole program is checked, so the slack of list doubling and
-// those slots would otherwise stay for that long. The type table keeps its
-// slots: each generic instance looks its fact types up in them
-// (sema_instance_type, ir_fact_type).
-body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
+// keys drop their slots (symbol_local_keys_seal).
+body_tree_sealed: fn(tree: &&BodyTree, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
     sealed := tree
     if !nodes_fitted {
         sealed.nodes = body_rows_fitted(sealed.nodes.move())
@@ -60,13 +55,6 @@ body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}, nodes_fitted
     }
     if !stmts_fitted {
         sealed.stmts = body_rows_fitted(sealed.stmts.move())
-    }
-    sealed.types.types = body_rows_fitted(sealed.types.types.move())
-    if keep_type_slots {
-        sealed.types.hashes = body_rows_fitted(sealed.types.hashes.move())
-    } else {
-        sealed.types.hashes = [Int]{}
-        sealed.types.slots = [Int]{}
     }
     sealed.symbols.bytes = body_rows_fitted(sealed.symbols.bytes.move())
     sealed.symbols.ends = body_rows_fitted(sealed.symbols.ends.move())
@@ -120,11 +108,11 @@ body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
     ids: [Int]{-9, -5, 3, 4, 5, 9, 10, 11}
     loop (index, id) in ids {
         tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: index, width: None}, span: Span{start: index, end: index + 1}})
-        tree.expr_types.push(TExprType{id: id, ty: index})
+        tree.expr_types.push(TExprType{id: id, ty: TypeID{id: U32{index + 1}}})
     }
     loop (index, id) in ids {
         assert(body_node(tree, id).kind == NodeKind.IntLit{value: index, width: None})
-        assert_eq(body_type_id(tree, id), index)
+        assert_eq(body_type_id(tree, id), TypeID{id: U32{index + 1}})
     }
     assert(checked_expr_type_id(tree.expr_types, 6) == None)
     assert(checked_expr_type_id(tree.expr_types, 12) == None)
@@ -136,22 +124,35 @@ body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
     local: symbol_local_keys_intern(tree.symbols, "local:m:f:x")
     loop id in 0..<9 {
         tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: id, width: None}, span: Span{start: id, end: id + 1}})
-        tree.expr_types.push(TExprType{id: id, ty: type_table_intern(tree.types, Type.Int)})
+        tree.expr_types.push(TExprType{id: id, ty: TYPE_INT})
     }
     tree = body_tree_sealed(tree)
     assert_eq(tree.nodes.len(), 9)
     assert(body_node(tree, 8).kind == NodeKind.IntLit{value: 8, width: None})
-    assert_eq(body_type_id(tree, 8), 0)
-    assert_eq(type_table_find(tree.types, Type.Int) ?? -1, 0)
+    assert_eq(body_type_id(tree, 8), TYPE_INT)
     assert_eq(Int{(symbol_local_keys_find(tree.symbols, "local:m:f:x") ?? symbol_none()).id}, Int{local.id})
 }
 
-// The checked type of node `id`.
-body_type: fn(tree: BodyTree, id: Int) -> Type Never! { tree.types.types[body_type_id(tree, id)] }
+// The written checked type of node `id` from `table`.
+body_type: fn(table: Interner, tree: BodyTree, id: Int) -> Type Never! {
+    type_syntax(table, body_type_id(tree, id))
+}
 
-// The index in `tree.types` of node `id`'s checked type.
-body_type_id: fn(tree: BodyTree, id: Int) -> Int Never! {
+// The interned `TypeID` of node `id`.
+body_type_id: fn(tree: BodyTree, id: Int) -> TypeID Never! {
     checked_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
+}
+
+// Renumbers every worker-local TypeID in `tree.expr_types` through `remap`.
+body_tree_remap_types: fn(tree: &BodyTree, remap: InternerRemap) Never! {
+    if remap.types.len() == 0 -> return
+    mark: remap.marks.types
+    loop i in 0..<tree.expr_types.len() {
+        row_id: Int{tree.expr_types[i].ty.id}
+        if row_id >= mark {
+            tree.expr_types[i].ty = remap.types[row_id - mark]
+        }
+    }
 }
 
 // Statement `index`.

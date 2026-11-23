@@ -76,14 +76,19 @@ use jet_foundation.[
     Interner,
     InternerDelta,
     TypeID,
+    TypeKind,
     interner,
     interner_delta_empty,
     interner_fork_delta,
     type_none,
     type_id_well_known,
     type_find_syntax,
+    type_kind,
+    type_syntax,
     type_id_identity_equal,
     delta_type_intern_syntax,
+    delta_type_kind,
+    delta_type_syntax,
     delta_type_id_identity_equal,
     ModuleID,
     module_find,
@@ -1279,8 +1284,8 @@ sema_program_fork_delta: fn(program: SemaProgramTables) -> InternerDelta Never! 
 }
 
 // Looks up `ty` in the program's immutable shared `Interner` with zero heap
-// allocation, falling back to the worker's `InternerDelta` only when one has
-// been forked. On a nested snapshot context, only shared/well-known IDs escape.
+// allocation, lazily forking a worker-local `InternerDelta` only on the first
+// miss. On a nested snapshot context, only shared/well-known IDs escape.
 sema_intern_type: fn(program: SemaProgramTables, context: &SemaCheckContext, ty: Type) -> TypeID Never! {
     wk: type_id_well_known(ty)
     if wk.id != 0 -> return wk
@@ -1291,18 +1296,67 @@ sema_intern_type: fn(program: SemaProgramTables, context: &SemaCheckContext, ty:
         shared: type_find_syntax(fallback, ty)
         if shared.id != 0 -> return shared
     }
+    if context.is_snapshot -> return type_none()
+    if context.type_delta.len() == 0 && (program.registration_graph != None || program.interner != None) {
+        context.type_delta.push(sema_program_fork_delta(program))
+    }
     if context.type_delta.len() > 0 {
-        tid := type_none()
         if program.registration_graph == .Val(graph) {
-            tid = delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
-        } else if program.interner == .Val(fallback) {
-            tid = delta_type_intern_syntax(fallback, context.type_delta[0], ty)
+            return delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
         }
-        tid_row: Int{tid.id}
-        if context.is_snapshot && tid_row >= context.type_delta[0].base.types -> return type_none()
-        return tid
+        if program.interner == .Val(fallback) {
+            return delta_type_intern_syntax(fallback, context.type_delta[0], ty)
+        }
     }
     type_none()
+}
+
+// Always interns `ty` into a non-zero TypeID in `(program, context.type_delta)`,
+// even on a snapshot context (used when flattening checked bodies/expressions).
+sema_intern_type_force: fn(program: SemaProgramTables, context: &SemaCheckContext, ty: Type) -> TypeID Never! {
+    wk: type_id_well_known(ty)
+    if wk.id != 0 -> return wk
+    if program.registration_graph == .Val(graph) {
+        shared: type_find_syntax(graph.interner, ty)
+        if shared.id != 0 -> return shared
+    } else if program.interner == .Val(fallback) {
+        shared: type_find_syntax(fallback, ty)
+        if shared.id != 0 -> return shared
+    }
+    if context.type_delta.len() == 0 && (program.registration_graph != None || program.interner != None) {
+        context.type_delta.push(sema_program_fork_delta(program))
+    }
+    if context.type_delta.len() > 0 {
+        if program.registration_graph == .Val(graph) {
+            return delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
+        }
+        if program.interner == .Val(fallback) {
+            return delta_type_intern_syntax(fallback, context.type_delta[0], ty)
+        }
+    }
+    panic("sema_intern_type_force: no Interner available on SemaProgramTables")
+}
+
+// Written form of `id` in `(program, context.type_delta)`.
+sema_type_syntax_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> Type Never! {
+    if context.type_delta.len() > 0 {
+        if program.registration_graph == .Val(graph) -> return delta_type_syntax(graph.interner, context.type_delta[0], id)
+        if program.interner == .Val(fallback) -> return delta_type_syntax(fallback, context.type_delta[0], id)
+    }
+    if program.registration_graph == .Val(graph) -> return type_syntax(graph.interner, id)
+    if program.interner == .Val(fallback) -> return type_syntax(fallback, id)
+    panic("sema_type_syntax_in: no Interner available on SemaProgramTables")
+}
+
+// Kind byte of `id` in `(program, context.type_delta)` without allocating a Type.
+sema_type_kind_in: fn(program: SemaProgramTables, context: SemaCheckContext, id: TypeID) -> TypeKind Never! {
+    if context.type_delta.len() > 0 {
+        if program.registration_graph == .Val(graph) -> return delta_type_kind(graph.interner, context.type_delta[0], id)
+        if program.interner == .Val(fallback) -> return delta_type_kind(fallback, context.type_delta[0], id)
+    }
+    if program.registration_graph == .Val(graph) -> return type_kind(graph.interner, id)
+    if program.interner == .Val(fallback) -> return type_kind(fallback, id)
+    TypeKind.Int
 }
 
 // O(1) identity equality on interned TypeIDs (using canonical columns).
@@ -1801,6 +1855,17 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
     sema_comptime_body_sources_index(snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
     snapshot
+}
+
+// A nested check on a snapshot interns into the type delta of the check it
+// nests in: the enclosing check lends its delta (`from`) to the snapshot's
+// (`to`) before the nested check, and the snapshot hands it back the same
+// way after, so a TypeID the nested check publishes (a comptime request's
+// tree, sema_publish_expression) names the same row in the enclosing check.
+// A snapshot that forked a delta of its own hands that one back.
+sema_check_delta_pass: fn(from: &[InternerDelta], to: &[InternerDelta]) Never! {
+    delta := from.pop() ?? return
+    to.push(delta)
 }
 
 // A rollback point for a probe check run on the live context (instead of a

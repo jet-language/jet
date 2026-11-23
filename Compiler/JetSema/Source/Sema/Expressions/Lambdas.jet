@@ -2241,6 +2241,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     lambda_context := sema_check_context_snapshot(context)
     // A debugger probe inside the body answers through the enclosing walk.
     defer sema_eval_walk_take_back(context, lambda_context)
+    // The body interns into this check's type delta, handed back on every exit.
+    sema_check_delta_pass(context.type_delta, lambda_context.type_delta)
+    defer sema_check_delta_pass(lambda_context.type_delta, context.type_delta)
     // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
     // changes the collection an enclosing loop reads is refused there too.
     lambda_context.iter_borrowed = context.iter_borrowed.copy()

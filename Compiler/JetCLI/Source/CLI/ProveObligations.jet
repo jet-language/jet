@@ -11,7 +11,7 @@
 // skipped and never guessed, so every counterexample is one the program can
 // reach.
 use {
-    jet_foundation.[BodyTree, DeclTable, FnBody, Span, SymbolID, SymbolTable, TIndexProof, TLocal, Type, body_node, body_stmt, body_type, decl_table_key]
+    jet_foundation.[BodyTree, DeclTable, FnBody, Interner, Span, SymbolID, SymbolTable, TIndexProof, TLocal, Type, body_node, body_stmt, body_type, decl_table_key]
     jet_semindex.[semindex_doc_text]
 }
 
@@ -54,6 +54,7 @@ JetCLISolverScope: struct {
 JetCLISolverCallees: struct {
     decls: DeclTable,
     symbols: SymbolTable,
+    interner: Interner,
     names: [String:String],
 }
 
@@ -117,7 +118,7 @@ jet_cli_solver_lookup: fn(scope: JetCLISolverScope, local: TLocal) -> JetCLISolv
 }
 
 // Integer node `id` as an affine term over the scope's names.
-jet_cli_solver_affine_of: fn(tree: BodyTree, id: Int, scope: JetCLISolverScope) -> JetCLISolverAffine JetCLISolverUnknown! {
+jet_cli_solver_affine_of: fn(interner: Interner, tree: BodyTree, id: Int, scope: JetCLISolverScope) -> JetCLISolverAffine JetCLISolverUnknown! {
     node: body_node(tree, id)
     if node.kind == {
         .IntLit(value, _) -> {
@@ -127,26 +128,26 @@ jet_cli_solver_affine_of: fn(tree: BodyTree, id: Int, scope: JetCLISolverScope) 
             Ok(jet_cli_solver_constant(value))
         }
         .Local(local) -> jet_cli_solver_lookup(scope, local)
-        .Move(value) | .ExplicitCopy(value) | .DistinctRaw(value) -> jet_cli_solver_affine_of(tree, value, scope)
-        .Clone(value, _) -> jet_cli_solver_affine_of(tree, value, scope)
+        .Move(value) | .ExplicitCopy(value) | .DistinctRaw(value) -> jet_cli_solver_affine_of(interner, tree, value, scope)
+        .Clone(value, _) -> jet_cli_solver_affine_of(interner, tree, value, scope)
         .Unary(op, operand) -> {
             if op != .Neg {
                 return Err(jet_cli_solver_unsupported("an operator other than + - * and comparisons"))
             }
-            if jet_cli_solver_fixed_width(body_type(tree, id)) {
+            if jet_cli_solver_fixed_width(body_type(interner, tree, id)) {
                 return Err(jet_cli_solver_unknown("machine_overflow"))
             }
-            jet_cli_solver_scale(jet_cli_solver_affine_of(tree, operand, scope), -1)
+            jet_cli_solver_scale(jet_cli_solver_affine_of(interner, tree, operand, scope), -1)
         }
         .Binary(op, _, _, lhs, rhs) -> {
             if op != .Add && op != .Sub && op != .Mul {
                 return Err(jet_cli_solver_unsupported("an operator other than + - * and comparisons"))
             }
-            if jet_cli_solver_fixed_width(body_type(tree, id)) {
+            if jet_cli_solver_fixed_width(body_type(interner, tree, id)) {
                 return Err(jet_cli_solver_unknown("machine_overflow"))
             }
-            left: jet_cli_solver_affine_of(tree, lhs, scope)
-            right: jet_cli_solver_affine_of(tree, rhs, scope)
+            left: jet_cli_solver_affine_of(interner, tree, lhs, scope)
+            right: jet_cli_solver_affine_of(interner, tree, rhs, scope)
             if op == .Add -> return jet_cli_solver_combine(left, 1, right)
             if op == .Sub -> return jet_cli_solver_combine(left, -1, right)
             if left.terms.len() == 0 -> return jet_cli_solver_scale(right, left.constant)
@@ -170,35 +171,35 @@ jet_cli_solver_relation: fn(op: TBinaryOp) -> String? Never! {
 }
 
 // `lhs <op> rhs` over integers; any other operand type is unsupported.
-jet_cli_solver_comparison: fn(tree: BodyTree, op: TBinaryOp, lhs: Int, rhs: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
+jet_cli_solver_comparison: fn(interner: Interner, tree: BodyTree, op: TBinaryOp, lhs: Int, rhs: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
     symbol: jet_cli_solver_relation(op) ?? return Err(jet_cli_solver_unsupported("an operator other than + - * and comparisons"))
-    if !jet_cli_solver_type_bounds(body_type(tree, lhs)).integer || !jet_cli_solver_type_bounds(body_type(tree, rhs)).integer {
+    if !jet_cli_solver_type_bounds(body_type(interner, tree, lhs)).integer || !jet_cli_solver_type_bounds(body_type(interner, tree, rhs)).integer {
         return Err(jet_cli_solver_unsupported("a comparison of values that are not integers"))
     }
-    jet_cli_solver_compare(jet_cli_solver_affine_of(tree, lhs, scope), symbol, jet_cli_solver_affine_of(tree, rhs, scope))
+    jet_cli_solver_compare(jet_cli_solver_affine_of(interner, tree, lhs, scope), symbol, jet_cli_solver_affine_of(interner, tree, rhs, scope))
 }
 
 // Bool node `id` as a formula over the scope's names.
-jet_cli_solver_bool_of: fn(tree: BodyTree, id: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
+jet_cli_solver_bool_of: fn(interner: Interner, tree: BodyTree, id: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
     node: body_node(tree, id)
     if node.kind == {
         .BoolLit(value) -> Ok(JetCLISolverBool.Constant(value))
-        .Move(value) | .ExplicitCopy(value) -> jet_cli_solver_bool_of(tree, value, scope)
-        .Clone(value, _) -> jet_cli_solver_bool_of(tree, value, scope)
+        .Move(value) | .ExplicitCopy(value) -> jet_cli_solver_bool_of(interner, tree, value, scope)
+        .Clone(value, _) -> jet_cli_solver_bool_of(interner, tree, value, scope)
         .Unary(op, operand) -> {
             if op != .Not {
                 return Err(jet_cli_solver_unsupported("an operator other than + - * and comparisons"))
             }
-            jet_cli_solver_negate(jet_cli_solver_bool_of(tree, operand, scope))
+            jet_cli_solver_negate(jet_cli_solver_bool_of(interner, tree, operand, scope))
         }
         .Binary(op, _, _, lhs, rhs) -> {
             if op == .And {
-                return Ok(JetCLISolverBool.And([JetCLISolverBool]{jet_cli_solver_bool_of(tree, lhs, scope), jet_cli_solver_bool_of(tree, rhs, scope)}))
+                return Ok(JetCLISolverBool.And([JetCLISolverBool]{jet_cli_solver_bool_of(interner, tree, lhs, scope), jet_cli_solver_bool_of(interner, tree, rhs, scope)}))
             }
             if op == .Or {
-                return Ok(JetCLISolverBool.Or([JetCLISolverBool]{jet_cli_solver_bool_of(tree, lhs, scope), jet_cli_solver_bool_of(tree, rhs, scope)}))
+                return Ok(JetCLISolverBool.Or([JetCLISolverBool]{jet_cli_solver_bool_of(interner, tree, lhs, scope), jet_cli_solver_bool_of(interner, tree, rhs, scope)}))
             }
-            jet_cli_solver_comparison(tree, op, lhs, rhs, scope)
+            jet_cli_solver_comparison(interner, tree, op, lhs, rhs, scope)
         }
         .CompareChain(operands, operators, hooks) -> {
             if operators.len() + 1 != operands.len() || hooks.contains(true) {
@@ -206,7 +207,7 @@ jet_cli_solver_bool_of: fn(tree: BodyTree, id: Int, scope: JetCLISolverScope) ->
             }
             parts := [JetCLISolverBool]{}
             loop index in 0..<operators.len() {
-                parts.push(jet_cli_solver_comparison(tree, operators[index], operands[index], operands[index + 1], scope))
+                parts.push(jet_cli_solver_comparison(interner, tree, operators[index], operands[index], operands[index + 1], scope))
             }
             Ok(JetCLISolverBool.And(parts))
         }
@@ -227,7 +228,7 @@ jet_cli_solver_bound_facts: fn(name: String, bounds: JetCLISolverBounds, facts: 
 
 // The function's integer parameters with their type bounds, then its
 // `#Pre` clauses: what every obligation inside it may assume.
-jet_cli_solver_entry: fn(function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_entry: fn(interner: Interner, function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
     loop parameter in function.params {
         bounds: jet_cli_solver_type_bounds(parameter.ty)
         if !bounds.integer -> next
@@ -241,7 +242,7 @@ jet_cli_solver_entry: fn(function: FnBody, scope: &JetCLISolverScope, facts: &[J
         }
     }
     loop contract in function.pre {
-        condition: jet_cli_solver_bool_of(function.tree, contract.condition, scope) ?? return Err(jet_cli_solver_unsupported("a #Pre the solver can't read ({err.detail})"))
+        condition: jet_cli_solver_bool_of(interner, function.tree, contract.condition, scope) ?? return Err(jet_cli_solver_unsupported("a #Pre the solver can't read ({err.detail})"))
         facts.push(condition)
     }
     Ok(true)
@@ -250,11 +251,11 @@ jet_cli_solver_entry: fn(function: FnBody, scope: &JetCLISolverScope, facts: &[J
 // Binds immutable integer `let` `local` to `init` and returns true when it
 // translates. A binding that doesn't stays out of scope, so reading it later
 // is unsupported.
-jet_cli_solver_let: fn(tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_let: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> Bool JetCLISolverUnknown! {
     if scope.names.contains(local.name) -> return Err(jet_cli_solver_unsupported("a shadowed name"))
     bounds: jet_cli_solver_type_bounds(local.ty)
     if local.mutable || !bounds.integer -> return Ok(false)
-    value: jet_cli_solver_affine_of(tree, init, scope) ?? return Ok(false)
+    value: jet_cli_solver_affine_of(interner, tree, init, scope) ?? return Ok(false)
     facts.push(jet_cli_solver_compare(jet_cli_solver_variable(local.name), "==", value))
     jet_cli_solver_bound_facts(local.name, bounds, facts)
     scope.names.push(local.name.copy())
@@ -312,7 +313,7 @@ jet_cli_solver_index_formula: fn(proof: TIndexProof) -> JetCLISolverFormula JetC
 // One obligation per `#Post` clause, at the clause: the parameters, `#Pre`
 // and the body's affine immutable `let`s are assumed, `result` is the one
 // value the body returns, and the clause is the claim.
-jet_cli_solver_post_obligations: fn(function: FnBody, source: String, out: &[JetCLISolverObligation]) Never! {
+jet_cli_solver_post_obligations: fn(interner: Interner, function: FnBody, source: String, out: &[JetCLISolverObligation]) Never! {
     if function.body.len() != 1 {
         return
     }
@@ -320,7 +321,7 @@ jet_cli_solver_post_obligations: fn(function: FnBody, source: String, out: &[Jet
         loop contract in post {
             claim: jet_cli_solver_text(source, body_node(function.tree, contract.condition).span)
             row := JetCLISolverObligation{kind: "function_postcondition", function: function.name.copy(), callee: "", span: contract.span, claim: claim, formula: None, reason: "", detail: "", pre: function.pre.len() > 0}
-            formula: jet_cli_solver_post_formula(function, body, contract, result) ?? {
+            formula: jet_cli_solver_post_formula(interner, function, body, contract, result) ?? {
                 row.reason = err.reason
                 row.detail = err.detail
                 out.push(row)
@@ -332,11 +333,11 @@ jet_cli_solver_post_obligations: fn(function: FnBody, source: String, out: &[Jet
     }
 }
 
-jet_cli_solver_post_formula: fn(function: FnBody, body: [Int], contract: BodyContract, result: TContractResult) -> JetCLISolverFormula JetCLISolverUnknown! {
+jet_cli_solver_post_formula: fn(interner: Interner, function: FnBody, body: [Int], contract: BodyContract, result: TContractResult) -> JetCLISolverFormula JetCLISolverUnknown! {
     tree: function.tree
     scope := JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
     facts := [JetCLISolverBool]{}
-    jet_cli_solver_entry(function, scope, facts)
+    jet_cli_solver_entry(interner, function, scope, facts)
     name: if result.mode == .Direct -> result.carrier_local.name else -> result.binding_local.name
     bounds: jet_cli_solver_type_bounds(result.binding_ty)
     if !bounds.integer -> return Err(jet_cli_solver_unsupported("a result that is not an integer"))
@@ -346,7 +347,7 @@ jet_cli_solver_post_formula: fn(function: FnBody, body: [Int], contract: BodyCon
         statement: body_stmt(tree, id)
         if statement == {
             .Let(local, _, init, _, _, _) -> {
-                if last || !jet_cli_solver_let(tree, local, init, scope, facts) {
+                if last || !jet_cli_solver_let(interner, tree, local, init, scope, facts) {
                     return Err(jet_cli_solver_unsupported("a body that is not affine bindings and one return"))
                 }
             }
@@ -355,13 +356,13 @@ jet_cli_solver_post_formula: fn(function: FnBody, body: [Int], contract: BodyCon
                 if !last {
                     return Err(jet_cli_solver_unsupported("a body that is not affine bindings and one return"))
                 }
-                facts.push(jet_cli_solver_compare(jet_cli_solver_variable(name), "==", jet_cli_solver_affine_of(tree, jet_cli_solver_returned(tree, returned, result), scope)))
+                facts.push(jet_cli_solver_compare(jet_cli_solver_variable(name), "==", jet_cli_solver_affine_of(interner, tree, jet_cli_solver_returned(tree, returned, result), scope)))
             }
             .ExprStmt(value, _) -> {
                 if !last {
                     return Err(jet_cli_solver_unsupported("a body that is not affine bindings and one return"))
                 }
-                facts.push(jet_cli_solver_compare(jet_cli_solver_variable(name), "==", jet_cli_solver_affine_of(tree, jet_cli_solver_returned(tree, value, result), scope)))
+                facts.push(jet_cli_solver_compare(jet_cli_solver_variable(name), "==", jet_cli_solver_affine_of(interner, tree, jet_cli_solver_returned(tree, value, result), scope)))
             }
             .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> return Err(jet_cli_solver_unsupported("a branch, loop or write in the body"))
         }
@@ -371,7 +372,7 @@ jet_cli_solver_post_formula: fn(function: FnBody, body: [Int], contract: BodyCon
     }
     jet_cli_solver_bound_facts(name, bounds, facts)
     scope.names.push(name.copy())
-    claim: jet_cli_solver_bool_of(tree, contract.condition, scope)
+    claim: jet_cli_solver_bool_of(interner, tree, contract.condition, scope)
     Ok(jet_cli_solver_formula(facts, [JetCLISolverBool]{claim}))
 }
 
@@ -459,7 +460,7 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
     tree: function.tree
     scope := JetCLISolverScope{names: [String]{}, pins: [JetCLISolverPin]{}}
     facts := [JetCLISolverBool]{}
-    blocked := jet_cli_solver_entry_blocked(function, scope, facts)
+    blocked := jet_cli_solver_entry_blocked(callees.interner, function, scope, facts)
     straight := [Int]{}
     loop id in jet_cli_solver_body(function) {
         statement: body_stmt(tree, id)
@@ -477,7 +478,7 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
             jet_cli_solver_call_block(function, block, source, callees, blocked, scope, facts, out)
         }
         if blocked == "" && statement == .Let(local, _, init, _, _, _) {
-            blocked = jet_cli_solver_let_blocked(tree, local, init, scope, facts)
+            blocked = jet_cli_solver_let_blocked(callees.interner, tree, local, init, scope, facts)
         }
     }
     loop node in tree.nodes {
@@ -494,14 +495,14 @@ jet_cli_solver_call_obligations: fn(function: FnBody, source: String, callees: J
 }
 
 // Why the function's parameters and `#Pre` can't be assumed, or "".
-jet_cli_solver_entry_blocked: fn(function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
-    _ := jet_cli_solver_entry(function, scope, facts) ?? return err.detail
+jet_cli_solver_entry_blocked: fn(interner: Interner, function: FnBody, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
+    _ := jet_cli_solver_entry(interner, function, scope, facts) ?? return err.detail
     ""
 }
 
 // Why a `let` leaves later reads ambiguous (it shadows a name), or "".
-jet_cli_solver_let_blocked: fn(tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
-    _ := jet_cli_solver_let(tree, local, init, scope, facts) ?? return err.detail
+jet_cli_solver_let_blocked: fn(interner: Interner, tree: BodyTree, local: TLocal, init: Int, scope: &JetCLISolverScope, facts: &[JetCLISolverBool]) -> String Never! {
+    _ := jet_cli_solver_let(interner, tree, local, init, scope, facts) ?? return err.detail
     ""
 }
 
@@ -515,7 +516,7 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
     loop item in body {
         statement: body_stmt(tree, item)
         if statement == .Let(local, _, init, _, _, _) {
-            value: jet_cli_solver_affine_of(tree, init, scope) ?? {
+            value: jet_cli_solver_affine_of(callees.interner, tree, init, scope) ?? {
                 pinned.pins.push(JetCLISolverPin{name: local.name.copy(), symbol: local.symbol_id.copy(), value: None})
                 next
             }
@@ -531,7 +532,7 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
                 out.push(row)
                 next
             }
-            claim: jet_cli_solver_bool_of(tree, contract.condition, pinned) ?? {
+            claim: jet_cli_solver_bool_of(callees.interner, tree, contract.condition, pinned) ?? {
                 row.reason = err.reason
                 row.detail = err.detail
                 out.push(row)
@@ -575,7 +576,7 @@ jet_cli_solver_obligations: fn(functions: [FnBody], callees: JetCLISolverCallees
         if function.synthetic || function.source_file != file -> next
         jet_cli_solver_index_obligations(function, source, out)
         jet_cli_solver_call_obligations(function, source, callees, out)
-        jet_cli_solver_post_obligations(function, source, out)
+        jet_cli_solver_post_obligations(callees.interner, function, source, out)
     }
     keyed := loop item in out -> JetCLISolverKeyedObligation{text: if item.formula == .Val(formula) -> jet_cli_solver_formula_json(formula) else -> "{item.reason}\t{item.detail}", obligation: item}
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.

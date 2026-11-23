@@ -63,6 +63,8 @@ use {
         TLetTy,
         TLetWrapper,
         TLocal,
+        TypeKind,
+        TYPE_NEVER,
         TMethodRef,
         TPatternBindingFact,
         TPatternPosition,
@@ -2854,7 +2856,7 @@ sema_stmt_for_in_tree_expr_stays: fn(value: TExpr, key: SymbolID, arena: BodyTre
 
 // Whether node row `index` of `tree` has type Never.
 sema_stmt_row_is_never: fn(tree: BodyTree, index: Int) -> Bool Never! {
-    tree.types.types[tree.expr_types[index - tree.node_base].ty] == (Type.Named{name: "Never"})
+    tree.expr_types[index - tree.node_base].ty.id == TYPE_NEVER.id
 }
 
 // sema_stmt_for_in_tree_stays of statement rows `statements` of `tree`.
@@ -7323,55 +7325,55 @@ sema_stmt_transaction_stm_local: fn(span: Span) -> TLocal Never! {
 // Whether any child expression of `value` touches shared state; the
 // children are read in place (tree_each_*_child), never copied. `arena`
 // holds the rows of the body's flat nodes (sema_node).
-sema_stmt_tree_children_touch_shared: fn(value: TExpr, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_children_touch_shared: fn(value: TExpr, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     found := false
     tree_each_expr_child(value, fn(child: TExpr) {
-        if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
+        if !found && sema_stmt_tree_expr_touches_shared(child, program, context) -> found = true
     })
     found
 }
 
-sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     found := false
     tree_each_pattern_child(pattern, fn(child: TExpr) {
-        if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
+        if !found && sema_stmt_tree_expr_touches_shared(child, program, context) -> found = true
     })
     found
 }
 
-sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     found := false
     tree_each_if_cond_child(condition, fn(child: TExpr) {
-        if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
+        if !found && sema_stmt_tree_expr_touches_shared(child, program, context) -> found = true
     })
     found
 }
 
-sema_stmt_tree_statement_children_touch_shared: fn(statement: TStmt, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_statement_children_touch_shared: fn(statement: TStmt, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     found := false
     tree_each_stmt_child(statement, fn(child: TExpr) {
-        if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
+        if !found && sema_stmt_tree_expr_touches_shared(child, program, context) -> found = true
     })
     found
 }
 
-sema_stmt_tree_expr_touches_shared: fn(value: TExpr, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_expr_touches_shared: fn(value: TExpr, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     if value.kind == {
-        .Flat(index) -> return sema_stmt_row_touches_shared(arena, index)
+        .Flat(index) -> return sema_stmt_row_touches_shared(program, context, index)
         .Lambda(_) -> return false
-        .InlineBlock(body) -> return sema_stmt_tree_statements_touch_shared(body, arena)
+        .InlineBlock(body) -> return sema_stmt_tree_statements_touch_shared(body, program, context)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            if sema_stmt_tree_condition_touches_shared(condition, arena) -> return true
-            if sema_stmt_tree_statements_touch_shared(then_body, arena) -> return true
-            if sema_stmt_tree_expr_touches_shared(then_value, arena) -> return true
-            if sema_stmt_tree_statements_touch_shared(else_body, arena) -> return true
-            return sema_stmt_tree_expr_touches_shared(else_value, arena)
+            if sema_stmt_tree_condition_touches_shared(condition, program, context) -> return true
+            if sema_stmt_tree_statements_touch_shared(then_body, program, context) -> return true
+            if sema_stmt_tree_expr_touches_shared(then_value, program, context) -> return true
+            if sema_stmt_tree_statements_touch_shared(else_body, program, context) -> return true
+            return sema_stmt_tree_expr_touches_shared(else_value, program, context)
         }
         .SharedGuardWait(guard, condition, _) -> {
-            if sema_stmt_tree_expr_touches_shared(guard, arena) -> return true
-            return sema_stmt_tree_expr_touches_shared(condition, arena)
+            if sema_stmt_tree_expr_touches_shared(guard, program, context) -> return true
+            return sema_stmt_tree_expr_touches_shared(condition, program, context)
         }
-        .CoreClosureCall(kind) -> return sema_stmt_tree_core_closure_touches_shared(kind, arena)
+        .CoreClosureCall(kind) -> return sema_stmt_tree_core_closure_touches_shared(kind, program, context)
         .FnValue(kind) -> {
             if kind == {
                 .NamedFn(_, _) -> return false
@@ -7392,20 +7394,20 @@ sema_stmt_tree_expr_touches_shared: fn(value: TExpr, arena: BodyTree) -> Bool Ne
         }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) -> {}
     }
-    sema_stmt_tree_children_touch_shared(value, arena)
+    sema_stmt_tree_children_touch_shared(value, program, context)
 }
 
-sema_stmt_tree_contract_touches_shared: fn(contract: TContract, arena: BodyTree) -> Bool Never! {
-    if sema_stmt_tree_expr_touches_shared(contract.condition, arena) -> return true
-    sema_stmt_tree_expr_touches_shared(contract.message, arena)
+sema_stmt_tree_contract_touches_shared: fn(contract: TContract, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
+    if sema_stmt_tree_expr_touches_shared(contract.condition, program, context) -> return true
+    sema_stmt_tree_expr_touches_shared(contract.message, program, context)
 }
 
-sema_stmt_tree_core_closure_touches_shared: fn(kind: TCoreClosureKind, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_core_closure_touches_shared: fn(kind: TCoreClosureKind, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     if kind == {
         .Spawn(group, _, _, _) -> {
             if group != None {
                 value: group
-                if sema_stmt_tree_expr_touches_shared(value, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(value, program, context) -> return true
             }
             false
         }
@@ -7413,160 +7415,161 @@ sema_stmt_tree_core_closure_touches_shared: fn(kind: TCoreClosureKind, arena: Bo
     }
 }
 
-sema_stmt_tree_statement_touches_shared: fn(statement: TStmt, arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_statement_touches_shared: fn(statement: TStmt, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     if statement == {
         .Transact(_, _, _, _, _) -> false
         .ContractScope(pre, body, post, _, _) -> {
             loop contract in pre {
-                if sema_stmt_tree_contract_touches_shared(contract, arena) -> return true
+                if sema_stmt_tree_contract_touches_shared(contract, program, context) -> return true
             }
-            if sema_stmt_tree_statements_touch_shared(body, arena) -> return true
+            if sema_stmt_tree_statements_touch_shared(body, program, context) -> return true
             loop contract in post {
-                if sema_stmt_tree_contract_touches_shared(contract, arena) -> return true
+                if sema_stmt_tree_contract_touches_shared(contract, program, context) -> return true
             }
             false
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            if sema_stmt_tree_pattern_touches_shared(pattern, arena) -> return true
-            if sema_stmt_tree_expr_touches_shared(init, arena) -> return true
-            sema_stmt_tree_statements_touch_shared(fallback, arena)
+            if sema_stmt_tree_pattern_touches_shared(pattern, program, context) -> return true
+            if sema_stmt_tree_expr_touches_shared(init, program, context) -> return true
+            sema_stmt_tree_statements_touch_shared(fallback, program, context)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            if sema_stmt_tree_statement_touches_shared(init, arena) -> return true
-            if sema_stmt_tree_expr_touches_shared(condition, arena) -> return true
+            if sema_stmt_tree_statement_touches_shared(init, program, context) -> return true
+            if sema_stmt_tree_expr_touches_shared(condition, program, context) -> return true
             if step != None {
                 nested: step
-                if sema_stmt_tree_statement_touches_shared(nested, arena) -> return true
+                if sema_stmt_tree_statement_touches_shared(nested, program, context) -> return true
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            if sema_stmt_tree_expr_touches_shared(start, arena) || sema_stmt_tree_expr_touches_shared(end, arena) {
+            if sema_stmt_tree_expr_touches_shared(start, program, context) || sema_stmt_tree_expr_touches_shared(end, program, context) {
                 return true
             }
             if step != None {
                 nested: step
-                if sema_stmt_tree_expr_touches_shared(nested, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(nested, program, context) -> return true
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
-            if source == .Val(nested) && sema_stmt_tree_expr_touches_shared(nested, arena) {
+            if source == .Val(nested) && sema_stmt_tree_expr_touches_shared(nested, program, context) {
                 return true
             }
-            if sema_stmt_tree_expr_touches_shared(start, arena) || sema_stmt_tree_expr_touches_shared(end, arena) {
+            if sema_stmt_tree_expr_touches_shared(start, program, context) || sema_stmt_tree_expr_touches_shared(end, program, context) {
                 return true
             }
-            if step == .Val(nested) && sema_stmt_tree_expr_touches_shared(nested, arena) {
+            if step == .Val(nested) && sema_stmt_tree_expr_touches_shared(nested, program, context) {
                 return true
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .If(condition, then_body, else_body, _, _) -> {
-            if sema_stmt_tree_condition_touches_shared(condition, arena) -> return true
-            if sema_stmt_tree_statements_touch_shared(then_body, arena) -> return true
-            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, arena) else -> false
+            if sema_stmt_tree_condition_touches_shared(condition, program, context) -> return true
+            if sema_stmt_tree_statements_touch_shared(then_body, program, context) -> return true
+            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, program, context) else -> false
         }
-        .Loop(_, body, _) -> sema_stmt_tree_statements_touch_shared(body, arena)
+        .Loop(_, body, _) -> sema_stmt_tree_statements_touch_shared(body, program, context)
         .While(_, condition, body, _) -> {
-            if sema_stmt_tree_expr_touches_shared(condition, arena) -> return true
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            if sema_stmt_tree_expr_touches_shared(condition, program, context) -> return true
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .Match(subject, arms, _, _) -> {
-            if sema_stmt_tree_expr_touches_shared(subject, arena) -> return true
+            if sema_stmt_tree_expr_touches_shared(subject, program, context) -> return true
             loop arm in arms {
-                if sema_stmt_tree_pattern_touches_shared(arm.pattern, arena) -> return true
-                if sema_stmt_tree_statements_touch_shared(arm.body, arena) -> return true
+                if sema_stmt_tree_pattern_touches_shared(arm.pattern, program, context) -> return true
+                if sema_stmt_tree_statements_touch_shared(arm.body, program, context) -> return true
             }
             false
         }
         .EnumMatch(scrutinee, arms, else_body, _, _) -> {
-            if sema_stmt_tree_expr_touches_shared(scrutinee, arena) -> return true
+            if sema_stmt_tree_expr_touches_shared(scrutinee, program, context) -> return true
             loop arm in arms {
-                if sema_stmt_tree_pattern_touches_shared(arm.pattern, arena) -> return true
-                if sema_stmt_tree_statements_touch_shared(arm.body, arena) -> return true
+                if sema_stmt_tree_pattern_touches_shared(arm.pattern, program, context) -> return true
+                if sema_stmt_tree_statements_touch_shared(arm.body, program, context) -> return true
             }
-            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, arena) else -> false
+            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, program, context) else -> false
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            if sema_stmt_tree_expr_touches_shared(subject, arena) -> return true
+            if sema_stmt_tree_expr_touches_shared(subject, program, context) -> return true
             loop arm in arms {
-                if sema_stmt_tree_statements_touch_shared(arm.body, arena) -> return true
+                if sema_stmt_tree_statements_touch_shared(arm.body, program, context) -> return true
             }
-            sema_stmt_tree_statements_touch_shared(else_body, arena)
+            sema_stmt_tree_statements_touch_shared(else_body, program, context)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-            if sema_stmt_tree_expr_touches_shared(source, arena) || sema_stmt_tree_expr_touches_shared(collection, arena) {
+            if sema_stmt_tree_expr_touches_shared(source, program, context) || sema_stmt_tree_expr_touches_shared(collection, program, context) {
                 return true
             }
             if step != None {
                 nested: step
-                if sema_stmt_tree_expr_touches_shared(nested, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(nested, program, context) -> return true
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_stmt_tree_statements_touch_shared(body, arena)
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_stmt_tree_statements_touch_shared(body, program, context)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            if sema_stmt_tree_expr_touches_shared(subject, arena) -> return true
+            if sema_stmt_tree_expr_touches_shared(subject, program, context) -> return true
             loop arm in arms {
-                if sema_stmt_tree_expr_touches_shared(arm.condition, arena) -> return true
-                if sema_stmt_tree_statements_touch_shared(arm.body, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(arm.condition, program, context) -> return true
+                if sema_stmt_tree_statements_touch_shared(arm.body, program, context) -> return true
             }
-            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, arena) else -> false
+            if else_body == .Val(else_statements) -> sema_stmt_tree_statements_touch_shared(else_statements, program, context) else -> false
         }
-        .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> sema_stmt_tree_statements_touch_shared(body, arena)
+        .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> sema_stmt_tree_statements_touch_shared(body, program, context)
         .ContextBlock(guards, body, _) -> {
             loop guard in guards {
-                if sema_stmt_tree_expr_touches_shared(guard.value, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(guard.value, program, context) -> return true
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
                 .Timeout(duration) -> {
-                    if sema_stmt_tree_expr_touches_shared(duration, arena) -> return true
+                    if sema_stmt_tree_expr_touches_shared(duration, program, context) -> return true
                 }
                 .Setup | .ExpectFail(_, _) | .Measure | .Skip -> {}
             }
-            sema_stmt_tree_statements_touch_shared(body, arena)
+            sema_stmt_tree_statements_touch_shared(body, program, context)
         }
         .GCEdit(_, _, _, _, index_temp, nested, _) -> {
             if index_temp != None {
                 nested_index: index_temp
-                if sema_stmt_tree_expr_touches_shared(nested_index, arena) -> return true
+                if sema_stmt_tree_expr_touches_shared(nested_index, program, context) -> return true
             }
-            sema_stmt_tree_statement_touches_shared(nested, arena)
+            sema_stmt_tree_statement_touches_shared(nested, program, context)
         }
         .Reactive(_, _) -> false
-        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> sema_stmt_tree_statement_children_touch_shared(statement, arena)
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> sema_stmt_tree_statement_children_touch_shared(statement, program, context)
     }
 }
 
-sema_stmt_tree_statements_touch_shared: fn(statements: [TStmt], arena: BodyTree) -> Bool Never! {
+sema_stmt_tree_statements_touch_shared: fn(statements: [TStmt], program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     loop statement in statements {
-        if sema_stmt_tree_statement_touches_shared(statement, arena) -> return true
+        if sema_stmt_tree_statement_touches_shared(statement, program, context) -> return true
     }
     false
 }
 
 // sema_stmt_tree_expr_touches_shared of node row `index` of `tree`.
-sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
+sema_stmt_row_touches_shared: fn(program: SemaProgramTables, context: SemaCheckContext, index: Int) -> Bool Never! {
+    tree: context.arena.tree
     if tree.nodes[index - tree.node_base].kind == {
         .Lambda(_) -> return false
-        .InlineBlock(body) -> return sema_stmt_rows_touch_shared(tree, body)
+        .InlineBlock(body) -> return sema_stmt_rows_touch_shared(program, context, body)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            if sema_stmt_row_condition_touches_shared(tree, condition) -> return true
-            if sema_stmt_rows_touch_shared(tree, then_body) -> return true
-            if sema_stmt_row_touches_shared(tree, then_value) -> return true
-            if sema_stmt_rows_touch_shared(tree, else_body) -> return true
-            return sema_stmt_row_touches_shared(tree, else_value)
+            if sema_stmt_row_condition_touches_shared(program, context, condition) -> return true
+            if sema_stmt_rows_touch_shared(program, context, then_body) -> return true
+            if sema_stmt_row_touches_shared(program, context, then_value) -> return true
+            if sema_stmt_rows_touch_shared(program, context, else_body) -> return true
+            return sema_stmt_row_touches_shared(program, context, else_value)
         }
         .SharedGuardWait(guard, condition, _) -> {
-            if sema_stmt_row_touches_shared(tree, guard) -> return true
-            return sema_stmt_row_touches_shared(tree, condition)
+            if sema_stmt_row_touches_shared(program, context, guard) -> return true
+            return sema_stmt_row_touches_shared(program, context, condition)
         }
         .CoreClosureCall(kind) -> return if kind == {
-            .Spawn(group, _, _, _) -> if group == .Val(value) -> sema_stmt_row_touches_shared(tree, value) else -> false
+            .Spawn(group, _, _, _) -> if group == .Val(value) -> sema_stmt_row_touches_shared(program, context, value) else -> false
             .Guard(_) | .OnCommit(_, _) | .OnRollback(_, _) | .ReactiveDerived(_) | .ReactiveEffect(_) | .UIReactiveRender(_) | .UIClickSlot(_) | .UIDropSlot(_) -> false
         }
         .FnValue(kind) -> {
@@ -7582,7 +7585,10 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
                         return true
                     }
                     // A capture inside a transaction snapshots through the STM.
-                    if method == "capture" && tree.types.types[tree.expr_types[receiver - tree.node_base].ty] == .Shared(_) {
+                    row_index: receiver - tree.node_base
+                    row_tid: tree.expr_types[row_index].ty
+                    is_shared: if row_tid.id != 0 -> sema_type_kind_in(program, context, row_tid) == TypeKind.Shared else -> context.arena.arena_syntax[row_index] == .Shared(_)
+                    if method == "capture" && is_shared {
                         return true
                     }
                 }
@@ -7593,151 +7599,152 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
     }
     found := false
     body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
-        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+        if !found && sema_stmt_row_touches_shared(program, context, child) -> found = true
     })
     found
 }
 
-sema_stmt_row_pattern_touches_shared: fn(tree: BodyTree, pattern: BodyPattern) -> Bool Never! {
+sema_stmt_row_pattern_touches_shared: fn(program: SemaProgramTables, context: SemaCheckContext, pattern: BodyPattern) -> Bool Never! {
     found := false
-    body_each_pattern_child(tree, pattern, fn(child: Int) {
-        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    body_each_pattern_child(context.arena.tree, pattern, fn(child: Int) {
+        if !found && sema_stmt_row_touches_shared(program, context, child) -> found = true
     })
     found
 }
 
-sema_stmt_row_condition_touches_shared: fn(tree: BodyTree, condition: BodyIfCond) -> Bool Never! {
+sema_stmt_row_condition_touches_shared: fn(program: SemaProgramTables, context: SemaCheckContext, condition: BodyIfCond) -> Bool Never! {
     found := false
-    body_each_if_cond_child(tree, condition, fn(child: Int) {
-        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+    body_each_if_cond_child(context.arena.tree, condition, fn(child: Int) {
+        if !found && sema_stmt_row_touches_shared(program, context, child) -> found = true
     })
     found
 }
 
 // sema_stmt_tree_statement_touches_shared of statement row `item` of `tree`.
-sema_stmt_row_statement_touches_shared: fn(tree: BodyTree, item: Int) -> Bool Never! {
+sema_stmt_row_statement_touches_shared: fn(program: SemaProgramTables, context: SemaCheckContext, item: Int) -> Bool Never! {
+    tree: context.arena.tree
     if tree.stmts[item - tree.stmt_base] == {
         .Transact(_, _, _, _, _) | .Reactive(_, _) -> return false
         .ContractScope(pre, body, post, _, _) -> {
             loop contract in pre {
-                if sema_stmt_row_touches_shared(tree, contract.condition) || sema_stmt_row_touches_shared(tree, contract.message) {
+                if sema_stmt_row_touches_shared(program, context, contract.condition) || sema_stmt_row_touches_shared(program, context, contract.message) {
                     return true
                 }
             }
-            if sema_stmt_rows_touch_shared(tree, body) -> return true
+            if sema_stmt_rows_touch_shared(program, context, body) -> return true
             loop contract in post {
-                if sema_stmt_row_touches_shared(tree, contract.condition) || sema_stmt_row_touches_shared(tree, contract.message) {
+                if sema_stmt_row_touches_shared(program, context, contract.condition) || sema_stmt_row_touches_shared(program, context, contract.message) {
                     return true
                 }
             }
             return false
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            if sema_stmt_row_pattern_touches_shared(tree, pattern) -> return true
-            if sema_stmt_row_touches_shared(tree, init) -> return true
-            return sema_stmt_rows_touch_shared(tree, fallback)
+            if sema_stmt_row_pattern_touches_shared(program, context, pattern) -> return true
+            if sema_stmt_row_touches_shared(program, context, init) -> return true
+            return sema_stmt_rows_touch_shared(program, context, fallback)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            if sema_stmt_row_statement_touches_shared(tree, init) -> return true
-            if sema_stmt_row_touches_shared(tree, condition) -> return true
-            if step == .Val(nested) && sema_stmt_row_statement_touches_shared(tree, nested) {
+            if sema_stmt_row_statement_touches_shared(program, context, init) -> return true
+            if sema_stmt_row_touches_shared(program, context, condition) -> return true
+            if step == .Val(nested) && sema_stmt_row_statement_touches_shared(program, context, nested) {
                 return true
             }
-            return sema_stmt_rows_touch_shared(tree, body)
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            if sema_stmt_row_touches_shared(tree, start) || sema_stmt_row_touches_shared(tree, end) {
+            if sema_stmt_row_touches_shared(program, context, start) || sema_stmt_row_touches_shared(program, context, end) {
                 return true
             }
-            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
-            return sema_stmt_rows_touch_shared(tree, body)
+            if step == .Val(nested) && sema_stmt_row_touches_shared(program, context, nested) -> return true
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
-            if source == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
-            if sema_stmt_row_touches_shared(tree, start) || sema_stmt_row_touches_shared(tree, end) {
+            if source == .Val(nested) && sema_stmt_row_touches_shared(program, context, nested) -> return true
+            if sema_stmt_row_touches_shared(program, context, start) || sema_stmt_row_touches_shared(program, context, end) {
                 return true
             }
-            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
-            return sema_stmt_rows_touch_shared(tree, body)
+            if step == .Val(nested) && sema_stmt_row_touches_shared(program, context, nested) -> return true
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .If(condition, then_body, else_body, _, _) -> {
-            if sema_stmt_row_condition_touches_shared(tree, condition) -> return true
-            if sema_stmt_rows_touch_shared(tree, then_body) -> return true
-            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+            if sema_stmt_row_condition_touches_shared(program, context, condition) -> return true
+            if sema_stmt_rows_touch_shared(program, context, then_body) -> return true
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(program, context, else_statements) else -> false
         }
         .While(_, condition, body, _) -> {
-            if sema_stmt_row_touches_shared(tree, condition) -> return true
-            return sema_stmt_rows_touch_shared(tree, body)
+            if sema_stmt_row_touches_shared(program, context, condition) -> return true
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .Match(subject, arms, _, _) -> {
-            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            if sema_stmt_row_touches_shared(program, context, subject) -> return true
             loop arm in arms {
-                if sema_stmt_row_pattern_touches_shared(tree, arm.pattern) -> return true
-                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+                if sema_stmt_row_pattern_touches_shared(program, context, arm.pattern) -> return true
+                if sema_stmt_rows_touch_shared(program, context, arm.body) -> return true
             }
             return false
         }
         .EnumMatch(scrutinee, arms, else_body, _, _) -> {
-            if sema_stmt_row_touches_shared(tree, scrutinee) -> return true
+            if sema_stmt_row_touches_shared(program, context, scrutinee) -> return true
             loop arm in arms {
-                if sema_stmt_row_pattern_touches_shared(tree, arm.pattern) -> return true
-                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+                if sema_stmt_row_pattern_touches_shared(program, context, arm.pattern) -> return true
+                if sema_stmt_rows_touch_shared(program, context, arm.body) -> return true
             }
-            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(program, context, else_statements) else -> false
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            if sema_stmt_row_touches_shared(program, context, subject) -> return true
             loop arm in arms {
-                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+                if sema_stmt_rows_touch_shared(program, context, arm.body) -> return true
             }
-            return sema_stmt_rows_touch_shared(tree, else_body)
+            return sema_stmt_rows_touch_shared(program, context, else_body)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
-            if sema_stmt_row_touches_shared(tree, source) || sema_stmt_row_touches_shared(tree, collection) {
+            if sema_stmt_row_touches_shared(program, context, source) || sema_stmt_row_touches_shared(program, context, collection) {
                 return true
             }
-            if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
-            return sema_stmt_rows_touch_shared(tree, body)
+            if step == .Val(nested) && sema_stmt_row_touches_shared(program, context, nested) -> return true
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> return sema_stmt_rows_touch_shared(tree, body)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> return sema_stmt_rows_touch_shared(program, context, body)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            if sema_stmt_row_touches_shared(tree, subject) -> return true
+            if sema_stmt_row_touches_shared(program, context, subject) -> return true
             loop arm in arms {
-                if sema_stmt_row_touches_shared(tree, arm.condition) -> return true
-                if sema_stmt_rows_touch_shared(tree, arm.body) -> return true
+                if sema_stmt_row_touches_shared(program, context, arm.condition) -> return true
+                if sema_stmt_rows_touch_shared(program, context, arm.body) -> return true
             }
-            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(tree, else_statements) else -> false
+            return if else_body == .Val(else_statements) -> sema_stmt_rows_touch_shared(program, context, else_statements) else -> false
         }
         .ContextBlock(guards, body, _) -> {
             loop guard in guards {
-                if sema_stmt_row_touches_shared(tree, guard.value) -> return true
+                if sema_stmt_row_touches_shared(program, context, guard.value) -> return true
             }
-            return sema_stmt_rows_touch_shared(tree, body)
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .ScopeMember(kind, body, _) -> {
-            if kind == .Timeout(duration) && sema_stmt_row_touches_shared(tree, duration) {
+            if kind == .Timeout(duration) && sema_stmt_row_touches_shared(program, context, duration) {
                 return true
             }
-            return sema_stmt_rows_touch_shared(tree, body)
+            return sema_stmt_rows_touch_shared(program, context, body)
         }
         .GCEdit(_, _, _, _, index_temp, nested, _) -> {
-            if index_temp == .Val(nested_index) && sema_stmt_row_touches_shared(tree, nested_index) {
+            if index_temp == .Val(nested_index) && sema_stmt_row_touches_shared(program, context, nested_index) {
                 return true
             }
-            return sema_stmt_row_statement_touches_shared(tree, nested)
+            return sema_stmt_row_statement_touches_shared(program, context, nested)
         }
         .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
     }
     found := false
     body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
-        if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
+        if !found && sema_stmt_row_touches_shared(program, context, child) -> found = true
     })
     found
 }
 
-sema_stmt_rows_touch_shared: fn(tree: BodyTree, statements: [Int]) -> Bool Never! {
+sema_stmt_rows_touch_shared: fn(program: SemaProgramTables, context: SemaCheckContext, statements: [Int]) -> Bool Never! {
     loop item in statements {
-        if sema_stmt_row_statement_touches_shared(tree, item) -> return true
+        if sema_stmt_row_statement_touches_shared(program, context, item) -> return true
     }
     false
 }
@@ -7787,7 +7794,7 @@ sema_stmt_check_transaction: fn(name: String?, name_span: Span?, body: [Stmt], i
         handle = Val(synthesized)
     }
     stm := TLocal?{None}
-    if sema_stmt_tree_statements_touch_shared(nested.value, context.arena.tree) {
+    if sema_stmt_tree_statements_touch_shared(nested.value, program, context) {
         stm = Val(sema_stmt_transaction_stm_local(span))
     }
     Val(TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: nested.value, span: span})

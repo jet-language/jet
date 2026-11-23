@@ -52,7 +52,7 @@ ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBo
         }
         row: b.f.slot_type[binding.slot]
         if !binding.owned && m.types[row].drop != "" && m.types[row].kind != .Aggregate && m.types[row].clone == "" {
-            return ir_fail(b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(m.types[row].ty)}, which has no copy; take it by move (`&&`)")
+            return ir_fail(b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(ir_row_ty(m, p, row))}, which has no copy; take it by move (`&&`)")
         }
         captures.push(IRGeneratorCapture{name: binding.name.copy(), row: row, offset: offset, moved: index < moves.len() && moves[index]})
         size: m.types[row].size

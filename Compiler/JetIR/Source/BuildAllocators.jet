@@ -91,7 +91,7 @@ ir_view_result_store: fn(m: &IRModule, b: &IRBuilder, boxed: Int, view: Int, tai
 ir_view_result_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)
-    boxed_ty: m.types[b.f.slot_type[boxed]].ty.copy()
+    boxed_ty: ir_row_ty(m, p, b.f.slot_type[boxed])
     tail: ir_view_result_tail(m, p, boxed_ty)
     ir_emit(b.f, IROp.Load, address, boxed, tail, -1, b.line)
     address

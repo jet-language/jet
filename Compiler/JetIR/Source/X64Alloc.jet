@@ -2625,7 +2625,8 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     loop level in 0..<3 {
         m := ir_module_new()
         word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        pair: ir_intern_type(m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
+        pair_tid: ir_module_intern_tid(m, Type.Named{name: "Pair"})
+        pair: ir_intern_type(m, "Pair", IRType{ty: pair_tid, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
         make := ir_function_new("make", "test:pair.jet.make", "", "pair.jet", 1)
         x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         make.result = pair

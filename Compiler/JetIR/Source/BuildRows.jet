@@ -15,7 +15,7 @@
 //   - `table.field` returns the contiguous `[F]` column directly via one
 //     Offset (zero loop, zero allocation, zero element copy).
 use {
-    jet_foundation.[
+    jet_foundation.[interner_empty, 
         BodyStructFieldValue,
         FnBody,
         Span,
@@ -139,11 +139,17 @@ ir_rows_columnar: fn(m: &IRModule, p: IRProgram, ty: Type) -> IRRowsColumns? Nev
     None
 }
 
+// ir_rows_columnar of node `table`'s checked type.
+ir_rows_columnar_of: fn(m: &IRModule, p: IRProgram, b: IRBuilder, table: Int) -> IRRowsColumns? Never! {
+    ty: ir_ty(m, p, b, table)
+    ir_rows_columnar(m, p, ty)
+}
+
 // If `node_id` is `.Field(table, "__rows")` on a columnar `Rows<T>`, returns
 // `table`; else -1.
 ir_rows_backing_table: fn(m: &IRModule, p: IRProgram, b: IRBuilder, node_id: Int) -> Int Never! {
     if ir_body_node(p, b, node_id).kind == .Field(receiver, field) {
-        if field.name == "__rows" && ir_rows_columnar(m, p, ir_ty(p, b, receiver)) != None {
+        if field.name == "__rows" && ir_rows_columnar_of(m, p, b, receiver) != None {
             return receiver
         }
     }
@@ -163,7 +169,7 @@ ir_rows_col_index: fn(info: IRRowsColumns, name: String) -> Int Never! {
 ir_rows_checked_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, col0: Int, index: Int, span: Span) -> Int Never! {
     position: ir_expr(m, p, b, index)
     if ir_failed(b) || position < 0 -> return -1
-    native: ir_native_index(m, b, position, span)
+    native: ir_native_index(m, p, b, position, span)
     if ir_failed(b) -> return -1
     if b.bounds != .Off {
         length: ir_list_length(m, b, col0)
@@ -189,7 +195,7 @@ ir_rows_struct_lit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Int, info:
         ir_emit(b.f, IROp.Store, -1, storage, col.offset + 8, zero, b.line)
         ir_emit(b.f, IROp.Store, -1, storage, col.offset + 16, zero, b.line)
     }
-    if fields.len() == 1 && fields[0].field.name == "__rows" && !ir_empty_list_literal(p, b, fields[0].value) {
+    if fields.len() == 1 && fields[0].field.name == "__rows" && !ir_empty_list_literal(m, p, b, fields[0].value) {
         src_list: ir_expr(m, p, b, fields[0].value)
         if ir_failed(b) || src_list < 0 -> return -1
         length: ir_list_length(m, b, src_list)
@@ -223,7 +229,7 @@ ir_rows_struct_lit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Int, info:
 ir_rows_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int? Never! {
     table: ir_rows_backing_table(m, p, b, receiver)
     if table < 0 -> return None
-    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    info: ir_rows_columnar_of(m, p, b, table) ?? return None
     if operation == .LenList && args.len() == 0 {
         table_slot: ir_expr(m, p, b, table)
         if ir_failed(b) || table_slot < 0 -> return Val(-1)
@@ -275,7 +281,7 @@ ir_rows_field_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int,
         if kind != .List -> return None
         table: ir_rows_backing_table(m, p, b, base)
         if table < 0 -> return None
-        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+        info: ir_rows_columnar_of(m, p, b, table) ?? return None
         ci: ir_rows_col_index(info, field_name)
         if ci < 0 -> return None
         table_slot: ir_expr(m, p, b, table)
@@ -294,7 +300,7 @@ ir_rows_field_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int,
 ir_rows_row_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, span: Span) -> Int? Never! {
     table: ir_rows_backing_table(m, p, b, base)
     if table < 0 -> return None
-    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    info: ir_rows_columnar_of(m, p, b, table) ?? return None
     table_slot: ir_expr(m, p, b, table)
     if ir_failed(b) || table_slot < 0 -> return Val(-1)
     col0: ir_member_read(m, b, table_slot, info.col_members[0])
@@ -320,11 +326,11 @@ ir_rows_field_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: In
         if kind != .List -> return false
         table: ir_rows_backing_table(m, p, b, base)
         if table < 0 -> return false
-        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return false
+        info: ir_rows_columnar_of(m, p, b, table) ?? return false
         ci: ir_rows_col_index(info, field_name)
         if ci < 0 -> return false
         col_elem_row: info.elem_members[ci].ty
-        value_ty: ir_ty(p, b, value)
+        value_ty: ir_ty(m, p, b, value)
         slot: ir_value_as(m, p, b, value, col_elem_row, span)
         if ir_failed(b) -> return true
         table_addr: ir_write_base(m, p, b, table, span)
@@ -345,7 +351,7 @@ ir_rows_row_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, ind
     if op != None -> return false
     table: ir_rows_backing_table(m, p, b, base)
     if table < 0 -> return false
-    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return false
+    info: ir_rows_columnar_of(m, p, b, table) ?? return false
     val: ir_value_as(m, p, b, value, info.elem_row, span)
     if ir_failed(b) || val < 0 -> return true
     table_addr: ir_write_base(m, p, b, table, span)
@@ -379,7 +385,7 @@ ir_rows_field_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, recei
         if kind != .List -> return None
         table: ir_rows_backing_table(m, p, b, base)
         if table < 0 -> return None
-        info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+        info: ir_rows_columnar_of(m, p, b, table) ?? return None
         ci: ir_rows_col_index(info, field_name)
         if ci < 0 -> return None
         table_addr: ir_place_address(m, p, b, table, backs, span)
@@ -405,7 +411,7 @@ ir_rows_column_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], 
     if body.len() != 3 -> return None
     collect_name := ""
     if ir_body_stmt(p, b, body[0]) == .Let(local, _, init, _, _, _) {
-        if !ir_empty_list_literal(p, b, init) -> return None
+        if !ir_empty_list_literal(m, p, b, init) -> return None
         collect_name = local.name
     } else { return None }
     table := -1
@@ -435,7 +441,7 @@ ir_rows_column_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], 
             if tail_local.name != collect_name -> return None
         } else { return None }
     } else { return None }
-    info: ir_rows_columnar(m, p, ir_ty(p, b, table)) ?? return None
+    info: ir_rows_columnar_of(m, p, b, table) ?? return None
     ci: ir_rows_col_index(info, col_field)
     if ci < 0 -> return None
     table_slot: ir_expr(m, p, b, table)
@@ -555,7 +561,7 @@ ir_rows_test_struct: fn(name: String, generic: [String], fields: [TypeTupleField
     user_rows_def: ir_rows_test_struct("engine.Rows", [String]{"T"}, [TypeTupleField]{TypeTupleField{name: "items", ty: Type.List{element: t_param}}})
     node_def: ir_rows_test_struct("Node", [String]{}, [TypeTupleField]{TypeTupleField{name: "line", ty: Type.Int}, TypeTupleField{name: "kind", ty: Type.Int}})
     ty_def: ir_rows_test_struct("Ty", [String]{}, [TypeTupleField]{TypeTupleField{name: "size", ty: Type.Int}})
-    p: ir_program_declared([TTypeDef]{rows_def, user_rows_def, node_def, ty_def}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p: ir_program_declared([TTypeDef]{rows_def, user_rows_def, node_def, ty_def}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     m := ir_module_new()
 
     assert(ir_rows_is_core_def(p, 0), "core.collections.Rows is recognized as Core Rows")
