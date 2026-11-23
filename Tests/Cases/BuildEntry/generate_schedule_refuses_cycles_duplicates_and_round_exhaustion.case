@@ -1,0 +1,48 @@
+# Claim: the generation schedule is checked before anything runs. A step that
+# waits on Jet source it makes, alone or through other steps, is a generation
+# cycle (Jet.GenerationCycle); a cycle through plain files only stays a step
+# cycle (Jet.BuildPlanFailed). Two producers of one output are refused with
+# their codes, and a chain of steps past the 17-round limit is
+# Jet.GenerationRoundLimit while one of 17 rounds plans. Each refusal runs no
+# step and writes nothing.
+fixture: Fixtures/GenerateScheduleRefusals
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet build self.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Jet.GenerationCycle" # a step that reads the Jet source it makes
+stderr: ~ "generated Jet source waits on itself: `grow` -> `grow`" # the one-step cycle, named
+stderr: ~ "self.jet:5:17" # at the step's `b.run` call
+file: made.txt absent # the step never ran
+file: .jet/generated absent
+step: jet build pair.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Jet.GenerationCycle" # through a plain file in between
+stderr: ~ "`schema` -> `models` -> `link` -> `schema`" # each step of the cycle, in order
+stderr: ~ "pair.jet:6:19" # at the first step's `b.run` call
+file: made.txt absent
+step: jet build files.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Jet.BuildPlanFailed" # plain files only: a step cycle
+stderr: ~ "action dependency graph contains a cycle: `stamp` -> `stamp`" # the step cycle's own report
+stderr: !~ "Jet.GenerationCycle" # no Jet source is in this cycle
+step: jet build rounds.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "Jet.GenerationRoundLimit" # 18 rounds in a chain of steps
+stderr: ~ "step `gen17` would generate in round 18, past the limit of 17: `gen0` -> `gen1` -> " # the chain from its first step
+stderr: ~ "rounds.jet:7:21" # at the `b.run` call in the loop
+file: .jet/generated absent
+step: jet inspect build within.jet --json
+exit: 0
+json: stdout doc $.build.schedule[16].name = "gen16"
+json: stdout doc $.build.schedule[16].round = 17 # the last round the limit allows
+json: stdout doc $.build.schedule[16].waits[0].producer = "gen15"
+step: jet build twice.jet
+exit: nonzero
+stderr: ~ "Jet.GenerationCycle" # one module, two producers
+stderr: ~ "module `facts` is generated twice" # the second `b.generate` of one name
+file: .jet/generated absent
+step: jet build shared.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "output `table.txt` is owned by both `first` and `second`" # two steps write one file

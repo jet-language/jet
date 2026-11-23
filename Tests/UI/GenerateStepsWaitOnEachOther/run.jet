@@ -1,0 +1,18 @@
+// @programmable_build
+// @cli_build
+// Two steps that each read the Jet source the other makes wait on each
+// other: neither can start until the other's source is checked (E3511),
+// reported at the `b.run` call of the step the chain starts from.
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell") {
+        shell: b.probe("shell", "find_program", "sh")
+        schema: b.run("schema", b.found(shell), [])
+        models: b.run("models", b.found(shell), [])
+        schema.reads(".jet/generated/run/models.jet")
+        schema.writes(".jet/generated/run/schema.jet")
+        models.reads(".jet/generated/run/schema.jet")
+        models.writes(".jet/generated/run/models.jet")
+    }
+}
+
+run: fn() {}

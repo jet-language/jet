@@ -1,0 +1,23 @@
+// `schema` and `models` each read the Jet source the other makes, through
+// the plain file `link` makes: the three wait on each other.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generating steps") {
+        shell: b.probe("shell", "find_program", "sh")
+        schema: b.run("schema", b.found(shell), ["Exec", "FS"])
+        schema.arg("-c")
+        schema.arg("printf 'made' > made.txt")
+        schema.reads(".jet/generated/pair/models.jet")
+        schema.writes(".jet/generated/pair/schema.jet")
+        schema.writes("made.txt")
+        link: b.run("link", b.found(shell), ["Exec", "FS"])
+        link.reads(".jet/generated/pair/schema.jet")
+        link.writes("link.txt")
+        models: b.run("models", b.found(shell), ["Exec", "FS"])
+        models.reads("link.txt")
+        models.writes(".jet/generated/pair/models.jet")
+        app: b.add_executable("app", ["pair.jet"], [models])
+        b.default(app)
+    }
+}
+
+run: fn() {}

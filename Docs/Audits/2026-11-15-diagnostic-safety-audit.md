@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 875 active error rows: 752 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 876 active error rows: 753 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -673,12 +673,13 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3504 | BuildActionAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:1074 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCLI/Source/CLI/BuildExecute.jet:181 | the action's cause is fixed |
 | E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:246 | the step's cause is fixed |
-| E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:574 | generate under another name |
-| E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:418 | one producer per module |
+| E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:587 | generate under another name |
+| E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:429 | one producer per module, and no step waits on its own Jet source |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:169 | regenerate and lock again |
 | E3513 | LockedEffectRowWidened | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:553 | lock the new effect row after review |
-| E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:208 | a producer makes the file |
-| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:527 | one build entry per package |
+| E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:211 | a producer makes the file |
+| E3516 | GenerationRoundLimit | Compiler/JetBuildSession/Source/Session.jet:436 | a shorter chain of generating steps |
+| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:529 | one build entry per package |
 | E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:405 | one writer per layer |
 | E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:117 | a code outside the compiler's shape |
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:942 | one override per command |
@@ -1628,11 +1629,12 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E3505 | BuildProbeFailed | soundness | The probe or sandboxed action failed, and Jet never falls back to ambient execution, so there is no result. |
 | E3506 | LinkStepFailed | soundness | A link or post-link step the build names failed, and Jet never makes the executable another way, so there is no executable. |
 | E3510 | GeneratedModuleShadows | soundness | The generated module would replace written source, so what compiles would not be what was written. |
-| E3511 | GenerationCycle | soundness | Two producers for one module would make what compiles depend on which ran last. |
+| E3511 | GenerationCycle | soundness | Two producers for one module would make what compiles depend on which ran last, and a step that waits on Jet source it makes could never start. |
 | E3512 | LockedGenerationDrift | soundness | The generated input changed from the lock, so a `--locked` build would compile bytes nobody locked. |
 | E3513 | LockedEffectRowWidened | soundness | The dependency now reaches an effect the lock does not record, so a `--locked` build would grant authority nobody reviewed. |
 | E3514 | RewriteWithoutConsent | soundness | Rewriting a dependency's code changes what runs, so it needs the root's consent. |
 | E3515 | MissingProducer | soundness | No producer makes the file, so it is stale or was never made, and nothing checks it. |
+| E3516 | GenerationRoundLimit | soundness | Each round of generated Jet source is checked before the next reads it, so a bounded number of rounds keeps generation finite. |
 | E3520 | DuplicateBuildEntry | soundness | Two build entries give one package two build authorities. |
 | E3521 | BuildFactConflict | soundness | Two writers at one layer disagree, so the fact has no one value. |
 | E3530 | ReservedBuildRuleCode | soundness | Compiler codes own that shape, so a build rule code there gives the code two meanings. |

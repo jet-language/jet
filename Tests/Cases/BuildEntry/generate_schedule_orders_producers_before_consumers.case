@@ -1,0 +1,42 @@
+# Claim: generation follows a schedule built from what each producer
+# promises and each consumer declares it reads, not from declaration order.
+# A module `b.generate` makes is round 1; a step reading Jet source waits on
+# a typed barrier and runs a round after its producer, once that source is
+# checked; a step reading a plain file waits on a file barrier in its
+# producer's round. The plan JSON shows the schedule, and the build runs each
+# consumer after its producer, with the promised module on disk first even
+# though `write_generated` is off.
+fixture: Fixtures/GenerateSchedule
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet inspect build main.jet --json
+exit: 0
+json: stdout doc $.build.schedule[0].round = 1
+json: stdout doc $.build.schedule[0].kind = "module"
+json: stdout doc $.build.schedule[0].name = "facts"
+json: stdout doc $.build.schedule[0].outputs = [".jet/generated/main/facts.jet"]
+json: stdout doc $.build.schedule[0].waits = []
+json: stdout doc $.build.schedule[1].round = 2 # a round after the module it reads
+json: stdout doc $.build.schedule[1].name = "render"
+json: stdout doc $.build.schedule[1].waits[0].path = ".jet/generated/main/facts.jet"
+json: stdout doc $.build.schedule[1].waits[0].kind = "module"
+json: stdout doc $.build.schedule[1].waits[0].producer = "facts"
+json: stdout doc $.build.schedule[1].waits[0].barrier = "typed"
+json: stdout doc $.build.schedule[2].round = 3 # declared first, it still waits on `shown`
+json: stdout doc $.build.schedule[2].name = "count"
+json: stdout doc $.build.schedule[2].waits[0].producer = "shown"
+json: stdout doc $.build.schedule[2].waits[0].barrier = "file" # a plain file adds no round
+json: stdout doc $.build.schedule[3].round = 3
+json: stdout doc $.build.schedule[3].name = "shown"
+json: stdout doc $.build.schedule[3].waits[0].kind = "step"
+json: stdout doc $.build.schedule[3].waits[0].producer = "render"
+json: stdout doc $.build.schedule[3].waits[0].barrier = "typed"
+file: .jet/generated absent # planning runs nothing and writes nothing
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: .jet/generated/main/facts.jet ~ "answer" # the promised module, on disk before `render` ran
+file: .jet/generated/main/render.jet = "rendered: fn() -> Int { 1 }\n"
+file: shown.txt = "rendered: fn() -> Int { 1 }"
+file: count.txt = "counted rendered: fn() -> Int { 1 }"

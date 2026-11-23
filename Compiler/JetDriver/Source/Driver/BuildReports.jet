@@ -8,9 +8,11 @@ use {
         BuildSessionAction,
         BuildSessionGeneratedModule,
         BuildSessionPlan,
+        BuildSessionScheduleNode,
         build_key_debug_text,
         build_key_target_kind,
         build_session_project,
+        build_session_schedule,
     ]
 }
 
@@ -145,10 +147,21 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
         probes.push("{{\"name\":{foundation_json_quote(probe.name)},\"kind\":{foundation_json_quote(kind)},\"reproducibility\":{foundation_json_quote(reproducibility)}}}")
     }
     generated: loop generated_row in permit.value.generated -> jet_driver_build_generated_json(generated_row)
+    schedule: loop node in build_session_schedule(permit.value) -> jet_driver_build_schedule_json(node)
     default: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
     // Rust BuildGraph.affected_files() is the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
-    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}]}}"
+    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"schedule\":[{schedule.join(",")}]}}"
+}
+
+// One producer of the plan's generation schedule (JetBuildSession
+// Schedule.jet): its round, kind ("module" or "step") and name, the outputs
+// it promises, and what it waits on: each path, the producer that promises
+// it, and its barrier ("typed" for Jet source, checked before it is read a
+// round later; "file" otherwise).
+jet_driver_build_schedule_json: fn(node: BuildSessionScheduleNode) -> String Never! {
+    waits: loop wait in node.waits -> "{{\"path\":{foundation_json_quote(wait.path)},\"kind\":{foundation_json_quote(wait.kind)},\"producer\":{foundation_json_quote(wait.producer)},\"barrier\":{foundation_json_quote(wait.barrier)}}}"
+    "{{\"round\":{node.round},\"kind\":{foundation_json_quote(node.kind)},\"name\":{foundation_json_quote(node.name)},\"outputs\":{jet_driver_build_strings(node.outputs)},\"waits\":[{waits.join(",")}]}}"
 }
 
 // One generated module of the plan: its stable identity (`id`, kept across

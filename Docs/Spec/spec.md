@@ -7700,18 +7700,40 @@ Generation is additive with one owner per managed path.
 `.jet/generated/<package>/<name>.jet`; a name keeps
 only letters, digits, `_` and `-` (every other character becomes `_`), so no
 name leaves that folder. Every generated module joins the package's one checked
-compile beside its hand-written sources, so a generated module can use another
-in any order and generation has no rounds to bound. A module generated twice,
-two names that share one path, and a step that writes a generated module's path
-are E3511, reported at the call that makes the second claim, before any step
-runs or any generated file is written; an empty name or item block is E3502.
-Steps that wait on each other are E3502 at the `b.run` call of the step the
-cycle starts from. A target source or an input under `.jet/generated/` that no
+compile beside its hand-written sources, so generated modules can use each
+other in any order. Generation follows a schedule built from what each
+producer promises and each step declares it reads, never from the order of
+the calls. Every `b.generate`, `meta.add` and `meta.rewrite_body` module is
+round 1. A step that reads a path another producer promises waits on that
+producer. Reading Jet source (a `.jet` path) is a typed barrier: the step runs
+one round after its producer, once that source is checked. Reading any other
+file is a file barrier in the producer's round. A module a selected step
+reads is written and checked before any step runs, whatever
+`write_generated` says. `jet inspect build --json` lists the schedule under
+`schedule`, ordered by round, then kind (`module`, then `step`), then name.
+Each row gives its round, kind and name, the outputs it promises, and what it
+waits on: each wait's path, its producer and producer kind, and its barrier.
+A build generates in at most 17 rounds (D-META-LADDER1). A step that would
+generate in round 18 or later is E3516, at its `b.run` call, naming the chain
+of steps that leads to it. A module generated twice, two names that share one
+path, and a step that writes a generated module's path are E3511, reported at
+the call that makes the second claim, before any step runs or any generated
+file is written; an empty name or item block is E3502. Steps that wait on Jet
+source they make, alone or through other steps, are E3511 at the `b.run` call
+of the step the cycle starts from; steps that wait on each other only through
+other files are E3502 there. Both are reported before any step runs or any
+file is written. A target source or an input under `.jet/generated/` that no
 `b.generate`, `meta.add` or step output makes is E3515, at the call that
 declared the target or step that uses it. A generated module that would shadow
 a hand-written one is E3510. When `run` or another hand-written function uses
 a module the build never made because it refused a call, the refusal is
-reported first and the check report follows. `--locked` checks generated input
+reported first and the check report follows: a check of the whole package
+without the modules the build never made, so it covers members `build: fn`
+doesn't reach. The check report on a name that a promised module declares
+carries a note naming both ends of the broken promise: the call that
+promised the module (`b.generate("facts")` at its line, or `meta.add` in the
+function that called it) and the function that uses the name. An unknown
+name that no promised module declares gets no such note. `--locked` checks generated input
 and output hashes before materializing and records provenance after the
 complete runtime bundle is checked (D-BUILDENTRY1).
 

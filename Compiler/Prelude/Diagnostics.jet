@@ -13061,21 +13061,23 @@ GenerationCycle: struct {
     impl Diagnostic {
         code: "E3511",
         safety_class: .Soundness,
-        safety_reason: "Two producers for one module would make what compiles depend on which ran last.",
-        expert_path: "none: one producer per module",
+        safety_reason: "Two producers for one module would make what compiles depend on which ran last, and a step that waits on Jet source it makes could never start.",
+        expert_path: "none: one producer per module, and no step waits on its own Jet source",
         stage: [.Build],
-        meaning: "A generated module name or path has two producers",
+        meaning: "A generated output has two producers, or steps wait on Jet source they make",
         detail: true,
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "Generated source has two producers: `{self.chain}`." }
+        what: fn(self) -> String {
+            "Generated source has two producers, or waits on itself: `{self.chain}`."
+        }
 
         why: fn(self) -> String {
-            "Each generated module and its path have one producer, so what compiles never depends on which producer ran last."
+            "Each generated output has one producer and is checked before a step reads it, so what compiles never depends on which producer ran last and every step can start."
         }
 
         fix: fn(self) -> String {
-            "Give each generated module its own name, and keep steps from writing a generated module's path."
+            "Give each generated module its own name, keep steps from writing a generated module's path, and have one step of a waiting chain read something no step in it makes."
         }
     }
 }
@@ -13181,6 +13183,33 @@ MissingProducer: struct {
 
         fix: fn(self) -> String {
             "Restore the `b.generate`, `meta.add` or step output that made `{self.path}`, or remove it from {self.user}"
+        }
+    }
+}
+
+GenerationRoundLimit: struct {
+    step: String,
+    limit: String,
+
+    impl Diagnostic {
+        code: "E3516",
+        safety_class: .Soundness,
+        safety_reason: "Each round of generated Jet source is checked before the next reads it, so a bounded number of rounds keeps generation finite.",
+        expert_path: "none: a shorter chain of generating steps",
+        stage: [.Build],
+        meaning: "A step generates in a round past the build's generation round limit",
+        detail: true,
+
+        what: fn(self) -> String {
+            "Step `{self.step}` would generate past the limit of {self.limit} rounds"
+        }
+
+        why: fn(self) -> String {
+            "Each round of generated Jet source is checked before the next round reads it, and a build generates in at most {self.limit} rounds, so generation always ends"
+        }
+
+        fix: fn(self) -> String {
+            "Have a step read an earlier round's source, or merge steps of the chain so it is at most {self.limit} rounds long"
         }
     }
 }

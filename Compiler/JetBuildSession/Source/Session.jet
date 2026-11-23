@@ -360,6 +360,15 @@ build_session_refused: fn(session: BuildSession) -> Bool Never! {
     permit.value.refused
 }
 
+// The modules the build promised so far: each `b.generate`, `meta.add` and
+// `meta.rewrite_body` call the session accepted, also when the build then
+// failed and made none of them.
+build_session_promised: fn(session: BuildSession) -> [BuildSessionGeneratedModule] Never! {
+    permit: session.storage.guard_read()
+    // copy: the rows outlive the read of the session.
+    permit.value.generated.copy()
+}
+
 // The next call's span is in source file `file` (a dependency's function's
 // call as well as the build file's), which an option it sets names as its
 // site.
@@ -411,16 +420,28 @@ build_session_diag: fn(state: BuildSessionState, what: String) -> BuildSessionDi
     build_session_plan_report(what, state.start, state.end)
 }
 
-// An invalid-plan report: a generated module name or path with two producers
-// is E3511, every other invalid graph fact the E3502 report. The driver and
-// the evaluator both word their reports here.
+// An invalid-plan report: a generated module name or path with two
+// producers, and steps that wait on Jet source they make themselves, are
+// E3511; a step past the generation round limit is E3516; every other
+// invalid graph fact is the E3502 report. The driver and the evaluator both
+// word their reports here.
 build_session_plan_report: fn(what: String, start: Int, end: Int) -> BuildSessionDiagnostic Never! {
     if what.starts_with("Jet.GenerationCycle: ") {
         detail: what.removeprefix("Jet.GenerationCycle: ")
+        if detail.starts_with(BUILD_SESSION_WAIT_CYCLE) {
+            return {code: "E3511", what: "build plan is invalid: {detail}", why: "a step reads Jet source only once the build has checked it, so a step that waits on Jet source it makes itself, alone or through other steps, can never start", fix: "have one step of the chain read something no step in it makes, or merge the steps into one", start: start, end: end}
+        }
         return {code: "E3511", what: "build plan is invalid: {detail}", why: "each generated module and its path have one producer, so what compiles never depends on which producer ran last", fix: "give each generated module its own name, and keep steps from writing a generated module's path", start: start, end: end}
+    }
+    if what.starts_with("Jet.GenerationRoundLimit: ") {
+        detail: what.removeprefix("Jet.GenerationRoundLimit: ")
+        return {code: "E3516", what: "build plan is invalid: {detail}", why: "each round of generated Jet source is checked before the next round reads it, and a build generates in at most {BUILD_SESSION_GENERATION_ROUNDS} rounds, so generation always ends", fix: "have a step read an earlier round's source, or merge steps of the chain so it is at most {BUILD_SESSION_GENERATION_ROUNDS} rounds long", start: start, end: end}
     }
     {code: "E3502", what: "build plan is invalid: {what}", why: "`build: fn` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: start, end: end}
 }
+
+// How a cycle of steps that wait on Jet source they make begins its report.
+BUILD_SESSION_WAIT_CYCLE: "generated Jet source waits on itself"
 
 build_session_fail: fn(state: BuildSessionState, what: String) -> BuildSessionReply {
     return BuildSessionReply.Failure{error: build_session_diag(state, what)}
@@ -1168,6 +1189,8 @@ BuildSessionError: enum {
     GeneratedModuleCycle(name: String, path: String),
     TargetDependencyCycle(nodes: [String]),
     ActionDependencyCycle(nodes: [String]),
+    GenerationWaitCycle(nodes: [String]),
+    GenerationRoundLimit(step: String, round: Int, chain: [String]),
 }
 
 BuildSessionErrorField: struct {
@@ -1270,6 +1293,14 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .GeneratedModuleCycle(name, path) -> ({variant: "GeneratedModuleCycle", text: "Jet.GenerationCycle: `{name}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", name), build_session_error_field("path", path)}})
         .TargetDependencyCycle(nodes) -> build_session_error_cycle("TargetDependencyCycle", "target", nodes)
         .ActionDependencyCycle(nodes) -> build_session_error_cycle("ActionDependencyCycle", "action", nodes)
+        .GenerationWaitCycle(nodes) -> {
+            chain: loop node in nodes -> "`{node}`"
+            return {variant: "GenerationWaitCycle", text: "Jet.GenerationCycle: {BUILD_SESSION_WAIT_CYCLE}: {chain.join(" -> ")}; each step reads Jet source the next one makes", fields: [BuildSessionErrorField]{{name: "nodes", value: build_session_error_texts(nodes)}}}
+        }
+        .GenerationRoundLimit(step, round, chain) -> {
+            steps: loop node in chain -> "`{node}`"
+            return {variant: "GenerationRoundLimit", text: "Jet.GenerationRoundLimit: step `{step}` would generate in round {round}, past the limit of {BUILD_SESSION_GENERATION_ROUNDS}: {steps.join(" -> ")}, each reading what the one before made", fields: [BuildSessionErrorField]{build_session_error_field("step", step), {name: "round", value: "{round}"}, {name: "chain", value: build_session_error_texts(chain)}}}
+        }
         .PolicyDenied(subject, allowed, reason, caps) -> {
             // PolicyExplanation Debug is part of the reference failed value.
             names: loop cap in caps -> build_session_cap_name(cap)

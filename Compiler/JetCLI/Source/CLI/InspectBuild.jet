@@ -397,13 +397,18 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     shadowed: jet_cli_generated_shadow(root, generated, color)
     // copy: `shadowed` is a payload view of the check's result.
     if shadowed == .Val(refusal) -> return refusal.copy()
-    if build_options_value(selected_options, "write_generated") == "on" {
-        loop source_file in generated {
-            path: jet_cli_entry_join(root, source_file.path)
-            directory: jet_cli_parent(path) ?? root
-            build_files.create_dir_all(directory) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
-            build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
-        }
+    // Under `write_generated: on` every generated source is written; a
+    // module a step reads is that step's input, promised to it, so it is
+    // written before any step runs whatever the option says (JetBuildSession
+    // Schedule.jet).
+    write_all: build_options_value(selected_options, "write_generated") == "on"
+    loop source_file in generated {
+        if !write_all && !jet_cli_build_steps_read(graph, source_file.path) -> next
+        path: jet_cli_entry_join(root, source_file.path)
+        directory: jet_cli_parent(path) ?? root
+        fix: if write_all -> "make `{directory}` writable, or build with `--write-generated=off`" else -> "make `{directory}` writable"
+        build_files.create_dir_all(directory) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), fix, color)
+        build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), fix, color)
     }
     built: jet_cli_build_run_graph(graph, projected, generated, settings, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
@@ -462,6 +467,14 @@ jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutab
         } ?? false
         if !made -> missing.push("`{source}` of `{target.name}`")
     }
+}
+
+// Whether a step of `graph` reads `path`.
+jet_cli_build_steps_read: fn(graph: BuildPlanExecution, path: String) -> Bool Never! {
+    loop action in graph.actions {
+        if action.inputs.contains(path) -> return true
+    }
+    false
 }
 
 // The `[[comptime_inputs]]` rows of `generated`: each source's package-relative

@@ -1,0 +1,19 @@
+// @programmable_build
+// @cli_build
+// A build that fails makes none of the modules it promised. The report on a
+// name such a module declares names the call that promised it and the
+// function that uses it; `nowhere`, which no module promised, stays an
+// ordinary unknown name.
+build: fn(b: Build) {
+    b.generate("facts") {
+        answer: fn() -> Int { 42 }
+    }
+    b.generate("facts") {
+        other: fn() -> Int { 1 }
+    }
+}
+
+run: fn() {
+    print(answer())
+    print(nowhere())
+}

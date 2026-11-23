@@ -7,10 +7,14 @@ use jet_build_session.[
     BuildSessionError,
     BuildSessionPolicy,
     BuildSessionReply,
+    BuildSessionScheduleNode,
     BuildSessionValue,
+    build_plan_schedule,
+    build_plan_selected_generated,
     build_session_abort,
     build_session_call,
     build_session_compiler_node,
+    build_session_finish,
     build_session_graph,
     build_session_new,
     build_session_set_dependencies,
@@ -570,4 +574,129 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     plan: build_graph_rules_value(build_session_call(session, "plan", [BuildSessionValue]{}, None, false, 7, 8))
     diagnostic: build_session_graph(session, plan).diagnostic ?? panic("a step with no output must refuse the plan")
     assert_eq(diagnostic.error, Val(BuildSessionError.StepWithoutOutputs{value: "quiet"}))
+}
+
+// `step := b.run(name, tool, caps)` at bytes `start..end`, then
+// `step.reads(path)` for each of `reads` and `step.writes(path)` for each of
+// `writes`.
+build_graph_rules_schedule_step: fn(session: &BuildSession, tool: BuildSessionValue, name: String, reads: [String], writes: [String], start: Int) -> BuildSessionValue Never! {
+    step: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text{value: name}, tool, build_graph_rules_list([String]{})}, None, true, start, start + 1))
+    loop path in reads {
+        assert(build_graph_rules_ok(build_graph_rules_step(session, "reads", step, [BuildSessionValue]{.Text{value: path}})))
+    }
+    loop path in writes {
+        assert(build_graph_rules_ok(build_graph_rules_step(session, "writes", step, [BuildSessionValue]{.Text{value: path}})))
+    }
+    step
+}
+
+// `b.generate(name) { source }`, made at `.jet/generated/graph/<name>.jet`.
+build_graph_rules_generate: fn(session: &BuildSession, name: String, source: String) Never! {
+    assert(build_graph_rules_ok(build_session_call(session, "generate", [BuildSessionValue]{.Text{value: name}}, Val(source), false, 1, 2)))
+}
+
+build_graph_rules_schedule_row: fn(node: BuildSessionScheduleNode) -> String Never! {
+    waits: loop wait in node.waits -> "{wait.path}<{wait.kind}:{wait.producer}:{wait.barrier}"
+    "{node.round} {node.kind} {node.name} [{node.outputs.join(",")}] [{waits.join(",")}]"
+}
+
+// The refusal `build: fn` returning leaves, once the session is set up.
+build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiagnostic Never! {
+    finished: build_session_finish(session, .Unit)
+    assert(finished.plan == None, "the schedule refuses the plan")
+    assert_eq(finished.diagnostics.len(), 1)
+    finished.diagnostics[0]
+}
+
+#Test("generation_schedule_rounds_follow_declared_inputs_and_typed_barriers") {
+    session := build_graph_rules_session(120)
+    tool: build_graph_rules_tool(session)
+    // Declared out of order: the schedule comes from the declarations, not
+    // the order of the calls.
+    _: build_graph_rules_schedule_step(session, tool, "index", [String]{"out/pack.txt"}, [String]{"out/index.txt"}, 30)
+    _: build_graph_rules_schedule_step(session, tool, "pack", [String]{".jet/generated/graph/render.jet"}, [String]{"out/pack.txt"}, 20)
+    render: build_graph_rules_schedule_step(session, tool, "render", [String]{".jet/generated/graph/facts.jet", "assets/table.csv"}, [String]{".jet/generated/graph/render.jet"}, 10)
+    build_graph_rules_generate(session, "facts", "facts_value: fn() -> Int {{ 7 }}")
+    build_graph_rules_generate(session, "unused", "unused_value: fn() -> Int {{ 1 }}")
+    app: build_graph_rules_value(build_session_call(session, "add_executable", [BuildSessionValue]{.Text{value: "app"}, build_graph_rules_list([String]{"main.jet"}), .List{values: [BuildSessionValue]{render}}}, None, false, 40, 41))
+    assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 42, 43)))
+    finished: build_session_finish(session, .Unit)
+    plan: finished.plan ?? panic("the schedule admits the plan")
+    rows: loop node in build_plan_schedule(plan) -> build_graph_rules_schedule_row(node)
+    assert_eq(
+        rows,
+        [String]{
+            "1 module facts [.jet/generated/graph/facts.jet] []",
+            "1 module unused [.jet/generated/graph/unused.jet] []",
+            "2 step render [.jet/generated/graph/render.jet] [.jet/generated/graph/facts.jet<module:facts:typed]",
+            "3 step index [out/index.txt] [out/pack.txt<step:pack:file]",
+            "3 step pack [out/pack.txt] [.jet/generated/graph/render.jet<step:render:typed]",
+        },
+    )
+    // The module a selected step reads is checked before the step runs, as
+    // round 1; the one nothing selected reads is not.
+    selected: loop module_row in build_plan_selected_generated(plan) -> module_row.name
+    assert_eq(selected, [String]{"facts"})
+}
+
+#Test("generation_schedule_refuses_a_step_that_waits_on_its_own_jet_source") {
+    session := build_graph_rules_session(121)
+    tool: build_graph_rules_tool(session)
+    _: build_graph_rules_schedule_step(session, tool, "grow", [String]{".jet/generated/graph/grow.jet"}, [String]{".jet/generated/graph/grow.jet"}, 10)
+    diagnostic: build_graph_rules_finish_refusal(session)
+    assert_eq(diagnostic.error, Val(BuildSessionError.GenerationWaitCycle{nodes: [String]{"grow", "grow"}}))
+    assert_eq(diagnostic.code, "E3511")
+    assert_eq(diagnostic.what, "build plan is invalid: generated Jet source waits on itself: `grow` -> `grow`; each step reads Jet source the next one makes")
+    assert(diagnostic.why.contains("can never start"), "the wait cycle says why")
+    assert_eq(diagnostic.start, 10)
+    assert_eq(diagnostic.end, 11)
+}
+
+#Test("generation_schedule_refuses_steps_that_wait_on_each_others_jet_source") {
+    session := build_graph_rules_session(122)
+    tool: build_graph_rules_tool(session)
+    _: build_graph_rules_schedule_step(session, tool, "left", [String]{".jet/generated/graph/right.jet"}, [String]{".jet/generated/graph/left.jet"}, 10)
+    _: build_graph_rules_schedule_step(session, tool, "middle", [String]{".jet/generated/graph/left.jet"}, [String]{"out/middle.txt"}, 20)
+    _: build_graph_rules_schedule_step(session, tool, "right", [String]{"out/middle.txt"}, [String]{".jet/generated/graph/right.jet"}, 30)
+    diagnostic: build_graph_rules_finish_refusal(session)
+    assert_eq(diagnostic.error, Val(BuildSessionError.GenerationWaitCycle{nodes: [String]{"left", "right", "middle", "left"}}))
+    assert_eq(diagnostic.code, "E3511")
+    assert_eq(diagnostic.start, 10)
+}
+
+#Test("generation_schedule_keeps_a_file_only_step_cycle_the_step_cycle") {
+    session := build_graph_rules_session(123)
+    tool: build_graph_rules_tool(session)
+    _: build_graph_rules_schedule_step(session, tool, "stamp", [String]{"out/stamp.txt"}, [String]{"out/stamp.txt"}, 10)
+    diagnostic: build_graph_rules_finish_refusal(session)
+    assert_eq(diagnostic.error, Val(BuildSessionError.ActionDependencyCycle{nodes: [String]{"stamp", "stamp"}}))
+    assert_eq(diagnostic.code, "E3502")
+    assert_eq(diagnostic.start, 10)
+}
+
+// A chain of `count` steps, each reading the Jet source the one before made.
+build_graph_rules_round_chain: fn(session: &BuildSession, count: Int) Never! {
+    tool: build_graph_rules_tool(session)
+    loop index in 0..<count {
+        reads: if index == 0 -> [String]{} else -> [String]{".jet/generated/graph/gen{index - 1}.jet"}
+        _: build_graph_rules_schedule_step(session, tool, "gen{index}", reads, [String]{".jet/generated/graph/gen{index}.jet"}, 10 * (index + 1))
+    }
+}
+
+#Test("generation_schedule_holds_every_build_to_seventeen_rounds") {
+    within := build_graph_rules_session(124)
+    build_graph_rules_round_chain(within, 17)
+    finished: build_session_finish(within, .Unit)
+    plan: finished.plan ?? panic("seventeen rounds fit the limit")
+    schedule: build_plan_schedule(plan)
+    assert_eq(schedule[schedule.len() - 1].round, 17)
+    past := build_graph_rules_session(125)
+    build_graph_rules_round_chain(past, 18)
+    diagnostic: build_graph_rules_finish_refusal(past)
+    chain: loop index in 0..<18 -> "gen{index}"
+    assert_eq(diagnostic.error, Val(BuildSessionError.GenerationRoundLimit{step: "gen17", round: 18, chain: chain}))
+    assert_eq(diagnostic.code, "E3516")
+    assert(diagnostic.what.starts_with("build plan is invalid: step `gen17` would generate in round 18, past the limit of 17: `gen0` -> `gen1` -> "), "the limit names the step, its round and the chain")
+    assert_eq(diagnostic.start, 180)
+    assert_eq(diagnostic.end, 181)
 }

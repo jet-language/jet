@@ -1,0 +1,30 @@
+Error: Jet.GenerationCycle: Build plan is invalid: module `facts` is generated twice
+  --> Tests/UI/generate_promise_missing_names_producer_and_consumer.jet:11:7
+    |
+ 11 |     b.generate("facts") {
+    |       ^^^^^^^^
+ Why: Each generated module and its path have one producer, so what compiles never depends on which producer ran last
+ Fix: Give each generated module its own name, and keep steps from writing a generated module's path
+More: jet-lang.dev/e/Jet.GenerationCycle
+
+Error: Jet.UnknownFunction: Nothing named `answer` exists here
+  --> Tests/UI/generate_promise_missing_names_producer_and_consumer.jet:17:11
+    |
+ 17 |     print(answer())
+    |           ^^^^^^
+ Why: Only functions that have been defined (or built in, like `print` / `panic`) can be called
+ Fix: Define it first (fn answer() { ... }), or call one that exists
+ Note: `run` uses `answer`, which `b.generate("facts")` at `generate_promise_missing_names_producer_and_consumer.jet:8` promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first
+More: jet-lang.dev/e/Jet.UnknownFunction
+
+Error: Jet.UnknownFunction: Nothing named `nowhere` exists here
+  --> Tests/UI/generate_promise_missing_names_producer_and_consumer.jet:18:11
+    |
+ 18 |     print(nowhere())
+    |           ^^^^^^^
+ Why: Only functions that have been defined (or built in, like `print` / `panic`) can be called
+ Fix: Define it first (fn nowhere() { ... }), or call one that exists
+More: jet-lang.dev/e/Jet.UnknownFunction
+
+3 problems found
+Run `jet explain Jet.GenerationCycle` to learn more
