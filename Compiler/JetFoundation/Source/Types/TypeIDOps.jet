@@ -6,40 +6,40 @@
 // --- Interner constructors ---
 
 type_id_named_id: fn(table: &Interner, name: Name) -> TypeID Never! {
-    if name.id == NAME_UNIT.id -> return TYPE_UNIT
-    if name.id == NAME_NEVER.id -> return TYPE_NEVER
+    if name.id == NAME_UNIT.id -> return TYPE_ID_UNIT
+    if name.id == NAME_NEVER.id -> return TYPE_ID_NEVER
     type_intern_scalar(table, TypeKind.Named, name.id, U32{0}, U32{0})
 }
 
 type_id_foundation_named: fn(table: &Interner, name: String) -> TypeID Never! {
     if name == {
-        "Int" -> TYPE_INT
-        "Float" | "F64" -> TYPE_FLOAT
-        "F32" -> TYPE_FLOAT32
-        "Bool" -> TYPE_BOOL
-        "String" -> TYPE_STRING
-        "Char" -> TYPE_CHAR
-        "I8" -> TYPE_I8
-        "I16" -> TYPE_I16
-        "I32" -> TYPE_I32
-        "I64" -> TYPE_I64
-        "U8" -> TYPE_U8
-        "U16" -> TYPE_U16
-        "U32" -> TYPE_U32
-        "U64" -> TYPE_U64
-        "Unit" -> TYPE_UNIT
-        "Never" -> TYPE_NEVER
+        "Int" -> TYPE_ID_INT
+        "Float" | "F64" -> TYPE_ID_FLOAT
+        "F32" -> TYPE_ID_FLOAT32
+        "Bool" -> TYPE_ID_BOOL
+        "String" -> TYPE_ID_STRING
+        "Char" -> TYPE_ID_CHAR
+        "I8" -> TYPE_ID_I8
+        "I16" -> TYPE_ID_I16
+        "I32" -> TYPE_ID_I32
+        "I64" -> TYPE_ID_I64
+        "U8" -> TYPE_ID_U8
+        "U16" -> TYPE_ID_U16
+        "U32" -> TYPE_ID_U32
+        "U64" -> TYPE_ID_U64
+        "Unit" -> TYPE_ID_UNIT
+        "Never" -> TYPE_ID_NEVER
         else -> type_id_named(table, name)
     }
 }
 
-// The written Type of a well-known TypeID (TYPE_INT through TYPE_POINTER), which
+// The written Type of a well-known TypeID (TYPE_ID_INT through TYPE_ID_POINTER), which
 // every interner() holds at the same row, so it reads without an interner;
 // None for any other id.
 type_id_well_known_syntax: fn(id: TypeID) -> Type? Never! {
     value: type_row(id)
-    if value >= type_row(TYPE_I8) && value <= type_row(TYPE_U64) {
-        step: value - type_row(TYPE_I8)
+    if value >= type_row(TYPE_ID_I8) && value <= type_row(TYPE_ID_U64) {
+        step: value - type_row(TYPE_ID_I8)
         return Val(Type.IntN{signed: step < 4, bits: 8 << (step % 4)})
     }
     if value == {
@@ -60,7 +60,7 @@ type_id_well_known_syntax: fn(id: TypeID) -> Type? Never! {
 // an interner; None for any other id.
 type_id_well_known_kind: fn(id: TypeID) -> TypeKind? Never! {
     value: type_row(id)
-    if value >= type_row(TYPE_I8) && value <= type_row(TYPE_U64) -> return Val(TypeKind.IntN)
+    if value >= type_row(TYPE_ID_I8) && value <= type_row(TYPE_ID_U64) -> return Val(TypeKind.IntN)
     if value == {
         1 -> Val(TypeKind.Int)
         2 -> Val(TypeKind.Float)
@@ -118,15 +118,15 @@ type_id_fixed_list: fn(table: &Interner, elem: TypeID, len: Measure) -> TypeID N
 
 type_id_int_n: fn(table: &Interner, signed: Bool, bits: Int) -> TypeID Never! {
     if signed {
-        if bits == 8 -> return TYPE_I8
-        if bits == 16 -> return TYPE_I16
-        if bits == 32 -> return TYPE_I32
-        if bits == 64 -> return TYPE_I64
+        if bits == 8 -> return TYPE_ID_I8
+        if bits == 16 -> return TYPE_ID_I16
+        if bits == 32 -> return TYPE_ID_I32
+        if bits == 64 -> return TYPE_ID_I64
     } else {
-        if bits == 8 -> return TYPE_U8
-        if bits == 16 -> return TYPE_U16
-        if bits == 32 -> return TYPE_U32
-        if bits == 64 -> return TYPE_U64
+        if bits == 8 -> return TYPE_ID_U8
+        if bits == 16 -> return TYPE_ID_U16
+        if bits == 32 -> return TYPE_ID_U32
+        if bits == 64 -> return TYPE_ID_U64
     }
     type_intern_scalar(table, TypeKind.IntN, if signed -> U32{1} else -> U32{0}, U32{bits}, U32{0})
 }
@@ -335,7 +335,7 @@ type_id_is_compute_tensor_family: fn(table: Interner, id: TypeID) -> Bool Never!
             if expected == 0 || count != expected -> return false
             if type_id_compute_shape_dimensions(table, plain) != None -> return true
             loop i in 0..<count {
-                if type_child_type(table, plain, i).id != TYPE_INT.id -> return false
+                if type_child_type(table, plain, i).id != TYPE_ID_INT.id -> return false
             }
             true
         }
@@ -344,9 +344,9 @@ type_id_is_compute_tensor_family: fn(table: Interner, id: TypeID) -> Bool Never!
 }
 
 type_id_is_unit_callable_return: fn(table: Interner, id: TypeID) -> Bool Never! {
-    if id.id == TYPE_UNIT.id -> return true
+    if id.id == TYPE_ID_UNIT.id -> return true
     if type_kind(table, id) == TypeKind.Result {
-        return type_a_type(table, id).id == TYPE_UNIT.id && type_id_is_named_text(table, type_b_type(table, id), "Err")
+        return type_a_type(table, id).id == TYPE_ID_UNIT.id && type_id_is_named_text(table, type_b_type(table, id), "Err")
     }
     false
 }
@@ -505,7 +505,7 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
             out := "fn({names.join(", ")})"
             ret: type_a_type(table, id)
             shown_ret := if !type_is_none(ret) && !type_id_is_unit_callable_return(table, ret) -> ret else -> type_none()
-            unit_fallible := !type_is_none(shown_ret) && type_kind(table, shown_ret) == TypeKind.Result && type_a_type(table, shown_ret).id == TYPE_UNIT.id
+            unit_fallible := !type_is_none(shown_ret) && type_kind(table, shown_ret) == TypeKind.Result && type_a_type(table, shown_ret).id == TYPE_ID_UNIT.id
             if !type_is_none(shown_ret) && !unit_fallible -> out = "{out} ->"
             if !type_is_none(shown_ret) -> out = "{out} {type_id_name(table, shown_ret)}"
             out
@@ -515,7 +515,7 @@ type_id_name: fn(table: Interner, id: TypeID) -> String Never! {
 
 type_id_result_surface_name: fn(table: Interner, ok: TypeID, err: TypeID) -> String Never! {
     default_error: type_id_is_named_text(table, err, "Err")
-    unit_success: ok.id == TYPE_UNIT.id
+    unit_success: ok.id == TYPE_ID_UNIT.id
     if unit_success -> return "{type_id_marked_name(table, err)}!"
     if !default_error -> return "{type_id_marked_name(table, ok)} {type_id_marked_name(table, err)}!"
     type_id_name(table, ok)
@@ -525,7 +525,7 @@ type_id_failure_name: fn(table: Interner, id: TypeID) -> String Never! {
     if type_kind(table, id) == TypeKind.Result {
         ok: type_a_type(table, id)
         err: type_b_type(table, id)
-        if type_id_is_named_text(table, err, "Err") && ok.id != TYPE_UNIT.id {
+        if type_id_is_named_text(table, err, "Err") && ok.id != TYPE_ID_UNIT.id {
             return "{type_id_marked_name(table, ok)} Err!"
         }
     }
@@ -564,7 +564,7 @@ type_id_unqualified_name_text: fn(table: Interner, id: TypeID) -> String Never! 
         .Result -> {
             ok: type_a_type(table, id)
             err: type_b_type(table, id)
-            if ok.id == TYPE_UNIT.id -> return "{type_id_unqualified_marked_name(table, err)}!"
+            if ok.id == TYPE_ID_UNIT.id -> return "{type_id_unqualified_marked_name(table, err)}!"
             if !type_id_is_named_text(table, err, "Err") -> return "{type_id_unqualified_marked_name(table, ok)} {type_id_unqualified_marked_name(table, err)}!"
             type_id_unqualified_name_text(table, ok)
         }
@@ -796,7 +796,7 @@ type_id_nominals_unqualified: fn(table: &Interner, id: TypeID, identities_only: 
 }
 
 type_id_effective_callable_return: fn(table: &Interner, id: TypeID) -> TypeID Never! {
-    if id.id == TYPE_NEVER.id -> return TypeID{id: id.id}
+    if id.id == TYPE_ID_NEVER.id -> return TypeID{id: id.id}
     kind: type_kind(table, id)
     if kind == TypeKind.Option || kind == TypeKind.Result -> return TypeID{id: id.id}
     err_id: type_id_named(table, "Err")
@@ -973,9 +973,9 @@ type_id_failure_union_canonical: fn(table: &Interner, members: [TypeID]) -> Type
     idx := flat.len()
     loop idx > 0 {
         idx -= 1
-        if flat[idx].id == TYPE_NEVER.id -> _ := flat.remove(idx, .Slot)
+        if flat[idx].id == TYPE_ID_NEVER.id -> _ := flat.remove(idx, .Slot)
     }
-    if flat.len() == 0 -> return TYPE_NEVER
+    if flat.len() == 0 -> return TYPE_ID_NEVER
     if flat.len() == 1 -> return flat[0]
     type_id_union_sort(table, flat)
     type_id_union(table, flat)
@@ -1203,8 +1203,8 @@ delta_type_id_map: fn(shared: Interner, delta: &InternerDelta, key: TypeID, valu
 }
 
 delta_type_id_named: fn(shared: Interner, delta: &InternerDelta, name: String) -> TypeID Never! {
-    if name == "Unit" -> return TYPE_UNIT
-    if name == "Never" -> return TYPE_NEVER
+    if name == "Unit" -> return TYPE_ID_UNIT
+    if name == "Never" -> return TYPE_ID_NEVER
     name_id: delta_name_intern(shared, delta, name)
     delta_type_intern_scalar(shared, delta, TypeKind.Named, name_id.id, U32{0}, U32{0})
 }
@@ -1370,23 +1370,23 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
     e_param: type_id_named(table, "E")
     list_t: type_id_list(table, t_param)
     box_t: type_id_apply(table, "Box", [TypeID]{list_t})
-    inst: type_id_substitute(table, box_t, [String]{"T"}, [TypeID]{TYPE_STRING})
+    inst: type_id_substitute(table, box_t, [String]{"T"}, [TypeID]{TYPE_ID_STRING})
     assert_eq(type_id_name(table, inst), "Box<[String]>")
     // Unchanged subtree returns exact same TypeID without adding rows.
     before: type_count(table)
-    same: type_id_substitute(table, inst, [String]{"T"}, [TypeID]{TYPE_INT})
+    same: type_id_substitute(table, inst, [String]{"T"}, [TypeID]{TYPE_ID_INT})
     assert_eq(same, inst)
     assert_eq(type_count(table), before)
     // Length measure substitution on FixedList.
     fixed: type_id_fixed_list(table, t_param, Measure.Symbol{kind: "length", name: "N"})
     len4: type_id_measure(table, Measure.Literal{kind: "length", value: 4})
-    fixed_inst: type_id_substitute(table, fixed, [String]{"T", "N"}, [TypeID]{TYPE_FLOAT32, len4})
+    fixed_inst: type_id_substitute(table, fixed, [String]{"T", "N"}, [TypeID]{TYPE_ID_FLOAT32, len4})
     assert_eq(type_id_name(table, fixed_inst), "[F32#4]")
     assert_eq(type_id_substitute(table, n_param, [String]{"N"}, [TypeID]{len4}), len4)
     // Failure union with E = Never collapses to single remaining error.
     shop_err: type_id_named(table, "ShopError")
     union_ty: type_id_union(table, [TypeID]{shop_err, e_param})
-    collapsed: type_id_substitute(table, union_ty, [String]{"E"}, [TypeID]{TYPE_NEVER})
+    collapsed: type_id_substitute(table, union_ty, [String]{"E"}, [TypeID]{TYPE_ID_NEVER})
     assert_eq(collapsed, shop_err)
 }
 
@@ -1433,7 +1433,7 @@ type_id_remap: fn(id: TypeID, remap: InternerRemap) -> TypeID Never! {
 
 #Test("a well-known TypeID reads its written type and kind without an interner, as interner() holds them") {
     table := interner()
-    loop row in type_row(TYPE_INT)..<type_row(TYPE_POINTER) + 1 {
+    loop row in type_row(TYPE_ID_INT)..<type_row(TYPE_ID_POINTER) + 1 {
         id: TypeID{id: U32{row}}
         written: type_id_well_known_syntax(id) ?? panic("no written type for {row}")
         assert_eq(type_intern_syntax(table, written), id)

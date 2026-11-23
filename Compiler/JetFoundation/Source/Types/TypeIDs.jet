@@ -157,7 +157,7 @@ TYPE_SIDES_INITIAL_SLOTS: 64
 
 // The compilation's interner. Its first names are name_table_compilation's
 // and its first types the well-known ones, so a phase names each by its
-// constant (TYPE_INT and the rest) without the interner.
+// constant (TYPE_ID_INT and the rest) without the interner.
 interner: fn() -> Interner Never! {
     result := Interner{names: name_table_compilation(), types: type_columns(), key_spans: type_sides(), ranges: type_sides(), measures: type_sides(), dimensions: type_sides(), tags: type_sides(), functions: type_sides()}
     _: type_intern_scalar(result, TypeKind.Int, U32{0}, U32{0}, U32{0})
@@ -181,39 +181,39 @@ interner: fn() -> Interner Never! {
     result
 }
 
-TYPE_INT: TypeID{id: U32{1}}
+TYPE_ID_INT: TypeID{id: U32{1}}
 
-TYPE_FLOAT: TypeID{id: U32{2}}
+TYPE_ID_FLOAT: TypeID{id: U32{2}}
 
-TYPE_BOOL: TypeID{id: U32{3}}
+TYPE_ID_BOOL: TypeID{id: U32{3}}
 
-TYPE_STRING: TypeID{id: U32{4}}
+TYPE_ID_STRING: TypeID{id: U32{4}}
 
-TYPE_CHAR: TypeID{id: U32{5}}
+TYPE_ID_CHAR: TypeID{id: U32{5}}
 
-TYPE_FLOAT32: TypeID{id: U32{6}}
+TYPE_ID_FLOAT32: TypeID{id: U32{6}}
 
-TYPE_UNIT: TypeID{id: U32{7}}
+TYPE_ID_UNIT: TypeID{id: U32{7}}
 
-TYPE_NEVER: TypeID{id: U32{8}}
+TYPE_ID_NEVER: TypeID{id: U32{8}}
 
-TYPE_I8: TypeID{id: U32{9}}
+TYPE_ID_I8: TypeID{id: U32{9}}
 
-TYPE_I16: TypeID{id: U32{10}}
+TYPE_ID_I16: TypeID{id: U32{10}}
 
-TYPE_I32: TypeID{id: U32{11}}
+TYPE_ID_I32: TypeID{id: U32{11}}
 
-TYPE_I64: TypeID{id: U32{12}}
+TYPE_ID_I64: TypeID{id: U32{12}}
 
-TYPE_U8: TypeID{id: U32{13}}
+TYPE_ID_U8: TypeID{id: U32{13}}
 
-TYPE_U16: TypeID{id: U32{14}}
+TYPE_ID_U16: TypeID{id: U32{14}}
 
-TYPE_U32: TypeID{id: U32{15}}
+TYPE_ID_U32: TypeID{id: U32{15}}
 
-TYPE_U64: TypeID{id: U32{16}}
+TYPE_ID_U64: TypeID{id: U32{16}}
 
-TYPE_POINTER: TypeID{id: U32{17}}
+TYPE_ID_POINTER: TypeID{id: U32{17}}
 
 type_columns: fn() -> TypeColumns Never! {
     type_columns_sized(TYPE_COLUMNS_INITIAL_SLOTS)
@@ -299,34 +299,34 @@ interner_marks: fn(table: Interner) -> InternerMarks Never! {
     InternerMarks{names: table.names.texts.len(), types: table.types.kind.len(), key_spans: table.key_spans.rows.len(), ranges: table.ranges.rows.len(), measures: table.measures.rows.len(), dimensions: table.dimensions.rows.len(), tags: table.tags.rows.len(), functions: table.functions.rows.len()}
 }
 
-// Constant well-known TypeID for scalar primitives (`TYPE_INT`..`TYPE_U64`)
-// and the IR's `TYPE_POINTER` in O(1) without touching any Interner;
+// Constant well-known TypeID for scalar primitives (`TYPE_ID_INT`..`TYPE_ID_U64`)
+// and the IR's `TYPE_ID_POINTER` in O(1) without touching any Interner;
 // `type_none()` for every other type.
 type_id_well_known: fn(ty: Type) -> TypeID Never! {
     if ty == {
-        .Int -> return TYPE_INT
-        .Float -> return TYPE_FLOAT
-        .Bool -> return TYPE_BOOL
-        .String -> return TYPE_STRING
-        .Char -> return TYPE_CHAR
-        .Float32 -> return TYPE_FLOAT32
+        .Int -> return TYPE_ID_INT
+        .Float -> return TYPE_ID_FLOAT
+        .Bool -> return TYPE_ID_BOOL
+        .String -> return TYPE_ID_STRING
+        .Char -> return TYPE_ID_CHAR
+        .Float32 -> return TYPE_ID_FLOAT32
         .Named(name) -> {
-            if name == "Unit" -> return TYPE_UNIT
-            if name == "Never" -> return TYPE_NEVER
-            if name == "Pointer" -> return TYPE_POINTER
+            if name == "Unit" -> return TYPE_ID_UNIT
+            if name == "Never" -> return TYPE_ID_NEVER
+            if name == "Pointer" -> return TYPE_ID_POINTER
             return type_none()
         }
         .IntN(signed, bits) -> {
             if signed {
-                if bits == 8 -> return TYPE_I8
-                if bits == 16 -> return TYPE_I16
-                if bits == 32 -> return TYPE_I32
-                if bits == 64 -> return TYPE_I64
+                if bits == 8 -> return TYPE_ID_I8
+                if bits == 16 -> return TYPE_ID_I16
+                if bits == 32 -> return TYPE_ID_I32
+                if bits == 64 -> return TYPE_ID_I64
             } else {
-                if bits == 8 -> return TYPE_U8
-                if bits == 16 -> return TYPE_U16
-                if bits == 32 -> return TYPE_U32
-                if bits == 64 -> return TYPE_U64
+                if bits == 8 -> return TYPE_ID_U8
+                if bits == 16 -> return TYPE_ID_U16
+                if bits == 32 -> return TYPE_ID_U32
+                if bits == 64 -> return TYPE_ID_U64
             }
             return type_none()
         }
@@ -867,12 +867,12 @@ type_tag_hash: fn(marker: TagMarker) -> Int Never! {
 type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
     none: U32{0}
     if ty == {
-        .Int -> TYPE_INT
-        .Float -> TYPE_FLOAT
-        .Bool -> TYPE_BOOL
-        .String -> TYPE_STRING
-        .Char -> TYPE_CHAR
-        .Float32 -> TYPE_FLOAT32
+        .Int -> TYPE_ID_INT
+        .Float -> TYPE_ID_FLOAT
+        .Bool -> TYPE_ID_BOOL
+        .String -> TYPE_ID_STRING
+        .Char -> TYPE_ID_CHAR
+        .Float32 -> TYPE_ID_FLOAT32
         .List(element) -> {
             element_id: type_intern_syntax(table, element)
             type_intern_scalar(table, TypeKind.List, element_id.id, none, none)
@@ -904,8 +904,8 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
             type_intern(table, TypeKind.Fn, result, none, side, children)
         }
         .Named(name) -> {
-            if name == "Unit" -> return TYPE_UNIT
-            if name == "Never" -> return TYPE_NEVER
+            if name == "Unit" -> return TYPE_ID_UNIT
+            if name == "Never" -> return TYPE_ID_NEVER
             name_id: name_intern(table.names, name)
             type_intern_scalar(table, TypeKind.Named, name_id.id, none, none)
         }
@@ -935,15 +935,15 @@ type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
         }
         .IntN(signed, bits) -> {
             if signed {
-                if bits == 8 -> return TYPE_I8
-                if bits == 16 -> return TYPE_I16
-                if bits == 32 -> return TYPE_I32
-                if bits == 64 -> return TYPE_I64
+                if bits == 8 -> return TYPE_ID_I8
+                if bits == 16 -> return TYPE_ID_I16
+                if bits == 32 -> return TYPE_ID_I32
+                if bits == 64 -> return TYPE_ID_I64
             } else {
-                if bits == 8 -> return TYPE_U8
-                if bits == 16 -> return TYPE_U16
-                if bits == 32 -> return TYPE_U32
-                if bits == 64 -> return TYPE_U64
+                if bits == 8 -> return TYPE_ID_U8
+                if bits == 16 -> return TYPE_ID_U16
+                if bits == 32 -> return TYPE_ID_U32
+                if bits == 64 -> return TYPE_ID_U64
             }
             type_intern_scalar(table, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
         }
@@ -1192,15 +1192,15 @@ type_id_map: fn(table: &Interner, key: TypeID, value: TypeID) -> TypeID Never! {
 }
 
 type_id_named: fn(table: &Interner, name: String) -> TypeID Never! {
-    if name == "Unit" -> return TYPE_UNIT
-    if name == "Never" -> return TYPE_NEVER
+    if name == "Unit" -> return TYPE_ID_UNIT
+    if name == "Never" -> return TYPE_ID_NEVER
     name_id: name_intern(table.names, name)
     type_intern_scalar(table, TypeKind.Named, name_id.id, U32{0}, U32{0})
 }
 
-type_id_is_unit: fn(id: TypeID) -> Bool Never! { id.id == TYPE_UNIT.id }
+type_id_is_unit: fn(id: TypeID) -> Bool Never! { id.id == TYPE_ID_UNIT.id }
 
-type_id_is_never: fn(id: TypeID) -> Bool Never! { id.id == TYPE_NEVER.id }
+type_id_is_never: fn(id: TypeID) -> Bool Never! { id.id == TYPE_ID_NEVER.id }
 
 type_id_is_numeric: fn(table: Interner, id: TypeID) -> Bool Never! {
     code: Int{table.types.kind[type_row(id)]}
@@ -1530,12 +1530,12 @@ delta_type_intern: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a
 delta_type_intern_syntax: fn(shared: Interner, delta: &InternerDelta, ty: Type) -> TypeID Never! {
     none: U32{0}
     if ty == {
-        .Int -> TYPE_INT
-        .Float -> TYPE_FLOAT
-        .Bool -> TYPE_BOOL
-        .String -> TYPE_STRING
-        .Char -> TYPE_CHAR
-        .Float32 -> TYPE_FLOAT32
+        .Int -> TYPE_ID_INT
+        .Float -> TYPE_ID_FLOAT
+        .Bool -> TYPE_ID_BOOL
+        .String -> TYPE_ID_STRING
+        .Char -> TYPE_ID_CHAR
+        .Float32 -> TYPE_ID_FLOAT32
         .List(element) -> {
             element_id: delta_type_intern_syntax(shared, delta, element)
             delta_type_intern_scalar(shared, delta, TypeKind.List, element_id.id, none, none)
@@ -1567,8 +1567,8 @@ delta_type_intern_syntax: fn(shared: Interner, delta: &InternerDelta, ty: Type) 
             delta_type_intern(shared, delta, TypeKind.Fn, result, none, side, children)
         }
         .Named(name) -> {
-            if name == "Unit" -> return TYPE_UNIT
-            if name == "Never" -> return TYPE_NEVER
+            if name == "Unit" -> return TYPE_ID_UNIT
+            if name == "Never" -> return TYPE_ID_NEVER
             name_id: delta_name_intern(shared, delta, name)
             delta_type_intern_scalar(shared, delta, TypeKind.Named, name_id.id, none, none)
         }
@@ -1598,15 +1598,15 @@ delta_type_intern_syntax: fn(shared: Interner, delta: &InternerDelta, ty: Type) 
         }
         .IntN(signed, bits) -> {
             if signed {
-                if bits == 8 -> return TYPE_I8
-                if bits == 16 -> return TYPE_I16
-                if bits == 32 -> return TYPE_I32
-                if bits == 64 -> return TYPE_I64
+                if bits == 8 -> return TYPE_ID_I8
+                if bits == 16 -> return TYPE_ID_I16
+                if bits == 32 -> return TYPE_ID_I32
+                if bits == 64 -> return TYPE_ID_I64
             } else {
-                if bits == 8 -> return TYPE_U8
-                if bits == 16 -> return TYPE_U16
-                if bits == 32 -> return TYPE_U32
-                if bits == 64 -> return TYPE_U64
+                if bits == 8 -> return TYPE_ID_U8
+                if bits == 16 -> return TYPE_ID_U16
+                if bits == 32 -> return TYPE_ID_U32
+                if bits == 64 -> return TYPE_ID_U64
             }
             delta_type_intern_scalar(shared, delta, TypeKind.IntN, if signed -> U32{1} else -> none, U32{bits}, none)
         }
@@ -1765,29 +1765,29 @@ interner_merge_delta: fn(into: &Interner, delta: &InternerDelta) -> InternerRema
 
 #Test("equal types are one id, and children and operands tell types apart") {
     table := interner()
-    list: type_intern(table, TypeKind.List, TYPE_INT.id, U32{0}, U32{0}, [U32]{})
-    again: type_intern(table, TypeKind.List, TYPE_INT.id, U32{0}, U32{0}, [U32]{})
+    list: type_intern(table, TypeKind.List, TYPE_ID_INT.id, U32{0}, U32{0}, [U32]{})
+    again: type_intern(table, TypeKind.List, TYPE_ID_INT.id, U32{0}, U32{0}, [U32]{})
     assert_eq(list, again)
-    function: type_intern(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{TYPE_INT.id, list.id})
-    swapped: type_intern(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{list.id, TYPE_INT.id})
+    function: type_intern(table, TypeKind.Fn, TYPE_ID_INT.id, U32{0}, U32{0}, [U32]{TYPE_ID_INT.id, list.id})
+    swapped: type_intern(table, TypeKind.Fn, TYPE_ID_INT.id, U32{0}, U32{0}, [U32]{list.id, TYPE_ID_INT.id})
     assert(function != swapped)
     assert_eq(type_kind(table, function), TypeKind.Fn)
     assert_eq(type_child_count(table, function), 2)
     assert_eq(type_child_type(table, function, 1), list)
-    assert_eq(type_find(table, TypeKind.Fn, TYPE_INT.id, U32{0}, U32{0}, [U32]{TYPE_INT.id, list.id}), Val(function))
-    assert_eq(type_find(table, TypeKind.Option, TYPE_BOOL.id, U32{0}, U32{0}, [U32]{}), None)
+    assert_eq(type_find(table, TypeKind.Fn, TYPE_ID_INT.id, U32{0}, U32{0}, [U32]{TYPE_ID_INT.id, list.id}), Val(function))
+    assert_eq(type_find(table, TypeKind.Option, TYPE_ID_BOOL.id, U32{0}, U32{0}, [U32]{}), None)
 }
 
 #Test("the well-known types are their constants") {
     table := interner()
-    assert_eq(type_intern_syntax(table, Type.Named{name: "Unit"}), TYPE_UNIT)
-    assert_eq(type_intern_syntax(table, Type.Named{name: "Never"}), TYPE_NEVER)
-    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 8}), TYPE_I8)
-    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 64}), TYPE_I64)
-    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 8}), TYPE_U8)
-    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 64}), TYPE_U64)
-    assert_eq(type_intern_syntax(table, Type.Float32), TYPE_FLOAT32)
-    assert_eq(type_intern_syntax(table, Type.Named{name: "Pointer"}), TYPE_POINTER)
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Unit"}), TYPE_ID_UNIT)
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Never"}), TYPE_ID_NEVER)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 8}), TYPE_ID_I8)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: true, bits: 64}), TYPE_ID_I64)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 8}), TYPE_ID_U8)
+    assert_eq(type_intern_syntax(table, Type.IntN{signed: false, bits: 64}), TYPE_ID_U64)
+    assert_eq(type_intern_syntax(table, Type.Float32), TYPE_ID_FLOAT32)
+    assert_eq(type_intern_syntax(table, Type.Named{name: "Pointer"}), TYPE_ID_POINTER)
     assert_eq(type_count(table), 18)
 }
 
@@ -1814,9 +1814,9 @@ interner_merge_delta: fn(into: &Interner, delta: &InternerDelta) -> InternerRema
     // Canonical identity ignores Map key_span, non-identity tags, and Fn effect bounds.
     assert(type_id_identity_equal(table, other, type_intern_syntax(table, shapes[0])))
     tagged_float: type_intern_syntax(table, Type.Tagged{marker: TagMarker.User{name: "Celsius"}, inner: Type.Float})
-    assert(type_id_identity_equal(table, tagged_float, TYPE_FLOAT))
+    assert(type_id_identity_equal(table, tagged_float, TYPE_ID_FLOAT))
     crypto_id: type_intern_syntax(table, Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}, inner: Type.String})
-    assert(!type_id_identity_equal(table, crypto_id, TYPE_STRING))
+    assert(!type_id_identity_equal(table, crypto_id, TYPE_ID_STRING))
     plain_fn: type_intern_syntax(table, Type.Fn{params: [Type]{Type.Int, Type.Option{inner: Type.Char}}, ret: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
     assert(type_id_identity_equal(table, plain_fn, type_intern_syntax(table, shapes[1])))
 }

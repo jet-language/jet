@@ -47,7 +47,7 @@ use {
         ir_opt_report,
         ir_slot,
     ]
-    jet_foundation.[TYPE_BOOL, TYPE_FLOAT, TYPE_INT, TYPE_POINTER, TYPE_STRING, TYPE_U32, TYPE_U64, Type, compiler_threads_single]
+    jet_foundation.[TYPE_ID_BOOL, TYPE_ID_FLOAT, TYPE_ID_INT, TYPE_ID_POINTER, TYPE_ID_STRING, TYPE_ID_U32, TYPE_ID_U64, Type, compiler_threads_single]
     process: core.process
     files: core.files
 }
@@ -75,15 +75,15 @@ lp_types: fn(m: &IRModule) -> LPTypes {
     code_tid: ir_module_intern_tid(m, Type.Apply{name: IR_CODE_TYPE, args: [Type]{twice_ty}})
     guard_tid: ir_module_intern_tid(m, Type.Named{name: "Guard"})
     LPTypes{
-        int: ir_intern_type(m, "Int", IRType{ty: TYPE_INT, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
-        bool: ir_intern_type(m, "Bool", IRType{ty: TYPE_BOOL, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
-        float: ir_intern_type(m, "Float", IRType{ty: TYPE_FLOAT, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
-        word: ir_intern_type(m, "U64", IRType{ty: TYPE_U64, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
-        narrow: ir_intern_type(m, "U32", IRType{ty: TYPE_U32, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: false, bits: 32, drop: ""}),
-        pointer: ir_intern_type(m, "Pointer", IRType{ty: TYPE_POINTER, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        int: ir_intern_type(m, "Int", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
+        bool: ir_intern_type(m, "Bool", IRType{ty: TYPE_ID_BOOL, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        float: ir_intern_type(m, "Float", IRType{ty: TYPE_ID_FLOAT, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
+        word: ir_intern_type(m, "U64", IRType{ty: TYPE_ID_U64, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        narrow: ir_intern_type(m, "U32", IRType{ty: TYPE_ID_U32, kind: IRTypeKind.Word, size: 4, align: 4, class: IRClass.Integer, signed: false, bits: 32, drop: ""}),
+        pointer: ir_intern_type(m, "Pointer", IRType{ty: TYPE_ID_POINTER, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // An owned handle with a drop and no clone: a Copy of it is a second owner.
         owned: ir_intern_type(m, "Handle", IRType{ty: handle_tid, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_handle_drop"}),
-        string: ir_intern_type(m, "String", IRType{ty: TYPE_STRING, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
+        string: ir_intern_type(m, "String", IRType{ty: TYPE_ID_STRING, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}),
         pair: ir_intern_type(m, "(Int, Int)", IRType{ty: pair_tid, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         code: ir_intern_type(m, "{IR_CODE_TYPE}:twice", IRType{ty: code_tid, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // A handle whose drop is the module's `release` (function 1).
@@ -344,7 +344,7 @@ lp_bind_half: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 }
 
 lp_type_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_intern_type(m, "Wrong", IRType{ty: TYPE_INT, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
+    _ := ir_intern_type(m, "Wrong", IRType{ty: TYPE_ID_INT, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
     lp_return(f, -1)
 }
 

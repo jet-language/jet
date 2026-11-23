@@ -24,8 +24,8 @@ use jet_foundation.[
     BodyIfCond,
     BodyTree,
     StmtKind,
-    TYPE_BOOL,
-    TYPE_FLOAT,
+    TYPE_ID_BOOL,
+    TYPE_ID_FLOAT,
     Type,
     body_node,
     body_stmt,
@@ -103,7 +103,7 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan, program: 
     if statement == {
         .Assign(place, op, value, _, _) -> {
             // A compound write of anything but a Float can overflow or divide by zero.
-            if op != None && body_type_id(tree, value).id != TYPE_FLOAT.id -> scan.effect_free = false
+            if op != None && body_type_id(tree, value).id != TYPE_ID_FLOAT.id -> scan.effect_free = false
             if place == {
                 .Local(target) -> {
                     if target.name == scan.local -> scan.readable = false
@@ -202,7 +202,7 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan, program: S
             // Float arithmetic and comparisons cannot stop; integer
             // arithmetic can overflow or divide by zero.
             tid: body_type_id(tree, id)
-            if overflow || (tid.id != TYPE_FLOAT.id && tid.id != TYPE_BOOL.id) -> scan.effect_free = false
+            if overflow || (tid.id != TYPE_ID_FLOAT.id && tid.id != TYPE_ID_BOOL.id) -> scan.effect_free = false
             sema_loop_scan_expr(tree, lhs, scan, program, context)
             sema_loop_scan_expr(tree, rhs, scan, program, context)
         }
@@ -212,7 +212,7 @@ sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan, program: S
         .Unary(_, operand) -> {
             // An Int negation can overflow; Float and Bool operators cannot stop.
             tid: body_type_id(tree, id)
-            if tid.id != TYPE_FLOAT.id && tid.id != TYPE_BOOL.id -> scan.effect_free = false
+            if tid.id != TYPE_ID_FLOAT.id && tid.id != TYPE_ID_BOOL.id -> scan.effect_free = false
             sema_loop_scan_expr(tree, operand, scan, program, context)
         }
         .Move(value) | .Clone(value, _) | .ExplicitCopy(value) -> {
