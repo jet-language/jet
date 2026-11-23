@@ -6400,14 +6400,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     sema_registration_attach_namespace_impls(graph)
     sema_registration_inject_compiler_builtins(graph)
     graph.unit_facts = sema_registration_unit_facts(graph)
+    // A fact's bucket sits at its name's id; id 0 is the table's empty
+    // spelling, so every id up to the new one gets its bucket first.
     loop fact_index in 0..<graph.unit_facts.len() {
         fact_name: graph.unit_facts[fact_index].name
         slot: Int{name_intern(graph.unit_fact_names, fact_name).id}
-        if slot < graph.unit_fact_buckets.len() {
-            graph.unit_fact_buckets[slot].push(fact_index)
-        } else {
-            graph.unit_fact_buckets.push([Int]{fact_index})
-        }
+        loop graph.unit_fact_buckets.len() <= slot -> graph.unit_fact_buckets.push([Int]{})
+        graph.unit_fact_buckets[slot].push(fact_index)
     }
     loop module_row_index in 0..<graph.modules.len() {
         loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
