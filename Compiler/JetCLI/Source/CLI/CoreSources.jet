@@ -24,16 +24,25 @@ JetCLICoreAsset: struct {
     bytes: [U8],
 }
 
-JET_CLI_CORE_SOURCES: #run { loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")} }
+// The built-in Core sources and the assets they embed, computed in one #run
+// so the Core source tree is read once rather than twice in the same batch.
+JetCLICoreBundle: struct {
+    sources: [CoreDeclarationFile],
+    assets: [JetCLICoreAsset],
+}
 
-// The files the Core sources embed (core_declarations_assets), read from the
-// toolchain tree.
-JET_CLI_CORE_ASSETS: #run { loop path in core_declarations_assets(JET_CLI_CORE_SOURCES) -> JetCLICoreAsset{bytes: embed_bytes("toolchain:{path}"), path: path} }
+jet_cli_core_bundle_build: fn() -> JetCLICoreBundle {
+    sources: loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")}
+    assets: loop path in core_declarations_assets(sources) -> JetCLICoreAsset{bytes: embed_bytes("toolchain:{path}"), path: path}
+    JetCLICoreBundle{sources: sources, assets: assets}
+}
+
+JET_CLI_CORE_BUNDLE: #run jet_cli_core_bundle_build()
 
 // The built-in text of the Core source row at repository path `path`
 // (`Core/App/App.jet`), or None when no row has that path.
 jet_cli_core_source_text: fn(path: String) -> String? Never! {
-    loop file in JET_CLI_CORE_SOURCES {
+    loop file in JET_CLI_CORE_BUNDLE.sources {
         if file.path == path -> return Val(file.text.copy())
     }
     None
@@ -43,7 +52,7 @@ jet_cli_core_source_text: fn(path: String) -> String? Never! {
 // (`Core/UI/XkbTables/keysym_values.bin`), or None when no Core source embeds
 // that path.
 jet_cli_core_asset_bytes: fn(path: String) -> [U8]? Never! {
-    loop asset in JET_CLI_CORE_ASSETS {
+    loop asset in JET_CLI_CORE_BUNDLE.assets {
         if asset.path == path -> return Val(asset.bytes.copy())
     }
     None
@@ -99,7 +108,7 @@ JetCLICoreBodiesRecords: struct {
 }
 
 // Whether the Core of the toolchain tree `toolchain` is the Core built into
-// this jet (JET_CLI_CORE_SOURCES, JET_CLI_CORE_ASSETS): its Core rows
+// this jet (JET_CLI_CORE_BUNDLE): its Core rows
 // (jet_cli_toolchain_core_rows), then each row's file and each embedded
 // asset, byte for byte, up to the first difference. A tree that matches
 // costs one read of its Core files, about 20 MB, and no hash.
@@ -107,7 +116,7 @@ jet_cli_core_tree_matches: fn(toolchain: String) -> Bool Never! {
     rows: jet_cli_toolchain_core_rows(toolchain) ?? return false
     if rows.len() != CORE_SOURCE_OWNED_ROWS.len() -> return false
     built_in := [String:Int]{}
-    loop (index, file) in JET_CLI_CORE_SOURCES -> built_in[file.path] = index
+    loop (index, file) in JET_CLI_CORE_BUNDLE.sources -> built_in[file.path] = index
     loop (index, row) in rows {
         known: CORE_SOURCE_OWNED_ROWS[index]
         if row.path != known.path || row.module_name != known.module_name || row.alias != known.alias || row.owner != known.owner || row.owned_members != known.owned_members || row.impl_types != known.impl_types || row.runtime != known.runtime {
@@ -115,9 +124,9 @@ jet_cli_core_tree_matches: fn(toolchain: String) -> Bool Never! {
         }
         at: built_in.get(row.path) ?? return false
         text: cli_files.read(jet_cli_authority_path(toolchain, row.path)) ?? return false
-        if text != JET_CLI_CORE_SOURCES[at].text -> return false
+        if text != JET_CLI_CORE_BUNDLE.sources[at].text -> return false
     }
-    loop asset in JET_CLI_CORE_ASSETS {
+    loop asset in JET_CLI_CORE_BUNDLE.assets {
         bytes: cli_files.read_bytes(jet_cli_authority_path(toolchain, asset.path)) ?? return false
         if bytes != asset.bytes -> return false
     }

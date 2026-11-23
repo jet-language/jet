@@ -175,6 +175,11 @@ IRX64Allocation: struct {
     // (ir_x64_result_storage), -1 for none: its StackAddress loads the
     // hidden result pointer and a Return of it copies nothing.
     result_storage: Int,
+    // Whether the function contains any Loop or StreamStore instruction,
+    // captured during the allocator's single op pass so selection skips
+    // unused per-op arrays and full scans.
+    has_loop: Bool{true},
+    has_stream_store: Bool{true},
 }
 
 // Which operands of an instruction are slots it reads: none; `a`; `a` and
@@ -1097,12 +1102,13 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
     }
     loop_starts := [Int]{}
     loop_ends := [Int]{}
+    has_stream_store := false
     loop at in 0..<op_count {
         op: f.op[at]
         if op == .Loop {
             loop_starts.push(at)
             loop_ends.push(f.a[at])
-        }
+        } else if op == .StreamStore { has_stream_store = true }
         form: ir_x64_read_form(op)
         if form != IR_X64_READS_NONE {
             a: f.a[at]
@@ -1341,7 +1347,7 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
         loop _ in 0..<count -> frames.push(0)
     }
     frame_bytes: ir_x64_align(depth, 16)
-    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: [Int]{}, routed: [Int]{}, homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: [Int]{}, frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: [Int]{}, routed: [Int]{}, homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: [Int]{}, frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage, has_loop: loop_starts.len() > 0, has_stream_store: has_stream_store}
 }
 
 ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Allocation Never! {
@@ -1386,6 +1392,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     // If arm.
     loop_starts := [Int]{}
     loop_ends := [Int]{}
+    has_stream_store := false
     around := [Int]{}
     if !fast_o0 -> around.try_reserve(op_count) ?? panic("reserve failed")
     openers := [Int]{}
@@ -1394,14 +1401,16 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     if has_float -> armed.try_reserve(op_count) ?? panic("reserve failed")
     if fast_o0 && !has_float {
         loop at in 0..<op_count {
-            if f.op[at] == .Loop {
+            op: f.op[at]
+            if op == .Loop {
                 loop_starts.push(at)
                 loop_ends.push(f.a[at])
-            }
+            } else if op == .StreamStore { has_stream_store = true }
         }
     } else {
         loop at in 0..<op_count {
             op: f.op[at]
+            if op == .StreamStore -> has_stream_store = true
             if op == .End {
                 if !fast_o0 -> _ := openers.pop()
                 if has_float -> _ := arms.pop()
@@ -1867,7 +1876,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     }
     total: ir_x64_align(depth, 16)
     frame_bytes: total - 8 * kept.len()
-    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), routed: routed.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), routed: routed.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage, has_loop: loop_starts.len() > 0, has_stream_store: has_stream_store}
 }
 
 // A word storage laid out after a 512-byte one still sits among the homes,

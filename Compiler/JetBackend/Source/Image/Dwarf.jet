@@ -1005,7 +1005,9 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     // The address table: version 5, 8-byte addresses, no segment selector,
     // then function i's start at index i.
     addr := [U8]{}
+    addr.try_reserve(DWARF_ADDR_HEADER + 8 * functions.len()) ?? panic("reserve failed")
     addr_relas := [X64ObjectRela]{}
+    addr_relas.try_reserve(functions.len()) ?? panic("reserve failed")
     elf64_u32(addr, 0)
     elf64_u16(addr, 5)
     dwarf_u8(addr, 8)
@@ -1018,6 +1020,7 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     sections.addr_relas = addr_relas.move()
 
     weights := [Int]{}
+    weights.try_reserve(functions.len()) ?? panic("reserve failed")
     total := 0
     variables := 0
     runs := 0
@@ -1051,14 +1054,18 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     info_size := info.len() + 1
     list_count := 0
     range_count := 0
+    total_relas := relas.len()
     loop rows in taken {
         info_size += rows.info.len()
         list_count += rows.lists.offsets.len()
         range_count += rows.ranges.offsets.len()
+        total_relas += rows.relas.len()
     }
     dwarf_patch_u32(info, 0, info_size - 4)
     lists := dwarf_lists_header(list_count)
+    lists.try_reserve(DWARF_LISTS_HEADER + 4 * list_count) ?? panic("reserve failed")
     ranges := dwarf_lists_header(range_count)
+    ranges.try_reserve(DWARF_LISTS_HEADER + 4 * range_count) ?? panic("reserve failed")
     list_end := 4 * list_count
     range_end := 4 * range_count
     loop rows in taken {
@@ -1079,36 +1086,94 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     info_pieces := [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: info.move()}}
     list_pieces := [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: lists.move()}}
     range_pieces := [X64ObjectPiece]{X64ObjectPiece{at: 0, bytes: ranges.move()}}
+    patch_jobs := [DwarfInfoPatch]{}
     taken.reverse()
     loop taken.len() > 0 {
-        rows := taken.pop() ?? {
-            break
-        }
-        loop rela in rows.relas {
-            relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
-        }
-        loop pair in 0..<(rows.refs.len() >> 1) {
-            dwarf_patch_u32(rows.info, rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
-        }
-        dwarf_lists_index(rows.info, rows.lists.refs, list_index, widths.lists)
-        dwarf_lists_index(rows.info, rows.ranges.refs, range_index, widths.ranges)
-        list_index += rows.lists.offsets.len()
-        range_index += rows.ranges.offsets.len()
+        rows := taken.pop() ?? break
         info_at: info_base
         list_at: list_base
         range_at: range_base
+        l_idx: list_index
+        r_idx: range_index
         info_base += rows.info.len()
         list_base += rows.lists.bytes.len()
         range_base += rows.ranges.bytes.len()
-        info_pieces.push(X64ObjectPiece{at: info_at, bytes: rows.info.move()})
-        list_pieces.push(X64ObjectPiece{at: list_at, bytes: rows.lists.bytes.move()})
-        range_pieces.push(X64ObjectPiece{at: range_at, bytes: rows.ranges.bytes.move()})
+        list_index += rows.lists.offsets.len()
+        range_index += rows.ranges.offsets.len()
+        patch_jobs.push(DwarfInfoPatch{rows: rows.move(), info_at: info_at, list_at: list_at, range_at: range_at, list_index: l_idx, range_index: r_idx, widths: widths})
+    }
+    patched := if patch_jobs.len() > 1 -> {
+        patch_jobs.reverse()
+        dwarf_info_patch_parts(patch_jobs)
+    } else -> {
+        out_p := [DwarfInfoPatched]{}
+        loop patch_jobs.len() > 0 {
+            job := patch_jobs.pop() ?? break
+            out_p.push(dwarf_info_patch_one(job))
+        }
+        out_p
+    }
+    relas.try_reserve(total_relas) ?? panic("reserve failed")
+    patched.reverse()
+    loop patched.len() > 0 {
+        item := patched.pop() ?? break
+        relas.extend(item.relas.move())
+        info_pieces.push(X64ObjectPiece{at: item.info_at, bytes: item.info.move()})
+        list_pieces.push(X64ObjectPiece{at: item.list_at, bytes: item.lists.move()})
+        range_pieces.push(X64ObjectPiece{at: item.range_at, bytes: item.ranges.move()})
     }
     info_pieces.push(X64ObjectPiece{at: info_base, bytes: [U8]{U8{0}}})
     sections.info = info_pieces.move()
     sections.info_relas = relas.move()
     sections.loclists = list_pieces.move()
     sections.rnglists = range_pieces.move()
+}
+
+DwarfInfoPatch: struct {
+    rows: DwarfInfoRows,
+    info_at: Int,
+    list_at: Int,
+    range_at: Int,
+    list_index: Int,
+    range_index: Int,
+    widths: DwarfListWidths,
+}
+
+DwarfInfoPatched: struct {
+    info: [U8],
+    lists: [U8],
+    ranges: [U8],
+    relas: [X64ObjectRela],
+    info_at: Int,
+    list_at: Int,
+    range_at: Int,
+}
+
+dwarf_info_patch_one: fn(job: &&DwarfInfoPatch) -> DwarfInfoPatched Never! {
+    item := job.move()
+    rows := item.rows.move()
+    info_at: item.info_at
+    loop pair in 0..<(rows.refs.len() >> 1) {
+        dwarf_patch_u32(rows.info, rows.refs[2 * pair], info_at + rows.refs[2 * pair + 1])
+    }
+    dwarf_lists_index(rows.info, rows.lists.refs, item.list_index, item.widths.lists)
+    dwarf_lists_index(rows.info, rows.ranges.refs, item.range_index, item.widths.ranges)
+    loop k in 0..<rows.relas.len() -> rows.relas[k].at = rows.relas[k].at + info_at
+    DwarfInfoPatched{info: rows.info.move(), lists: rows.lists.bytes.move(), ranges: rows.ranges.bytes.move(), relas: rows.relas.move(), info_at: info_at, list_at: item.list_at, range_at: item.range_at}
+}
+
+dwarf_info_patch_parts: fn(jobs: &[DwarfInfoPatch]) -> [DwarfInfoPatched] Never! {
+    if jobs.len() == 0 -> return [DwarfInfoPatched]{}
+    head := jobs.pop() ?? return [DwarfInfoPatched]{}
+    if jobs.len() == 0 -> return [DwarfInfoPatched]{dwarf_info_patch_one(head)}
+    out := [DwarfInfoPatched]{}
+    task.group dwarf_info_patch_group {
+        done_head: task &&head { dwarf_info_patch_one(head) }
+        rest: dwarf_info_patch_parts(jobs)
+        out.push(done_head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop item in rest.move() -> out.push(item)
+    }
+    out
 }
 
 // The bytes before `.debug_addr`'s first address: the unit length, the

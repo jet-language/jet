@@ -1357,7 +1357,9 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 // Where slow path `cold` leaves once it published a stop: its stop point's
 // edge, else the stop `exit`.
 ir_x64_stop_target: fn(e: IRX64Emitter, cold: IRX64Cold, exit: Int) -> Int Never! {
-    if cold.pad >= 0 && e.pad_label[cold.pad] >= 0 -> return e.pad_label[cold.pad]
+    if cold.pad >= 0 && e.pad_label.len() > 0 && e.pad_label[cold.pad] >= 0 {
+        return e.pad_label[cold.pad]
+    }
     exit
 }
 
@@ -2073,13 +2075,28 @@ IRX64Region: struct {
 // its place. A branch may leave a region (a stop edge); none enters one.
 // Adjacent regions (a plot's and the frame mark right after it) share one
 // site. A `zones: strip` module keeps none.
-ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation) -> [Int] Never! {
+ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll_in: Int{-2}, trap_in: Int{-2}, turn_in: Int{-2}, zone_plot_in: Int{-2}, zone_frame_in: Int{-2}) -> [Int] Never! {
+    if m.zones_stripped -> return [Int]{}
+    zone_plot: if zone_plot_in >= -1 -> zone_plot_in else -> (name_rows_value(m.name_rows, "jet_perf_plot_float") ?? -1)
+    zone_frame: if zone_frame_in >= -1 -> zone_frame_in else -> (name_rows_value(m.name_rows, "jet_perf_frame") ?? -1)
+    if zone_plot < 0 && zone_frame < 0 -> return [Int]{}
+    has_zone := false
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .CallRuntime && f.dst[at] < 0 {
+            a: f.a[at]
+            if a == zone_plot || a == zone_frame {
+                has_zone = true
+                break
+            }
+        }
+    }
+    if !has_zone -> return [Int]{}
     sunk := [Int]{}
+    sunk.try_reserve(f.op.len()) ?? panic("reserve failed")
     loop _ in 0..<f.op.len() -> sunk.push(-1)
-    if m.zones_stripped -> return sunk
-    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
+    poll: if poll_in >= -1 -> poll_in else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
+    trap: if trap_in >= -1 -> trap_in else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
+    turn: if turn_in >= -1 -> turn_in else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
     points: [Int]{poll, trap, turn}
     parents: ir_x64_parents(f)
     first := -1
@@ -2289,7 +2306,7 @@ ir_x64_zone_bound: fn(e: &IRX64Emitter, m: IRModule, at: Int) -> Int Never! {
         e.sunk_site = -1
         e.sunk_end = -1
     }
-    if e.sunk_site < 0 && e.sunk[at] >= 0 {
+    if e.sunk_site < 0 && e.sunk.len() > 0 && e.sunk[at] >= 0 {
         if m.zone_table {
             ir_x64_zone_stub(e, at, e.sunk[at])
             return e.sunk[at]
@@ -2964,7 +2981,7 @@ ir_x64_bit_test_fuse: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
     if cmp_at >= f.op.len() || al.ends[dst] != cmp_at -> return false
     after := cmp_at + 1
     loop after < f.op.len() && f.op[after] == .Nop -> after += 1
-    if after < f.op.len() && e.picks[after] >= 0 -> return false
+    if after < f.op.len() && e.picks.len() > 0 && e.picks[after] >= 0 -> return false
     cmp_op: f.op[cmp_at]
     if cmp_op != .Eq && cmp_op != .Ne -> return false
     other := -1
@@ -4395,7 +4412,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
         }
         .If -> {
             // Both arms run; the comparison waits for the End.
-            if e.picks[at] >= 0 {
+            if e.picks.len() > 0 && e.picks[at] >= 0 {
                 if ir_x64_pick_saves(m, f, al, at, e.picks[at]) {
                     ir_x64_load(e, m, f, al, e.picks[at], X64_R11)
                 }
@@ -4566,7 +4583,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 // no outward branch, and any Return only inside a stop-poll If) into e.pads
 // past the function epilogue, leaving a single conditional jump on the hot path.
 ir_x64_cold_if: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, turn: Int) -> Int Never! {
-    if e.absorbed[at] || e.select >= 0 || e.picks[at] >= 0 -> return -1
+    if e.absorbed[at] || e.select >= 0 || (e.picks.len() > 0 && e.picks[at] >= 0) -> return -1
     if f.op[at] != .If || f.b[at] >= 0 -> return -1
     end: f.c[at]
     if end <= at + 1 || end >= f.op.len() || f.op[end - 1] != .Unreachable -> return -1
@@ -4755,6 +4772,13 @@ IRX64PadTail: struct {
 }
 
 ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64FunctionTables, exit: Int, lines: &[X64LineRow]) Never! {
+    if e.pads.len() == 0 {
+        return
+    }
+    if e.pad_label.len() == 0 && f.op.len() > 0 {
+        e.pad_label.try_reserve(f.op.len()) ?? panic("reserve failed")
+        loop _ in 0..<f.op.len() -> e.pad_label.push(-1)
+    }
     // Keys by hash (ir_x64_key_hash) -> head row in `entries`, chained via `next`.
     seen := [Int:Int]{}
     entries := Rows<IRX64PadEntry>{}
@@ -5532,9 +5556,9 @@ ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64
 // code names use k as data row IR_X64_LOCAL_DATA + k until ir_x64_resolve.
 // It keeps an emission log when JET_X64_EMIT_LOG entry list `names` names
 // it (ir_x64_log_names).
-ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}) -> IRX64FunctionResult Never! {
+ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}) -> IRX64FunctionResult Never! {
     tables: ir_x64_function_tables(m, row, names)
-    compiled := ir_x64_select_row(m, tables, row, poll, trap, turn)
+    compiled := ir_x64_select_row(m, tables, row, poll, trap, turn, zone_plot, zone_frame)
     compiled.uses = tables.uses.move()
     compiled.hot = tables.hot.move()
     compiled.cold = tables.cold.move()
@@ -5549,13 +5573,13 @@ ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}
 }
 
 // A stop poll, an `#FFI(asm)` leaf or a body.
-ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int, poll: Int{-2}, trap: Int{-2}, turn: Int{-2}) -> IRX64FunctionResult Never! {
+ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int, poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}) -> IRX64FunctionResult Never! {
     key: m.functions[row].key
     if ir_stop_key(key) -> return ir_x64_stop_poll(m.functions[row], row)
     if m.functions[row].asm == .Val(leaf) {
         return ir_x64_asm_function(m, m.functions[row], leaf, row, tables)
     }
-    ir_x64_compile_body(m, m.functions[row], tables, row, poll, trap, turn)
+    ir_x64_compile_body(m, m.functions[row], tables, row, poll, trap, turn, zone_plot, zone_frame)
 }
 
 // The emission log of a function JET_X64_EMIT_LOG names (X64Code): `x64`
@@ -6077,31 +6101,35 @@ ir_x64_stack_saved_xmm: fn(xmm: Int) -> Int Never! {
 
 // Function row `row` (`f`, borrowed from `m`). A function with a fixed slot
 // keeps its encoder's emission log for the fixed-timing check (Timing.jet).
-ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables, row: Int, poll_in: Int{-2}, trap_in: Int{-2}, turn_in: Int{-2}) -> IRX64FunctionResult Never! {
+ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables, row: Int, poll_in: Int{-2}, trap_in: Int{-2}, turn_in: Int{-2}, zone_plot_in: Int{-2}, zone_frame_in: Int{-2}) -> IRX64FunctionResult Never! {
     checked: ir_timing_marked(f)
     logged: tables.logged
     fast_o0: m.fast_o0 && f.frame_bound < 0 && !checked && !logged
     al: ir_x64_allocate(m, f, fast_o0)
     op_count: f.op.len()
-    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_head: [Int]{}, end_tail: [Int]{}, end_sites: [Int]{}, end_next: [Int]{}, end_pending: 0, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_head: [Int]{}, end_tail: [Int]{}, end_sites: [Int]{}, end_next: [Int]{}, end_pending: 0, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: al.has_stream_store, below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
     if op_count > 0 {
         e.end_of.try_reserve(op_count) ?? panic("reserve failed")
-        e.pad_label.try_reserve(op_count) ?? panic("reserve failed")
         e.absorbed.try_reserve(op_count) ?? panic("reserve failed")
-        e.picks.try_reserve(op_count) ?? panic("reserve failed")
-        e.tests.try_reserve(op_count) ?? panic("reserve failed")
-        e.rotated.try_reserve(op_count) ?? panic("reserve failed")
-        e.exits.try_reserve(op_count) ?? panic("reserve failed")
         e.code.bytes.try_reserve(op_count * 12 + 64) ?? panic("reserve failed")
-    }
-    loop _ in 0..<op_count {
-        e.end_of.push(-1)
-        e.pad_label.push(-1)
-        e.absorbed.push(false)
-        e.picks.push(-1)
-        e.tests.push(-1)
-        e.rotated.push(false)
-        e.exits.push(-1)
+        loop _ in 0..<op_count {
+            e.end_of.push(-1)
+            e.absorbed.push(false)
+        }
+        if !fast_o0 {
+            e.picks.try_reserve(op_count) ?? panic("reserve failed")
+            loop _ in 0..<op_count -> e.picks.push(-1)
+        }
+        if al.has_loop {
+            e.tests.try_reserve(op_count) ?? panic("reserve failed")
+            e.rotated.try_reserve(op_count) ?? panic("reserve failed")
+            e.exits.try_reserve(op_count) ?? panic("reserve failed")
+            loop _ in 0..<op_count {
+                e.tests.push(-1)
+                e.rotated.push(false)
+                e.exits.push(-1)
+            }
+        }
     }
     if !fast_o0 {
         loop at in 0..<op_count {
@@ -6111,7 +6139,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
             loop k in ir_x64_select_test(m, f, al, at)..<at -> e.absorbed[k] = f.op[k] != .Nop
         }
     }
-    e.sunk = ir_x64_zone_regions(m, f, al)
+    e.sunk = ir_x64_zone_regions(m, f, al, poll_in, trap_in, turn_in, zone_plot_in, zone_frame_in)
 
     // The stack check (ir_x64_stack_check) first, then the frame-free
     // prefix (ir_x64_wrap), in registers of its own with its parameters

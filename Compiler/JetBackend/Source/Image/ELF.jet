@@ -17,6 +17,12 @@ X64ExecutableResult: struct {
     undefined: [String]{[String]{}},
     // Undefined runtime/external symbol names referenced by an object.
     imports: [String]{[String]{}},
+    // Split-buffer direct object representation: when non-empty, `bytes` holds
+    // the ELF header, `.shstrtab`, and section headers, `split_bufs` holds
+    // per-section data buffers, and `split_sec_buf[k]` maps section header `k`
+    // to its index in `split_bufs` (-1: stored in `bytes`).
+    split_bufs: [[U8]]{[[U8]]{}},
+    split_sec_buf: [Int]{[Int]{}},
 }
 
 // Little-endian words, byte by byte without a loop: each `U8{x & 255}` is a

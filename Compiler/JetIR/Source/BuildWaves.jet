@@ -8,7 +8,7 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-use jet_foundation.[CompilerThreads, CompilerTraceSink, FnBody, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, symbol_table]
+use jet_foundation.[CompilerThreads, CompilerTraceSink, FnBody, NameRows, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, name_rows, name_rows_set, name_rows_value, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
 // build admits threads by x64 selection admission (ir_x64_admit) with each
@@ -68,7 +68,7 @@ IRBuildQueue: struct {
     waiting: Int,
     busy: Int,
     row_jobs: [Int],
-    keyed_jobs: [String:Int],
+    keyed_jobs: NameRows,
 }
 
 // Rung after jobs are queued, when a part stops building and when a part
@@ -148,7 +148,7 @@ ir_build_waves_parted: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Boo
     }
     row_jobs := [Int]{}
     loop _ in 0..<p.functions.len() -> row_jobs.push(-1)
-    queue: Shared{IRBuildQueue{jobs: [IRWaveJob]{}, claimable: [Int]{}, claimed: 0, own: own.move(), own_claimed: own_claimed.move(), waiting: 0, busy: 0, row_jobs: row_jobs.move(), keyed_jobs: [String:Int]{}}}
+    queue: Shared{IRBuildQueue{jobs: [IRWaveJob]{}, claimable: [Int]{}, claimed: 0, own: own.move(), own_claimed: own_claimed.move(), waiting: 0, busy: 0, row_jobs: row_jobs.move(), keyed_jobs: name_rows()}}
     bell: Shared{IRBuildBell{rings: 0, stopped: 0, seats: seats.move()}}
     ir_build_queue_add(queue, roots)
     rooted: ir_build_queue_count(queue)
@@ -338,7 +338,7 @@ ir_waves_plain: fn(job: IRWaveJob) -> Bool { job.lambda < 0 && job.args.len() ==
 // Whether a job of `job`'s function is queued.
 ir_build_known: fn(q: IRBuildQueue, job: IRWaveJob) -> Bool Never! {
     if ir_waves_plain(job) -> return q.row_jobs[job.row] >= 0
-    q.keyed_jobs.get(job.key) != None
+    name_rows_value(q.keyed_jobs, job.key) != None
 }
 
 // Records job `index` as its function's job.
@@ -346,7 +346,7 @@ ir_build_note: fn(q: &IRBuildQueue, index: Int) Never! {
     if ir_waves_plain(q.jobs[index]) {
         row: q.jobs[index].row
         q.row_jobs[row] = index
-    } else { q.keyed_jobs[q.jobs[index].key.copy()] = index }
+    } else { name_rows_set(q.keyed_jobs, q.jobs[index].key, index) }
 }
 
 // Part `part`'s fused queue step: queues `found` (discovered by its previous
