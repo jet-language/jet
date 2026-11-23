@@ -386,6 +386,15 @@ sema_call_is_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
+// A registered function's body. A registration row's declaration may hold
+// none; sema_registration_function_body reads it from the row's item.
+sema_call_registered_function_body: fn(program: SemaProgramTables, function: SemaRegistrationFunction) -> [Stmt] {
+    if program.registration_graph == .Val(graph) && sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) {
+        return sema_registration_function_body(graph.modules[owner_row], function)
+    }
+    function.declaration.body
+}
+
 // Whether a callback argument at a C boundary is outside the C callback
 // subset, which accepts only function values. A name that is not a
 // registered function, and a module-qualified name, are left to the
@@ -394,7 +403,7 @@ sema_call_c_callback_unsafe: fn(argument: Expr, environment: SemaScopeEnvironmen
     if argument == {
         .Ident(name, _, _) -> {
             function: sema_http_route_find_function(environment, program, scopes, name) ?? return false
-            return !sema_call_foreign_thread_safe_func(function.declaration)
+            return !sema_call_foreign_thread_safe_func(function.declaration, sema_call_registered_function_body(program, function))
         }
         .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(environment.tables, lambda, scopes)
         .Field(base, _, _, _) -> {
@@ -433,7 +442,7 @@ sema_call_c_callback_context_read: fn(argument: Expr, environment: SemaScopeEnvi
         function: sema_http_route_find_function(environment, program, scopes, name) ?? return None
         tables: sema_scope_module_tables(environment, program, function.symbol.module_identity) ?? return None
         loop parameter in function.declaration.params -> inner.push(parameter.name)
-        body: if program.registration_graph == .Val(graph) && sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) -> sema_registration_function_body(graph.modules[owner_row], function) else -> function.declaration.body
+        body: sema_call_registered_function_body(program, function)
         loop statement in body {
             ast_visit_statement(tables, statement, fn(expression: ExprNode) { sema_call_note_context_read(tables, reads, expression) }, false)
         }
@@ -531,11 +540,11 @@ sema_call_note_ident: fn(tables: ASTTables, names: &[String], expression: ExprNo
     if ast_expr(tables, expression) == .Ident(name, _, _) -> names.push(name.copy())
 }
 
-sema_call_foreign_thread_safe_func: fn(func: Func) -> Bool Never! {
+sema_call_foreign_thread_safe_func: fn(func: Func, body: [Stmt]) -> Bool Never! {
     if !func.is_pure || func.type_params.len() > 0 || func.pre.len() > 0 || func.post.len() > 0 {
         return false
     }
-    loop statement in func.body {
+    loop statement in body {
         if !sema_call_foreign_thread_safe_stmt(statement) -> return false
     }
     true

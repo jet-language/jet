@@ -106,14 +106,15 @@ sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool
 }
 
 // The pending effect and body obligations of a top-level kernel whose header
-// obligations hold, or None. `compute_aliases` are the module's aliases of
+// obligations hold, or None. `body` is its body (a registration row's
+// declaration may hold none); `compute_aliases` are the module's aliases of
 // `core.compute`.
-sema_kernel_pending: fn(func: Func, compute_aliases: [String]) -> SemaKernelPending? Never! {
+sema_kernel_pending: fn(func: Func, body: [Stmt], compute_aliases: [String]) -> SemaKernelPending? Never! {
     kernel: func.kernel ?? return None
     if sema_kernel_declaration_failure(func, kernel, false) != None -> return None
     names := (loop param in func.params -> param.name)
     body_failure := SemaKernelFailure?{None}
-    loop statement in func.body {
+    loop statement in body {
         body_failure = sema_kernel_prove_statement(statement, names, compute_aliases)
         if body_failure != None -> break
     }

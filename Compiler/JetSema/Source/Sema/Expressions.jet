@@ -4912,7 +4912,16 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         name_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: plan.policy_name}}, span: method_span, id: AST_NODE_GENERATED}
         spec_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: plan.join_spec}}, span: method_span, id: AST_NODE_GENERATED}
         planned_args: [CallArg]{sema_call_http_core_synthetic_arg(name_expr, method_span), sema_call_http_core_synthetic_arg(spec_expr, method_span), args[0]}
-        return sema_expr_check_declared_method(receiver, receiver_value, method, "__guard_plan", method_span, owner_type_args, [Type]{}, planned_args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        // The call checks as `__guard_plan(name, spec, policy)`; a policy
+        // that doesn't fit is reported as the `guard(policy)` call written.
+        first: diagnostics.len()
+        checked: sema_expr_check_declared_method(receiver, receiver_value, method, "__guard_plan", method_span, owner_type_args, [Type]{}, planned_args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        loop at in first..<diagnostics.len() {
+            if diagnostics[at].code == "E0112" {
+                diagnostics[at].what = diagnostics[at].what.replace("`__guard_plan` wants", "`guard` wants").replace(" for argument 3,", " for argument 1,")
+            }
+        }
+        return checked
     }
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) {
         return None

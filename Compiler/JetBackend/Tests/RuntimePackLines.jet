@@ -2,9 +2,11 @@
 // link_pack_write), so what links the pack names the runtime's functions'
 // sources: the runtime image prelinked from it, which the comptime child
 // runs, and every program linked with it. The pack is linked here from the
-// runtime object of the compiler under test.
+// runtime object of the compiler under test. Its block records the
+// runtime's compilation directory, so the program's view of the table
+// (x64_jetline_program) holds none of them.
 use {
-    jet_backend.[x64_image_functions, x64_jetline_find, x64_jetline_read, x64_link_runtime_image, x64_link_runtime_pack]
+    jet_backend.[X64_JETLINE_RUNTIME_DIRECTORY, x64_image_functions, x64_jetline_find, x64_jetline_program, x64_jetline_read, x64_link_runtime_image, x64_link_runtime_pack]
     jet_foundation.[compiler_threads_single]
     lines_files: core.files
     lines_process: core.process
@@ -36,6 +38,7 @@ runtime_lines_object_path: fn() -> String {
         record: lines.functions[found]
         assert(record.low <= function.start && function.start < record.high, "`{function.name}`'s record holds its start")
         assert(record.file.ends_with(".jet") && record.decl > 0, "`{function.name}` is declared at a line of a Jet source, not {record.file}:{record.decl}")
+        assert(record.dir == X64_JETLINE_RUNTIME_DIRECTORY, "`{function.name}`'s record is the runtime's, not in `{record.dir}`")
         named += 1
     }
     loop name in ([String]{"jet_rt_string_eq", "jet_rt_alloc"}) {
@@ -47,4 +50,5 @@ runtime_lines_object_path: fn() -> String {
         assert(x64_jetline_find(lines, read.functions[index].start) >= 0, "the runtime image's line table names `{name}`'s source")
     }
     assert(named == lines.functions.len(), "each of the {lines.functions.len()} records is a function of the image, {named} are")
+    assert(x64_jetline_program(lines).functions.len() == 0, "no record of the runtime image is a program's function")
 }

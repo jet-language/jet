@@ -554,10 +554,12 @@ SemaEffectBodyFacts: struct {
     kernel: SemaKernelPending?{None},
 }
 
-// The body facts of `func`, walked from its body, its kernel left out.
-sema_effect_body_facts: fn(func: Func) -> SemaEffectBodyFacts Never! {
-    facts := SemaEffectBodyFacts{fx_regions: sema_authority_fx_regions(func.body)}
-    sema_effect_collect_statement_spans(func.body, facts)
+// The body facts of a function whose body is `body`, its kernel left out.
+// A registration row's declaration may hold no body
+// (sema_registration_function_body reads it from its item).
+sema_effect_body_facts: fn(body: [Stmt]) -> SemaEffectBodyFacts Never! {
+    facts := SemaEffectBodyFacts{fx_regions: sema_authority_fx_regions(body)}
+    sema_effect_collect_statement_spans(body, facts)
     facts
 }
 
@@ -812,7 +814,7 @@ sema_effect_push_memory_event: fn(nodes: &[SemaEffectNode], node_index: Int, spa
 // The effect source of `func`, keyed `key`, with its body walked for its
 // body facts, its kernel left out.
 sema_effect_source_from_function_key: fn(func: Func, key: String) -> SemaEffectFunctionSource Never! {
-    facts := sema_effect_body_facts(func)
+    facts := sema_effect_body_facts(func.body)
     sema_effect_source_from_header(func, key, facts)
 }
 
@@ -4180,11 +4182,19 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         }
         .StrLit(parts) -> {
             sema_effect_walk_record_exact_fact(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller)
-            interpolated: loop part in parts {
-                if part == .Interpolation(_, _) {
-                    break true
+            // Formatting a local that holds a Clock records its `Clock
+            // formatting` fact on the local's span; a bare local skips fact
+            // lookups elsewhere, so the interpolation looks it up here.
+            interpolated := false
+            loop part in parts {
+                if part == .Interpolation(value, _) {
+                    interpolated = true
+                    value_node: body_node(tree, value)
+                    if value_node.kind == .Local(_) {
+                        sema_effect_walk_record_exact_fact(nodes, node_index, tree, value_node, facts, module_facts, diagnostics, caller)
+                    }
                 }
-            } ?? false
+            }
             if interpolated {
                 sema_effect_push_memory_event(nodes, node_index, node.span, "string interpolation allocates a new `String`", "alloc", None)
             }
@@ -6778,7 +6788,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     unsafe_name_texts := [String]{}
     published_rows := name_column(node_by_key.nodes.len())
     published_texts := [String]{}
-    loop id in 1..<node_by_key.nodes.len() {
+    loop _ in 1..<node_by_key.nodes.len() {
         unsafe_rows.push(NAME_COLUMN_UNBOUND)
         published_rows.push(NAME_COLUMN_UNBOUND)
     }

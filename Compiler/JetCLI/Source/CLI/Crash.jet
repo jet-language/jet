@@ -13,7 +13,7 @@
 use {
     cli_files: core.files
     cli_term: core.term
-    jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_place, x64_jetline_read]
+    jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_place, x64_jetline_program, x64_jetline_read]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[diagnostic_registry_row, diagnostic_stop_footer, diagnostic_stop_line]
 }
@@ -51,7 +51,10 @@ jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never!
     store: ".jet/symbols/.build-id/{id.slice(0, 2)}/{id.slice(2, id.len())}.debug"
     side: jet_cli_crash_side(store) ?? return jet_cli_crash_missing(id, color)
     bytes: cli_files.read_bytes(side) ?? return jet_cli_fail("E2105", "couldn't read the debug info `{side}`: {err}", jet_cli_why("E2105"), "check that the file is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    table: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
+    // The program's functions, as the dev build's report finds them: the
+    // runtime's are routines (x64_jetline_program).
+    read: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
+    table: x64_jetline_program(read)
     out := [String]{}
     at := 0
     loop at < lines.len() {

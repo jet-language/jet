@@ -403,7 +403,10 @@ symbol:
 # strings (from the block's start), u64 base; then count records in
 # address order: an sleb, the start's distance from the previous record's
 # end (the first's from the base), then five ulebs, size, name, file,
-# declaration line and the byte length of the rows that follow.
+# declaration line and the byte length of the rows that follow. The
+# runtime library's block, whose directory (the first string) is
+# `<runtime>` (Image/Jetline.jet X64_JETLINE_RUNTIME_DIRECTORY), holds no
+# Jet frame: its functions are routines, named by symbol.
 find:
     sub rax, [rbp + V_BIAS]
     mov rsi, [rbp + V_TAB]
@@ -419,7 +422,18 @@ find:
     mov r9d, [rsi + 4]
     mov r11d, [rsi + 8]
     add r11, rsi
-    mov r10, [rsi + 12]
+    cmp byte ptr [r11], 0x3c       # '<'
+    jne 6f
+    movabs rcx, 0x656d69746e75723c # "<runtime"
+    cmp [r11], rcx
+    jne 6f
+    cmp byte ptr [r11 + 8], 0x3e   # '>'
+    jne 6f
+    cmp byte ptr [r11 + 9], 0      # its NUL
+    jne 6f
+    mov rsi, rdi
+    jmp 1b
+6:  mov r10, [rsi + 12]
     mov rsi, rdx
     push rax
 2:  test r9d, r9d
