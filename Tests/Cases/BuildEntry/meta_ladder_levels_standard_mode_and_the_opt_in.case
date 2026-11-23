@@ -1,0 +1,63 @@
+# Standard mode, with no `authority` row, reads facts completely and adds
+# checked code: `standard` reflects `Point`'s fields at build time and in a
+# `#run` value and adds a function made from them, and `jet check`, `jet run`
+# and the built program agree. An operation above level 5 needs the
+# package's opt-in (D-META-OPTIN2, now an expert Meta effect named in
+# `authority.allow`): a body rewrite (`rewrite`) and a type made from facts
+# (`types`) are refused by every command without it, and `opted` names both
+# and runs them.
+fixture: MetaLadderLevels.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+cwd: standard
+exit: 0
+step: jet run main.jet
+cwd: standard
+exit: 0
+stdout: = "field: x\nfield: y\ngenerated: xy\n"
+step: jet build main.jet
+cwd: standard
+exit: 0
+step: {work}/standard/.jet/build/app
+exit: 0
+stdout: = "field: x\nfield: y\ngenerated: xy\n"
+step: jet check main.jet
+cwd: rewrite
+exit: 1
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Rewrite`, which the main package doesn't hold" # a rewrite is above level 5
+step: jet run main.jet
+cwd: rewrite
+exit: 1
+stdout: = ""
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Rewrite`" # the run refuses it too
+step: jet build main.jet
+cwd: rewrite
+exit: 1
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Rewrite`" # and so does the build
+step: jet check main.jet
+cwd: types
+exit: 1
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Types`, which the main package doesn't hold" # a type made from facts is above level 5
+step: jet run main.jet
+cwd: types
+exit: 1
+stdout: = ""
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Types`" # the run refuses it too
+step: jet build main.jet
+cwd: types
+exit: 1
+stderr: ~ "Jet.ExpertEffectNotHeld: `build` uses the expert effect `Meta.Code.Types`" # and so does the build
+step: jet check main.jet
+cwd: opted
+exit: 0
+step: jet run main.jet
+cwd: opted
+exit: 0
+stdout: = "rewritten by the build\n7\n"
+step: jet build main.jet
+cwd: opted
+exit: 0
+step: {work}/opted/.jet/build/app
+exit: 0
+stdout: = "rewritten by the build\n7\n"

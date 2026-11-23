@@ -1,0 +1,23 @@
+// `#run` values are computed while building, on every tier: the text is
+// read from `config.txt`, and a check of it stops the build when it is
+// empty. The program prints four lines in a fixed order, and its test
+// reads the same value.
+TEXT: #run embed_file("config.txt")
+
+WORDS: #run checked(TEXT)
+
+checked: fn(text: String) -> Int {
+    if text.trim() == "" -> panic("config.txt is empty")
+    text.trim().split(" ").len()
+}
+
+run: fn() {
+    print("first")
+    print("text: {TEXT.trim()}")
+    print("words: {WORDS}")
+    print("last")
+}
+
+#Test("the build counted the words") {
+    assert_eq(WORDS, 2)
+}

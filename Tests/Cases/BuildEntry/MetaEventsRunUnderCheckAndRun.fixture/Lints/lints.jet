@@ -1,0 +1,26 @@
+// A Tidy finding at each checked call of `print` in the root's own source.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "lints.NoPrintInLib",
+        tier: .Tidy,
+
+        what: fn(self) -> String { "library code prints to the terminal" }
+
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
+        fix: fn(self) -> String { "return the text, or write it to stderr" }
+    }
+}
+
+install: fn(meta: Compiler) {
+    meta.events(watch: .Calls{to: print}, fn(event) {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+}
+
+// A call watch whose handler stops at the first call it hears.
+refuse: fn(meta: Compiler) {
+    meta.events(watch: .Calls{to: print}, fn(event) {
+        if event == .Checked(.Call(_)) -> panic("the call watch refused a print")
+    })
+}

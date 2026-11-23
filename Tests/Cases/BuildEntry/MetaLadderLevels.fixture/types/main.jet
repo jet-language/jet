@@ -1,0 +1,20 @@
+// A type made from facts is above level 5: refused without the opt-in.
+Source: struct {
+    id: Int,
+    secret: String,
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop field in Source.reflect().fields {
+        if field.name != "secret" {
+            fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+        }
+    }
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() { print(Shape{id: 7}.id) }

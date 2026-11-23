@@ -1,0 +1,20 @@
+// @programmable_build
+// @cli_build
+// `meta.add` writes declarations, which is `Meta.Generate`, so a function
+// whose written row prohibits that effect can't call it, as with any effect.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_ladder_add_denied_by_a_generate_row.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+install: fn(meta: Compiler) -[!Meta.Generate]> {
+    meta.add(
+        #code {
+            extra: fn() -> Int { 2 }
+        },
+        scope: "extra",
+    )
+}
+
+run: fn() { print(2) }

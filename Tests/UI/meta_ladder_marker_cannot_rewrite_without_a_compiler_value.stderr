@@ -1,0 +1,8 @@
+Error: Jet.MarkerRowOutsideContract: `Meta.Code.Rewrite` in `Faster`'s template row is outside `Marker.expand`'s row
+  --> Tests/UI/meta_ladder_marker_cannot_rewrite_without_a_compiler_value.jet:9:44
+    |
+  9 |         expand: fn(self, target: Target) -[Meta.Code.Rewrite]> {
+    |                                            ^^^^^^^^^^^^^^^^^
+ Why: A marker's template holds no `Compiler` value, and rewriting a body or making a type from text is above marker expansion: only the root build's `Compiler` value does it
+ Fix: Remove `Meta.Code.Rewrite`, and do the change in the root package's `build: fn` through `b.compiler(app)`: `meta.rewrite_body(f, #code { ... })` or `meta.add_struct(...)`
+More: jet-lang.dev/e/Jet.MarkerRowOutsideContract

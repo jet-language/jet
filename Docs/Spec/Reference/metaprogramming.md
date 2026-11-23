@@ -106,6 +106,17 @@ with `value: #run T.f(…)`
 ([`comptime_no_silent_fallback_run_fn_call.jet`](../../../Tests/UI/comptime_no_silent_fallback_run_fn_call.jet),
 [`comptime_no_silent_fallback_run_fn_call`](../../../Tests/Cases/ComptimeNoSilentFallback/comptime_no_silent_fallback_run_fn_call.case)).
 
+Every command that compiles computes the `#run` values: `jet check`,
+`jet test`, `jet run` at each profile and `jet build`, and a failure stops
+each of them (E3010). A built program never runs them again: it keeps the
+values its build took, so an input edited after the build changes nothing
+it prints until the next build. `build: fn` runs only for a command that
+makes an artifact (`jet run`, `jet test`, `jet build`); `jet check` runs it
+only to load the modules it adds. Only a pure function keeps results
+(`#Memo` on one that prints is E0938), so a cache hit never drops or
+reorders a print
+([`meta_ladder_levels_run_build_artifacts_and_cache_hits`](../../../Tests/Cases/BuildEntry/meta_ladder_levels_run_build_artifacts_and_cache_hits.case)).
+
 A local whose value only calls pure code is computed while compiling when
 it can be, and the program reads the computed value; this automatic
 evaluation never changes what the program prints. `#Runtime(mode)` on a
@@ -1117,6 +1128,12 @@ uses one its package doesn't hold is refused (E0777), and a `deny` row always
 wins. An expert entry sets no ceiling on the other effects a package may use.
 `Meta.Host`, which compile-time code needs to reach the host, is expert the
 same way.
+Standard mode needs no row: reading facts, a `#run` value of them and
+checked code a marker or `meta.add` adds. Each operation above it (a type
+made from facts, code from text, a rewrite of written code) is refused by
+`jet check`, `jet run` and `jet build` alike until the package names its
+effect
+([`meta_ladder_levels_standard_mode_and_the_opt_in`](../../../Tests/Cases/BuildEntry/meta_ladder_levels_standard_mode_and_the_opt_in.case)).
 The root package's own functions need no consent. A dependency's function is
 rewritten only after the root writes `meta.allow_rewrite(package: "orm")` on
 its value, naming that dependency, which the build loads at its locked
@@ -1186,8 +1203,12 @@ a call watch heard. The finding's type has an `impl Diagnostic`: its `code`
 constant names the report (the type path, such as `mypkg.NoPrintInLib`, when
 it writes none), its `tier` says what the report fails, and `what`, `why`
 and `fix` word it. When the build returns, an `.Error` finding fails the
-build; a `.Tidy` one fails `jet build` but not `jet run`, `jet dev` or
-`jet test`; a `.Report` one is advice for lint alone and fails nothing. A
+build; a `.Tidy` one fails `jet build` and `jet check` but not `jet run`,
+`jet dev` or `jet test`; a `.Report` one is advice for lint alone and fails
+nothing. The watches run under every command that runs the package's build,
+`jet check` and `jet run` as `jet build`, and a handler that panics stops
+each of them with E3010
+([`meta_events_run_under_check_and_run`](../../../Tests/Cases/BuildEntry/meta_events_run_under_check_and_run.case)). A
 value whose type has no `impl Diagnostic` is refused (E0905). Reporting
 needs no Meta effect, and the build refuses a value whose build has returned.
 A finding can carry a machine fix: `structured_fix: syntax.rewrite(callee:

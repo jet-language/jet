@@ -1,0 +1,37 @@
+# The call watches a package's `build: fn` registers (`meta.events`) run
+# under `jet check` and `jet run` as under `jet build`. `Tidy` installs a lint
+# whose `.Tidy` finding fails `jet check` and `jet build` at the `print` it
+# hears, while `jet run` keeps going. `Panics` registers a handler that
+# panics: every command stops with the handler's report, worded as
+# compile-time code that stopped the build.
+fixture: MetaEventsRunUnderCheckAndRun.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check run.jet
+cwd: Tidy
+exit: 1
+stderr: ~ "Error: lints.NoPrintInLib: Library code prints to the terminal" # the check runs the lint
+stderr: ~ "--> run.jet:3:27" # at the print it heard
+step: jet run run.jet
+cwd: Tidy
+exit: 0
+stdout: = "tidy: ready\n"
+stderr: !~ "lints.NoPrintInLib" # a run never stops for a Tidy finding
+step: jet build run.jet
+cwd: Tidy
+exit: 1
+stderr: ~ "Error: lints.NoPrintInLib: Library code prints to the terminal" # the build fails on it as before
+step: jet check run.jet
+cwd: Panics
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `the call watch refused a print`" # the check stops at the handler
+stderr: ~ "a `build: fn` or a handler it registers" # worded as compile-time code
+step: jet run run.jet
+cwd: Panics
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `the call watch refused a print`" # the run stops before it starts
+stdout: = ""
+step: jet build run.jet
+cwd: Panics
+exit: 1
+stderr: ~ "Jet.ArithmeticOrBoundsFailure: `the call watch refused a print`" # the build stops the same way

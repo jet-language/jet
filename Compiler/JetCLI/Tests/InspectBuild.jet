@@ -30,6 +30,7 @@ use {
         jet_cli_build_report,
         jet_cli_driver_request,
         jet_cli_core_sources,
+        jet_cli_generated_request,
         jet_cli_generated_write,
         jet_cli_native_session_at,
     ]
@@ -442,4 +443,39 @@ inspect_build_runtime_dir: fn() -> String {
     assert(query.generated.len() == 1 && query.generated[0].relative_path == ".jet/generated/main/rewrite_body/step.jet", "the one marked function is rewritten")
     rewritten: query.generated[0].source
     assert(rewritten.contains("use jet_profiled_zone: core.perf") && rewritten.contains("_zone: jet_profiled_zone.zone(\"step\")"), "the new body opens a zone named after the function through the import the build adds")
+}
+
+// A compile that runs no build of its own runs the build's call watches as
+// `jet build` does: a check reports the `.Tidy` finding one raises, a run
+// keeps going without it, and a handler that panics stops both with its
+// own report, worded as compile-time code that stopped the build.
+#Test("inspect_build a check reports what the build's call watches raised") {
+    core: if jet_cli_core_sources("/inspect-build/main.jet") == {
+        .Loaded(sources) -> sources
+        .Missing(what, _) -> panic("the compiler under test has no Core: {what}")
+    }
+    watched: "Loud: struct {{\n    impl Diagnostic {{\n        code: \"app.Loud\",\n        tier: .Tidy,\n\n        what: fn(self) -> String {{ \"loud call\" }}\n\n        why: fn(self) -> String {{ \"quiet\" }}\n\n        fix: fn(self) -> String {{ \"hush\" }}\n    }}\n}}\n\nbuild: fn(b: Build) {{\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    meta: b.compiler(app)\n    meta.events(watch: .Calls{{to: print}}, fn(event) {{\n        if event == .Checked(.Call(c)) -> HANDLER\n    }})\n    b.default(app)\n}}\n\nrun: fn() {{ print(1) }}\n"
+    shapes: [String]{"meta.report(Loud{{}}, at: c)", "panic(\"the watch refused\")"}
+    modes: [JetDriverCompileMode]{JetDriverCompileMode.Check, JetDriverCompileMode.Program}
+    rows := [String]{}
+    loop handler in shapes {
+        loop mode in modes {
+            request := jet_cli_driver_request(inspect_build_request().authorized_sources, core.copy(), Val(1), mode)
+            request.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+            request.authorized_sources.roots[0].files[0].source = watched.replace("HANDLER", handler)
+            generated: jet_cli_generated_request(request)
+            loop reported in generated.reports {
+                rows.push("{mode == JetDriverCompileMode.Check}|{reported.code}|{reported.what}|{reported.why}")
+            }
+        }
+    }
+    stop_why: "Compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in code the build runs (a `#run` value, a `build: fn` or a handler it registers) is a compile error"
+    assert_eq(
+        rows,
+        [String]{
+            "true|app.Loud|Loud call|Quiet",
+            "true|E3010|`the watch refused`|{stop_why}",
+            "false|E3010|`the watch refused`|{stop_why}",
+        },
+    )
 }

@@ -239,8 +239,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0770 | DuplicateParameterLabel | Compiler/JetParser/Source/Parser/Items.jet:827 | each parameter publishes its own label |
 | E0771 | FunctionValueLabelMismatch | Compiler/JetSema/Source/Sema/Expressions.jet:1381 | the function value's labels and zones match the expected type |
 | E0772 | AmbiguousCall | Compiler/JetSema/Source/Sema/Calls/Methods.jet:922 | labels pick one body |
-| E0774 | MarkerRowOutsideContract | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:483 | a template's row names `Meta.Generate` and nothing else |
-| E0775 | MarkerGeneratesOutsideRow | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:537 | the template's row names `Meta.Generate` |
+| E0774 | MarkerRowOutsideContract | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:488 | a template's row names `Meta.Generate` and nothing else |
+| E0775 | MarkerGeneratesOutsideRow | Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet:545 | the template's row names `Meta.Generate` |
 | E0776 | CompilerValueOutsideRoot | Compiler/JetSema/Source/Sema/Calls/Build.jet:283 | compiler control belongs to the root package's build source |
 | E0801 | UnknownLambdaParameterType | Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet:2305 | the parameter's type is written or given by the context |
 | E0803 | CalledNonFunction | Compiler/JetSema/Source/Sema/Calls/Direct.jet:835 | parentheses call functions and lambdas |
@@ -344,7 +344,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1017 | InlineAlwaysReadsTrace | Compiler/JetSema/Source/Sema/MarkerRules.jet:2429 | a function that reads `context.trace` is not `#Inline(Always)` |
 | E1018 | ComptimeValueIsRuntimeHandle | Compiler/JetSema/Source/Sema/Diagnostics.jet:505 | a compile-time value is data |
 | E1019 | ComptimeMethodCalledAtRunTime | Compiler/JetSema/Source/Sema/Diagnostics.jet:513 | a `#run fn` runs while building |
-| E1020 | ComptimeValueIsComputedFunction | Compiler/JetEval/Source/IR/Native.jet:1636 | a compile-time value is data |
+| E1020 | ComptimeValueIsComputedFunction | Compiler/JetEval/Source/IR/Native.jet:1639 | a compile-time value is data |
 | E1021 | InlineAlwaysForeign | Compiler/JetSema/Source/Sema/MarkerRules.jet:2375 | a function with a foreign body is not `#Inline(Always)` |
 | E1022 | RuntimeOnlyAtBuildTime | Compiler/JetSema/Source/Sema/Diagnostics.jet:521 | `#Runtime(.Only)` code runs only in the running program |
 | E1023 | UnknownLibraryMarker | Compiler/JetSema/Source/Sema/MarkerModules.jet:646 | a qualified marker names a marker its import's module declares |
@@ -617,7 +617,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3006 | Deadlock | Compiler/JetRuntime/Source/WaitCycle.jet:422 | one task of the cycle stops waiting for the others |
 | E3007 | ComptimeEndedBySignal | Compiler/JetEval/Source/IR/Native.jet:966 | the build runs again without the signal |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:169 | the operands or index are checked first |
-| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1105 | the `#Todo` is written |
+| E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1108 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:186 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1157 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:3156 | the fatal trap is fixed |
@@ -675,7 +675,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3513 | LockedEffectRowWidened | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:553 | lock the new effect row after review |
 | E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:211 | a producer makes the file |
 | E3516 | GenerationRoundLimit | Compiler/JetBuildSession/Source/Session.jet:493 | a shorter chain of generating steps |
-| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:544 | one build entry per package |
+| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:562 | one build entry per package |
 | E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:405 | one writer per layer |
 | E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:117 | a code outside the compiler's shape |
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:942 | one override per command |

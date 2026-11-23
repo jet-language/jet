@@ -1,0 +1,17 @@
+// A marker's template writes declarations at its marked site and holds no
+// `Compiler` value, so its row can't claim `Meta.Code.Rewrite`: rewriting a
+// body is above marker expansion and takes the root build's `Compiler`
+// value (`meta.rewrite_body`).
+Faster: struct {
+    impl Marker {
+        sites: [.Function],
+
+        expand: fn(self, target: Target) -[Meta.Code.Rewrite]> {
+            name: target.name
+        }
+    }
+}
+
+#Faster answer: fn() -> Int { 2 }
+
+run: fn() { print(answer()) }

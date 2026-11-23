@@ -1,0 +1,11 @@
+// `build: fn` runs only for a command that makes an artifact: `jet check`
+// makes none and passes, while `jet run`, `jet test` and `jet build` stop
+// where the build panics.
+build: fn(b: Build) {
+    stops: [1].len()
+    if stops > 0 -> panic("the build fn ran")
+    app: b.add_executable("app", ["main.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print("program ran") }

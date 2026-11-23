@@ -1,0 +1,27 @@
+// Standard mode, with no `authority` row: the build reads facts and adds
+// checked code, and the program reads facts a `#run` value took.
+Point: struct {
+    x: Int,
+    y: Int,
+}
+
+FIELDS: #run Point.reflect().fields
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    names := ""
+    loop field in Point.reflect().fields -> names = "{names}{field.name}"
+    meta.add(
+        #code {
+            point_names: fn() -> String { #{names} }
+        },
+        scope: "facts",
+    )
+    b.default(app)
+}
+
+run: fn() {
+    loop field in FIELDS { print("field: {field.name}") }
+    print("generated: {point_names()}")
+}

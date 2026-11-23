@@ -899,20 +899,37 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
 // loads them as `jet run` and `jet build` do (jet_cli_contributed_request).
 // The build runs only when the sources spell a generating call
 // (jet_driver_sources_may_generate), and only up to its generated modules
-// (jet_driver_query_build_plan's `generated_only`): its reports, its
-// settings and its plan stay `jet build`'s, and a build that fails leaves
-// the compile its sources alone, whose check reports what they miss. A
-// request that already carries generated modules is returned as it is.
-jet_cli_generated_request: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverCompileRequest {
+// (jet_driver_query_build_plan's `generated_only`): its settings and its plan
+// stay `jet build`'s. Its call watches run as under `jet build`, so the
+// compile reports what they raised (`reports`): a `.Tidy` finding under
+// `jet check`, which fails on it as `jet build` does, while a run or a test
+// keeps going. A build that fails leaves the compile its sources alone,
+// whose check reports what they miss; when its staging check passed, the
+// build's own reports (a handler's stop, an `.Error` finding) are the
+// compile's too. A request that already carries generated modules is
+// returned as it is.
+JetCLIGeneratedRequest: struct {
+    request: JetDriverCompileRequest,
+    reports: [Diagnostic],
+}
+
+jet_cli_generated_request: fn(owned_request: &&JetDriverCompileRequest) -> JetCLIGeneratedRequest {
     request := owned_request.move()
-    if request.generated_modules.len() > 0 || !jet_driver_sources_may_generate(request) -> return request.move()
-    if !jet_driver_entry_build_probe(request).has_build -> return request.move()
+    if request.generated_modules.len() > 0 || !jet_driver_sources_may_generate(request) {
+        return {request: request.move(), reports: [Diagnostic]{}}
+    }
+    if !jet_driver_entry_build_probe(request).has_build {
+        return {request: request.move(), reports: [Diagnostic]{}}
+    }
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response: jet_driver_query_build_plan(request, scope, generated_only: true)
     query: response.query.move()
     folded := response.request.move()
-    if query.complete && query.internal_problem == None -> folded.generated_modules = query.generated.move()
-    folded.move()
+    if query.internal_problem != None -> return {request: folded.move(), reports: [Diagnostic]{}}
+    if !query.complete -> return {request: folded.move(), reports: query.build_reports.move()}
+    folded.generated_modules = query.generated.move()
+    reports: if folded.mode == JetDriverCompileMode.Check -> query.tidy.move() else -> [Diagnostic]{}
+    {request: folded.move(), reports: reports}
 }
 
 // Record what `plan`'s `build: fn` contributed as `package`'s
