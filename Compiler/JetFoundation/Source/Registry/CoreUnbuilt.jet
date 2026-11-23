@@ -4,26 +4,23 @@
 // every one). Lowering a user call of one would stop inside the compiler, so
 // sema refuses the call with E2104 in any compile that lowers it. This is the
 // only table of unbuilt surfaces. A row names the feature, the card that builds
-// it, and its user-facing surface:
-// - the Core calls `module_name.member` for each member in `members`, where a
-//   static constructor member is spelled `Type.member`;
-// - every method of each handle type in `handles`, and its static `new`.
-// A row goes away when its feature lands.
+// it, and its user-facing surface: the Core calls `module_name.member` for each
+// member in `members`, where a member a Core type declares (its static
+// constructor or a method) is spelled `Type.member`. A row goes away when its
+// feature lands.
 CoreUnbuiltRow: struct {
     feature: String,
     card: Int,
     module_name: String,
     members: [String],
-    handles: [String],
 }
 
 CORE_UNBUILT_ROWS: [CoreUnbuiltRow]{
     {
         feature: "the configured HTTP client runtime (pools, cookies, redirects, proxies, TLS, HTTP/2)",
         card: 3665,
-        module_name: "",
-        members: [String]{},
-        handles: [String]{"HTTPClient"},
+        module_name: "core.http.client",
+        members: [String]{"Client.send"},
     },
 }
 
@@ -38,12 +35,13 @@ core_unbuilt_call: fn(module_name: String, member: String) -> CoreUnbuiltRow? Ne
     None
 }
 
-// The unbuilt row of the handle type `owner`, if it has one.
-core_unbuilt_handle: fn(owner: String) -> CoreUnbuiltRow? Never! {
+// Whether some unbuilt member is a method `Type.method` of a Core type: the
+// cheap test before a method call looks up its receiver's declaring module.
+core_unbuilt_method: fn(method: String) -> Bool Never! {
     loop row in CORE_UNBUILT_ROWS {
-        loop name in row.handles {
-            if name == owner -> return Val(row)
+        loop name in row.members {
+            if name.ends_with(method) && name.rfind(".") + 1 + method.count_bytes() == name.count_bytes() -> return true
         }
     }
-    None
+    false
 }

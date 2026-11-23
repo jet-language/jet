@@ -4293,8 +4293,6 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
     if alias != "" && sema_expr_core_module_alias_visible(alias, scopes) {
         memory := sema_call_try_memory_static(receiver, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if memory.handled -> return memory
-        http := sema_call_try_http_static(receiver, method, owner_type_args, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        if http.handled -> return http
     }
     // `mem.address_of(place)` names the module itself as its receiver.
     if receiver == .Ident(name, _, _) {
@@ -4471,8 +4469,10 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     data := sema_call_try_data_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if data.handled -> return data
 
-    http := sema_call_try_http_method(receiver, receiver_value, method, owner_type_args, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if http.handled -> return http
+    if sema_call_http_nominal_leaf(receiver_value.ty) == "HTTPRouter" {
+        route := sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if route.handled -> return route
+    }
     web_form := sema_call_try_web_form_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -4964,6 +4964,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
 // The ordinary registered-method call: operator or declared candidates,
 // inference over the argument types, then the checked candidate.
 sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, method: String, routed_method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    before: diagnostics.len()
     operator_trait: owned_trait_for_operator_hook(method)
     argument_types := [Type?]{}
     argument_index := 0
@@ -5020,6 +5021,7 @@ sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, metho
     checked := sema_call_check_method_candidate_from_value_owned(state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, method_span, expected, environment, program, scopes, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1
     value: checked ?? return None
+    if sema_call_core_method_unbuilt(receiver_value.ty, routed_method, method_span, before, environment, program, diagnostics) -> return None
     context.call_return_views.push(SemaCallReturnView{span: method_span, facts: value.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, scopes, context, method_span, value, diagnostics) {
         return None

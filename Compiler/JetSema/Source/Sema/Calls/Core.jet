@@ -21,7 +21,7 @@ use jet_foundation.[
     CoreTypedCallSignature,
     CoreUnbuiltRow,
     core_unbuilt_call,
-    core_unbuilt_handle,
+    core_unbuilt_method,
     Diagnostic,
     diagnostic_registry_row,
     InternalTag,
@@ -245,14 +245,22 @@ sema_call_core_unbuilt_error: fn(callee: String, row: CoreUnbuiltRow, span: Span
     sema_error("E2104", span, "`{callee}` is not built yet", "This `jet` has no implementation of {row.feature} yet, and no other `jet` can run it.", "Remove the `{callee}` call for now; {row.feature} needs its Jet implementation first (card #{row.card}).")
 }
 
-// E2104 at a checked call of a method (or the static `new`) of an unbuilt
-// handle type (core_unbuilt_handle); true when reported. The call is refused
-// wherever it is written, Core's own source included, and only by a compile
-// that lowers it (sema_refuses_unbuilt).
-sema_call_core_handle_unbuilt: fn(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
-    if !sema_refuses_unbuilt(program) -> return false
-    row: core_unbuilt_handle(owner) ?? return false
-    diagnostics.push(sema_call_core_unbuilt_error("{owner}.{method}", row, span))
+// E2104 at a checked call of a method an unbuilt Core type declares: the
+// core_unbuilt_call member `Type.method` of the module declaring the
+// receiver's type. Like sema_call_core_unbuilt_settle it stays silent when
+// checking the call added an error since `before`, and it refuses the call
+// wherever it is written, Core's own source included, only in a compile that
+// lowers it (sema_refuses_unbuilt); true when reported.
+sema_call_core_method_unbuilt: fn(receiver: Type, method: String, span: Span, before: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if !core_unbuilt_method(method) || !sema_refuses_unbuilt(program) -> return false
+    graph: program.registration_graph ?? return false
+    owner: sema_type_resolve_nominal_row(graph, sema_call_resolved_type(receiver, environment, program), environment.module_identity) ?? return false
+    module_row: graph.modules[owner.module_index]
+    if !module_is_core(module_row.module_identity) -> return false
+    member: "{module_row.nominals[owner.row].symbol.name}.{method}"
+    row: core_unbuilt_call(module_row.module_name, member) ?? return false
+    if sema_has_error_since(diagnostics, before) -> return false
+    diagnostics.push(sema_call_core_unbuilt_error(member, row, span))
     true
 }
 

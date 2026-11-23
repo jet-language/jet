@@ -142,7 +142,6 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
         .UnixStreamReady -> return Val(ir_handle_h("jet_net_unix_ready", [Bool]{true, false, true}))
         .UnixStreamClose -> return Val(ir_handle_h("jet_net_unix_close", [Bool]{true}))
         .UnixStreamSetTimeout -> return Val(ir_handle_h("jet_net_unix_set_timeout", [Bool]{true, true}))
-        .HTTPClientNew -> return Val(ir_handle_h("jet_http_client_new_impl", [Bool]{}))
         .TerminalSessionResize -> return Val(ir_handle_h("jet_terminal_session_resize", [Bool]{true, true}))
         .ProcessStdinWrite -> return Val(ir_handle_h("jet_process_stdin_write", [Bool]{true, true}))
         .ProcessStdinWriteText -> return Val(ir_handle_h("jet_process_stdin_write_text", [Bool]{true, true}))
@@ -216,7 +215,7 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
             if sender_receiver -> return Val(ir_handle_h("jet_std.JetSender.close", [Bool]{true}))
             return Val(ir_handle_h("jet_std.JetReceiver.close", [Bool]{true}))
         }
-        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .ProcessLines -> return None
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .ProcessLines -> return None
         .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .TaskJoin | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
     }
 }

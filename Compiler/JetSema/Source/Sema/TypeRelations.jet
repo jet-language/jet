@@ -1088,7 +1088,7 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
     if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || sema_registration_compiler_builtin_row(graph, name) != None || sema_type_builtin_trait_symbol(name) != None {
         return false
     }
-    if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None {
+    if sema_process_handle_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None {
         return false
     }
     if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None {
@@ -1139,19 +1139,14 @@ sema_type_compiler_owned_name: fn(name: String) -> Bool {
 
 // The runtime handles (IR_RUNTIME_HANDLES) a program may write as a type with
 // no import: the solver variables and constraints, the module grant handle,
-// the HTTP client policies, the text-width and log-span handles, the realtime
-// receipt, a closed channel's marker and the FFI callback registration. The
-// other handles are reached through their Core module's export or are the
-// runtime's own. SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to
-// IR_RUNTIME_HANDLES.
+// the text-width and log-span handles, the realtime receipt, a closed
+// channel's marker and the FFI callback registration. The other handles are
+// reached through their Core module's export or are the runtime's own.
+// SEMA_TYPE_NAMEABLE_HANDLES_CHECKED holds the view to IR_RUNTIME_HANDLES.
 SEMA_TYPE_NAMEABLE_HANDLES: [String]{
     "Closed",
     "Constraint",
     "FfiCallbackRegistration",
-    "HTTPCookieJar",
-    "HTTPProxy",
-    "HTTPRedirectPolicy",
-    "HTTPRetryPolicy",
     "HVar",
     "LengthVar",
     "LogSpan",

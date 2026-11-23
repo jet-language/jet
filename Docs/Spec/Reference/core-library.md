@@ -1800,16 +1800,17 @@ one.
 | `session_retries` / `session_redirects` | `Session` | Set a bounded retry or redirect policy. A session request waits at most 30 s; a `#Deadline` block bounds it sooner. |
 | `session_auth` / `session_proxy` | `Session` | Set credentials or an explicit proxy URL. |
 | `session_request(session, method, url, body)` | `HTTPResponse HTTPError!` | Apply session headers, retries, redirect checks, and transport. |
-| `Client.new()` | `HTTPClient` | Construct the typed client policy carrier; unset policies use the safe defaults. |
-| `Client.new().proxy(policy)` | `HTTPClient` | Select `.FromEnvironment` (default), `.None`, or `.URL(proxy)`. |
-| `Client.new().tls(config)` | `HTTPClient` | Apply a `core.net.tls.ClientConfig`; custom roots, mTLS identity, and TLS 1.2/1.3 bounds are enforced on HTTPS sends. |
-| `Client.new().cookies(.Memory)` | `HTTPClient` | Enable one clone-shared, bounded RFC6265bis memory cookie jar; one-shot shortcuts remain stateless. |
-| `Client.new().redirects(.Follow{ max:, same_origin_credentials: })` | `HTTPClient` | Follow at most the bounded limit, strip credentials across origins, and preserve same-origin credentials only when requested. |
-| `Client.new().allow_http_downgrade(true)` | `HTTPClient` | Explicitly permit HTTPS-to-HTTP redirects; the default refuses downgrades. |
-| `Client.new().retries(.Safe/.Idempotent/.None)` | `HTTPClient` | Retry one stale pooled-connection I/O failure for safe methods, optionally idempotent methods, or never; never retry status or timeout failures. |
-| `Client.new().protocols(false, true, false)` | `HTTPClient` | Select the enabled HTTP/2, HTTP/1.1, and HTTP/3 protocol families before transport. |
-| `Client.new().timeouts(connect, read, total, dns, tls, write, first_byte)` | `HTTPClient` | Set nonnegative per-phase and total timeout budgets; request overrides and ambient deadlines remain upper bounds. |
-| `Client.new().raw_encoding()` | `HTTPClient` | Preserve raw response content-encoding metadata for the response projection. |
+| `Client.new()` | `Client` | Construct the typed client policy carrier; unset policies use the safe defaults. |
+| `Client.new().proxy(policy)` | `Client` | Select a `ProxyPolicy`: `.FromEnvironment` (default) or `.URL(proxy)`; the absent option `.None` uses no proxy. |
+| `Client.new().tls(config)` | `Client` | Apply a `core.net.tls.ClientConfig`; custom roots, mTLS identity, and TLS 1.2/1.3 bounds are enforced on HTTPS sends. |
+| `Client.new().cookies(.Memory)` | `Client` | Select the `CookieJar` `.Memory`: one clone-shared, bounded RFC6265bis memory cookie jar; one-shot shortcuts remain stateless. |
+| `Client.new().redirects(.Follow{ max:, same_origin_credentials: })` | `Client` | Follow at most the bounded limit, strip credentials across origins, and preserve same-origin credentials only when requested. |
+| `Client.new().allow_http_downgrade(true)` | `Client` | Explicitly permit HTTPS-to-HTTP redirects; the default refuses downgrades. |
+| `Client.new().retries(.Safe/.Idempotent/.None)` | `Client` | Retry one stale pooled-connection I/O failure for safe methods (`RetryPolicy.Safe`, the default), idempotent methods too (`.Idempotent`), or never (the absent option `.None`); never retry status or timeout failures. |
+| `Client.new().protocols(false, true, false)` | `Client` | Select the enabled HTTP/2, HTTP/1.1, and HTTP/3 protocol families before transport; HTTP/2 and HTTP/1.1 are the default. |
+| `Client.new().timeouts(connect, read, total, dns, tls, write, first_byte)` | `Client` | Set nonnegative per-phase and total timeout budgets; request overrides and ambient deadlines remain upper bounds. |
+| `Client.new().raw_encoding()` | `Client` | Preserve raw response content-encoding metadata for the response projection. |
+| `client.send(req)` | `HTTPResponse HTTPError!` | Send a request under the client's policies. Not built yet (card #3665): `jet check` accepts the call and a compile that lowers it refuses it with E2104. |
 
 Request and response body handles are single-use. Text projection rejects
 non-UTF-8 data and uses the shared body limit unless the caller selects an
