@@ -1891,6 +1891,30 @@ sema_registration_function_body: fn(module_row: SemaRegistrationModule, function
     function.declaration.body
 }
 
+// Points every function and method row of `module_row` at its item's index
+// once items left `program.items`: `moved` holds each old index's new one,
+// or -1 for an item that left. A row past `moved` names no program item.
+sema_registration_move_item_rows: fn(module_row: &SemaRegistrationModule, moved: [Int]) Never! {
+    loop row in 0..<module_row.functions.len() {
+        module_row.functions[row].item_index = sema_registration_moved_item(moved, module_row.functions[row].item_index)
+    }
+    loop nominal in 0..<module_row.nominals.len() {
+        loop row in 0..<module_row.nominals[nominal].methods.len() {
+            module_row.nominals[nominal].methods[row].item_index = sema_registration_moved_item(moved, module_row.nominals[nominal].methods[row].item_index)
+        }
+    }
+    loop owner in 0..<module_row.impls.len() {
+        loop row in 0..<module_row.impls[owner].methods.len() {
+            module_row.impls[owner].methods[row].item_index = sema_registration_moved_item(moved, module_row.impls[owner].methods[row].item_index)
+        }
+    }
+}
+
+sema_registration_moved_item: fn(moved: [Int], index: Int) -> Int Never! {
+    if index < 0 || index >= moved.len() -> return -1
+    moved[index]
+}
+
 sema_registration_function_with_body: fn(module_row: SemaRegistrationModule, function: SemaRegistrationFunction) -> Func Never! {
     updated := sema_registration_func_header(function.declaration)
     updated.body = sema_registration_function_body(module_row, function)
@@ -6589,23 +6613,26 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed
-    // in place; every other item stays where it is, uncopied.
+    // in place; every other item stays in order, uncopied, and the rows that
+    // read their bodies by item index follow them (`moved`: each old index's
+    // new one, -1 for an erased item).
     loop erased_index in 0..<graph.modules.len() {
         item_index := 0
+        moved := [Int]{}
         removed := false
         loop item_index < graph.modules[erased_index].program.items.len() {
             if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
                 erased_cap: sema_registration_template_cap(graph.modules[erased_index].program.items[item_index])
                 if erased_cap == .Val(cap) -> graph.modules[erased_index].template_caps.push(cap)
                 _ := graph.modules[erased_index].program.items.remove(item_index, .Slot)
+                moved.push(-1)
                 removed = true
-            } else { item_index += 1 }
-        }
-        if removed {
-            loop fn_row in 0..<graph.modules[erased_index].functions.len() {
-                graph.modules[erased_index].functions[fn_row].item_index = -1
+            } else {
+                moved.push(item_index)
+                item_index += 1
             }
         }
+        if removed -> sema_registration_move_item_rows(graph.modules[erased_index], moved)
     }
     // User derives and declared marker
     // bodies expand over the complete graph's reflection and register their
