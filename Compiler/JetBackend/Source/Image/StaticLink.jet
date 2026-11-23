@@ -2016,8 +2016,8 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     // jumps back past the site. The input order is entry, hot, cold, after.
     entry_code: [U8]{0xa9, 6, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3, 0xe8, 0, 0, 0, 0, 0xeb, 0xf3}
     functions := [X64CompiledFunction]{
-        X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: entry_code, relocs: [X64Reloc]{X64Reloc{at: 6, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}, X64Reloc{at: 12, target: X64RelocTarget.Function{id: X64FunctionID{value: 2}}}}, align: X64_FUNCTION_ALIGN, zones: [Int]{0}, zone_ends: [Int]{18}},
-        X64CompiledFunction{id: X64FunctionID{value: 1}, name: "hot", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 3}}}}, align: X64_FUNCTION_ALIGN},
+        X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: entry_code, relocs: [X64Reloc]{x64_reloc_function(6, 1), x64_reloc_function(12, 2)}, align: X64_FUNCTION_ALIGN, zones: [Int]{0}, zone_ends: [Int]{18}},
+        X64CompiledFunction{id: X64FunctionID{value: 1}, name: "hot", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_function(1, 3)}, align: X64_FUNCTION_ALIGN},
         X64CompiledFunction{id: X64FunctionID{value: 2}, name: "cold", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
         X64CompiledFunction{id: X64FunctionID{value: 3}, name: "after", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
     }
@@ -2074,8 +2074,8 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     built_objs := [X64ExecutableResult]{}
     loop variant in 0..<2 {
         functions := [X64CompiledFunction]{
-            X64CompiledFunction{id: X64FunctionID{value: 0}, name: "_start", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}}, align: X64_FUNCTION_ALIGN},
-            X64CompiledFunction{id: X64FunctionID{value: 1}, name: "helper", code: [U8]{0x48, 0x8d, 0x05, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 3, target: X64RelocTarget.Data{id: X64DataID{value: 0}}}}, align: X64_FUNCTION_ALIGN},
+            X64CompiledFunction{id: X64FunctionID{value: 0}, name: "_start", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_function(1, 1)}, align: X64_FUNCTION_ALIGN},
+            X64CompiledFunction{id: X64FunctionID{value: 1}, name: "helper", code: [U8]{0x48, 0x8d, 0x05, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_data(3, 0)}, align: X64_FUNCTION_ALIGN},
         }
         debug := [X64FunctionDebug]{
             X64FunctionDebug{lines: [X64LineRow]{X64LineRow{at: 0, line: 10}}, body: 0, cfi: [U8]{U8{0x0e}, U8{0x10}}, ranges: [X64VariableRange]{}},

@@ -89,17 +89,17 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
     rodata_live := false
     loop function in functions {
         loop reloc in function.relocs {
-            if reloc.target == .Function(id) {
-                if id.value < -1 || id.value + 1 >= function_rows.len() || function_rows[id.value + 1] < 0 {
+            if reloc.kind == X64_RELOC_FUNCTION {
+                if reloc.target < -1 || reloc.target + 1 >= function_rows.len() || function_rows[reloc.target + 1] < 0 {
                     return false
                 }
             }
-            if reloc.target == .Data(id) {
-                if id.value < 0 || id.value >= program.data.len() -> return false
-                if x64_object_read_only(program.data[id.value]) -> rodata_live = true else {
+            if reloc.kind == X64_RELOC_DATA {
+                if reloc.target < 0 || reloc.target >= program.data.len() -> return false
+                if x64_object_read_only(program.data[reloc.target]) -> rodata_live = true else {
                     data_live = true
                 }
-                x64_object_data_place(program.data, id.value, placed, order)
+                x64_object_data_place(program.data, reloc.target, placed, order)
             }
         }
     }
@@ -232,11 +232,10 @@ link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectMod
         link_pad_to(out, code_from + offsets[index], 0xcc)
         out.extend(function.code)
         loop reloc in function.relocs {
-            target: if reloc.target == {
-                .Function(id) -> code_at + offsets[function_rows[id.value + 1]]
-                .Runtime(symbol) -> link_direct_import(c, view, names, looked, import_at, symbol)
-                .RuntimeData(symbol) -> link_direct_import(c, view, names, looked, import_at, symbol)
-                .Data(id) -> (if x64_object_read_only(program.data[id.value]) -> rodata_at else -> data_at) + data_offsets[id.value]
+            target: if reloc.kind == {
+                X64_RELOC_FUNCTION -> code_at + offsets[function_rows[reloc.target + 1]]
+                X64_RELOC_DATA -> (if x64_object_read_only(program.data[reloc.target]) -> rodata_at else -> data_at) + data_offsets[reloc.target]
+                else -> link_direct_import(c, view, names, looked, import_at, x64_reloc_symbol(reloc, program.runtime_symbols))
             }
             if target < 0 -> return false
             place: code_at + offsets[index] + reloc.at

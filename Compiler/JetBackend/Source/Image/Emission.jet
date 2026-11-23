@@ -12,22 +12,56 @@ X64DataID: struct {
     value: Int,
 }
 
-// A relocation's target: a compiled function, a runtime function (a call),
-// a data object of the module, or a runtime data object (its address, read
-// RIP-relative: the runtime object exports it, RuntimeObject.jet
-// X64DataExport).
-X64RelocTarget: enum {
-    Function(id: X64FunctionID),
-    Runtime(symbol: String),
-    Data(id: X64DataID),
-    RuntimeData(symbol: String),
-}
+// Relocation target kinds (plain Int constants; zero payload-enum heap boxing).
+X64_RELOC_FUNCTION: 0
+
+X64_RELOC_DATA: 1
+
+X64_RELOC_RUNTIME: 2
+
+X64_RELOC_RUNTIME_DATA: 3
 
 // A rel32 field at `at` (offset in the function's code) that must hold the
-// distance from the end of the field to the target.
+// distance from the end of the field to its target. Unboxed value struct:
+// for X64_RELOC_FUNCTION and X64_RELOC_DATA, `target` is the function or data
+// row id and `symbol` is ""; for X64_RELOC_RUNTIME and X64_RELOC_RUNTIME_DATA,
+// `symbol` names the runtime symbol (or "" when `target >= 0` indexes
+// X64ObjectModule.runtime_symbols).
 X64Reloc: struct {
     at: Int,
-    target: X64RelocTarget,
+    kind: Int,
+    target: Int,
+    symbol: String{""},
+}
+
+#Inline(Always) x64_reloc_function: fn(at: Int, id: Int) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_FUNCTION, target: id}
+}
+
+#Inline(Always) x64_reloc_data: fn(at: Int, id: Int) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_DATA, target: id}
+}
+
+#Inline(Always) x64_reloc_runtime: fn(at: Int, symbol: String) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_RUNTIME, target: -1, symbol: symbol}
+}
+
+#Inline(Always) x64_reloc_runtime_id: fn(at: Int, id: Int) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_RUNTIME, target: id}
+}
+
+#Inline(Always) x64_reloc_runtime_data: fn(at: Int, symbol: String) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_RUNTIME_DATA, target: -1, symbol: symbol}
+}
+
+#Inline(Always) x64_reloc_runtime_data_id: fn(at: Int, id: Int) -> X64Reloc Never! {
+    X64Reloc{at: at, kind: X64_RELOC_RUNTIME_DATA, target: id}
+}
+
+#Inline(Always) x64_reloc_symbol: fn(reloc: X64Reloc, runtime_symbols: [String]) -> String Never! {
+    if reloc.symbol != "" -> return reloc.symbol
+    if reloc.target >= 0 && reloc.target < runtime_symbols.len() -> return runtime_symbols[reloc.target]
+    ""
 }
 
 // `align`: the function's start alignment in `.text`, a power of two of at
@@ -295,4 +329,5 @@ X64ObjectModule: struct {
     data: [X64Data],
     debug: X64ModuleDebug,
     functions: [X64FunctionSource],
+    runtime_symbols: [String]{[String]{}},
 }

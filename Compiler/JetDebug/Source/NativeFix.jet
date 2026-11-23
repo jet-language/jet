@@ -22,7 +22,7 @@
 // in its old code, would pass it the old ones, when it changes the entry
 // the program has already run, or when it reaches a runtime routine the
 // image does not hold.
-use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_find, x64_jetline_rows, x64_jetline_text]
+use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64Jetline, X64JetlineFunction, X64ModuleDebug, X64ObjectModule, X64Reloc, X64_RELOC_DATA, X64_RELOC_FUNCTION, X64_RELOC_RUNTIME, X64_RELOC_RUNTIME_DATA, link_debug_addr, link_debug_le, x64_jetline_find, x64_jetline_rows, x64_jetline_text, x64_reloc_data, x64_reloc_function, x64_reloc_runtime, x64_reloc_symbol]
 
 // What `fix` compiled: the program's module (its data objects, debug types
 // and functions' source facts), its compiled functions with their
@@ -270,13 +270,10 @@ native_fix_pick: fn(function: X64CompiledFunction, ordinal: Int, runnings: [Nati
 }
 
 // The key a relocation target is known by in NativeFixTargets.clashed.
-native_fix_key: fn(target: X64RelocTarget) -> String Never! {
-    if target == {
-        .Function(id) -> "f{id.value}"
-        .Data(id) -> "d{id.value}"
-        .Runtime(symbol) -> "r{symbol}"
-        .RuntimeData(symbol) -> "r{symbol}"
-    }
+native_fix_key: fn(reloc: X64Reloc, runtime_symbols: [String]) -> String Never! {
+    if reloc.kind == X64_RELOC_FUNCTION -> return "f{reloc.target}"
+    if reloc.kind == X64_RELOC_DATA -> return "d{reloc.target}"
+    "r{x64_reloc_symbol(reloc, runtime_symbols)}"
 }
 
 // Whether `code` is `running`'s code but for the rel32 fields `function`'s
@@ -300,35 +297,33 @@ native_fix_reached: fn(running: NativeFixRunning, at: Int) -> Int Never! {
     running.address + at + 4 + native_number(running.code, at, 4, X64DebugEncoding.Signed)
 }
 
-// Record that `target` lives at `address`.
-native_fix_learn: fn(targets: &NativeFixTargets, target: X64RelocTarget, address: Int) Never! {
-    key: native_fix_key(target)
+// Record that `reloc`'s target lives at `address`.
+native_fix_learn: fn(targets: &NativeFixTargets, reloc: X64Reloc, runtime_symbols: [String], address: Int) Never! {
+    key: native_fix_key(reloc, runtime_symbols)
     if targets.clashed.get(key) != None {
         return
     }
-    known: native_fix_known(targets, target)
+    known: native_fix_known(targets, reloc, runtime_symbols)
     if known == .Val(found) {
         if found != address -> targets.clashed[key] = true
         return
     }
-    if target == {
-        .Function(id) -> { targets.functions[id.value] = address }
-        .Data(id) -> { targets.data[id.value] = address }
-        .Runtime(symbol) -> { targets.runtime[symbol] = address }
-        .RuntimeData(symbol) -> targets.runtime[symbol] = address
+    if reloc.kind == X64_RELOC_FUNCTION {
+        targets.functions[reloc.target] = address
+    } else if reloc.kind == X64_RELOC_DATA {
+        targets.data[reloc.target] = address
+    } else {
+        targets.runtime[x64_reloc_symbol(reloc, runtime_symbols)] = address
     }
 }
 
-// Where the running code reaches `target`; None when no unchanged code
+// Where the running code reaches `reloc`'s target; None when no unchanged code
 // reaches it or two places do.
-native_fix_known: fn(targets: NativeFixTargets, target: X64RelocTarget) -> Int? Never! {
-    if targets.clashed.get(native_fix_key(target)) != None -> return None
-    if target == {
-        .Function(id) -> targets.functions.get(id.value)
-        .Data(id) -> targets.data.get(id.value)
-        .Runtime(symbol) -> targets.runtime.get(symbol)
-        .RuntimeData(symbol) -> targets.runtime.get(symbol)
-    }
+native_fix_known: fn(targets: NativeFixTargets, reloc: X64Reloc, runtime_symbols: [String]) -> Int? Never! {
+    if targets.clashed.get(native_fix_key(reloc, runtime_symbols)) != None -> return None
+    if reloc.kind == X64_RELOC_FUNCTION -> return targets.functions.get(reloc.target)
+    if reloc.kind == X64_RELOC_DATA -> return targets.data.get(reloc.target)
+    targets.runtime.get(x64_reloc_symbol(reloc, runtime_symbols))
 }
 
 // How the struct `name` of the edit differs from the running image: None
@@ -425,7 +420,7 @@ native_fix_diff: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
         alike: if found == .Val(was) -> native_fix_same_bytes(function, was) else -> false
         if alike && found == .Val(was) {
             loop reloc in function.relocs {
-                native_fix_learn(targets, reloc.target, native_fix_reached(was, reloc.at))
+                native_fix_learn(targets, reloc, edit.object.runtime_symbols, native_fix_reached(was, reloc.at))
             }
         }
         running.push(found)
@@ -444,9 +439,9 @@ native_fix_diff: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
             was: running[row] ?? panic("an unchanged function has running code")
             loop reloc in function.relocs {
                 reached: native_fix_reached(was, reloc.at)
-                if native_fix_known(targets, reloc.target) != .Val(reached) -> moved = true
-                if reloc.target == .Function(id) {
-                    callee: row_of.get(id.value) ?? -1
+                if native_fix_known(targets, reloc, edit.object.runtime_symbols) != .Val(reached) -> moved = true
+                if reloc.kind == X64_RELOC_FUNCTION {
+                    callee: row_of.get(reloc.target) ?? -1
                     if callee < 0 || running[callee] == None -> moved = true
                     if running[callee] == .Val(called) && called.address != reached -> moved = true
                 }
@@ -475,7 +470,7 @@ native_fix_plan: fn(image: NativeImage, edit: NativeFixEdit, symbols: NativeFixS
     // effect in a program already past them.
     entry := -1
     loop reloc in edit.functions[0].relocs {
-        if reloc.target == .Function(id) -> entry = row_of.get(id.value) ?? -1
+        if reloc.kind == X64_RELOC_FUNCTION -> entry = row_of.get(reloc.target) ?? -1
     }
     loop row in diff.changed {
         if row == 0 || row == entry {
@@ -573,10 +568,10 @@ native_fix_types: fn(image: NativeImage, edit: NativeFixEdit, plan: NativeFixPla
     None
 }
 
-// Whether `function` calls the edit's function `id`.
+// // Whether `function` calls the edit's function `id`.
 native_fix_calls: fn(function: X64CompiledFunction, id: Int) -> Bool Never! {
     loop reloc in function.relocs {
-        if reloc.target == .Function(callee) && callee.value == id -> return true
+        if reloc.kind == X64_RELOC_FUNCTION && reloc.target == id -> return true
     }
     false
 }
@@ -632,7 +627,7 @@ native_fix_place_all: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, plan: N
         reached[row] = true
         rows.push(row)
         loop reloc in edit.functions[row].relocs {
-            if reloc.target == .Function(id) -> pending.push(row_of.get(id.value) ?? -1)
+            if reloc.kind == X64_RELOC_FUNCTION -> pending.push(row_of.get(reloc.target) ?? -1)
         }
     }
     native_fix_lay_out(edit, symbols, plan.targets, rows, row_of, loop _ in edit.functions -> false, trapped: true)
@@ -661,28 +656,25 @@ native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: 
     absent := [String:Int]{}
     loop row in rows {
         loop reloc in edit.functions[row].relocs {
-            if reloc.target == {
-                .Data(id) -> {
-                    if native_fix_known(targets, reloc.target) == None -> wanted.push(id.value)
-                }
-                .Runtime(symbol) -> {
-                    if native_fix_known(targets, reloc.target) == None && symbols.slots.get(symbol) == None {
-                        if !trapped {
-                            return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"})
-                        }
-                        if !absent.has_key(symbol) -> absent[symbol] = absent.len()
+            if reloc.kind == X64_RELOC_DATA {
+                if native_fix_known(targets, reloc, edit.object.runtime_symbols) == None -> wanted.push(reloc.target)
+            } else if reloc.kind == X64_RELOC_RUNTIME {
+                symbol: x64_reloc_symbol(reloc, edit.object.runtime_symbols)
+                if native_fix_known(targets, reloc, edit.object.runtime_symbols) == None && symbols.slots.get(symbol) == None {
+                    if !trapped {
+                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now calls the runtime's `{symbol}`, which the running image does not hold"})
                     }
+                    if !absent.has_key(symbol) -> absent[symbol] = absent.len()
                 }
-                .RuntimeData(symbol) -> {
-                    if native_fix_known(targets, reloc.target) == None && symbols.slots.get(symbol) == None {
-                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now reads the runtime's `{symbol}`, which the running image does not hold"})
-                    }
+            } else if reloc.kind == X64_RELOC_RUNTIME_DATA {
+                symbol: x64_reloc_symbol(reloc, edit.object.runtime_symbols)
+                if native_fix_known(targets, reloc, edit.object.runtime_symbols) == None && symbols.slots.get(symbol) == None {
+                    return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` now reads the runtime's `{symbol}`, which the running image does not hold"})
                 }
-                .Function(id) -> {
-                    callee: row_of.get(id.value) ?? -1
-                    if callee < 0 || (!running[callee] && placed.get(id.value) == None) {
-                        return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` calls a function the edit does not compile"})
-                    }
+            } else if reloc.kind == X64_RELOC_FUNCTION {
+                callee: row_of.get(reloc.target) ?? -1
+                if callee < 0 || (!running[callee] && placed.get(reloc.target) == None) {
+                    return Err(NativeDebugError{detail: "`{native_fix_shown(edit, row)}` calls a function the edit does not compile"})
                 }
             }
         }
@@ -702,7 +694,7 @@ native_fix_lay_out: fn(edit: NativeFixEdit, symbols: NativeFixSymbols, targets: 
             }
         }
     }
-    // Each trap, `ud2` (0f 0b), in the order the calls came.
+    // Each trap, `ud2` (0f 0b), in the order the calls come.
     traps: offset
     offset += NATIVE_FIX_TRAP * absent.len()
     // Room for the last word the debugger writes whole.
@@ -723,34 +715,28 @@ native_fix_absent_at: fn(plan: NativeFixPlan, base: Int, pc: Int) -> String? Nev
     None
 }
 
-// Where the plan's region, mapped at `base`, has `target`.
-native_fix_address: fn(plan: NativeFixPlan, symbols: NativeFixSymbols, base: Int, target: X64RelocTarget) -> Int Never! {
-    if target == {
-        .Function(id) -> {
-            if plan.placed.get(id.value) == .Val(row) {
-                loop piece in plan.pieces {
-                    if piece.function == row -> return base + piece.offset
-                }
+// Where the plan's region, mapped at `base`, has `reloc`'s target.
+native_fix_address: fn(plan: NativeFixPlan, symbols: NativeFixSymbols, runtime_symbols: [String], base: Int, reloc: X64Reloc) -> Int Never! {
+    if reloc.kind == X64_RELOC_FUNCTION {
+        if plan.placed.get(reloc.target) == .Val(row) {
+            loop piece in plan.pieces {
+                if piece.function == row -> return base + piece.offset
             }
         }
-        .Data(id) -> {
-            if plan.copied.get(id.value) == .Val(piece) -> return base + plan.pieces[piece].offset
+    } else if reloc.kind == X64_RELOC_DATA {
+        if plan.copied.get(reloc.target) == .Val(piece) -> return base + plan.pieces[piece].offset
+    } else if reloc.kind == X64_RELOC_RUNTIME {
+        symbol: x64_reloc_symbol(reloc, runtime_symbols)
+        if plan.entries.get(symbol) == .Val(entry) -> return base + entry
+        if plan.absent.get(symbol) == .Val(place) {
+            return base + plan.traps + NATIVE_FIX_TRAP * place
         }
-        .Runtime(symbol) -> {
-            if plan.entries.get(symbol) == .Val(entry) -> return base + entry
-            if plan.absent.get(symbol) == .Val(place) {
-                return base + plan.traps + NATIVE_FIX_TRAP * place
-            }
-        }
-        .RuntimeData(_) -> {}
     }
-    if native_fix_known(plan.targets, target) == .Val(found) -> return found
-    if target == {
-        .Runtime(symbol) -> native_fix_runtime_address(symbols, symbol)
-        .RuntimeData(symbol) -> native_fix_runtime_address(symbols, symbol)
-        .Function(_) -> 0
-        .Data(_) -> 0
+    if native_fix_known(plan.targets, reloc, runtime_symbols) == .Val(found) -> return found
+    if reloc.kind == X64_RELOC_RUNTIME || reloc.kind == X64_RELOC_RUNTIME_DATA {
+        return native_fix_runtime_address(symbols, x64_reloc_symbol(reloc, runtime_symbols))
     }
+    0
 }
 
 // Write the little-endian `value` over `size` bytes of `bytes` at `at`.
@@ -774,7 +760,7 @@ native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeF
             loop (k, byte) in function.code -> region[piece.offset + k] = byte
             loop reloc in function.relocs {
                 at: piece.offset + reloc.at
-                reached: native_fix_address(plan, symbols, base, reloc.target)
+                reached: native_fix_address(plan, symbols, edit.object.runtime_symbols, base, reloc)
                 native_fix_put(region, at, reached - (base + at + 4), 4)
             }
             next
@@ -782,7 +768,7 @@ native_fix_region: fn(plan: NativeFixPlan, edit: NativeFixEdit, symbols: NativeF
         object: edit.object.data[piece.data]
         loop (k, byte) in object.bytes -> region[piece.offset + k] = byte
         loop reloc in object.relocs {
-            reached: native_fix_address(plan, symbols, base, X64RelocTarget.Data{id: reloc.target})
+            reached: native_fix_address(plan, symbols, edit.object.runtime_symbols, base, x64_reloc_data(0, reloc.target.value))
             native_fix_put(region, piece.offset + reloc.offset, reached + reloc.addend, 8)
         }
     }
@@ -839,8 +825,8 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     native_fix_symbol_add(symbols, "p.run", NativeFixSymbol{address: 0x1020, size: 6})
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     call: [U8]{0xe8, 0, 0, 0, 0, 0xc3}
-    main: X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: call, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}}, align: 16}
-    run: X64CompiledFunction{id: X64FunctionID{value: 1}, name: "p.run", code: call, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 0}}}}, align: 16}
+    main: X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: call, relocs: [X64Reloc]{x64_reloc_function(1, 1)}, align: 16}
+    run: X64CompiledFunction{id: X64FunctionID{value: 1}, name: "p.run", code: call, relocs: [X64Reloc]{x64_reloc_function(1, 0)}, align: 16}
     same: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.g", code: [U8]{0xb8, 1, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{}, align: 16}
     edited: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.g", code: [U8]{0xb8, 2, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{}, align: 16}
     object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "g", file: -1, line: 3, variables: [X64DebugVariable]{}}, X64FunctionSource{name: "run", file: -1, line: 6, variables: [X64DebugVariable]{}}}}
@@ -849,7 +835,7 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     assert_eq(unchanged.changed.len(), 0)
     plan: native_fix_plan(image, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, text, 0x1000, [NativeFixed]{}) ?? panic("refused: {err.detail}")
     assert_eq(plan.changed, [Int]{2})
-    assert_eq(native_fix_known(plan.targets, X64RelocTarget.Function{id: X64FunctionID{value: 0}}), Val(0x1010))
+    assert_eq(native_fix_known(plan.targets, x64_reloc_function(0, 0), [String]{}), Val(0x1010))
     region: native_fix_region(plan, NativeFixEdit{object: object, functions: [X64CompiledFunction]{main, run, edited}, debug: rows}, symbols, 0x40000000)
     assert_eq(region[1], U8{2})
     assert_eq(native_fix_jump(0x1010, 0x40000000), [U8]{0xe9, 0xeb, 0xef, 0xff, 0x3f})
@@ -908,7 +894,7 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
     image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{rounds_lines, score_lines, placed_lines}}, functions: [NativeFunction]{score}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
     call: [U8]{0xe8, 0, 0, 0, 0, 0xc3}
     main: X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: [U8]{0xc3}, relocs: [X64Reloc]{}, align: 16}
-    rounds: X64CompiledFunction{id: X64FunctionID{value: 1}, name: "p.rounds", code: call, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 0}}}}, align: 16}
+    rounds: X64CompiledFunction{id: X64FunctionID{value: 1}, name: "p.rounds", code: call, relocs: [X64Reloc]{x64_reloc_function(1, 0)}, align: 16}
     scored: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.score", code: [U8]{0xb8, 2, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{}, align: 16}
     debug_types: [X64DebugType]{X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}}, X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: 0}}}
     widened: [X64DebugVariable]{X64DebugVariable{name: "round", ty: 1, line: 1, parameter: true, indirect: false}, X64DebugVariable{name: "bonus", ty: 1, line: 1, parameter: true, indirect: false}}
@@ -932,7 +918,7 @@ native_fix_line_address: fn(debug: X64FunctionDebug, low: Int, line: Int) -> Int
 #Test("an evaluation's call of a runtime function the image doesn't hold goes to a trap; a fix's is refused") {
     symbols: NativeFixSymbols{slots: [String:Int]{}, named: [[NativeFixSymbol]]{}}
     // `call rel32` to the runtime's jet_int_mul, `ret`.
-    expression: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Runtime{symbol: "jet_int_mul"}}}, align: 16}
+    expression: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_runtime(1, "jet_int_mul")}, align: 16}
     object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "eval", file: -1, line: 1, variables: [X64DebugVariable]{}}}}
     edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{expression}, debug: [X64FunctionDebug]{}}
     targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}

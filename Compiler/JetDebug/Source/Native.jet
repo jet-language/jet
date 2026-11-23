@@ -10,7 +10,7 @@ use {
     native_hex: core.encoding.hex
     native_math: core.math
     native_crypto: core.crypto
-    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_fault_address, x64_trace_follow_exits, x64_trace_peek, x64_trace_permitted, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64DwarfSymbols, X64FunctionDebug, X64LineRow, X64Trace, X64TraceResume, X64_ALLOC_ROOT_SYMBOL, X64_DEBUG_ITEMS_DROP_SYMBOL, X64_OBSERVE_ROOT_SYMBOL, X64_RELOC_RUNTIME, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, dwarf_eh_frame, link_debug_le, link_debug_uleb, x64_debug_eval_symbols, x64_jetline_find, x64_jetline_line, x64_jetline_next, x64_jetline_place, x64_jetline_sleb, x64_jetline_text, x64_reloc_symbol, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_event_message, x64_trace_fault_address, x64_trace_follow_exits, x64_trace_peek, x64_trace_permitted, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, ENV_JET_RECORD, EXIT_ICE, EXIT_RUNTIME_PANIC, MODULE_CORE_PREFIX, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, foundation_named_type]
 }
 
@@ -1679,7 +1679,8 @@ NativeSession: struct {
             loop piece in plan.pieces {
                 if piece.function < 0 -> next
                 loop reloc in permit.value.edit.functions[piece.function].relocs {
-                    if reloc.target == .Runtime(symbol) {
+                    if reloc.kind == X64_RELOC_RUNTIME {
+                        symbol: x64_reloc_symbol(reloc, permit.value.edit.object.runtime_symbols)
                         if native_place_arena_route(symbol) >= 0 -> allocates = true
                         if NATIVE_PLACE_PACKED.contains(symbol) && !packed.has_key(symbol) {
                             packed[symbol] = packed.len()
@@ -1743,7 +1744,8 @@ NativeSession: struct {
             loop piece in plan.pieces {
                 if piece.function < 0 -> next
                 loop reloc in permit.value.edit.functions[piece.function].relocs {
-                    if reloc.target == .Runtime(symbol) {
+                    if reloc.kind == X64_RELOC_RUNTIME {
+                        symbol: x64_reloc_symbol(reloc, permit.value.edit.object.runtime_symbols)
                         if plan.entries.has_key(symbol) -> next
                         at: offsets[k] + piece.offset + reloc.at
                         native_fix_put(region, at, trampoline + native_place_routine(built, symbol) - (base + at + 4), 4)

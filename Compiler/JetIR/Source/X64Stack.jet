@@ -9,7 +9,12 @@
 // through a function value, has no bound. The runtime's own frames (the
 // Runtime targets) are not counted; each bound names the runtime symbols it
 // reaches.
-use jet_backend.[X64RelocTarget]
+use jet_backend.[
+        X64Reloc,
+        X64_RELOC_FUNCTION,
+        X64_RELOC_RUNTIME,
+        x64_reloc_symbol,
+    ]
 
 IRX64StackBound: struct {
     // The entry's function row.
@@ -101,9 +106,9 @@ ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
 
 // The callee row a relocation calls, or -1 when it calls no compiled
 // function.
-ir_x64_stack_callee: fn(walk: IRX64StackWalk, target: X64RelocTarget) -> Int Never! {
-    if target == .Function(id) {
-        if id.value >= 0 && id.value < walk.state.len() -> return id.value
+ir_x64_stack_callee: fn(walk: IRX64StackWalk, reloc: X64Reloc) -> Int Never! {
+    if reloc.kind == X64_RELOC_FUNCTION {
+        if reloc.target >= 0 && reloc.target < walk.state.len() -> return reloc.target
     }
     return -1
 }
@@ -118,7 +123,7 @@ ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) N
     walk.pending.push(row)
     if compiled.debug[row].dynamic -> walk.open[row] = "dynamic" else {
         loop reloc in compiled.functions[row].relocs {
-            callee: ir_x64_stack_callee(walk, reloc.target)
+            callee: ir_x64_stack_callee(walk, reloc)
             if callee < 0 -> next
             if walk.state[callee] == 0 {
                 ir_x64_stack_visit(walk, compiled, callee)
@@ -154,7 +159,7 @@ ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int)
             break
         }
         loop reloc in compiled.functions[member].relocs {
-            callee: ir_x64_stack_callee(walk, reloc.target)
+            callee: ir_x64_stack_callee(walk, reloc)
             if callee < 0 || walk.part[callee] == root || walk.deep[callee] >= 0 -> next
             open = member
             walk.next[member] = callee
@@ -176,7 +181,7 @@ ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int)
     cyclic := false
     loop member in members {
         loop reloc in compiled.functions[member].relocs {
-            callee: ir_x64_stack_callee(walk, reloc.target)
+            callee: ir_x64_stack_callee(walk, reloc)
             if callee < 0 -> next
             if walk.part[callee] == root {
                 cyclic = true
@@ -229,7 +234,7 @@ ir_x64_stack_segment: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int
     step := -1
     marked := -1
     loop reloc in compiled.functions[row].relocs {
-        callee: ir_x64_stack_callee(walk, reloc.target)
+        callee: ir_x64_stack_callee(walk, reloc)
         if callee < 0 || walk.part[callee] != root -> next
         if compiled.program.functions[callee].max_depth > 0 {
             if marked < 0 -> marked = callee
@@ -275,18 +280,14 @@ ir_x64_stack_runtime: fn(compiled: IRX64Result, entry: Int) -> [String] Never! {
             break
         }
         loop reloc in compiled.functions[row].relocs {
-            if reloc.target == {
-                .Function(id) -> {
-                    if id.value >= 0 && id.value < compiled.functions.len() && reached.get(id.value) == None {
-                        reached[id.value] = true
-                        pending.push(id.value)
-                    }
+            if reloc.kind == X64_RELOC_FUNCTION {
+                if reloc.target >= 0 && reloc.target < compiled.functions.len() && reached.get(reloc.target) == None {
+                    reached[reloc.target] = true
+                    pending.push(reloc.target)
                 }
-                .Runtime(symbol) -> {
-                    if !names.contains(symbol) -> names.push(symbol.copy())
-                }
-                .Data(_) -> {}
-                .RuntimeData(_) -> {}
+            } else if reloc.kind == X64_RELOC_RUNTIME {
+                symbol: x64_reloc_symbol(reloc, compiled.tables.runtime_symbols)
+                if !names.contains(symbol) -> names.push(symbol.copy())
             }
         }
     }

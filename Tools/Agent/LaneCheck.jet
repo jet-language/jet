@@ -510,6 +510,10 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
         }
         else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
     }
+    if relative == "Compiler" || relative.starts_with("Compiler/JetBackend") || relative.starts_with("Compiler/JetIR") || relative.starts_with("Compiler/Toolchain/X64Stencils") {
+        stencils_checked: generator_check(repo, [String]{jet, "run", "Compiler/Toolchain/X64Stencils/Main.jet", "--", "--check", "--out=Compiler/JetIR/Source/X64StencilData.jet"}, "Compiler/JetIR/Source/X64StencilData.jet")
+        ran = Ran{code: if ran.code != 0 -> ran.code else -> stencils_checked.code, text: "{ran.text}{stencils_checked.text}"}
+    }
     if runtime_shared {
         assembled: runtime_check(repo, jet, scratch)
         ran = Ran{code: if ran.code != 0 -> ran.code else -> assembled.code, text: "{ran.text}{assembled.text}"}
