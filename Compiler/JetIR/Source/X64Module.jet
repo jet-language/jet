@@ -881,9 +881,11 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
 // the member an `offset` or `load` reaches.
 ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String], trace_sink: CompilerTraceSink?{None}) -> IRX64Result Never! {
     m := program.move()
-    if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
-    ir_drop_early(m, threads)
-    if trace_sink == .Val(sink) -> sink.end("ir.x64.drop_early", m.functions.len())
+    if !m.fast_o0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
+        ir_drop_early(m, threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.x64.drop_early", m.functions.len())
+    }
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
     ir_tail_calls(m, threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
@@ -969,12 +971,20 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     stops := [String]{}
     outputs.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count -> outputs.push(None)
-    ir_x64_select_rows(inputs, workers, outputs, stops)
+    tables_box := [IRX64Tables]{}
+    task.group ir_x64_select_and_tables {
+        starting: task {
+            reads: inputs.guard_read()
+            ir_x64_tables_start(reads.value.programs[0])
+        }
+        ir_x64_select_rows(inputs, workers, outputs, stops)
+        tables_box.push(starting.join() ?? panic(compiler_threads_failure_text(err)))
+    }
     if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
     shells := ir_x64_take_inputs(inputs)
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
-    tables := ir_x64_tables_start(program_back)
+    tables := tables_box.pop() ?? panic("the x64 tables task lost its tables")
     functions.try_reserve(count) ?? panic("reserve failed")
     debug.try_reserve(count) ?? panic("reserve failed")
     variables.try_reserve(count) ?? panic("reserve failed")
@@ -1025,9 +1035,9 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
 }
 
-// O(N) 3-bucket claim order for fast_o0: heavy functions (>= 512 ops) claim
-// first so no straggler trails the parallel wave, followed by medium (>= 64),
-// then tiny functions (which workers claim in chunks of 16).
+// O(N) 3-bucket claim order for fast_o0: heavy functions (>= 512 ops, sorted
+// heaviest first so no mega-function trails the parallel wave), followed by
+// medium (>= 64), then tiny functions (claimed in chunks of 16).
 ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
     count: weights.len()
     heavy := [Int]{}
@@ -1037,6 +1047,9 @@ ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
     loop row in 0..<count {
         w: weights[row]
         if w >= 512 -> heavy.push(row) else if w >= 64 -> med.push(row) else -> small.push(row)
+    }
+    if heavy.len() > 1 {
+        heavy.sort_by(fn(left: Int, right: Int) { weights[right] <=> weights[left] })
     }
     order := [Int]{}
     order.try_reserve(count) ?? panic("reserve failed")

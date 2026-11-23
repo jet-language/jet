@@ -5570,6 +5570,31 @@ ir_x64_select_function_in: fn(m: IRModule, row: Int, names: [String], poll: Int{
             p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
             return ir_x64_patch_function_in(m, row, p_poll, p_trap, p_turn, patch)
         }
+        if !m.dropped_early && f.asm == None && !ir_stop_key(f.key) {
+            p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
+            p_trap: if trap != -2 -> trap else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
+            p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
+            plan := ir_drop_plan(m, f, p_poll, p_trap, p_turn)
+            if plan.slots.len() > 0 {
+                fc := f
+                ir_drop_apply(fc, plan)
+                tables: ir_x64_function_tables_in(m, fc, names)
+                compiled := ir_x64_compile_body(m, fc, tables, row, poll, trap, turn, zone_plot, zone_frame)
+                compiled.uses = tables.uses.move()
+                compiled.hot = tables.hot.move()
+                compiled.cold = tables.cold.move()
+                if compiled.uses.kinds.len() > 0 {
+                    locals := [Int]{}
+                    loop (at, reloc) in compiled.function.relocs {
+                        if reloc.target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
+                            locals.push(at)
+                        }
+                    }
+                    compiled.local_relocs = locals.move()
+                }
+                return compiled
+            }
+        }
     }
     tables: ir_x64_function_tables(m, row, names)
     compiled := ir_x64_select_row(m, tables, row, poll, trap, turn, zone_plot, zone_frame)

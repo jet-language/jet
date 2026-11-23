@@ -270,7 +270,7 @@ ir_build_waves_finish: fn(owned_jobs: &&[IRWaveJob], owned_built: &&[[IRWaveBuil
         roots_merged.push(entry_root.move())
     }
     if trace_sink == .Val(sink) -> sink.end("ir.build.order", jobs.len())
-    merged := ir_merge_with(parts, preps, roots_merged, entry_index, true, trace_sink)
+    merged := ir_merge_with(parts.move(), preps.move(), roots_merged, entry_index, true, trace_sink)
     IRBuildResult{program: merged.move(), failures: failures}
 }
 

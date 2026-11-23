@@ -32,7 +32,7 @@
 // would run that Drop before the callee instead of after it,
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
-use jet_foundation.[CompilerThreads, compiler_threads_failure_text, compiler_threads_partition, name_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, name_rows, name_rows_set, name_rows_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
 IR_TAIL_JUMP: 1
@@ -60,96 +60,185 @@ IRTailSite: struct {
     drops: [Int],
 }
 
-// Finding a function's ownable parameters and tail calls costs about this
-// much per IR instruction on one thread (timed as x64 selection admission's
-// costs are).
-IR_TAIL_CALLS_NS_PER_INSTRUCTION: 10
+// A function id that has at least one tail call and its tail-call plan.
+IRTailFound: struct {
+    id: Int,
+    plan: IRTailPlan,
+}
 
-// Each function's ownable parameters and tail calls as built read only its
-// own body and its callees' signatures, so for those the functions split
-// into consecutive parts (compiler_threads_partition by size), one thread
-// each, as many as x64 selection admission (ir_x64_admit) gives the module's
-// instructions at IR_TAIL_CALLS_NS_PER_INSTRUCTION. The variants are then
-// numbered in function order and call order, as the one-thread walk does, so
-// every body and variant is the same for any thread count.
+// Finding tail-call candidates takes a single read-only scan over each
+// function's Returns; `ownable` is computed lazily only for callees actually
+// targeted in tail position, so >97% of functions never scan for writes.
+IR_TAIL_CALLS_MIN_FUNCTIONS_PER_THREAD: 1024
+
+// Each function's tail-call candidacy reads only its own body and callee
+// signatures, so candidates are gathered in one parallel wave over equal-size
+// function slices; `ir_tail_ownable` and `ir_tail_sites` then run only on
+// the sparse candidate functions and their tail-called callees, in function
+// order, producing the exact same variants and rewrites for any thread count.
 ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
     count: m.functions.len()
+    if count == 0 {
+        return
+    }
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    weights := [Int]{}
-    total := 0
-    loop f in m.functions {
-        weights.push(1 + f.op.len())
-        total += 1 + f.op.len()
-    }
-    ownable := [Int]{}
-    plans := [IRTailPlan]{}
-    workers: ir_x64_admit(threads, count, total, IR_TAIL_CALLS_NS_PER_INSTRUCTION)
+    workers: compiler_threads_admit(threads, count, count, IR_TAIL_CALLS_MIN_FUNCTIONS_PER_THREAD, 0, 0)
+    candidates := [Int]{}
     if {
         workers <= 1 -> {
-            loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
-            loop f in m.functions -> plans.push(ir_tail_sites(m, f, 0, poll, trap, ownable))
+            loop id in 0..<count {
+                if ir_tail_has_candidate(m, m.functions[id], poll, trap) -> candidates.push(id)
+            }
         }
         else -> {
-            ir_tail_threads_plan(m, compiler_threads_partition(weights, workers), poll, trap, ownable, plans)
+            step: (count + workers - 1).div_euclid(workers)
+            bounds := [Int]{0}
+            at := step
+            loop at < count {
+                bounds.push(at)
+                at += step
+            }
+            bounds.push(count)
+            parts: ir_tail_candidate_parts(m, bounds, poll, trap, 0)
+            loop part in parts.move() -> candidates.extend(part)
         }
     }
-    // Work items: item k < count is function k as built; each later one a
-    // variant (function id k) of function sources[k] owning masks[k].
-    sources := [Int]{}
-    masks := [Int]{}
-    loop id in 0..<count {
-        sources.push(id)
-        masks.push(0)
+    if candidates.len() == 0 {
+        return
     }
+    ownable := [Int:Int]{}
+    found := [IRTailFound]{}
+    loop id in candidates {
+        plan := ir_tail_sites(m, m.functions[id], 0, poll, trap, ownable)
+        if plan.calls.len() > 0 -> found.push(IRTailFound{id: id, plan: plan.move()})
+    }
+    if found.len() == 0 {
+        return
+    }
+    // Variants are numbered `count + k`: variant k is a copy of
+    // `variant_sources[k]` owning `variant_masks[k]`.
+    variant_sources := [Int]{}
+    variant_masks := [Int]{}
+    variant_plans := [IRTailPlan]{}
     rows := name_rows()
-    loop id in 0..<count -> ir_tail_targets(plans[id], rows, sources, masks)
-    item := count
-    loop item < sources.len() {
-        plan := ir_tail_sites(m, m.functions[sources[item]], masks[item], poll, trap, ownable)
-        ir_tail_targets(plan, rows, sources, masks)
-        plans.push(plan.move())
+    loop idx in 0..<found.len() {
+        ir_tail_targets(found[idx].plan, rows, count, variant_sources, variant_masks)
+    }
+    item := 0
+    loop item < variant_sources.len() {
+        plan := ir_tail_sites(m, m.functions[variant_sources[item]], variant_masks[item], poll, trap, ownable)
+        ir_tail_targets(plan, rows, count, variant_sources, variant_masks)
+        variant_plans.push(plan.move())
         item += 1
     }
     // The variants copy the bodies as built, before those are rewritten.
-    loop variant in count..<sources.len() {
-        source: sources[variant]
+    loop variant in 0..<variant_sources.len() {
+        source: variant_sources[variant]
         v := m.functions[source].copy()
         base: if v.symbol != "" -> v.symbol.copy() else -> v.key.copy()
-        v.key = "{v.key}#own<{masks[variant]}>"
-        v.symbol = "{base}.own{masks[variant]}"
+        v.key = "{v.key}#own<{variant_masks[variant]}>"
+        v.symbol = "{base}.own{variant_masks[variant]}"
         v.symbol_hash = U64{0}
-        ir_tail_rewrite(v, plans[variant], masks[variant])
+        ir_tail_rewrite(v, variant_plans[variant], variant_masks[variant])
         name_rows_set(m.function_rows, v.key, m.functions.len())
         m.functions.push(v)
     }
-    loop id in 0..<count {
-        if plans[id].calls.len() > 0 -> ir_tail_rewrite(m.functions[id], plans[id], 0)
+    loop idx in 0..<found.len() { ir_tail_rewrite(m.functions[found[idx].id], found[idx].plan, 0) }
+}
+
+// Fast read-only predicate: whether `f` contains any Return preceded (past
+// Drops, Moves, Copies and stop polls) by a direct Call to a non-asm body
+// with matching arity.
+ir_tail_has_candidate: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> Bool Never! {
+    if f.asm != None -> return false
+    n: f.op.len()
+    fn_count: m.functions.len()
+    loop ret in 0..<n {
+        if f.op[ret] != .Return -> next
+        at := ret - 1
+        ok := true
+        loop at >= 0 {
+            op: f.op[at]
+            if op == .Drop || op == .Move || op == .Copy {
+                at -= 1
+                next
+            }
+            if op != .End -> break
+            opener: f.a[at]
+            if !ir_tail_poll(m, f, opener, at, poll, trap) {
+                ok = false
+                break
+            }
+            at = opener - 2
+        }
+        if !ok || at < 0 || f.op[at] != .Call -> next
+        callee: f.a[at]
+        if callee < 0 || callee >= fn_count || callee == poll || callee == trap -> next
+        if m.functions[callee].asm != None || m.functions[callee].op.len() == 0 -> next
+        if f.c[at] == m.functions[callee].param_count -> return true
     }
+    false
+}
+
+ir_tail_candidate_parts: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, at: Int) -> [[Int]] Never! {
+    done := [[Int]]{}
+    last: bounds.len() - 2
+    if at > last -> return done
+    if at == last {
+        done.push(ir_tail_candidate_range(m, bounds[at], bounds[at + 1], poll, trap))
+        return done
+    }
+    task.group ir_tail_group {
+        head: task ir_tail_candidate_range(m, bounds[at], bounds[at + 1], poll, trap)
+        rest: ir_tail_candidate_parts(m, bounds, poll, trap, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+ir_tail_candidate_range: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int) -> [Int] Never! {
+    found := [Int]{}
+    loop id in start..<end {
+        if ir_tail_has_candidate(m, m.functions[id], poll, trap) -> found.push(id)
+    }
+    found
+}
+
+ir_tail_ownable_cached: fn(m: IRModule, callee: Int, ownable: &[Int:Int]) -> Int Never! {
+    if ownable.get(callee) == .Val(mask) -> return mask
+    mask: ir_tail_ownable(m, m.functions[callee])
+    ownable[callee] = mask
+    mask
 }
 
 // The parameters of `f` a variant may own: bit i when parameter i is not an
 // Aggregate and no instruction writes it.
 ir_tail_ownable: fn(m: IRModule, f: IRFunction) -> Int Never! {
-    if f.asm != None || f.param_count > 62 -> return 0
-    written := [Bool]{}
-    loop _ in 0..<f.param_count -> written.push(false)
+    pc: f.param_count
+    if pc <= 0 || f.asm != None || pc > 62 -> return 0
+    candidates := 0
+    loop slot in 0..<pc {
+        if m.types[f.slot_type[slot]].kind != .Aggregate -> candidates |= ir_tail_bit(slot)
+    }
+    if candidates == 0 -> return 0
     loop at in 0..<f.op.len() {
         slot: ir_x64_write(f, at)
-        if slot >= 0 && slot < f.param_count -> written[slot] = true
-    }
-    mask := 0
-    loop slot in 0..<f.param_count {
-        if !written[slot] && m.types[f.slot_type[slot]].kind != .Aggregate {
-            mask += ir_tail_bit(slot)
+        if slot >= 0 && slot < pc {
+            bit: ir_tail_bit(slot)
+            if (candidates & bit) != 0 {
+                candidates -= bit
+                if candidates == 0 -> return 0
+            }
         }
     }
-    mask
+    candidates
 }
 
 // The tail calls of `f` owning the parameters in `owned`, each targeting
 // its callee until ir_tail_targets names the variants.
-ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: [Int]) -> IRTailPlan Never! {
+ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: &[Int:Int]) -> IRTailPlan Never! {
     plan := IRTailPlan{calls: [Int]{}, returns: [Int]{}, targets: [Int]{}, masks: [Int]{}, polls: [Int]{}, drop_start: [Int]{0}, drops: [Int]{}}
     if f.asm != None -> return plan
     loop at in 0..<f.op.len() {
@@ -172,7 +261,7 @@ ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, 
 
 // Points each call of `plan` handing values over at the variant of its
 // callee owning them, queued as a work item when new.
-ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, sources: &[Int], masks: &[Int]) Never! {
+ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, base_count: Int, sources: &[Int], masks: &[Int]) Never! {
     loop site in 0..<plan.calls.len() {
         mask: plan.masks[site]
         if mask == 0 -> next
@@ -180,7 +269,7 @@ ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, sources: &[Int], masks: 
         key: "{callee}#{mask}"
         target := name_rows_value(rows, key) ?? -1
         if target < 0 {
-            target = sources.len()
+            target = base_count + sources.len()
             sources.push(callee)
             masks.push(mask)
             name_rows_set(rows, key, target)
@@ -189,64 +278,11 @@ ir_tail_targets: fn(plan: &IRTailPlan, rows: &NameRows, sources: &[Int], masks: 
     }
 }
 
-// ir_tail_ownable, then ir_tail_sites as built, of every function of `m`
-// into `ownable` and `plans`, one thread per part from `bounds`. Both walks
-// only read `m`; each part's results come back in part order.
-ir_tail_threads_plan: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, ownable: &[Int], plans: &[IRTailPlan]) Never! {
-    owned: ir_tail_parts(m, bounds, poll, trap, ownable, 0)
-    loop part in owned.move() -> ownable.extend(part.ownable)
-    planned: ir_tail_parts(m, bounds, poll, trap, ownable, 0)
-    loop part in planned.move() -> plans.extend(part.plans)
-}
-
-// One part's walk of ir_tail_calls: its functions' ownable parameters, or
-// their tail calls as built.
-IRTailPart: struct {
-    ownable: [Int],
-    plans: [IRTailPlan],
-}
-
-// Parts `at` on, in part order, each walked on its own thread and the last
-// on this one (ir_tail_part).
-ir_tail_parts: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, ownable: [Int], at: Int) -> [IRTailPart] Never! {
-    done := [IRTailPart]{}
-    last: bounds.len() - 2
-    if at > last -> return done
-    if at == last {
-        done.push(ir_tail_part(m, bounds[at], bounds[at + 1], poll, trap, ownable))
-        return done
-    }
-    task.group ir_tail_group {
-        head: task ir_tail_part(m, bounds[at], bounds[at + 1], poll, trap, ownable)
-        rest: ir_tail_parts(m, bounds, poll, trap, ownable, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
-        loop part in rest.move() -> done.push(part)
-    }
-    done
-}
-
-// The functions `start..<end`: their ownable parameters while `ownable`
-// has none, else their tail calls as built.
-ir_tail_part: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: Int, ownable: [Int]) -> IRTailPart Never! {
-    part := IRTailPart{ownable: [Int]{}, plans: [IRTailPlan]{}}
-    if {
-        ownable.len() == 0 -> {
-            loop id in start..<end -> part.ownable.push(ir_tail_ownable(m, m.functions[id]))
-        }
-        else -> {
-            loop id in start..<end {
-                part.plans.push(ir_tail_sites(m, m.functions[id], 0, poll, trap, ownable))
-            }
-        }
-    }
-    part
-}
-
 ir_tail_none: fn() -> IRTailSite Never! { IRTailSite{call: -1, mask: 0, poll: -1, drops: [Int]{}} }
 
 // The tail call the Return at `ret` ends, when it has the shape and its
 // arguments allow a jump (ir_tail_calls).
-ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, trap: Int, ownable: [Int]) -> IRTailSite Never! {
+ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, trap: Int, ownable: &[Int:Int]) -> IRTailSite Never! {
     // Back from the Return over Drops, Moves, Copies and stop polls.
     at := ret - 1
     loop at >= 0 {
@@ -311,6 +347,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
     if dst >= 0 && m.types[f.slot_type[dst]].kind == .Aggregate -> return ir_tail_none()
     // Every argument in a register; the ones dropped after the call (or the
     // owned parameters) handed over, the others safe past the frame.
+    callee_own: ir_tail_ownable_cached(m, callee, ownable)
     general := 0
     floats := 0
     mask := 0
@@ -321,7 +358,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
         bit: ir_tail_bit(position - start)
         class: ir_x64_slot_class(m, f, slot)
         if class == .Float -> floats += 1 else if class != .Empty -> general += 1
-        own: ownable[callee] & bit != 0 && !handed.contains(slot)
+        own: callee_own & bit != 0 && !handed.contains(slot)
         param_owned: slot < f.param_count && ir_tail_has(owned, slot)
         if own && (dropped.contains(slot) || param_owned) {
             mask += bit
