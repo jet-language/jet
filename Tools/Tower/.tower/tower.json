@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113350,
+    "rev": 113375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30444,11 +30444,11 @@
         {
           "n": 2,
           "text": "Probe F reports `nickname` (never read) and `Legacy` (never built) once each as tidy errors with a delete-or-rename fix: `jet check` and `jet build` list them and exit non-zero, and `jet run` runs with unchanged output and prints neither.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:24.734Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_probe_f -> 1/1 PASS (member_liveness_probe_f.jet).",
+          "at": "2026-11-23T20:53:35.395Z",
           "proof": {
             "profile": "ui",
             "filter": "member_liveness_probe_f"
@@ -30466,11 +30466,11 @@
         {
           "n": 4,
           "text": "A case created by decode or returned from foreign code counts as built, and matching a case never makes it built.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:26.697Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter member_liveness_case_built_ -> 3/3 PASS (member_liveness_case_built_decode.jet, member_liveness_case_built_foreign.jet, member_liveness_case_built_match_only.jet).",
+          "at": "2026-11-23T20:53:36.405Z",
           "proof": {
             "profile": "ui",
             "filter": "member_liveness_case_built_"
@@ -30479,11 +30479,11 @@
         {
           "n": 5,
           "text": "Library `pub` members stay exempt, package-private and application members are checked, and the findings never stop `jet run` or `jet dev` (D-NO-WARNINGS1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:27.595Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile cases --filter member_liveness_pub_exempt_and_run_unblocked -> 1/1 PASS (member_liveness_pub_exempt_and_run_unblocked.case).",
+          "at": "2026-11-23T20:53:37.355Z",
           "proof": {
             "profile": "cases",
             "filter": "member_liveness_pub_exempt_and_run_unblocked"
@@ -30533,8 +30533,8 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-22T02:10:23.711Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T20:53:37.355Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
     {
@@ -33279,6 +33279,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "D-BUILD-TARGETFACTS1 posted for the owner after Main's adversarial review (Docs/Audits/2026-11-23-d-build-targetfacts1-review.md) and a second pass on the revision: A = per-output options: settings (root package only; options: itself built under c7) and two fact families, #build.target.* the triple baseline and #build.cpu.* the selected CPU defaulting to it (Apple arm64 cache line 64 to 128 named as a cost); B the merge; C a setter; D today. c6-c9 wait on it."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "D-BUILD-TOOLCHAIN1=A is ratified (2026-11-06), so c2/c4 are not blocked; host facts c1/c3 follow D-JAI-CONFIG1=A. Assigned to G1Facts after #6848 c2/c3. c6 needs ballot D-BUILD-TARGETFACTS1 (drafted, adversarial review pending by Main); c7-c9 wait on it."
+        },
+        {
           "at": "2026-11-22",
           "by": "owner",
           "text": "Owner order 2026-11-21: unfrozen after log audit (agent-frozen core Jet work, not cross-platform/FFI/JetOS)."
@@ -33422,8 +33432,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:30.927Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-23T21:28:01.672Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0gmf0y4",
@@ -56950,6 +56960,21 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "c12 S2b decision: the parser keeps binding the standard size names (I8..F64) to the number types through a table generated from the Prelude alias declarations (checked against them by a generator check or guard), and leaves a Named type wherever the file declares, imports or type-parameters that name, so a shadowing type stays the user's; Sema resolves other aliases of a family through the alias. Chosen over a full Sema pre-resolution audit (about 850 JetSema and 300 JetIR sites, untestable before a build, self-host miscompile risk)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Batch 9 landed c8f, c6r, c10r, c5r, c7 (dev 9597797b1b). Held: c1 (ui meta_ladder_marker_cannot_rewrite_without_a_compiler_value snapshot lacks the closing summary lines), c14 and c2 (cases meta_events_hear_marked_functions and meta_events_hear_resolved_calls passed in batch 7 and now stop with ArithmeticOrBoundsFailure). c10 stays open: generate_cancel_midway_leaves_no_partial_module fails (ComptimeFuelExhausted then UnknownFunction second_value)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c12 S1: the private float storage is builtin.FloatWord<exponent, fraction> beside builtin.Word<bits>, because Core.rows type exports and the Core owner maps key on bare names and a jet_builtins Float export would become the bare owner of Float."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "c12 S1 decisions: (1) the private integer storage in jet_builtins is spelled builtin.Word<bits> (floats builtin.Float<e, f>) because Bits is already the public bitset collection and Core types are bare-named; jet_builtins is Core's private door (D-CORE-BUILTINS1), so this is not user surface. (2) E0324 AliasWithoutParameters admits a parameterless alias whose target is an applied generic in any package (its own rationale: aliases shorten generic spellings), so I8: Signed<8> needs no Core-only exception; an alias of a plain non-generic type stays E0324."
         },
         {
@@ -57024,11 +57049,11 @@
         {
           "n": 5,
           "text": "Each generation round, source identity, collision check, dependency edge, lock fact and rollback result is deterministic and source-provenanced: two runs, and runs with permuted, cold, warm and parallel schedules, give byte-identical output and provenance.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "Landed 01869d94a5 (c5r). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_rounds_deterministic_across_cold_warm_parallel_and_permuted_runs PASS (with bubblewrap, no SKIP); Compiler/JetBuildSession/Tests/BuildGraphRules.jet --filter=generation_schedule 7/7; Compiler/JetCLI/Tests/InspectBuild.jet --filter=inspect_build 9/9.",
+          "at": "2026-11-23T21:22:19.013Z",
           "proof": {
             "profile": "cases",
             "filter": "generate_rounds_deterministic"
@@ -57037,11 +57062,11 @@
         {
           "n": 6,
           "text": "Shadowing, duplicate output, self and multi-node cycles, round exhaustion, outside-root paths and materialization failure each leave no partial module and report their registered code with what/why/fix text and a UI snapshot; each test fails if the code, span, message or cleanup path is bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:37.586Z",
+          "evidence": "Landed afb50bc93c (c6r). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_refusals_leave_no_partial_module PASS; ui --filter BuildGenerated 7/7 PASS and the Generate snapshots PASS (the one other FAIL is the pre-existing ForeignMetaCheckedBindings jetpack row); InspectBuild.jet --filter=inspect_build 9/9.",
+          "at": "2026-11-23T21:22:19.866Z",
           "proof": {
             "profile": "ui",
             "filter": "Generate"
@@ -57050,11 +57075,11 @@
         {
           "n": 7,
           "text": "`generate {}` helper values and inline `b.generate` are one mechanism with byte-identical output and source maps; handwritten code uses the generated items; a collision reports at the helper's line; opt-in in-tree materialization fails on drift; raw source strings are refused.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "Landed cbb8501201 (c7). Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b: cases generate_helper_ 4/4 PASS; BuildGraphRules.jet --filter=generation_schedule 7/7.",
+          "at": "2026-11-23T21:22:20.737Z",
           "proof": {
             "profile": "cases",
             "filter": "generate_helper_"
@@ -57063,11 +57088,11 @@
         {
           "n": 8,
           "text": "Generation follows a dependency-aware schedule (declared inputs, rounds, typed barriers, promised outputs); cycles and duplicate outputs are detected with registered codes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:41.959Z",
+          "evidence": "Landed 82406dbdd0 (c8f) on the c8r base. Batch-9 -O1 compiler (dev 2541ece0b1 + 13 submissions), landed on dev 9597797b1b with bubblewrap on PATH: cases generate_schedule_orders_producers_before_consumers and generate_schedule_refuses_cycles_duplicates_and_round_exhaustion 2/2 PASS; cases failed_step_report_shows_its_stderr PASS.",
+          "at": "2026-11-23T21:22:21.576Z",
           "proof": {
             "profile": "cases",
             "filter": "generate_schedule_"
@@ -57153,7 +57178,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-23T20:50:07.968Z",
+      "updated": "2026-11-23T21:28:18.436Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -57174,7 +57199,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "c3 scope decision: c3a adds JetSema Flow.jet with the one path rule set (meet, loop with exits, arm table with exhaustiveness) and a plane-supplied join; typestate and taint move onto it, which fixes taint's divergent join (fact_flow_join_* cases); ownership's fork join calls the same rule and stays a prover (c6, D-FACT-OWN1); effects keep no per-binding flow facts, so they get no plane. c3b makes the planes on Flow.jet share one store keyed by binding and plane, with a guard against new private per-binding maps."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed 299a1d731c: Examples/Metaprogramming/Reflection/FactQuery golden (jet inspect facts and compiler.query give equal marker rows on O0/O1/O2; missing store MetadataError stderr). PASS. c1 not met yet: FactSource has Schema/Program/Run, no plugin store, and no proof that no second registry reader remains."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -57282,8 +57318,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-22T02:10:23.721Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T21:29:05.337Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
     {
@@ -57399,6 +57435,21 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "M2 design correction (TypeIDSlice3): SourceSpan, TypeId, FunctionInfo and TypeInfo are already compiler-owned laid-out records in every IR program; the host word on the rule path is CompilerCall. M2a makes CompilerCall, CompilerName and CompilerArg compiler-owned laid-out records and removes CompilerCall, SourceSpan and TypeId from the host-value list (their Sema nameability moves to the record list); each checking wave's calls travel as one static-data literal. Budget stays 1 us per rule call, proven by the D-CORE-CHECK1 probe."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Batch 9 landed c3ar2 19a4b2caae (Body constructors as Core free functions, Headers.new a Core static; Sema's Body/Headers checker gone) and c3br2 369fb59c40 (Client is Core source; Sema's HTTPClient checker and THandleOp rows gone). ui http_body PASS; ui 0 new failures from them. c3 stays open for the remaining checkers under D-CORE-CHECK1=A."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "D-CORE-CHECK1=A ratified by the owner 2026-11-23. c3-c6 are unblocked and assigned to TypeIDSlice3 as G1's top step: Marker check rule, CompilerCall name/args/receiver, reject(at:), rules under check/run/build/LSP (stacks on #6846 c14), batched rule calls within 1 us per call (probe in the D-CORE-CHECK1 review audit), a rejection replaces ordinary checks, #Pre(#run) as a Prelude marker; then the eleven checkers move to Core rules one per patch, biggest first."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -57671,8 +57722,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-23T20:50:56.041Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T21:37:05.061Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 21
     },
     {
@@ -57885,6 +57936,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Batch 9 landed c9a f4c6a6e347 (jet.runtime.net bindings and exports for the Core-declared network handles); c9b2 follows in batch 10."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Landed on dev 61b25d4de8 (batch 1): growing public enums, compiler half plus UI snapshots, example and site pages. Batch compiler golden/ui/cases vs the dev baseline: 0 new failures."
         },
         {
@@ -58008,7 +58064,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-23T18:57:15.601Z",
+      "updated": "2026-11-23T21:22:24.107Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -61402,11 +61458,11 @@
         {
           "n": 4,
           "text": "A service that accepts on tcp_listener and writes with tcp_stream.write_text builds and runs on O0, O1 and O2 with no ICE.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:22:53.996Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile golden --filter Concurrency/Services/ -> 18/18 PASS (JobQueue.jet@o0, JobQueue.jet@o1, JobQueue.jet@o2, ServicePartitionReconcile.jet@o0, ServicePartitionReconcile.jet@o1, ServicePartitionReconcile.jet@o2, ServiceProjection.jet@o0, ServiceProjection.jet@o1, ServiceProjection.jet@o2, ServiceTree.jet@o0, ServiceTree.jet@o1, ServiceTree.jet@o2, ServiceWorkflowOutcome.jet@o0, ServiceWorkflowOutcome.jet@o1, ServiceWorkflowOutcome.jet@o2, run.jet@o0, run.).",
+          "at": "2026-11-23T20:53:38.306Z",
           "proof": {
             "profile": "golden",
             "filter": "Concurrency/Services/"
@@ -61535,8 +61591,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
-      "updated": "2026-11-22T02:10:23.722Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T20:53:38.306Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
     {
@@ -63050,11 +63106,11 @@
         {
           "n": 1,
           "text": "A loop over a constant range that can never run (`10..1`, or a step pointing away from the end) is check error E0170 RangeDirectionMismatch offering the minus step, as D-RANGE-BACKWARD1=A states; a computed backward range (`0..n - 1`) stays empty and raises nothing; the stride rule is in the spec.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T10:44:58.561Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter range_backward_constant -> 5/5 PASS (range_backward_constant.jet, range_backward_constant.jet@o0, range_backward_constant.jet@o1, range_backward_constant.jet@o2, range_backward_constant_quiet.jet). Stride rule in Docs/Spec/spec.md lines 588-592 (E0170).",
+          "at": "2026-11-23T20:53:39.237Z",
           "proof": {
             "profile": "ui",
             "filter": "range_backward_constant"
@@ -63063,11 +63119,11 @@
         {
           "n": 2,
           "text": "A function whose every path calls itself again with no exit is a tidy error at the call, found over call-graph cycles.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter unconditional_recursion -> 2/2 PASS (unconditional_recursion.jet, unconditional_recursion_quiet.jet).",
+          "at": "2026-11-23T20:53:40.153Z",
           "proof": {
             "profile": "ui",
             "filter": "unconditional_recursion"
@@ -63076,11 +63132,11 @@
         {
           "n": 3,
           "text": "A Float binding seeded with infinity but only ever assigned Int values is a tidy error naming the Int form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile ui --filter float_infinity_seed_int_only -> 2/2 PASS (float_infinity_seed_int_only.jet, float_infinity_seed_int_only_quiet.jet).",
+          "at": "2026-11-23T20:53:41.083Z",
           "proof": {
             "profile": "ui",
             "filter": "float_infinity_seed_int_only"
@@ -63166,8 +63222,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-22T02:10:23.723Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-23T20:53:41.083Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c00gioxt",
@@ -66095,11 +66151,11 @@
         {
           "n": 13,
           "text": "`assert_eq(x, None)` on an optional checks and runs and fails with the assertion report when x holds a value (#3857), and the retired L0528 never fires on generated bodies (#3903).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:28.658Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile cases --filter assert_eq_none -> 2/2 PASS (assert_eq_none_checks_and_runs.case, assert_eq_none_fails_on_a_value.case).",
+          "at": "2026-11-23T20:53:42.046Z",
           "proof": {
             "profile": "cases",
             "filter": "assert_eq_none"
@@ -66135,11 +66191,11 @@
         {
           "n": 17,
           "text": "JetSema reports doctest E2901 (#3905).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T12:57:24.832Z",
+          "evidence": "Sweep of open criteria against the full suite of the batch-7 -O1 compiler (dev 3019343199 + landed stack): jet test Compiler --profile cases --filter TestingTiers/doctests_compare_renderings_and_update_claims -> 1/1 PASS (doctests_compare_renderings_and_update_claims.case).",
+          "at": "2026-11-23T20:53:43.057Z",
           "proof": {
             "profile": "cases",
             "filter": "TestingTiers/doctests_compare_renderings_and_update_claims"
@@ -66186,8 +66242,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:42.636Z",
-      "updated": "2026-11-22T02:10:23.724Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T20:53:43.058Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 20
     },
     {
@@ -132974,6 +133030,224 @@
       "created": "2026-11-23T20:48:12.722Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-23"
+    },
+    {
+      "id": "D-BUILD-TARGETFACTS1",
+      "cardId": "c0rc40yf",
+      "group": "build",
+      "title": "How build code gives each output its own setting values, and what the two cache-line facts mean",
+      "situation": "A setting is a typed value a package declares, such as `fast_math: Bool = true`, that code reads while building. Today a setting can differ per profile in package.jet. But one `fn build` that makes an Arm and an x86 program from the same source cannot give the two programs different values. The hardware facts also blur two meanings. `#build.target.layout.cache_line` is the target triple's baseline, 128 bytes on Apple Arm. `#build.cpu.cache_line` should be the selected CPU's line, but it is a fixed 64 because no CPU can be selected yet. Game and embedded authors tune per machine, and today they split one build into several runs. You are asked how build code sets a setting for one output, and what the two cache-line facts mean. We recommend a labeled `options:` value for settings, and two fact families: the triple's baseline, and the selected CPU, which defaults to that baseline.",
+      "gist": "How does one build give each output its own setting values, and what do the target and CPU cache-line facts mean?",
+      "lesson": "An output is one thing a build makes, such as a program for Linux on x86 or the same program for Arm. A setting is a typed value the package declares and code reads while building as `#build.settings.name`. A target fact, read as `#build.target.…`, is what every machine of the output's triple guarantees. A CPU fact, read as `#build.cpu.…`, describes the one CPU chosen for the output. This choice decides where build code writes a per-output setting value and what the CPU facts answer.",
+      "explainer": "Think of a bakery that bakes one recipe for two ovens. The recipe says how much sugar to use. Each oven model has a size on its label, and the oven you bought may be bigger. Today the baker changes the sugar only by printing a new recipe book, and a second size note always says the same small number. Under the recommendation each oven's order slip carries its own sugar amount. The label keeps the model's size, and the second note holds your oven's size, starting from the label.",
+      "story": "Mira ships a game for x86 desktops and Apple Arm laptops from one `fn build`. The laptop build needs `max_particles: 2000` and the desktop `8000`, and her pool allocator aligns to the cache line. Today she keeps two profiles, runs `jet build` twice, and her alignment reads `#build.cpu.cache_line`, which is 64 even on Apple's chips, whose line is 128.",
+      "inWild": "// Zig: build.zig gives each artifact its own options module.\nconst opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);\n// In code: const config = @import(\"config\"); std.atomic.cache_line follows the selected CPU.",
+      "detail": "Current settings. Package.jet declares settings, as in `settings: { tls: Bool = true }`. Profiles override them, as in `build: { release: Build{ settings: { tls: false } } }`. Code reads `#build.settings.tls`, folded at build time (D-CONF-MODULE1=A, Examples/Modules/Packages/TypedSettings). An undeclared read is E0302 (sema_fact_build_setting_undeclared in Compiler/JetSema/Source/Sema/Expressions/FactReads.jet).\n\nCurrent outputs. `fn build` registers outputs with `b.add_executable(name, sources, actions, deps, probes, toolchain, signing)`, all positional (Compiler/JetBuildSession/Source/Declarations.jet). D-TARGET-ONE1=A and D-BUILD-CORE1=A ratified a labeled `options:` argument holding a `BuildOptions` value on every `b.add_*` call. It is ratified but not built. The slate card that ratified it, #5069, is closed, and no open card builds it. Under A, B and C, #5007 c7 builds `options:` first, and #5006 c1 reuses it.\n\nCurrent target facts (sema_fact_build_value in FactReads.jet). `#build.target.layout.pointer_bits`, `.word_bits` and `.cache_line` come from the triple's layout table. Its cache line is 128 on `aarch64-apple-*` and 64 elsewhere (Compiler/JetFoundation/Source/Target/Layout.jet). `#build.target.cpu_features` lists the features every CPU of the triple has. `#build.cpu.cache_line` is the selected CPU's line (D-CACHE-CONTROL1=A). With no CPU selection it answers a constant 64, which is wrong on Apple Arm. It has 37 uses in 15 files.\n\nSettings scope. An output's `options:` settings set the root package's declared settings only, the package whose `fn build` runs. A dependency keeps the values its own profile and the root's dependency entry give it, the same for every output. So a dependency library compiles once and is shared. Setting values join the instance fingerprint (D-CONF-MODULE1=A), so outputs with equal values share one compiled record.\n\nShared library. A root-package library that two outputs build with different values becomes two instances, one per distinct value set. The cost is one more compile of that library per extra value set. A setting may change a public type, such as an array length. That is sound, because each output links exactly one instance, so the two instances never meet in one program.\n\nFeature list type. `cpu_features` stays `[String]`. Its names are the code generator's, an open set that differs per architecture and grows with each backend release. A typed set would need a closed enum per architecture, regenerated with the backend, while `contains(\"avx2\")` already folds while building. A typed feature set belongs with CPU dispatch, D-CPU-DISPATCH1.\n\nOut of scope. Host facts such as `#build.host.os` belong to D-JAI-CONFIG1=A. Which machine answers a per-OS Core call during preparation is D-BUILD-TOOLCHAIN1=A. Hardware requirements stay D-HOST-CAPS1. The card's draft wording used byte names such as `pointer_size`; the bit names are in use, and no option renames them.\n\nEdge cases under A. An undeclared key in an output's `options:` settings is a registered error at the value. So is a value of the wrong type, and its message names the declared type (card c9). An unset key takes the profile's value, then the default. An output with no toolchain reads the build machine's facts, as today.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-output `options:` settings; the triple's baseline and the selected CPU as two fact families",
+          "detail": "Build code gives an output its own setting values in a labeled `options:` value on `b.add_executable` and the other `b.add_*` calls. Only the keys it names change; the others keep the profile's value. Each output's code reads its own value through `#build.settings.name`, folded while building, on every tier.\n\nThe facts keep two families with distinct meanings. `#build.target.*` is the triple's guaranteed baseline. `#build.cpu.cache_line` and a new `#build.cpu.features` describe the selected CPU, which defaults to that baseline until CPU selection exists. On Apple Arm `#build.cpu.cache_line` becomes 128, the chip's real line, with no rename.",
+          "technical": "`BuildOptions` gains no field, because `settings:` is already a profile field. `options: .{ settings: .{ max_particles: 2000 } }` layers the named keys over the selected profile's settings, for that output only. In D-SETTING-ORDER1's order, output options sit between the profile and entry-code pins. Keys and values are checked against the root package's declared settings while `fn build` runs.\n\n`#build.cpu.cache_line` answers the output triple's layout cache line instead of a constant. `#build.cpu.features` answers `#build.target.cpu_features` until a CPU can be selected, which gives a future `--cpu` flag its home. Building `options:` itself is part of this work (#5007 c7).",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game\", [\"run.jet\"])\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }\n\nrun: fn() {\n    print(\"particles: {#build.settings.max_particles}\")\n    print(\"cache line: {#build.cpu.cache_line}\")\n}\n// game prints 8000 and 64; game_laptop prints 2000 and 128."
+        },
+        {
+          "key": "B",
+          "name": "Per-output `options:` settings; one merged cache-line fact",
+          "detail": "Settings work as in A. The facts merge: `#build.cpu.cache_line` is removed, and its 37 uses in 15 files move to `#build.target.layout.cache_line` in one change, with no retired spelling kept. One name per fact is simpler today. But a future CPU flag has no fact to answer, and every aligned type on Apple Arm moves from 64 to 128 bytes in the same change.",
+          "technical": "Same settings layer as A. The merge is one cutover: the spelling leaves the syntax registry, and every caller is rewritten in the same commit. `#build.target.layout.cache_line` keeps answering the triple's value.",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\n#Layout(c, align(#build.target.layout.cache_line))\nPool: struct { used: Int }\n\nrun: fn() {\n    print(\"particles: {#build.settings.max_particles}\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "A setter method on the output; facts as in A",
+          "detail": "Build code calls a method on the output after adding it: `laptop.set(\"max_particles\", 2000)`. The facts are as in A. It reads like a configuration script, but it is a second way to change an output beside `options:`, and the key is a string the editor cannot complete.",
+          "technical": "`Output.set(key: String, value: Dyn)` checks the key against the declared settings while `fn build` runs. The call order matters: a `set` after the plan is sealed is an error. `options:` keeps its other fields, so an output's values come from two places.",
+          "code": "// package.jet declares the setting once.\n// settings: { max_particles: Int = 8000 }\n\nbuild: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    laptop: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac)\n    laptop.set(\"max_particles\", 2000)\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+        },
+        {
+          "key": "D",
+          "name": "Keep today",
+          "detail": "One build gives every output the same setting values; a per-output value needs a separate `jet build --profile=…` run. Both cache-line facts stay, and `#build.cpu.cache_line` keeps answering 64 on every target, which is wrong on Apple Arm.",
+          "technical": "No change. Card criteria c7 to c9 stay open.",
+          "code": "// package.jet:\n// settings: { max_particles: Int = 8000 }\n// build: { laptop: .{ settings: { max_particles: 2000 } } }\n// Two runs: jet build, then jet build --profile=laptop --target=aarch64-apple-darwin\n\nbuild: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Each artifact gets its own options module from build.zig; code imports it. `std.atomic.cache_line` follows the selected CPU, and the target's `builtin` module gives the baseline.",
+          "code": "const opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);"
+        },
+        {
+          "lang": "Rust",
+          "note": "Cargo has no per-artifact feature values in one build; a cross build is a separate `--target` run. `target_feature` follows `-C target-cpu`, which defaults to the triple's baseline.",
+          "code": "#[cfg(target_feature = \"avx2\")]\nconst LANES: usize = 8;"
+        },
+        {
+          "lang": "Jai",
+          "note": "Each workspace has its own Build_Options, set from the build program; code reads `#run` constants per workspace.",
+          "code": "w := compiler_create_workspace(\"laptop\");\nopts := get_build_options(w);\nopts.cpu_target = .ARM64;\nset_build_options(opts, w);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts a per-output setting in the labeled `options:` value D-TARGET-ONE1 already ratified for every output. It keeps the triple's baseline and the selected CPU apart, as D-CACHE-CONTROL1 defined them, and fixes the Apple Arm value with no rename.",
+        "gains": [
+          "One build makes outputs with different setting values, folded while building on every tier.",
+          "`#build.cpu.cache_line` gives the right value on Apple Arm, and a future CPU flag has a home.",
+          "No setter method and no rename of a fact in use."
+        ],
+        "losses": [
+          {
+            "loss": "`options:` on `b.add_*` is ratified but unbuilt, so A builds it first.",
+            "mitigation": "#5006 needs the same argument for several configurations, so the work serves both cards."
+          },
+          {
+            "loss": "A root-package library built with two value sets compiles twice.",
+            "mitigation": "Outputs with equal values share one record, and dependencies never vary per output."
+          },
+          {
+            "loss": "On Apple Arm, types aligned to `#build.cpu.cache_line` grow from 64 to 128 bytes.",
+            "mitigation": "128 is that chip's real line, so the padding finally prevents false sharing there."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One name now, but the 64-to-128 change still happens, and a future CPU flag loses its fact."
+          },
+          {
+            "key": "C",
+            "reason": "A second way to change an output, with string keys the editor cannot complete."
+          },
+          {
+            "key": "D",
+            "reason": "Per-output values need separate runs, and the CPU cache line stays wrong on Apple Arm."
+          }
+        ],
+        "tradeoff": "Two cache-line facts stay, each with one meaning: the triple's baseline and the chosen CPU. Build authors write settings inside `options:`, the one place an output's changes live."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. The review refuted merging the two cache-line facts, the retired spelling, and the unstated cost of the unbuilt `options:`. This draft keeps both fact families, states the settings scope and its compile cost, and names #5007 c7 as the builder of `options:`."
+      },
+      "checkInstructions": "Check settings in Examples/Modules/Packages/TypedSettings (package.jet, run.jet) and E0302 in Compiler/JetSema/Source/Sema/Expressions/FactReads.jet (sema_fact_build_setting_undeclared, sema_fact_build_value). Check `b.add_executable`'s positional arguments in Compiler/JetBuildSession/Source/Declarations.jet.\n\nCheck the triple cache line and features in Compiler/JetFoundation/Source/Target/Layout.jet (jet_target_layout_cache_line). Check `#build.cpu.cache_line` in Examples/Memory/Allocation/CacheLinePadding.jet and D-CACHE-CONTROL1 in Docs/Research/2026-10-30-cache-control-and-visibility.md.\n\nCheck `options:` in the ratified D-TARGET-ONE1, D-BUILD-CORE1, D-ENTRY-NAMES1 and D-SETTING-ORDER1. The review is Docs/Audits/2026-11-23-d-build-targetfacts1-review.md.",
+      "surface": {
+        "gist": "How does one build give each output its own setting values, and what do the CPU facts answer?",
+        "lesson": "An output is one thing a build makes, such as the same game for a desktop and for a laptop. A setting is a typed value the package declares, read while building. A target fact is what the output's triple guarantees; a CPU fact describes the chosen CPU. This picks where build code writes a per-output value and what the CPU facts answer.",
+        "trio": {
+          "current": {
+            "note": "Today every output of one build gets the same setting values, and the CPU cache-line fact is always 64.",
+            "code": "build: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n// A second value needs a second run with another profile.\n#Layout(c, align(#build.cpu.cache_line))  // 64 even on Apple Arm\nPool: struct { used: Int }"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig gives each artifact its own options from the build script.",
+            "code": "const opts = b.addOptions();\nopts.addOption(u32, \"max_particles\", 2000);\nhandheld.root_module.addOptions(\"config\", opts);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Settings in options, two fact families",
+            "gist": "An output's `options:` names its own setting values; CPU facts default to the triple's.",
+            "gains": [
+              "One build, different values per output.",
+              "Right cache line on Apple Arm."
+            ],
+            "losses": [
+              "`options:` must be built first."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    _: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac, options: .{ settings: .{ max_particles: 2000 } })\n}\n\nrun: fn() {\n    print(\"cache line: {#build.cpu.cache_line}\")  // 128\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Settings in options, merged facts",
+            "gist": "Settings as in A; the CPU cache-line fact is removed.",
+            "gains": [
+              "One name per fact today."
+            ],
+            "losses": [
+              "No fact for a future CPU flag.",
+              "Aligned types grow on Apple Arm."
+            ],
+            "proposed": {
+              "code": "#Layout(c, align(#build.target.layout.cache_line))\nPool: struct { used: Int }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Setter method",
+            "gist": "A method on the output sets one value by name; facts as in A.",
+            "gains": [
+              "Reads like a configuration script."
+            ],
+            "losses": [
+              "A second way to change an output.",
+              "Keys are strings the editor cannot complete."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    mac: b.toolchain(\"laptop\", \"aarch64-apple-darwin\")\n    laptop: b.add_executable(\"game_laptop\", [\"run.jet\"], toolchain: mac)\n    laptop.set(\"max_particles\", 2000)\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep today",
+            "gist": "No per-output values; the CPU cache line stays 64.",
+            "gains": [
+              "No work now."
+            ],
+            "losses": [
+              "A second value needs a second run.",
+              "Wrong cache line on Apple Arm."
+            ],
+            "proposed": {
+              "code": "build: fn(b: Build) {\n    _: b.add_executable(\"game\", [\"run.jet\"])\n}\n// jet build --profile=laptop --target=aarch64-apple-darwin\n#Layout(c, align(#build.cpu.cache_line))\nPool: struct { used: Int }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A puts per-output values in the `options:` value already ratified for every output, and keeps the triple's and the CPU's facts apart.",
+          "gains": [
+            "Different values per output in one build.",
+            "Right CPU cache line on Apple Arm.",
+            "No setter and no renames."
+          ],
+          "losses": [
+            {
+              "loss": "`options:` must be built first.",
+              "mitigation": "#5006 needs the same argument."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Same growth on Apple Arm, and no fact for a CPU flag."
+            },
+            {
+              "key": "C",
+              "reason": "Two ways to change an output, with string keys."
+            },
+            {
+              "key": "D",
+              "reason": "Separate runs, and a wrong cache line on Apple Arm."
+            }
+          ],
+          "tradeoff": "Two cache-line facts, each with one meaning."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "Main",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-23T21:28:00.578Z"
     }
   ],
   "questions": [
@@ -135307,6 +135581,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T21:37:05.061Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:29:05.337Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0n7zpy3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:28:18.436Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:28:01.672Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0rc40yf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:28:00.578Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-BUILD-TARGETFACTS1",
+      "note": "How build code gives each output its own setting values, and what the two cache-line facts mean"
+    },
+    {
+      "at": "2026-11-23T21:22:24.107Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c06r6neu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:22:23.283Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:22:22.407Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:22:21.576Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-23T21:22:20.737Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-23T21:22:19.866Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-23T21:22:19.013Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r6d7ja",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-23T21:10:48.125Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0rc40yf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:10:47.112Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T21:01:48.135Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0n7zpy3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:57:07.278Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T20:53:43.058Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-23T20:53:42.046Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09hk13a",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-23T20:53:41.083Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-23T20:53:40.153Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-23T20:53:39.237Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-23T20:53:38.306Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0v54mn1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-23T20:53:37.355Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0eve9h3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-23T20:53:36.405Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0eve9h3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-23T20:53:35.395Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0eve9h3",
+      "note": "#2"
+    },
     {
       "at": "2026-11-23T20:50:56.041Z",
       "by": "owner",
@@ -139164,713 +139613,6 @@
       "by": "owner",
       "action": "card.update",
       "ref": "c0dlrfkp",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cs6xlg",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0slc5oo",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08h4xjb",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0zizxhx",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0nsxbj2",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0sxi78p",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0yxlw5x",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08qqzef",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0b4rnem",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0s2gaqp",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c04g9zai",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06z2egd",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c01paimh",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0axja0l",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.718Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0p9ajji",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ycgz3f",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0bcerww",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ufxh06",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c066t33h",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c04pj0wn",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0jn187l",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c065d1d5",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c078tv7g",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0a8z3u0",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00ctwqw",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c015yc5v",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c018jg16",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0tpf98i",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0t9jcat",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0q4s6en",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0a2monf",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c09316pf",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c017cddb",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.717Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0tjjr66",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0manzdq",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fh2a4z",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00ii3d5",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0zy9mhn",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0166xrw",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wtvbj7",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0h8jjrp",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0s9rdnu",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0itgqr6",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08o25e8",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wv2wmp",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c09brw5t",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0uhfjtt",
-      "note": "epoch,phase,logEntry"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0mwaylu",
-      "note": "epoch,phase,logEntry"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "epoch,phase,logEntry"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0agsbqj",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.716Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ewbdj1",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0awiifz",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cdnofm",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0f1eda4",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wssehw",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02qdoro",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0p2n50x",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0y7kqfw",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02t52c5",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0isxyo3",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05p5u7s",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00w7rum",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06lvend",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ov7lce",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0smtxuc",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.715Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06he0ee",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c01vsb2c",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0sg79an",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0g5cadm",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ct4a0i",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0vhdiiv",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c059ge5n",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kyjdtx",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0do6acc",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0frcmcx",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05l3kpi",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c05gn07n",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07hz2zg",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0q31aks",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08m4yum",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0hsgoa6",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.714Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0e7sc5b",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0i42rgw",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lyckm2",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0810bga",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0r02x8n",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fvnyiq",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0mhdm27",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0qz3x03",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cwk90x",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c098yuyt",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c01ruyp3",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-11-22T02:10:23.713Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fq2ryv",
       "note": "epoch"
     }
   ],
