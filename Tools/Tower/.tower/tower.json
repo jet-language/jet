@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113277,
+    "rev": 113281,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52781,7 +52781,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "Sequenced after #6978 / #6793 S5 (TypeID). S1: Tagged IRDataReloc/X64DataReloc (.Data/.Function/.Runtime) + .data.rel.ro/.data placement in both merged and own_sections modes (L4) + data-reloc traversal in ir_x64_reached_only (X64Module.jet). S2: 72B IRTypeDesc (type_id, move_fn, close_fn) + Go 1.18 IRGenDict + tightened V1 eligibility (excluding Option/Result/Map/[T#N]/Rows/ZST/pop/first/last per L2) + pre-prologue stack-checked entry-hoisted dynamic frames (L1) + closure-box adapters & witness thunks + BuildRoutes.jet generic-stride list ops (0 new #Unsafe) + Backend/o0_shared_generic_body (c2, c3). S3: Cold uncached two-program -O0 compile/size/runtime receipt (c4, L5). S4: Full dated >4 KB tool-twin audit + general OptInline cold/growth caps, cold-stop outlining, and .rodata table lowering proved on two programs with CodegenCeiling 9/9 (c5).",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -52792,11 +52792,11 @@
         {
           "n": 1,
           "text": "A design note and a passing adversarial review in Docs/Audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/Audits/*shared-generic*\"` names the design note and its passing review.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:43.960Z"
+          "status": "verified",
+          "metBy": "Orchestrator",
+          "verifiedBy": "jet-verify",
+          "evidence": "dev 1165ce9432: Docs/Audits/2026-11-23-shared-generic-design.md (Rev 2) and Docs/Audits/2026-11-23-shared-generic-review.md (PASS — Holds Within Stated Limits L1-L5 after 2-pass fresh-context review by 2d561eea); covers strongest peers (Go 1.18 dictionaries, Swift unspecialized generics, OCaml/Java erasure, Rust/C++ monomorphization), live f3b6b8f4f7 -O0 jet-bare symtab denominator (1.54% user generics vs 7.11% per-type jet_ir_* glue), runnable N=20/N=50 mono-vs-shared -O0 probes (-18.1%/-33.6% compile, -62.3%/-79.3% .text, 1.84x/1.63x run), live f3b6b8f4f7 >4 KB tool-twin attribution (c5), and S1-S4 slice plan.",
+          "at": "2026-11-23T11:17:13.102Z"
         },
         {
           "n": 2,
@@ -52844,8 +52844,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:56.559Z",
-      "updated": "2026-11-22T02:10:23.720Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T11:17:15.012Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
     {
@@ -134637,6 +134637,34 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T11:17:49.976Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing0tx5lt7",
+      "note": "30M LOC/s Architectural Overhaul — 6/32 Real Criteria Met (#6798 c1 & #6797 c1 Passed)"
+    },
+    {
+      "at": "2026-11-23T11:17:15.012Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0b3gyq2",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-23T11:17:13.102Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0b3gyq2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-23T11:17:12.128Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b3gyq2",
+      "note": "#1"
+    },
+    {
       "at": "2026-11-23T11:10:01.830Z",
       "by": "jet-verify",
       "action": "card.criteria-verify",
@@ -139307,6 +139335,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing0tx5lt7",
+      "title": "30M LOC/s Architectural Overhaul — 6/32 Real Criteria Met (#6798 c1 & #6797 c1 Passed)",
+      "body": "## 30M LOC/s Architectural Overhaul — Honest Live Progress (`2026-11-23`)\n\n**G1 → G6 burndown remains STOPPED.** 100% of engineering focus is on completing all 7 real architectural overhaul cards (`#6978`, `#6793`–`#6798`) criterion-by-criterion with zero inflated percentages.\n\n### Honest Real Criteria Progress: **`6 / 32` Met (`18.8%`)**\n*(Strictly real Tower criteria verified & marked `met` — never invented wave percentages.)*\n\n| Card | Pillar | Real Criteria Met | Current Live State |\n|---|---|---:|---|\n| **`#6978`** | Full `TypeID` interner (Sema, Registration, IR) | **`0 / 2`** | **ACTIVELY IMPLEMENTING (`CodegenOpt`):** Slice 1 verified (`JetFoundation 32/32`, `jet check Compiler` byte-identical); Slice 2 (`TExprType.ty -> TypeID`, dropping `BodyTree.types`) actively running. |\n| **`#6793`** | Data-oriented compiler core (`< 1 GB` RSS, `<= 5 µs/line`) | **`2 / 9`** (`c1`, `c9`) | Next up for `CodegenOpt` immediately after `#6978` closes (`c2` 0 String-keyed maps -> `c3` flat SoA AST -> `c4` flat arenas -> `c5–c8`). |\n| **`#6794`** | Parallel pipeline (`1 → 16` scaling, work-stealing) | **`1 / 3`** (`c1` met) | `c1` PASS (`2026-11-23-parallel-pipeline-design.md` + review); S1–S5 implementation plan locked. |\n| **`#6795`** | Copy-and-patch `-O0` (`>= 10×` backend CPU cut) | **`0 / 4`** | `c1` Pass 1 review caught 7 real live-code issues (`F1–F7`: S1 Bubblewrap sandbox, `DropEarly` multi-`Drop`, `Float`/`String` `RFLAGS`, cold-stub `rax`, `debug_info=true` default, `.eh_frame`, `X64Stack`/`NativeFix` relocs, 3-arm probe). **`GoalsOrder` actively producing Rev 2 + honest 3-arm probe** before `#6795 c2–c4`. |\n| **`#6796`** | Parallel SIMD lex + parse (`<= 1 ns/byte`, `>= 10×` on 16c) | **`1 / 5`** (`c1` met) | `c1` PASS (`2026-11-23-parallel-lex-parse-design.md` + review); Slice 1–3 plan locked (`Chunks.jet` boundary fix + `Lanes<U8,N>`/`#Multiversion`). |\n| **`#6797`** | Shared generic code at `-O0` + `> 4 KB` code-size audit | **`1 / 5`** (`c1` met) | **`c1` JUST PASSED (`dev 1165ce9432`):** Rev 2 + PASS review (`2026-11-23-shared-generic-design.md` + review) with live `-O0` `jet-bare` `.symtab` breakdown, `N=20`/`N=50` mono-vs-shared probes (`-62%`/`-79%` `.text`), live tool-twin `> 4 KB` audit, and S1–S4 plan sequenced after `#6978`. |\n| **`#6798`** | Warm comptime child + SHM values + `CALL_BATCH` | **`1 / 4`** (`c1` met) | **`c1` JUST PASSED (`dev 40e3ec0b6f`):** Rev 3 + PASS review (`2026-11-23-comptime-child-design.md` + review) with `N=500` IPC probe (`706×` batch cut), 3-tier sound return transport, and S1–S3 plan. |\n\n### Honest Live Baseline vs Target (`fb1cb69a62`, Cold Uncached Idle Host, `S2 == S3`)\n- **`CompileThroughput -O0` (`1.09M` LOC, `-j12`):** **`34,112 LOC/s`** (`31.93s` wall, `82.07s` CPU = **`75.4 µs/line`**, `2.6×` parallel, `5,922 MiB` RSS) — **`879×` away from `30,000,000 LOC/s`**, **`15.1×` away from `<= 5 µs/line` (`#6793 c6`)**, and **`5.8×` away from `< 1 GB` RSS (`#6793 c5`)**.\n- **`CompileThroughput check` (`-j12`):** **`80,677 LOC/s`** (`13.50s` wall, `121.95s` CPU = `112.0 µs/line`, `9.0×` parallel, `3,370 MiB` RSS).\n- **Full `jet build -O0 --threads 24 Compiler`:** **`32.397s`** median (**`4,782.5 MB` Peak RSS**); standalone `jet-bare -O0 --threads 24`: **`12.027s`** (`4,820.2 MB` RSS); `jet check InspectBuild.jet`: **`3,364.4 MB` RSS** (`#6793 c7` target `< 1 GB`).\n- **Safety & Gates:** `CodegenCeiling 9/9`, `CompilerData 1034`, `UnsafeRatchet 1654` (`0` raw memory outside audited memory kernel), `Tests/Guards 217/217`.\n",
+      "by": "Orchestrator",
+      "created": "2026-11-23T11:17:49.976Z",
+      "sections": []
+    },
     {
       "id": "briefing0bq84e7",
       "title": "CORRECTION: 30M LOC/s Architectural Overhaul — Actual Status (2/32 Criteria Met, 34.1k LOC/s)",
