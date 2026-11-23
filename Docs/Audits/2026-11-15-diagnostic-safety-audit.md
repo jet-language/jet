@@ -673,12 +673,12 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3504 | BuildActionAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:1074 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCLI/Source/CLI/BuildExecute.jet:181 | the action's cause is fixed |
 | E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:246 | the step's cause is fixed |
-| E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:573 | generate under another name |
+| E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:574 | generate under another name |
 | E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:418 | one producer per module |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:169 | regenerate and lock again |
 | E3513 | LockedEffectRowWidened | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:553 | lock the new effect row after review |
 | E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:208 | a producer makes the file |
-| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:521 | one build entry per package |
+| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:527 | one build entry per package |
 | E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:405 | one writer per layer |
 | E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:117 | a code outside the compiler's shape |
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:942 | one override per command |
