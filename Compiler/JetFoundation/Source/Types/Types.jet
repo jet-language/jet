@@ -471,7 +471,7 @@ SymbolKeys: struct {
 }
 
 // A range's keys, each held once, as its String: a probe compares a key's
-// `name_rows_hash` and then the String, so a lookup copies no bytes and the
+// `name_text_hash` and then the String, so a lookup copies no bytes and the
 // range keeps no second copy of its keys' bytes.
 SymbolKeyRows: struct {
     texts: [String],
@@ -486,7 +486,7 @@ SymbolKeyRows: struct {
 // there, and a lookup the closed keys miss reads its own keys.
 SymbolTable: struct {
     ranges: [SymbolKeys],
-    // Open-addressing slots over each closed key's `name_rows_hash`: 0 is
+    // Open-addressing slots over each closed key's `name_text_hash`: 0 is
     // empty, otherwise the key's id plus one. A probe compares the String
     // the id's range holds, so the index stores no key text.
     slots: [Int]{[Int]{0}},
@@ -656,7 +656,7 @@ SymbolLocalKeys: struct {
     // Row `n` ends at `ends[n]` and starts where row `n - 1` ends.
     bytes: [U8],
     ends: [Int],
-    // Each row's `name_rows_hash`: a probe compares bytes only with a row of
+    // Each row's `name_text_hash`: a probe compares bytes only with a row of
     // the same hash, and a grow never hashes a key again.
     hashes: [Int],
     // Open-addressing slots: 0 is empty, otherwise the row plus one. Sealed
@@ -694,7 +694,7 @@ symbol_local_keys_spells: fn(keys: SymbolLocalKeys, row: Int, bytes: [U8]) -> Bo
     true
 }
 
-// The row of `key`, whose `name_rows_hash` is `hash`, when `keys` holds it.
+// The row of `key`, whose `name_text_hash` is `hash`, when `keys` holds it.
 // Sealed keys (symbol_local_keys_seal) have no slots, so their rows are
 // scanned.
 symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int? Never! {
@@ -731,7 +731,7 @@ symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int?
 
 // The id of `key` in `keys`, added when it is new.
 symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Never! {
-    hash: name_rows_hash(key)
+    hash: name_text_hash(key)
     if symbol_local_keys_row(keys, key, hash) == .Val(found) -> return symbol_local_id(found)
     row: keys.ends.len()
     if row >= SYMBOL_LOCAL_BOUND {
@@ -739,7 +739,7 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
     }
     if keys.hashes.len() < row {
         loop index in keys.hashes.len()..<row {
-            keys.hashes.push(name_rows_hash(String.from_bytes(keys.bytes.slice(symbol_local_keys_start(keys, index), keys.ends[index])) ?? ""))
+            keys.hashes.push(name_text_hash(String.from_bytes(keys.bytes.slice(symbol_local_keys_start(keys, index), keys.ends[index])) ?? ""))
         }
     }
     keys.bytes.extend(key.bytes())
@@ -778,7 +778,7 @@ symbol_local_keys_seal: fn(keys: &SymbolLocalKeys) Never! {
 
 // The id of `key` when `keys` holds it; never interns.
 symbol_local_keys_find: fn(keys: SymbolLocalKeys, key: String) -> SymbolID? Never! {
-    row: symbol_local_keys_row(keys, key, name_rows_hash(key)) ?? return None
+    row: symbol_local_keys_row(keys, key, name_text_hash(key)) ?? return None
     Val(symbol_local_id(row))
 }
 
@@ -807,7 +807,7 @@ symbol_key_rows: fn(slots: Int) -> SymbolKeyRows Never! {
     rows
 }
 
-// The row of `key`, whose `name_rows_hash` is `hash`, when `rows` holds it.
+// The row of `key`, whose `name_text_hash` is `hash`, when `rows` holds it.
 symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Never! {
     slot := hash & rows.mask
     loop {
@@ -824,7 +824,7 @@ symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Ne
 
 // The row of `key`, added when it is new.
 symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
-    hash: name_rows_hash(key)
+    hash: name_text_hash(key)
     if symbol_key_rows_find(rows, key, hash) == .Val(found) -> return found
     row: rows.texts.len()
     // copy: the rows keep their own key; `key` stays with the caller.
@@ -995,7 +995,7 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
     table
 }
 
-// Whether the key of closed id `id` is `key`, whose `name_rows_hash` is
+// Whether the key of closed id `id` is `key`, whose `name_text_hash` is
 // `hash`.
 symbol_table_holds: fn(table: SymbolTable, id: Int, hash: Int, key: String) -> Bool Never! {
     at: symbol_table_range_of(table, id)
@@ -1014,7 +1014,7 @@ symbol_table_module_range: fn(table: SymbolTable, identity: ModuleID) -> Int? Ne
 // The id of `key`, if a range holds it.
 symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
     if key == "" -> return Val(symbol_none())
-    hash: name_rows_hash(key)
+    hash: name_text_hash(key)
     slot := hash & table.mask
     loop table.slots[slot] != 0 {
         id: table.slots[slot] - 1
@@ -1049,7 +1049,7 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
     }
     assert_eq(Int{symbol_keys_intern(module_keys, "local:m:f:v7").id}, 1008)
     assert_eq(module_keys.keys.texts.len(), 41)
-    assert(symbol_key_rows_find(module_keys.keys, "local:m:f:v40", name_rows_hash("local:m:f:v40")) == None)
+    assert(symbol_key_rows_find(module_keys.keys, "local:m:f:v40", name_text_hash("local:m:f:v40")) == None)
     table := symbol_table_of([SymbolKeys]{symbol_builtin_keys(), module_keys})
     assert_eq(Int{(symbol_find(table, "local:m:f:v39") ?? symbol_none()).id}, 1040)
     assert(symbol_find(table, "") != None)

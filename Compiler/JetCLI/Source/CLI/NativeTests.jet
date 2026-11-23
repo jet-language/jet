@@ -5,7 +5,7 @@
 use {
     native_test_files: core.files
     native_test_sys: core.sys
-    jet_foundation.[ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, FnBody, NameRows, TTestFact, name_rows, name_rows_get_text, name_rows_set_first]
+    jet_foundation.[ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, FnBody, NameTable, TTestFact, name_column, name_column_get, name_column_set_first, name_column_table]
 }
 
 // One selected native unit test: `id` is the identity its outcome record
@@ -227,18 +227,18 @@ jet_native_test_writes_process_state: fn(function: FnBody) -> Bool Never! {
 }
 
 // Which rows of `functions` reach a process-state writer through their call
-// and value edges (`by_key` holds each key's first row): the writers'
-// callers, walked backward once for every test.
-jet_native_test_isolated_rows: fn(functions: [FnBody], by_key: NameRows) -> [Bool] Never! {
+// and value edges (`keys` and `by_key` hold each key's first row): the
+// writers' callers, walked backward once for every test.
+jet_native_test_isolated_rows: fn(functions: [FnBody], keys: NameTable, by_key: [Int]) -> [Bool] Never! {
     callers := (loop _ in functions -> [Int]{})
     pending := [Int]{}
     loop (row, function) in functions {
         if jet_native_test_writes_process_state(function) -> pending.push(row)
         loop edge in function.effects.call_edges {
-            if name_rows_get_text(by_key, edge) == .Val(callee) -> callers[callee].push(row)
+            if name_column_get(keys, by_key, edge) == .Val(callee) -> callers[callee].push(row)
         }
         loop edge in function.effects.value_edges {
-            if name_rows_get_text(by_key, edge) == .Val(callee) -> callers[callee].push(row)
+            if name_column_get(keys, by_key, edge) == .Val(callee) -> callers[callee].push(row)
         }
     }
     reaches := (loop _ in functions -> false)
@@ -260,14 +260,15 @@ jet_native_test_isolated_rows: fn(functions: [FnBody], by_key: NameRows) -> [Boo
 jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filter: String?, shuffle_seed: String?) -> [JetNativeTestCase] Err! {
     modules := [String:String]{}
     loop function in functions -> modules[function.key.copy()] = function.module_name.copy()
-    by_key := name_rows()
-    loop (row, function) in functions -> name_rows_set_first(by_key, function.key, row)
-    isolated: jet_native_test_isolated_rows(functions, by_key)
+    keys := name_column_table(functions.len())
+    by_key := name_column(functions.len())
+    loop (row, function) in functions -> name_column_set_first(keys, by_key, function.key, row)
+    isolated: jet_native_test_isolated_rows(functions, keys, by_key)
     rows := [JetNativeTestRow]{}
     // Every test the harness can't build, all at once (one ICE report).
     faults := [String]{}
     loop (index, test) in tests {
-        row: name_rows_get_text(by_key, test.function.key) ?? -1
+        row: name_column_get(keys, by_key, test.function.key) ?? -1
         if filter == .Val(needle) && !test.name.contains(needle) && (row < 0 || jet_cli_stem(functions[row].source_file) != needle) {
             next
         }
