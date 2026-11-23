@@ -124,12 +124,12 @@ body_node: fn(tree: BodyTree, id: Int) -> BodyNode Never! {
     local: symbol_local_keys_intern(tree.symbols, "local:m:f:x")
     loop id in 0..<9 {
         tree.nodes.push(BodyNode{id: id, kind: NodeKind.IntLit{value: id, width: None}, span: Span{start: id, end: id + 1}})
-        tree.expr_types.push(TExprType{id: id, ty: TYPE_INT})
+        tree.expr_types.push(TExprType{id: id, ty: TYPE_ID_INT})
     }
     tree = body_tree_sealed(tree)
     assert_eq(tree.nodes.len(), 9)
     assert(body_node(tree, 8).kind == NodeKind.IntLit{value: 8, width: None})
-    assert_eq(body_type_id(tree, 8), TYPE_INT)
+    assert_eq(body_type_id(tree, 8), TYPE_ID_INT)
     assert_eq(Int{(symbol_local_keys_find(tree.symbols, "local:m:f:x") ?? symbol_none()).id}, Int{local.id})
 }
 

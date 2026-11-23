@@ -224,11 +224,11 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
         if checked_builtin_mutates_receiver(operation) && type_kind(table, receiver_tid) == TypeKind.Map {
             return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
         }
-        if operation == TBuiltinOp.Lines && receiver_tid.id == TYPE_STRING.id {
+        if operation == TBuiltinOp.Lines && receiver_tid.id == TYPE_ID_STRING.id {
             return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder, written: true})
         }
     }
-    if tid.id == TYPE_INT.id {
+    if tid.id == TYPE_ID_INT.id {
         if node.kind == .Binary(op, _, _, left, right) {
             if op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul {
                 return Val(body_cost_int_operation_fact(table, tree, op, left, right))

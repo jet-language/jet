@@ -282,10 +282,10 @@ use {
         StructureFact,
         TLocal,
         Interner,
-        TYPE_INT,
-        TYPE_NEVER,
-        TYPE_U64,
-        TYPE_UNIT,
+        TYPE_ID_INT,
+        TYPE_ID_NEVER,
+        TYPE_ID_U64,
+        TYPE_ID_UNIT,
         body_tree_remap_types,
         body_type,
         body_type_id,
@@ -4365,7 +4365,7 @@ jet_driver_comptime_reach_expr: fn(reach: &JetDriverComptimeReach, tree: BodyTre
         return
     }
     tid: body_type_id(tree, expression)
-    if tid.id < TYPE_INT.id || tid.id == TYPE_UNIT.id || tid.id == TYPE_NEVER.id || tid.id > TYPE_U64.id {
+    if tid.id < TYPE_ID_INT.id || tid.id == TYPE_ID_UNIT.id || tid.id == TYPE_ID_NEVER.id || tid.id > TYPE_ID_U64.id {
         reach.everything = true
     }
     if body_node(tree, expression).kind == {
@@ -5252,7 +5252,7 @@ jet_driver_keep_going_trap_body: fn(function: FnBody, reason: String) -> FnBody 
     }
     nodes := [BodyNode]{BodyNode{id: stop_id, kind: NodeKind.Never{reason: reason, line: 0}, span: function.source_span}}
     loop node in trapped.tree.nodes -> nodes.push(node)
-    types := [TExprType]{TExprType{id: stop_id, ty: TYPE_NEVER}}
+    types := [TExprType]{TExprType{id: stop_id, ty: TYPE_ID_NEVER}}
     loop row in trapped.tree.expr_types -> types.push(row)
     trapped.tree.nodes = nodes.move()
     trapped.tree.expr_types = types.move()
