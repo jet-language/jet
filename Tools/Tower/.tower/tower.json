@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113250,
+    "rev": 113252,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72490,6 +72490,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed Pillar 1 Slice 1 (f17b0e1815, 29 files): live TypeID (U32) Interner + O(1) canonical column + InternerDelta worker fork/merge + TExpr.type_id + word-hashed zero-alloc NameTable (-30 CompilerData text-keyed lookups 1145->1115) + eliminated redundant AST body deep copies in Items.jet/Instances.jet (copy_ratchet -6). Verified 3-stage -O2 exact S1==S2==S3 fixed point (49.28s->43.91s, -5.37s), Throughput -O0 42.77s->40.25s (-5.9%, 25271->26854 LOC/s), Peak RSS -344 MiB (6940->6596 MiB), CodegenCeiling 9/9, UnsafeRatchet 1660 (0 outside kernel), Tests/Guards 217/217."
+        },
+        {
           "at": "2026-11-16",
           "by": "Main",
           "text": "Moved G6 → G11 (owner order 2026-11-15 ~23:00: speed/size work goes to G11). The card's payoff is self-compile speed (c2). PrecompiledCore-4 sized the remaining part as days of type-directed hand work, not a codemod: about 5.6k sema Type lines, 1584 construction sites, 157 Type fields, about 1.4k IR lines, about 100 fields across IR/driver/foundation, and a writable &Interner chain with about 25 fork/merge task sites. s33-1 (the single Interner in TypeIDs.jet) lands in p203. s33-2 (the 4992-function interner threading codemod) is held for this card's G11 batch, because alone it adds 525 unused-parameter warnings."
@@ -72522,8 +72527,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-22T02:10:23.730Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T03:10:46.990Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 2
     },
     {
@@ -134589,6 +134594,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T03:10:47.993Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing0fqsx0m",
+      "note": "30M LOC/s Architectural Overhaul — Pillar Status (32%)"
+    },
+    {
+      "at": "2026-11-23T03:10:46.990Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-23T02:27:36.161Z",
       "by": "Orchestrator",
       "action": "status.post",
@@ -139070,6 +139089,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing0fqsx0m",
+      "title": "30M LOC/s Architectural Overhaul — Pillar Status (32%)",
+      "body": "# 30M LOC/s Architectural Overhaul — Pillar Status\n\n**Goal:** Cold, uncached `30M LOC/s` compilation speed + hand-optimized-grade machine codegen (zero compile caching, strict I9 parity, Peak RSS `< 1.0 GiB`).\n**Target Window:** Architectural overhauls executing nonstop to **2026-11-23 05:00 EST**, followed immediately by rapid **G1 → G6** burndown.\n**Last Updated:** 2026-11-22 22:10 EST (`dev` `f17b0e1815`)\n\n---\n\n## Overall Architectural Progress: **32%**\n\n| Pillar | Tower Card(s) | Status | % Complete | Active Owner | Latest Landed / In-Flight Slice |\n|---|---|---|---:|---|---|\n| **1. Integer `TypeID` & Flat Symbol/Type Interning** | `#6978`, `#6793 c2` | **MAJOR LANDING** | **60%** | Stream A (`CodegenOpt`) | **LANDED (`f17b0e1815`, 29 files):** Live `TypeID` (`U32`) `Interner` + O(1) `canonical` column + zero-copy worker `InternerDelta` + `TExpr.type_id` + word-hashed zero-alloc `NameTable` (`CompilerData` `-30` text-keyed lookups `1145→1115`) + eliminated redundant AST `body: [Stmt]` deep copies across `Items.jet`/`Instances.jet` (`copy_ratchet` `-6`). A/B vs W5: **3-stage `-O2` `49.28s → 43.91s` (`-5.37s`, exact `S1==S2==S3`)**, **`Throughput -O0` `42.77s → 40.25s` (`-5.9%`, `25,271 → 26,854 LOC/s`)**, **Peak RSS `-344 MiB` (`6,940 → 6,596 MiB`)**. **NEXT (launching now):** Slice 2 — migrate `SemaCheckContext`/`TExpr`/`TypeRelations` off structural `ty: Type` onto `TypeID` (`u32`) with per-worker `InternerDelta` to slash `sema.finalize` (`40.5s` CPU). |\n| **2. Copy-and-Patch `-O0` Codegen & Direct Emit** | `#6795` | **IN FLIGHT (S2)** | **65%** | Stream B (`GoalsOrder`) | **LANDED Slice 1 (`1d11568b1b`):** `X64Patch.jet` copy-and-patch `-O0` stencils (`ir.x64` CPU `-40.3%`, wall `-29.2%`, backend total `-20.5%`, `jet-bare -O0` `-1.16s`, `-181 MB` RSS, `-17.2 MB` binary). **IN FLIGHT (final checks):** Slice 2 — per-part fused `-O0` `DropEarly` + `X64Patch` inside IR build workers (eliminating `ir.merge.functions` 550 ms + `drop_early` 109 ms + Peak RSS) + overlapping Core `ir.x64`/`ir.object` with `runtime.web` in `Request.jet`. |\n| **3. One Warm Shared-Memory Comptime Child** | `#6798` | **QUEUED NEXT** | **5%** | Stream B (`GoalsOrder`) | Blueprint ready: enable `m.fast_o0 = true` in `JetEval/Source/IR/Native.jet` (routing all 512 comptime evals onto `X64Patch` instead of `-O2` regalloc!) + `memfd`/`MAP_SHARED` shared-memory value & code channel in `SessionHost.jet`/`ComptimeServe.jet`. Launches right after Pillar 2 Slice 2. |\n| **4. Flat Arena SoA AST / TExpr / IR** | `#6793 c3, c4, c5` | **IN FLIGHT (4A)** | **20%** | Stream A + Stream B | `Rows<T>` shipped (`#6793 c9` met) + Pillar 1 Slice 1 eliminated `Items.jet`/`Instances.jet` AST body copies & dead `FnBody` hash/slot tables (`-344 MiB` RSS). Stream A now launching flat arena SoA for AST/TExpr/Scopes alongside Pillar 1 Slice 2; Stream B follows with flat `IRModule`/`IRFunction` columns. |\n| **5. Barrier-Free `CompilerTaskGraph` & Pipeline** | `#6794` | **QUEUED** | **5%** | Stream B (`GoalsOrder`) | Streaming work-stealing `CompilerTaskGraph` eliminating global parse/sema/IR/emit phase barriers starts after Pillar 3/4B. |\n| **6. Parallel SIMD Lex/Parse & Shared `-O0` Generics** | `#6796`, `#6797` | **QUEUED** | **0%** | Stream A (`CodegenOpt`) | Intra-file SIMD chunked lex/parse (`<= 1 ns/byte`) + shared generic `-O0` codegen follow Pillar 1 Slice 2 / 4A. |\n\n### Parallel Single-Source-of-Truth (SSoT) Landings (Orchestrator)\n- **LANDED (`361059bf5b`):** Collapsed `JetLexer`'s 106 duplicate `K_*` token-tag constants (`Terminators.jet`) onto single canonical `TOKEN_*` table in `Tokens.jet` (`-236` net lines).\n- **LANDED (`1d11568b1b`):** Deduplicated `IRPatchColdKind` onto `IRX64ColdKind`.\n- **LANDED (`ba92e090d6` + `f17b0e1815`):** Migrated all 70 raw `os_syscall_i64` calls across 19 `JetRuntime` files onto 30 single-home typed Linux syscall wrappers in `OS/Linux.jet` (`UnsafeRatchet` shrunk `1670 → 1660`, runtime regions `596 → 555`, `0` outside memory kernel, `runtime.stops` exact `1,366`, `CodegenCeiling 9/9`).\n\n---\n\n## Live Cold Uncached Benchmarks & Gates\n\n| Metric | Pre-Overhaul (`174a8cdeda`) | Pillar 1 Slice 1 (`f17b0e1815` vs W5) | Pillar 2 Slice 1 (`1d11568b1b` vs W6B) | Combined (`f17b0e1815`) |\n|---|---:|---:|---:|---:|\n| **`Throughput.jet -O0` (`-j12`, 1.08M LOC)** | `25,271 LOC/s` (`42.77s`) | **`26,854 LOC/s` (`40.25s`, `+6.3%`)** | — | *clean idle refresh after P2S2* |\n| **Peak RSS (`Throughput -O0 -j12`)** | `6,940 MiB` | **`6,596 MiB` (`-344 MiB`)** | `-181 MB` (`jet-bare`) | **~`-525 MiB` combined** |\n| **`ir.x64` CPU / wall (`jet-bare -O0 -j24`)** | `9,560 ms` / `1,052 ms` | — | **`5,710 ms (-40.3%)` / `744 ms (-29.2%)`** | combined live |\n| **3-stage `-O2` self-compile (`-j12`)** | `49.28s` | **`43.91s` (`-5.37s`)** | `S2 == S3` exact | **`S1 == S2 == S3` exact** |\n| **Ratchets (`CompilerData` / `Unsafe` / `Guards`)** | `1145` / `1670` / `217/217` | **`1115 (-30)`** / `copy -6` | `0 rises` | **`1115` / `1660 (-10)` / `9/9` / `217/217`** |\n\n*Note: All numbers are live, cold, uncached (`reused: false`). Clean idle-host full timing + Gauntlet + `Throughput.jet` refresh runs as soon as Pillar 2 Slice 2 lands.*\n",
+      "by": "Orchestrator",
+      "created": "2026-11-23T03:10:47.992Z",
+      "sections": []
+    },
     {
       "id": "briefing06b851e",
       "title": "30M LOC/s Architectural Overhaul — Pillar Status (22%)",
