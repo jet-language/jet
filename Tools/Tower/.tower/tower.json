@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113271,
+    "rev": 113274,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52550,7 +52550,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "S1 (GENERAL): lift hard thread caps (IR_BUILD_MAX_PARTS=12, SEMA_FINALIZE_SIDE_EFFECT_PARTS=16, taint threads/4), shard Alloc.jet large-block/slab locks (words 216, 736), lock-free per-carrier work-stealing in Scheduler.jet, safe Atomic<Int> compiler queues (0 new #Unsafe). S2 (COMPILER-ONLY): fix Barrier #6 build.step/runtime (forward --threads in RuntimePack.jet:621, unify JetRuntime+Core thread pool in Request.jet:254, parallelize BuildExecute.jet:293 ready targets). S3 (COMPILER-ONLY): Tier-1 streaming Parse->HeaderRegister->HeaderBarrier->BodyCheck+CoreDemand with deterministic (pass_id, module_id, ordinal) diagnostics. S4 (COMPILER-ONLY): Tier-2 streaming ir_build(fn_id)->x64_patch(fn_id) after convergence checkpoint (sema.failure/effects/masked/#Inline(Always)/dead_code) + per-module flat arena munmap once #6793 c3-c4 lands. S5 (COMPILER-ONLY): parallel warm comptime pool K children (gated on DAG-width probe) + #6794 c3 32t scaling gate (>=24x, >=400K LOC/s).",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -52572,11 +52572,11 @@
         {
           "n": 1,
           "text": "Design: a slice plan on the card covering the module dependency scheduler, removal of the phase barriers in the driver, parallel comptime children, the wait-free work queue, and per-thread arenas built on #6793's arenas, each with its proof. Proof: `git ls-files \"Docs/Audits/*parallel-pipeline*\"` names the design note and its passing review.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:38.743Z"
+          "evidence": "dev f3b6b8f4f702da77eccce13f244bc56afdc1727f: slice plan S1-S5 recorded on #6794; git ls-files 'Docs/Audits/*parallel-pipeline*' lists Docs/Audits/2026-11-23-parallel-pipeline-design.md (Rev 2, live 16t vs 32t CompileThroughput baseline + Barrier #6 runtime design) and Docs/Audits/2026-11-23-parallel-pipeline-review.md (fresh-context jet-verify PASS within stated limits).",
+          "at": "2026-11-23T10:46:19.621Z"
         },
         {
           "n": 2,
@@ -52602,7 +52602,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T08:55:38.800Z",
+      "updated": "2026-11-23T10:46:19.621Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -52714,11 +52714,11 @@
         {
           "n": 1,
           "text": "A design note and a passing adversarial review in Docs/Audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe. Proof: `git ls-files \"Docs/Audits/*parallel-lex-parse*\"` names the design note and its passing review.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:41.626Z"
+          "evidence": "dev adeff9d9a3: git ls-files 'Docs/Audits/*parallel-lex-parse*' lists Docs/Audits/2026-11-23-parallel-lex-parse-design.md (Rev 2, 1t/16t baselines on Math.jet/Statements.jet/CheckProgram.jet + cold 64 MiB full-LUT AVX2 probe 0.110-0.112 ns/B) and Docs/Audits/2026-11-23-parallel-lex-parse-review.md (fresh-context jet-verify PASS within stated limits).",
+          "at": "2026-11-23T10:46:17.281Z"
         },
         {
           "n": 2,
@@ -52766,7 +52766,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-23T09:07:31.265Z",
+      "updated": "2026-11-23T10:46:17.281Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
@@ -134636,6 +134636,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T10:46:19.621Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hkdzht",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-23T10:46:18.788Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-23T10:46:17.281Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0okfgjw",
+      "note": "#1"
+    },
     {
       "at": "2026-11-23T10:16:00.558Z",
       "by": "Orchestrator",
