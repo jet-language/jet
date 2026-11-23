@@ -2137,7 +2137,7 @@ sema_call_declared_method_names: fn(receiver: Type, environment: SemaScopeEnviro
     names := [String]{}
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return names
     if program.registration_graph == .Val(graph) {
-        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
             loop owner_index in owner_modules {
                 loop implementation in graph.modules[owner_index].impls {
                     if implementation.target_type_name != base_name -> next
@@ -2168,7 +2168,7 @@ sema_call_declared_method_names: fn(receiver: Type, environment: SemaScopeEnviro
 sema_call_declares_static_method: fn(receiver: Type, method: String, program: SemaProgramTables) -> Bool Never! {
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
     if program.registration_graph == .Val(graph) {
-        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+        if sema_registration_source_impl_owners(graph, base_name) == .Val(owner_modules) {
             loop owner_index in owner_modules {
                 loop implementation in graph.modules[owner_index].impls {
                     if implementation.target_type_name != base_name -> next

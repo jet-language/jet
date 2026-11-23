@@ -259,7 +259,7 @@ sema_core_body_capture: fn(program: SemaProgramTables, owner_id: SymbolID, check
 // when the key names a compiler-owned nominal registration put in `entry`.
 sema_core_body_capture_key: fn(graph: SemaRegistrationGraph, key: &&String, entry: String) -> String Never! {
     name: sema_core_body_builtin_name(key, entry) ?? return key
-    row: graph.compiler_builtin_rows.get(name) ?? return key
+    row: sema_registration_compiler_builtin_row(graph, name) ?? return key
     if module_text(graph.module_table, graph.modules[row.module_index].module_identity) != entry {
         return key
     }
@@ -862,7 +862,7 @@ sema_core_bodies_ahead_decoder: fn(graph: SemaRegistrationGraph, taken: &&Receiv
 // any other key.
 sema_core_body_builtin_key: fn(graph: SemaRegistrationGraph, key: String) -> String? Never! {
     name: sema_core_body_builtin_name(key, SEMA_CORE_BODIES_BUILTIN_MODULE) ?? return None
-    row: graph.compiler_builtin_rows.get(name) ?? return None
+    row: sema_registration_compiler_builtin_row(graph, name) ?? return None
     holder: module_text(graph.module_table, graph.modules[row.module_index].module_identity)
     Val(key.replace(SEMA_CORE_BODIES_BUILTIN_MODULE, holder))
 }

@@ -174,7 +174,7 @@ SemaDivergenceWalked: struct {
 // Walks function `row` of graph module `module_index` against the set so far.
 sema_divergence_walk: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaDivergenceWalked Never! {
     scope := SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
-    flow: sema_divergence_body(graph, scope, graph.modules[module_index].functions[row].declaration.body)
+    flow: sema_divergence_body(graph, scope, sema_registration_function_body(graph.modules[module_index], graph.modules[module_index].functions[row]))
     SemaDivergenceWalked{diverges: sema_divergence_definitely(flow), consulted: scope.consulted.move()}
 }
 

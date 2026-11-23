@@ -23,6 +23,7 @@ use {
         TagMarker,
         TextEdit,
         Type,
+        type_none,
         builtin_numeric_kind,
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_program,
@@ -443,6 +444,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
         if marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView}) {
             viewed := base
             viewed.ty = inner
+            viewed.type_id = type_none()
             return sema_expression_field_checked(viewed, member, span, expected, environment, program, scopes, context, diagnostics)
         }
     }

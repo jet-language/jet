@@ -1176,7 +1176,7 @@ sema_core_demand_join_callees: fn(graph: SemaRegistrationGraph, join: SemaCoreDe
     calls := SemaCoreDemandCalls{plain: [String]{}, qualified: [SemaCoreDemandQualified]{}, locals: [NamedSpan]{}}
     if join.row == {
         .Function(owner_module, index) -> {
-            sema_core_demand_calls_func(graph.modules[owner_module].functions[index].declaration, calls)
+            sema_core_demand_calls_func_body(graph.modules[owner_module].functions[index].declaration, sema_registration_function_body(graph.modules[owner_module], graph.modules[owner_module].functions[index]), calls)
         }
         .NominalMethod(owner_module, owner, index) -> {
             sema_core_demand_calls_func(graph.modules[owner_module].nominals[owner].methods[index].declaration, calls)
@@ -1220,13 +1220,17 @@ sema_core_demand_callee: fn(graph: SemaRegistrationGraph, resolved: SemaRegistra
 // compiler-generated function or one a template of another module wrote,
 // whose names resolve elsewhere.
 sema_core_demand_calls_func: fn(declaration: Func, calls: &SemaCoreDemandCalls) Never! {
+    sema_core_demand_calls_func_body(declaration, declaration.body, calls)
+}
+
+sema_core_demand_calls_func_body: fn(declaration: Func, body: [Stmt], calls: &SemaCoreDemandCalls) Never! {
     if declaration.compiler_generated || declaration.definition_module != "" {
         return
     }
     loop parameter in declaration.params {
         calls.locals.push(NamedSpan{name: parameter.name, span: parameter.name_span})
     }
-    sema_core_demand_calls_stmts(declaration.body, calls)
+    sema_core_demand_calls_stmts(body, calls)
 }
 
 sema_core_demand_calls_stmts: fn(body: [Stmt], calls: &SemaCoreDemandCalls) Never! {

@@ -217,10 +217,14 @@ sema_key_by_migration: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrde
     indent: sema_key_by_line_indent(home.source, span.start)
     if written.impl_index == .Val(index) {
         declaration: home.impls[index].declaration
+        loop item in home.program.items {
+            if item == .Impl(definition) && definition.span == declaration.span {
+                return sema_key_by_migration_of(graph, written, definition.methods, "impl {declaration.type_name}.KeyBy", indent)
+            }
+        }
         return sema_key_by_migration_of(graph, written, declaration.methods, "impl {declaration.type_name}.KeyBy", indent)
     }
-    nominal: home.nominals[written.row.row]
-    if nominal.source == .SourceAST(item) {
+    loop item in home.program.items {
         loop block in sema_registration_item_trait_blocks(item) {
             if block.span == written.span {
                 return sema_key_by_migration_of(graph, written, block.methods, "impl KeyBy", indent)

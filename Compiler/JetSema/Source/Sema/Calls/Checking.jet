@@ -423,7 +423,8 @@ sema_call_c_callback_context_read: fn(argument: Expr, environment: SemaScopeEnvi
         function: sema_http_route_find_function(environment, program, scopes, name) ?? return None
         tables: sema_scope_module_tables(environment, program, function.symbol.module_identity) ?? return None
         loop parameter in function.declaration.params -> inner.push(parameter.name)
-        loop statement in function.declaration.body {
+        body: if program.registration_graph == .Val(graph) && sema_registration_module_index(graph, function.symbol.module_identity) == .Val(owner_row) -> sema_registration_function_body(graph.modules[owner_row], function) else -> function.declaration.body
+        loop statement in body {
             ast_visit_statement(tables, statement, fn(expression: ExprNode) { sema_call_note_context_read(tables, reads, expression) }, false)
         }
     } else if argument == .Lambda(lambda, _) {

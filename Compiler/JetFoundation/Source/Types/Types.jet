@@ -1282,23 +1282,32 @@ TypeTable: struct {
 TYPE_TABLE_INITIAL_SLOTS: 16
 
 // The index of `ty` in `table.types`, added on first sight: equal types
-// share one index, and only a new type is copied.
-type_table_intern: fn(table: &TypeTable, ty: Type) -> Int Never! {
-    hash: type_shape_hash(ty)
-    if table.slots.len() == 0 -> type_table_grow(table, TYPE_TABLE_INITIAL_SLOTS)
-    mask: table.slots.len() - 1
-    slot := hash & mask
-    loop table.slots[slot] != 0 {
-        index: table.slots[slot] - 1
-        if table.hashes[index] == hash && table.types[index] == ty -> return index
-        slot = (slot + 1) & mask
+// share one index, and only a new type is copied. When `indexed` is false and
+// the table has no index slots yet, appends directly without hashing.
+type_table_intern: fn(table: &TypeTable, ty: Type, indexed: Bool{true}) -> Int Never! {
+    use_index: indexed || table.slots.len() > 0
+    hash := 0
+    slot := 0
+    mask := 0
+    if use_index {
+        hash = type_shape_hash(ty)
+        if table.slots.len() == 0 -> type_table_grow(table, TYPE_TABLE_INITIAL_SLOTS)
+        mask = table.slots.len() - 1
+        slot = hash & mask
+        loop table.slots[slot] != 0 {
+            index: table.slots[slot] - 1
+            if table.hashes[index] == hash && table.types[index] == ty -> return index
+            slot = (slot + 1) & mask
+        }
     }
     index: table.types.len()
     // copy: `ty` is the caller's read value; the table owns this one
     table.types.push(ty.copy())
-    table.hashes.push(hash)
-    table.slots[slot] = index + 1
-    if (index + 1) * 2 > mask -> type_table_grow(table, (mask + 1) * 2)
+    if use_index {
+        table.hashes.push(hash)
+        table.slots[slot] = index + 1
+        if (index + 1) * 2 > mask -> type_table_grow(table, (mask + 1) * 2)
+    }
     index
 }
 
@@ -1316,10 +1325,19 @@ type_table_find: fn(table: TypeTable, ty: Type) -> Int? Never! {
     None
 }
 
-// Rebuilds the slots at `capacity` (a power of two) from the stored hashes.
-type_table_grow: fn(table: &TypeTable, capacity: Int) Never! {
+// Rebuilds the slots at a power-of-two capacity at least `min_capacity` and
+// strictly above `2 * table.types.len()` from the stored hashes.
+type_table_grow: fn(table: &TypeTable, min_capacity: Int) Never! {
+    capacity := if min_capacity < 2 -> 2 else -> min_capacity
+    loop table.types.len() * 2 >= capacity -> capacity *= 2
     slots := [Int]{}
+    slots.try_reserve(capacity) ?? panic("reserve failed")
     loop _ in 0..<capacity -> slots.push(0)
+    if table.hashes.len() < table.types.len() {
+        table.hashes = [Int]{}
+        table.hashes.try_reserve(table.types.len()) ?? panic("reserve failed")
+        loop ty in table.types -> table.hashes.push(type_shape_hash(ty))
+    }
     mask: capacity - 1
     loop index in 0..<table.types.len() {
         slot := table.hashes[index] & mask

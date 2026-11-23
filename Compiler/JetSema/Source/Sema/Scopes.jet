@@ -66,15 +66,25 @@ use jet_foundation.[
     Exactness,
     Func,
     Namespace,
-    NameRows,
     NameTable,
     name_find,
+    name_find_hashed,
     name_index,
     name_intern,
     name_table_sized,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set,
+    name_text_hash,
+    Interner,
+    InternerDelta,
+    TypeID,
+    interner,
+    interner_delta_empty,
+    interner_fork_delta,
+    type_none,
+    type_id_well_known,
+    type_find_syntax,
+    type_id_identity_equal,
+    delta_type_intern_syntax,
+    delta_type_id_identity_equal,
     ModuleID,
     module_find,
     module_text,
@@ -686,7 +696,7 @@ SemaScopeEnvironment: struct {
     source_origin: SemaSourceOrigin,
     source_segments: [SemaSourceSegment],
     checked_types: [TTypeDef]{[TTypeDef]{}},
-    checked_type_names: NameTable{name_table_sized(2)},
+    checked_type_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     checked_type_name_rows: [[Int]]{[[Int]]{}},
     boxed_edges: [String:[String]]{[String:[String]]{}},
     copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[{known: Bool, value: Bool}]]{}}},
@@ -834,7 +844,7 @@ SemaCheckContext: struct {
     call_facts: [SemaCallSiteFact],
     // Each static route a body registers, `binding|method|pattern`, to the
     // span that registered it first.
-    http_routes: [String:Span]{[String:Span]{}},
+    http_routes: SemaHTTPRouteIndex{SemaHTTPRouteIndex{}},
     hardware_use: TargetHardwareUse,
     call_return_views: [SemaCallReturnView],
     local_view_provenance: [SemaLocalViewProvenance],
@@ -1057,6 +1067,13 @@ SemaCheckContext: struct {
     // earliest one decides (Expressions/NumberNames.jet).
     number_retypes_known: [SemaNumberRetype]{[SemaNumberRetype]{}},
     number_retypes_found: [SemaNumberRetype]{[SemaNumberRetype]{}},
+    // Worker-local zero-copy type interner delta forked from the program's
+    // shared Interner on first non-well-known type intern.
+    type_delta: [InternerDelta]{[InternerDelta]{}},
+    // True on a nested snapshot context (sema_check_context_snapshot): its
+    // delta-local ids are not merged back, so only shared/well-known TypeIDs
+    // escape onto TExprs.
+    is_snapshot: Bool{false},
 }
 
 // A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
@@ -1083,10 +1100,10 @@ SemaScopeTable: struct {
     module_identity: ModuleID,
     frames: [SemaScopeFrame],
     bindings: [SemaScopeBinding],
-    // Binding positions per name, ascending: `name_slots` maps a name to its
-    // row in `name_positions` (interned spellings, A1). Every push goes through
+    // Binding positions per name, ascending: `name_slots` interns each name
+    // to its row id in `name_positions`. Every push goes through
     // sema_scope_push_binding, so name resolution never rescans `bindings`.
-    name_slots: NameRows,
+    name_slots: NameTable,
     name_positions: [[Int]],
     base_table: [SemaScopeTable]{[SemaScopeTable]{}},
     base_binding_count: Int{0},
@@ -1220,6 +1237,55 @@ SemaProgramTables: struct {
     // registration graph is present); lets field reads skip computed-field
     // symbol lookups in O(1) when false.
     has_computed_fields: Bool{true},
+    // Fallback type/name interner when `registration_graph` is None; when a
+    // graph is present, its `graph.interner` is read directly.
+    interner: Interner?{None},
+}
+
+sema_program_fork_delta: fn(program: SemaProgramTables) -> InternerDelta Never! {
+    if program.registration_graph == .Val(graph) -> return interner_fork_delta(graph.interner)
+    if program.interner == .Val(fallback) -> return interner_fork_delta(fallback)
+    interner_delta_empty()
+}
+
+// Looks up `ty` in the program's immutable shared `Interner` with zero heap
+// allocation, falling back to the worker's `InternerDelta` only when one has
+// been forked. On a nested snapshot context, only shared/well-known IDs escape.
+sema_intern_type: fn(program: SemaProgramTables, context: &SemaCheckContext, ty: Type) -> TypeID Never! {
+    wk: type_id_well_known(ty)
+    if wk.id != 0 -> return wk
+    if program.registration_graph == .Val(graph) {
+        shared: type_find_syntax(graph.interner, ty)
+        if shared.id != 0 -> return shared
+    } else if program.interner == .Val(fallback) {
+        shared: type_find_syntax(fallback, ty)
+        if shared.id != 0 -> return shared
+    }
+    if context.type_delta.len() > 0 {
+        tid := type_none()
+        if program.registration_graph == .Val(graph) {
+            tid = delta_type_intern_syntax(graph.interner, context.type_delta[0], ty)
+        } else if program.interner == .Val(fallback) {
+            tid = delta_type_intern_syntax(fallback, context.type_delta[0], ty)
+        }
+        tid_row: Int{tid.id}
+        if context.is_snapshot && tid_row >= context.type_delta[0].base.types -> return type_none()
+        return tid
+    }
+    type_none()
+}
+
+// O(1) identity equality on interned TypeIDs (using canonical columns).
+sema_type_id_equal: fn(program: SemaProgramTables, context: SemaCheckContext, left: TypeID, right: TypeID) -> Bool Never! {
+    if left.id == right.id -> return true
+    if context.type_delta.len() > 0 {
+        if program.registration_graph == .Val(graph) -> return delta_type_id_identity_equal(graph.interner, context.type_delta[0], left, right)
+        if program.interner == .Val(fallback) -> return delta_type_id_identity_equal(fallback, context.type_delta[0], left, right)
+        return false
+    }
+    if program.registration_graph == .Val(graph) -> return type_id_identity_equal(graph.interner, left, right)
+    if program.interner == .Val(fallback) -> return type_id_identity_equal(fallback, left, right)
+    false
 }
 
 // The run-wide id of `key`, if a registration holds it.
@@ -1312,6 +1378,7 @@ sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
             }
         }
     }
+    graphless: graph == None
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
@@ -1320,6 +1387,7 @@ sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
         boxed_edges: boxed_edges,
         copy_facts: copy_facts,
         has_computed_fields: has_computed,
+        interner: if graphless -> Val(interner()) else -> None,
     }
 }
 
@@ -1589,6 +1657,19 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
     }
 }
 
+SemaHTTPRouteIndex: struct {
+    names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    spans: [Span?]{[Span?]{}},
+}
+
+sema_check_context_http_route_record: fn(context: &SemaCheckContext, key: String, span: Span) -> Span? Never! {
+    id: name_index(name_intern(context.http_routes.names, key))
+    loop context.http_routes.spans.len() <= id -> context.http_routes.spans.push(None)
+    if context.http_routes.spans[id] == .Val(existing) -> return Val(existing)
+    context.http_routes.spans[id] = Val(span)
+    None
+}
+
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
@@ -1605,7 +1686,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
-        http_routes: source.http_routes.copy(),
+        http_routes: if source.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> source.http_routes.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
         local_view_provenance: source.local_view_provenance.copy(),
@@ -1685,6 +1766,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len(), symbols: source.arena.tree.symbols.copy()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
         next_expr_id: source.next_expr_id,
         fresh_expr_ids: source.fresh_expr_ids,
+        is_snapshot: true,
     }
     sema_comptime_body_sources_index(snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1772,7 +1854,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
             call_facts: [SemaCallSiteFact]{},
-            http_routes: context.http_routes.copy(),
+            http_routes: if context.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> context.http_routes.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             call_return_views: [SemaCallReturnView]{},
             local_view_provenance: [SemaLocalViewProvenance]{},
@@ -2097,7 +2179,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
             module_identity: table.module_identity,
             frames: [SemaScopeFrame]{},
             bindings: [SemaScopeBinding]{},
-            name_slots: name_rows(),
+            name_slots: name_table_sized(2),
             name_positions: [[Int]]{},
             loop_labels: table.loop_labels.copy(),
             hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
@@ -2194,7 +2276,7 @@ sema_scope_init: fn(module_identity: ModuleID) -> SemaScopeTable Never! {
         module_identity: module_identity,
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: ""}},
         bindings: [SemaScopeBinding]{},
-        name_slots: name_rows(),
+        name_slots: name_table_sized(16),
         name_positions: [[Int]]{},
         loop_labels: [SemaScopeLoopLabel]{},
         hardware_transfers: [SemaHardwareDMATransferFact]{},
@@ -2333,14 +2415,15 @@ sema_scope_join_hardware_paths: fn(table: &SemaScopeTable, before: SemaScopeHard
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol, key: String) -> Bool Never! {
-    if sema_scope_name_slot(table, symbol.name) == .Val(slot) {
+    hash: name_text_hash(symbol.name)
+    if sema_scope_name_slot_hashed(table, symbol.name, hash) == .Val(slot) {
         loop index in table.name_positions[slot] {
             binding: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
         }
     }
     if table.base_binding_count > 0 {
-        if name_rows_get_text(table.base_table[0].name_slots, symbol.name) == .Val(slot) {
+        if sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, symbol.name, hash) == .Val(slot) {
             loop index in table.base_table[0].name_positions[slot] {
                 binding: table.bindings[index]
                 if binding.frame == 0 && !binding.compiler_builtin -> return false
@@ -2572,18 +2655,32 @@ sema_scope_pop_loop_label: fn(table: &SemaScopeTable) Never! {
 // Appends one binding and records its position under its name.
 sema_scope_push_binding: fn(table: &SemaScopeTable, binding: &&SemaScopeBinding) Never! {
     position: table.bindings.len()
-    if sema_scope_name_slot(table, binding.symbol.name) == .Val(slot) {
-        table.name_positions[slot].push(position)
-    } else {
-        name_rows_set(table.name_slots, binding.symbol.name, table.name_positions.len())
-        table.name_positions.push([Int]{position})
-    }
+    id: name_index(name_intern(table.name_slots, binding.symbol.name))
+    loop table.name_positions.len() <= id -> table.name_positions.push([Int]{})
+    table.name_positions[id].push(position)
     table.bindings.push(binding.move())
+}
+
+// The `name_positions` row of `name`, if any binding in `slots` has that name.
+sema_scope_name_slot_in: fn(slots: NameTable, positions: [[Int]], name: String, hash: Int) -> Int? Never! {
+    if positions.len() == 0 -> return None
+    found: name_find_hashed(slots, name, hash) ?? return None
+    id: name_index(found)
+    if id < positions.len() && positions[id].len() > 0 -> return Val(id)
+    None
+}
+
+sema_scope_name_slot_hashed: fn(table: SemaScopeTable, name: String, hash: Int) -> Int? Never! {
+    sema_scope_name_slot_in(table.name_slots, table.name_positions, name, hash)
 }
 
 // The `name_positions` row of `name`, if any binding ever had that name.
 sema_scope_name_slot: fn(table: SemaScopeTable, name: String) -> Int? Never! {
-    name_rows_get_text(table.name_slots, name)
+    if table.name_positions.len() == 0 -> return None
+    found: name_find(table.name_slots, name) ?? return None
+    id: name_index(found)
+    if id < table.name_positions.len() && table.name_positions[id].len() > 0 -> return Val(id)
+    None
 }
 
 // Counts one resolution that examined `compares` binding rows when the table
@@ -2639,8 +2736,9 @@ sema_scope_resolve_in_positions: fn(table: SemaScopeTable, positions: [Int]) -> 
 
 sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
     if table.base_binding_count > 0 {
-        local_slot: sema_scope_name_slot(table, name)
-        base_slot: name_rows_get_text(table.base_table[0].name_slots, name)
+        hash: name_text_hash(name)
+        local_slot: sema_scope_name_slot_hashed(table, name, hash)
+        base_slot: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash)
         if local_slot == None {
             bs: base_slot ?? return sema_scope_counted(table, 0, None)
             if table.lookup_counters == None {
@@ -2838,8 +2936,9 @@ sema_scope_resolve_at_in_positions: fn(table: SemaScopeTable, positions: [Int], 
 // hides them.
 sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
     if table.base_binding_count > 0 {
-        local_slot: sema_scope_name_slot(table, name)
-        base_slot: name_rows_get_text(table.base_table[0].name_slots, name)
+        hash: name_text_hash(name)
+        local_slot: sema_scope_name_slot_hashed(table, name, hash)
+        base_slot: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash)
         if local_slot == None {
             bs: base_slot ?? return sema_scope_counted(table, 0, None)
             if table.lookup_counters == None {
@@ -3055,7 +3154,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         module_identity: source.module_identity,
         frames: source.frames.copy(),
         bindings: bindings.move(),
-        name_slots: if source.base_binding_count > 0 -> source.name_slots.copy() else -> name_rows(),
+        name_slots: if source.base_binding_count > 0 -> source.name_slots.copy() else -> name_table_sized(2),
         name_positions: if source.base_binding_count > 0 -> source.name_positions.copy() else -> [[Int]]{},
         base_table: if source.base_binding_count > 0 -> source.base_table else -> [SemaScopeTable]{source},
         base_binding_count: if source.base_binding_count > 0 -> source.base_binding_count else -> count,

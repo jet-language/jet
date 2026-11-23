@@ -60,9 +60,33 @@ name_start: fn(table: NameTable, id: Int) -> Int Never! {
 }
 
 name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
-    hash := U32{0x811c9dc5}
-    loop index in start..<end -> hash = wrapping((hash ~ U32{bytes[index]}) * U32{0x01000193})
-    Int{hash}
+    len: I64{end - start}
+    hash := wrapping(len * I64{-7046029254386353131}) ~ I64{-3750763034362895579}
+    words: len & I64{-8}
+    at := I64{0}
+    loop at < words {
+        base: start + Int{at}
+        word: I64{bytes[base]} | (I64{bytes[base + 1]} << I64{8}) | (I64{bytes[base + 2]} << I64{16}) | (I64{bytes[base + 3]} << I64{24}) | (I64{bytes[base + 4]} << I64{32}) | (I64{bytes[base + 5]} << I64{40}) | (I64{bytes[base + 6]} << I64{48}) | (I64{bytes[base + 7]} << I64{56})
+        mixed: wrapping((hash ~ word) * I64{-7046029254386353131})
+        hash = mixed ~ ((mixed >> I64{29}) & I64{34359738367})
+        at = wrapping(at + I64{8})
+    }
+    if at < len {
+        tail := I64{0}
+        pos := len
+        loop pos > at {
+            pos = wrapping(pos - I64{1})
+            tail = (tail << I64{8}) | I64{bytes[start + Int{pos}]}
+        }
+        mixed: wrapping((hash ~ tail) * I64{-7046029254386353131})
+        hash = mixed ~ ((mixed >> I64{29}) & I64{34359738367})
+    }
+    hash ~= (hash >> I64{33}) & I64{2147483647}
+    hash = wrapping(hash * I64{-49064778989728563})
+    hash ~= (hash >> I64{33}) & I64{2147483647}
+    hash = wrapping(hash * I64{-4265267296055464877})
+    final: hash ~ ((hash >> I64{33}) & I64{2147483647})
+    Int{final & I64{0x3fffffff}}
 }
 
 // Whether id `id` spells `bytes[start..<end]`, whose `name_hash` is `hash`.
@@ -99,6 +123,23 @@ name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) ->
     slot
 }
 
+// Zero-allocation slot probe for a String `text` whose `name_text_hash` is `hash`.
+name_slot_text: fn(table: NameTable, hash: Int, text: String) -> Int Never! {
+    mask: table.mask
+    hash_tag: hash & 0x3fffffff
+    slot := hash & mask
+    loop {
+        entry: table.slots[slot]
+        if entry == 0 -> break
+        if (entry >> 32) == hash_tag {
+            id: (entry & 0xffffffff) - 1
+            if table.texts[id] == text -> return slot
+        }
+        slot = (slot + 1) & mask
+    }
+    slot
+}
+
 // Gives `bytes[start..<end]` (hash `hash`), whose String is `text`, the
 // next id at the empty slot `slot`.
 name_insert: fn(table: &NameTable, slot: Int, hash: Int, bytes: [U8], start: Int, end: Int, text: &&String) -> Name Never! {
@@ -122,11 +163,23 @@ name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> N
     name_insert(table, slot, hash, bytes, start, end, String.from_bytes(bytes.slice(start, end)) ?? "")
 }
 
+name_text_hash: fn(text: String) -> Int Never! {
+    Int{text.hash() & U64{0x3fffffff}}
+}
+
 // The id of `text` when the table holds it; never interns.
 name_find: fn(table: NameTable, text: String) -> Name? Never! {
     if table.texts.len() <= 1 -> return if text == "" -> Val(name_empty()) else -> None
-    bytes: text.bytes()
-    name_find_bytes(table, bytes, 0, bytes.len())
+    name_find_hashed(table, text, name_text_hash(text))
+}
+
+// The id of `text` (whose `name_text_hash` is `hash`) when the table holds it.
+name_find_hashed: fn(table: NameTable, text: String, hash: Int) -> Name? Never! {
+    if table.texts.len() <= 1 -> return if text == "" -> Val(name_empty()) else -> None
+    slot: name_slot_text(table, hash, text)
+    entry: table.slots[slot]
+    if entry == 0 -> return None
+    Val(Name{id: U32{(entry & 0xffffffff) - 1}})
 }
 
 // The id of `bytes[start..<end]` when the table holds that spelling; never
@@ -139,8 +192,15 @@ name_find_bytes: fn(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name
 }
 
 name_intern: fn(table: &NameTable, text: String) -> Name Never! {
+    name_intern_hashed(table, text, name_text_hash(text))
+}
+
+name_intern_hashed: fn(table: &NameTable, text: String, hash: Int) -> Name Never! {
+    slot: name_slot_text(table, hash, text)
+    entry: table.slots[slot]
+    if entry != 0 -> return Name{id: U32{(entry & 0xffffffff) - 1}}
     bytes: text.bytes()
-    name_intern_bytes(table, bytes, 0, bytes.len())
+    name_insert(table, slot, hash, bytes, 0, bytes.len(), String.from_bytes(bytes) ?? "")
 }
 
 name_table_grow: fn(table: &NameTable) Never! {

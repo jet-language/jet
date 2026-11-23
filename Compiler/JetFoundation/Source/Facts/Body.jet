@@ -52,13 +52,18 @@ body_tree_new: fn() -> BodyTree Never! {
 // those slots would otherwise stay for that long. The type table keeps its
 // slots: each generic instance looks its fact types up in them
 // (sema_instance_type, ir_fact_type).
-body_tree_sealed: fn(tree: &&BodyTree) -> BodyTree Never! {
+body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}) -> BodyTree Never! {
     sealed := tree
     sealed.nodes = body_rows_fitted(sealed.nodes.move())
     sealed.stmts = body_rows_fitted(sealed.stmts.move())
     sealed.expr_types = body_rows_fitted(sealed.expr_types.move())
     sealed.types.types = body_rows_fitted(sealed.types.types.move())
-    sealed.types.hashes = body_rows_fitted(sealed.types.hashes.move())
+    if keep_type_slots {
+        sealed.types.hashes = body_rows_fitted(sealed.types.hashes.move())
+    } else {
+        sealed.types.hashes = [Int]{}
+        sealed.types.slots = [Int]{}
+    }
     sealed.symbols.bytes = body_rows_fitted(sealed.symbols.bytes.move())
     sealed.symbols.ends = body_rows_fitted(sealed.symbols.ends.move())
     sealed.symbols.hashes = body_rows_fitted(sealed.symbols.hashes.move())
