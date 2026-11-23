@@ -11,6 +11,7 @@ use {
         BuildSessionScheduleNode,
         build_key_debug_text,
         build_key_target_kind,
+        build_session_made_by,
         build_session_project,
         build_session_schedule,
     ]
@@ -90,9 +91,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
             facts.push("generated={generated_row.name}")
             facts.push("id={generated_row.identity}")
             facts.push("digest={generated_row.source_digest}")
-            if generated_row.producer != None {
-                facts.push("made_by={jet_driver_build_generated_maker(generated_row)}")
-            }
+            facts.push("made_by={build_session_made_by(generated_row)}")
             loop step in generated_row.handoffs -> facts.push("handed={step}")
             if generated_row.authority == .Val(authority) -> facts.push("authority={authority}")
             if generated_row.consent == .Val(consent) -> facts.push("consent={consent}")
@@ -155,34 +154,27 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
 }
 
 // One producer of the plan's generation schedule (JetBuildSession
-// Schedule.jet): its round, kind ("module" or "step") and name, the outputs
-// it promises, and what it waits on: each path, the producer that promises
-// it, and its barrier ("typed" for Jet source, checked before it is read a
-// round later; "file" otherwise).
+// Schedule.jet): its round, kind ("module" or "step") and name, the call
+// that made it and its place (`made_by`), the outputs it promises, and what
+// it waits on: each path, the producer that promises it, and its barrier
+// ("typed" for Jet source, checked before it is read a round later; "file"
+// otherwise).
 jet_driver_build_schedule_json: fn(node: BuildSessionScheduleNode) -> String Never! {
     waits: loop wait in node.waits -> "{{\"path\":{foundation_json_quote(wait.path)},\"kind\":{foundation_json_quote(wait.kind)},\"producer\":{foundation_json_quote(wait.producer)},\"barrier\":{foundation_json_quote(wait.barrier)}}}"
-    "{{\"round\":{node.round},\"kind\":{foundation_json_quote(node.kind)},\"name\":{foundation_json_quote(node.name)},\"outputs\":{jet_driver_build_strings(node.outputs)},\"waits\":[{waits.join(",")}]}}"
+    "{{\"round\":{node.round},\"kind\":{foundation_json_quote(node.kind)},\"name\":{foundation_json_quote(node.name)},\"made_by\":{foundation_json_quote(node.made_by)},\"outputs\":{jet_driver_build_strings(node.outputs)},\"waits\":[{waits.join(",")}]}}"
 }
 
 // One generated module of the plan: its stable identity (`id`, kept across
-// rebuilds and new bodies), what made it (`made_by`) and, for a module a
-// `Compiler` value made, the handoffs that value took from the root's build
-// to its maker (`handoffs`, root first), the `Meta` effect it was made under
-// (`authority`) and the dependency the root's consent named (`consent`).
+// rebuilds and new bodies), what made it and where (`made_by`: the
+// `b.generate` call, or the `Compiler` value's call and the function that
+// made it) and, for a module a `Compiler` value made, the handoffs that
+// value took from the root's build to its maker (`handoffs`, root first),
+// the `Meta` effect it was made under (`authority`) and the dependency the
+// root's consent named (`consent`).
 jet_driver_build_generated_json: fn(row: BuildSessionGeneratedModule) -> String Never! {
-    made_by: if row.producer != None -> foundation_json_quote(jet_driver_build_generated_maker(row)) else -> "null"
     authority: if row.authority == .Val(text) -> foundation_json_quote(text) else -> "null"
     consent: if row.consent == .Val(text) -> foundation_json_quote(text) else -> "null"
-    "{{\"id\":{foundation_json_quote(row.identity)},\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.source_digest)},\"made_by\":{made_by},\"handoffs\":{jet_driver_build_strings(row.handoffs)},\"authority\":{authority},\"consent\":{consent}}}"
-}
-
-// Who made a module through a `Compiler` value: the call and the function
-// that made it, with its place. The root may hand the value to a dependency's
-// function; `handoffs` records each pass that led there.
-jet_driver_build_generated_maker: fn(row: BuildSessionGeneratedModule) -> String Never! {
-    maker: row.producer ?? ""
-    if row.rewrites == .Val(function) -> return "`meta.rewrite_body` of `{function}` in {maker}"
-    "`meta.add` in {maker}"
+    "{{\"id\":{foundation_json_quote(row.identity)},\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.source_digest)},\"made_by\":{foundation_json_quote(build_session_made_by(row))},\"handoffs\":{jet_driver_build_strings(row.handoffs)},\"authority\":{authority},\"consent\":{consent}}}"
 }
 
 // The handoffs that led a `Compiler` value to a module's maker, as a report

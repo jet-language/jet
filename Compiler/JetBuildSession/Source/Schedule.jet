@@ -30,13 +30,23 @@ BuildSessionScheduleWait: struct {
 }
 
 // One producer of the schedule: its kind ("module" or "step"), name, round,
-// the outputs it promises and what it waits on, in declaration order.
+// the call that made it and its place (`made_by`, build_session_made_by and
+// build_session_step_made_by), the outputs it promises and what it waits
+// on, in declaration order.
 BuildSessionScheduleNode: struct {
     kind: String,
     name: String,
     round: Int,
+    made_by: String,
     outputs: [String],
     waits: [BuildSessionScheduleWait],
+}
+
+// The call that declared a step, as provenance names it: its `b.run` call
+// (`b.action` declares one too) and its place.
+build_session_step_made_by: fn(action: BuildSessionAction) -> String Never! {
+    if action.site == "" -> return "`b.run(\"{action.name}\")`"
+    "`b.run(\"{action.name}\")` at {action.site}"
 }
 
 // Who promises each path: a generated module `index` as `-1 - index`, a
@@ -178,7 +188,7 @@ build_session_schedule: fn(state: BuildSessionState) -> [BuildSessionScheduleNod
     rounds: build_session_schedule_rounds(state, promises)
     nodes := [BuildSessionScheduleNode]{}
     loop generated in state.generated {
-        nodes.push(BuildSessionScheduleNode{kind: "module", name: generated.name.copy(), round: 1, outputs: [String]{generated.path.copy()}, waits: [BuildSessionScheduleWait]{}})
+        nodes.push(BuildSessionScheduleNode{kind: "module", name: generated.name.copy(), round: 1, made_by: build_session_made_by(generated), outputs: [String]{generated.path.copy()}, waits: [BuildSessionScheduleWait]{}})
     }
     loop (id, action) in state.actions {
         waits := [BuildSessionScheduleWait]{}
@@ -189,7 +199,7 @@ build_session_schedule: fn(state: BuildSessionState) -> [BuildSessionScheduleNod
             name: if producer < 0 -> state.generated[-1 - producer].name.copy() else -> state.actions[producer].name.copy()
             waits.push(BuildSessionScheduleWait{path: path.copy(), kind: kind, producer: name, barrier: barrier})
         }
-        nodes.push(BuildSessionScheduleNode{kind: "step", name: action.name.copy(), round: rounds[id], outputs: action.outputs.copy(), waits: waits.move()})
+        nodes.push(BuildSessionScheduleNode{kind: "step", name: action.name.copy(), round: rounds[id], made_by: build_session_step_made_by(action), outputs: action.outputs.copy(), waits: waits.move()})
     }
     nodes.sort_by(fn(left: BuildSessionScheduleNode, right: BuildSessionScheduleNode) {
         if left.round != right.round -> return left.round <=> right.round

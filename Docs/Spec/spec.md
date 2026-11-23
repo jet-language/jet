@@ -7598,9 +7598,9 @@ kept output, of the bytes the build left there, then `generated`, one row per
 module `build: fn` generated, as `jet inspect graph` shows it (`id`, `name`,
 `path`, `digest`, `made_by`, `handoffs`, `authority`, `consent`). A hover in
 `jet self lsp` anywhere in a module under `.jet/generated/` that the last
-build's receipt lists names what made it: the call and function, each
-handoff of the `Compiler` value that led there, root first, the `Meta` effect
-and consent it used, and its identity.
+build's receipt lists names what made it: the `b.generate` call and its place,
+or the `Compiler` value's call and function, each handoff of that value that
+led there, root first, the `Meta` effect and consent it used, and its identity.
 `jet inspect build --times` shows the last build's rows (`kind`, `name`,
 `wall_ms`, and `made` or `reused`), or the record itself under `--json`;
 before any build has recorded one it fails with E2104. Examples:
@@ -7711,8 +7711,16 @@ file is a file barrier in the producer's round. A module a selected step
 reads is written and checked before any step runs, whatever
 `write_generated` says. `jet inspect build --json` lists the schedule under
 `schedule`, ordered by round, then kind (`module`, then `step`), then name.
-Each row gives its round, kind and name, the outputs it promises, and what it
-waits on: each wait's path, its producer and producer kind, and its barrier.
+Each row gives its round, kind and name, the call that made it and its place
+in the build file (`made_by`, such as `` `b.generate("facts")` at main.jet:3 ``
+or `` `b.run("render")` at main.jet:9 ``, or a `Compiler` value's call as the
+`generated` rows name it), the outputs it promises, and what it waits on:
+each wait's path, its producer and producer kind, and its barrier. The
+schedule, each generated module's identity, digest and `made_by`, the lock's
+`[[comptime_inputs]]` rows, and every refusal and rollback report come from
+the declarations and the build file alone: two runs, a cold run, a warm one,
+any `--threads`, and the same calls declared in another order (which moves
+only each `made_by` place) give the same bytes.
 A build generates in at most 17 rounds (D-META-LADDER1). A step that would
 generate in round 18 or later is E3516, at its `b.run` call, naming the chain
 of steps that leads to it. A module generated twice, two names that share one

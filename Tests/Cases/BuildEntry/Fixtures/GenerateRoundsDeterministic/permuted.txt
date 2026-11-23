@@ -1,0 +1,31 @@
+// main.jet with the same calls declared in another order.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generating steps") {
+        b.write_generated(.On)
+        b.generate("second") {
+            second_value: fn() -> Int { first_value() + 2 }
+        }
+        b.generate("first") {
+            first_value: fn() -> Int { 40 }
+        }
+        shell: b.probe("shell", "find_program", "sh")
+        tally: b.run("tally", b.found(shell), ["Exec", "FS"])
+        tally.arg("-c")
+        tally.arg("printf 'tally' > tally.txt")
+        tally.writes("tally.txt")
+        render: b.run("render", b.found(shell), ["Exec", "FS"])
+        render.arg("-c")
+        render.arg("{{ IFS= read -r line || [ -n \"$line\" ]; }} < .jet/generated/main/first.jet && printf '%s' \"$line\" > rendered.txt")
+        render.reads(".jet/generated/main/first.jet")
+        render.writes("rendered.txt")
+        shown: b.run("shown", b.found(shell), ["Exec", "FS"])
+        shown.arg("-c")
+        shown.arg("{{ IFS= read -r line || [ -n \"$line\" ]; }} < rendered.txt && printf 'shown %s' \"$line\" > shown.txt")
+        shown.reads("rendered.txt")
+        shown.writes("shown.txt")
+        app: b.add_executable("app", ["main.jet", ".jet/generated/main/first.jet", ".jet/generated/main/second.jet"], [shown, tally])
+        b.default(app)
+    }
+}
+
+run: fn() { print("{second_value()}") }

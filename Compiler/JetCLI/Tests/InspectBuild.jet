@@ -121,7 +121,7 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     // The checked graph owns the key; every observable projection field is
     // pinned independently of the renderer, including the static file universe.
     files: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
-    payload: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[\"compiler\"],\"reuse\":\"Reusable\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet out/app\",\"inputs=1\",\"outputs=1\",\"reuse=Reusable\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[{{\"name\":\"compiler\",\"kind\":\"FindProgram {{ program: \\\"compiler\\\" }}\",\"reproducibility\":\"Ambient\"}}],\"generated\":[],\"schedule\":[{{\"round\":1,\"kind\":\"step\",\"name\":\"compile\",\"outputs\":[\"out/app\"],\"waits\":[]}}]}}"
+    payload: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[\"compiler\"],\"reuse\":\"Reusable\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet out/app\",\"inputs=1\",\"outputs=1\",\"reuse=Reusable\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[{{\"name\":\"compiler\",\"kind\":\"FindProgram {{ program: \\\"compiler\\\" }}\",\"reproducibility\":\"Ambient\"}}],\"generated\":[],\"schedule\":[{{\"round\":1,\"kind\":\"step\",\"name\":\"compile\",\"made_by\":\"`b.run(\\\"compile\\\")`\",\"outputs\":[\"out/app\"],\"waits\":[]}}]}}"
     inspect_build_require(jet_driver_build_plan_json(plan) == payload, "canonical graph JSON exact fields and order")
     machine_expected: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n"
     inspect_build_require(machine == machine_expected, "checked graph JSON exact envelope")
@@ -357,12 +357,12 @@ inspect_build_runtime_dir: fn() -> String {
     query := response.query.move()
     rows: loop reported in query.diagnostics -> "{reported.code}|{reported.what}|{reported.detail ?? "-"}"
     failure: jet_cli_build_query_failure(owner, query, "main.jet", false, false, false)
-    inspect_build_require(failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && failure.stderr.contains(" Note: `run` uses `answer`, which `b.generate(\"facts\")` at `main.jet:2` promised") && failure.stderr.contains("3 problems found"), "the rendered report carries the promise note")
+    inspect_build_require(failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && failure.stderr.contains(" Note: `run` uses `answer`, which `b.generate(\"facts\")` at main.jet:2 promised") && failure.stderr.contains("3 problems found"), "the rendered report carries the promise note")
     assert_eq(
         rows,
         [String]{
             "E3511|Build plan is invalid: module `facts` is generated twice|-",
-            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at `main.jet:2` promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
+            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at main.jet:2 promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
             "E0102|Nothing named `nowhere` exists here|-",
         },
     )
@@ -386,7 +386,7 @@ inspect_build_runtime_dir: fn() -> String {
         rows,
         [String]{
             "E3511|Build plan is invalid: module `facts` is generated twice|-",
-            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at `package.jet:4` promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
+            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at package.jet:4 promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
             "E0102|Nothing named `nowhere` exists here|-",
         },
     )
