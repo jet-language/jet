@@ -25,7 +25,7 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     if file.kind == "output" || file.kind == "host" || file.kind == "image" || file.kind == "dependency" {
         inputs.push(file.path.copy())
     }
-    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, kept: [String]{}, folders: [Int]{}, programs: [BuildSessionProgram]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end}
+    action: BuildSessionAction{name: name, inputs: inputs, outputs: [String]{}, kept: [String]{}, folders: [Int]{}, programs: [BuildSessionProgram]{}, argv: [String]{file.path.copy()}, caps: caps, toolchain: 0, probes: probes, signing: None, tool: tool, start: start, end: end, site: build_session_site(state, start)}
     if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 {
         return build_session_fail(state, "action graph exceeds 100000 actions")

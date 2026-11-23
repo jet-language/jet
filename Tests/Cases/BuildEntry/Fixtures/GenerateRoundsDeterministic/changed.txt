@@ -1,0 +1,14 @@
+// main.jet with a changed `first` and `second`, whose write the case makes fail.
+build: fn(b: Build) {
+    b.write_generated(.On)
+    b.generate("first") {
+        first_value: fn() -> Int { 41 }
+    }
+    b.generate("second") {
+        second_value: fn() -> Int { first_value() + 1 }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/first.jet", ".jet/generated/main/second.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print("{second_value()}") }

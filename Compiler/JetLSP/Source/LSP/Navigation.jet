@@ -96,8 +96,7 @@ lsp_choices_markdown: fn(at: LSPAt) -> String? Never! {
 // first), the `Meta` effect it was made under, the dependency consent it
 // used, and its stable identity.
 lsp_producer_markdown: fn(producer: LSPProducer) -> String Never! {
-    maker: producer.made_by ?? "`b.generate(\"{producer.name}\")` in the build"
-    text := "Generated module `{producer.name}`, made by {maker}"
+    text := "Generated module `{producer.name}`, made by {producer.made_by}"
     if producer.handoffs.len() > 0 -> text = "{text}, after {producer.handoffs.join(", then ")}"
     text = "{text}."
     if producer.authority == .Val(authority) -> text = "{text} Made under `{authority}`."

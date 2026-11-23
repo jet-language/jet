@@ -30,9 +30,12 @@ use {
         jet_cli_build_report,
         jet_cli_driver_request,
         jet_cli_core_sources,
+        jet_cli_generated_write,
         jet_cli_native_session_at,
     ]
     jet_build_session.[
+        BuildPlanExecution,
+        BuildSessionGeneratedModule,
         BuildSessionPolicy,
         BuildSessionValue,
         build_plan_graph,
@@ -44,6 +47,7 @@ use {
     build_math: core.math
     build_sys: core.sys
     build_process: core.process
+    inspect_files: core.files
 }
 
 inspect_build_require: fn(ok: Bool, message: String) Never! {
@@ -117,7 +121,7 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     // The checked graph owns the key; every observable projection field is
     // pinned independently of the renderer, including the static file universe.
     files: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
-    payload: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[\"compiler\"],\"reuse\":\"Reusable\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet out/app\",\"inputs=1\",\"outputs=1\",\"reuse=Reusable\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[{{\"name\":\"compiler\",\"kind\":\"FindProgram {{ program: \\\"compiler\\\" }}\",\"reproducibility\":\"Ambient\"}}],\"generated\":[],\"schedule\":[{{\"round\":1,\"kind\":\"step\",\"name\":\"compile\",\"outputs\":[\"out/app\"],\"waits\":[]}}]}}"
+    payload: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[\"compiler\"],\"reuse\":\"Reusable\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet out/app\",\"inputs=1\",\"outputs=1\",\"reuse=Reusable\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[{{\"name\":\"compiler\",\"kind\":\"FindProgram {{ program: \\\"compiler\\\" }}\",\"reproducibility\":\"Ambient\"}}],\"generated\":[],\"schedule\":[{{\"round\":1,\"kind\":\"step\",\"name\":\"compile\",\"made_by\":\"`b.run(\\\"compile\\\")`\",\"outputs\":[\"out/app\"],\"waits\":[]}}]}}"
     inspect_build_require(jet_driver_build_plan_json(plan) == payload, "canonical graph JSON exact fields and order")
     machine_expected: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n"
     inspect_build_require(machine == machine_expected, "checked graph JSON exact envelope")
@@ -274,6 +278,37 @@ inspect_build_stopped_is_internal: fn(ran: [Diagnostic], refused: Bool, problem:
     inspect_build_require(trapped_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && trapped_failure.stderr.contains("Shape"), "a staged run that stopped at a trap reports the staged check")
 }
 
+// The codes of a staged build query that stopped before its plan with the
+// build's reports `ran` and no internal problem.
+inspect_build_stopped_codes: fn(ran: [Diagnostic]) -> [String] Never! {
+    staged := [Diagnostic]{diagnostic_from_registry("E0107", None, "Nothing named `answer` exists here", "A name must be declared before it's used", "Declare it first")}
+    reports := ran
+    held := String?{None}
+    request := inspect_build_request()
+    response := jet_driver_build_query_stopped(request, staged, reports, true, false, held)
+    query := response.query.move()
+    inspect_build_require(!query.complete && query.internal_problem == None, "a stopped build is a failed query, not an internal problem")
+    loop reported in query.diagnostics -> reported.code.copy()
+}
+
+// A build cut short midway, past its step limit or ended from outside jet (a
+// cancel, or the system out of memory), generated nothing, so its stop is why
+// the staged check misses the names it would have generated: the stop comes
+// first, then the staged report. A stop of the build's own code (a keep-going
+// trap) restates the staged report, which stands alone.
+#Test("inspect_build a build cut short reports its stop before the staged report") {
+    fuel: diagnostic_from_registry("E0952", None, "Compile-time code ran past its step limit of 10000000 steps", "Compile-time code runs under a step limit", "Split the work so it fits")
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{fuel}), [String]{"E0952", "E0107"})
+    cancelled := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGINT from outside jet", "another process sent it SIGINT", "build again without stopping it")
+    cancelled.outside_signal = Val(2)
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{cancelled}), [String]{"E3007", "E0107"})
+    out_of_memory := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGKILL from outside jet", "the system sent it SIGKILL as memory ran out", "free memory or make the compile-time work smaller")
+    out_of_memory.outside_signal = Val(9)
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{out_of_memory}), [String]{"E3007", "E0107"})
+    trap: diagnostic_from_registry("E3010", None, "keep-going trap: this function calls `answer`, which did not check", "the function did not check", "fix the staged report")
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{trap}), [String]{"E0107"})
+}
+
 // The compiler under test, never this test binary, owns the runtime pack:
 // planning `build: fn` runs compile-time code over its jet_runtime.image.
 inspect_build_runtime_dir: fn() -> String {
@@ -322,12 +357,12 @@ inspect_build_runtime_dir: fn() -> String {
     query := response.query.move()
     rows: loop reported in query.diagnostics -> "{reported.code}|{reported.what}|{reported.detail ?? "-"}"
     failure: jet_cli_build_query_failure(owner, query, "main.jet", false, false, false)
-    inspect_build_require(failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && failure.stderr.contains(" Note: `run` uses `answer`, which `b.generate(\"facts\")` at `main.jet:2` promised") && failure.stderr.contains("3 problems found"), "the rendered report carries the promise note")
+    inspect_build_require(failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && failure.stderr.contains(" Note: `run` uses `answer`, which `b.generate(\"facts\")` at main.jet:2 promised") && failure.stderr.contains("3 problems found"), "the rendered report carries the promise note")
     assert_eq(
         rows,
         [String]{
             "E3511|Build plan is invalid: module `facts` is generated twice|-",
-            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at `main.jet:2` promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
+            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at main.jet:2 promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
             "E0102|Nothing named `nowhere` exists here|-",
         },
     )
@@ -351,10 +386,42 @@ inspect_build_runtime_dir: fn() -> String {
         rows,
         [String]{
             "E3511|Build plan is invalid: module `facts` is generated twice|-",
-            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at `package.jet:4` promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
+            "E0102|Nothing named `answer` exists here| Note: `run` uses `answer`, which `b.generate(\"facts\")` at package.jet:4 promised in the generated module `facts`; the build failed before it made that module, so fix the build's report first",
             "E0102|Nothing named `nowhere` exists here|-",
         },
     )
+}
+
+// The place `third` is staged is a folder, so its write fails after `first`
+// and `second` were written. The write is refused as E3502 naming the module
+// and its path from the package folder, and puts each module back as it
+// was: `first` to the bytes an earlier build left, `second` to absent, with
+// no staged file left. Once the folder is gone, every module is written whole.
+#Test("inspect_build a generated module that can't be written puts back every module the write wrote") {
+    root: "{build_sys.temp_dir()}/jet-generated-write-{build_process.current_pid()}"
+    inspect_files.remove_all(root).drop("a scratch an earlier run left")
+    folder: "{root}/.jet/generated/main"
+    inspect_files.create_dir_all("{folder}/third.jet.writing") ?? panic("blocked staging folder")
+    inspect_files.write("{folder}/first.jet", "first_value: fn() -> Int {{ 1 }}\n") ?? panic("an earlier build's module")
+    modules: [BuildSessionGeneratedModule]{
+        {name: "first", path: ".jet/generated/main/first.jet", source: "first_value: fn() -> Int {{ 2 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+        {name: "second", path: ".jet/generated/main/second.jet", source: "second_value: fn() -> Int {{ 3 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+        {name: "third", path: ".jet/generated/main/third.jet", source: "third_value: fn() -> Int {{ 4 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+    }
+    graph: BuildPlanExecution{toolchains: [], signing: [], probes: [], plugins: [], actions: [], targets: [], files: [], default: -1}
+    refused: jet_cli_generated_write("{root}/build.jet", root, modules, graph, true, false) ?? panic("a module that can't be written was not refused")
+    inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stderr.contains("Jet.BuildPlanFailed") && refused.stderr.contains("`b.generate(\"third\")` couldn't be written to `.jet/generated/main/third.jet`: "), "the refusal names the module and its path")
+    inspect_build_require(refused.stderr.contains("during write `.jet/generated/main/third.jet.writing`"), "the refusal names the staged path from the package folder")
+    inspect_build_require((inspect_files.read("{folder}/first.jet") ?? "") == "first_value: fn() -> Int {{ 1 }}\n", "a module an earlier build left is put back as it was")
+    inspect_build_require(!inspect_files.exists("{folder}/second.jet"), "a module the write added is removed")
+    inspect_build_require(!inspect_files.exists("{folder}/first.jet.writing") && !inspect_files.exists("{folder}/second.jet.writing"), "no staged file is left")
+    inspect_files.remove_all("{folder}/third.jet.writing") ?? panic("clear the staging folder")
+    inspect_build_require(jet_cli_generated_write("{root}/build.jet", root, modules, graph, true, false) == None, "a clear write succeeds")
+    loop made in modules {
+        inspect_build_require((inspect_files.read("{root}/{made.path}") ?? "") == made.source, "every module is written whole")
+        inspect_build_require(!inspect_files.exists("{root}/{made.path}.writing"), "and no staged file stays")
+    }
+    inspect_files.remove_all(root).drop("test scratch")
 }
 
 // A program with no `build: fn` that marks a function `#Perf.Profiled` plans

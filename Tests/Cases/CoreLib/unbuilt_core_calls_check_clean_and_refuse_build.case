@@ -3,16 +3,16 @@
 # `jet build` refuses the call at its site, citing the card that ports it.
 fixture: Fixtures/UnbuiltCoreCalls
 
-# The configured HTTP client runtime is unbuilt: `http.Client.new()` lowers
-# to a runtime route no runtime carries, and the client's methods have no IR
-# builder. The constructor is refused at its site, so no client value (and
-# none of its methods) reaches the backend.
+# The configured HTTP client's transport is unbuilt: `http.Client.new()` and
+# its builders are Core source and lower like any Core call, but
+# `Client.send` has no transport yet. The send is refused at its site, so no
+# call to it reaches the backend.
 step: jet check http_client.jet
 exit: 0
 stderr: !~ "Jet.InvalidCommandInput" # check mode lowers nothing, so nothing is refused
 
 step: jet build http_client.jet
 exit: 1
-stderr: ~ "Error: Jet.InvalidCommandInput: `HTTPClient.new` is not built yet" # the client constructor's runtime route is unbuilt
+stderr: ~ "Error: Jet.InvalidCommandInput: `Client.send` is not built yet" # the client's transport is unbuilt
 stderr: ~ "card #3665" # the refusal names the card that ports it
 stderr: !~ "Internal compiler error" # sema refuses before codegen

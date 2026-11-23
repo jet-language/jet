@@ -264,6 +264,18 @@ ws_shut: fn(conn: I64) {
     ws_send(conn, I64{1}, rt_text_data(text), rt_text_len(text), error)
 }
 
+// A binary message of the `length` bytes `data` lends at the host's U8
+// stride; the frame codec reads compact bytes, so a wider stride packs them.
+#Export(c) jet_ws_send_binary: fn(conn: I64, data: I64, length: I64, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
+    if (RT_HOST_U8_STRIDE == I64{1} || length == I64{0}) { return ws_send(conn, I64{2}, data, length, error) }
+    packed: jet_rt_alloc(length, I64{1})
+    net_copy_packed(data, length, packed)
+    result: ws_send(conn, I64{2}, packed, length, error)
+    jet_rt_free(packed, length, I64{1})
+    result
+}
+
 #Export(c) jet_ws_close: fn(conn: I64, code: I64, reason: I64, error: I64) -> I64 {
     requested: host_native_int(code)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -487,6 +499,17 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
         return ws_fail(WS_ERROR_PROTOCOL, error)
     }
     net_put(output, I64{0}, jet_rt_string_clone(dyn_word(wrapping(message + WS_MESSAGE_PAYLOAD))))
+    I64{1}
+}
+
+// A binary message's bytes, a fresh list; any other message is a Protocol
+// error, as `jet_ws_message_text` is for a non-text one.
+#Export(c) jet_ws_message_bytes: fn(message: I64, output: I64, length: I64, error: I64) -> I64 {
+    if (dyn_word(wrapping(message + WS_MESSAGE_TAG)) != I64{1}) {
+        return ws_fail(WS_ERROR_PROTOCOL, error)
+    }
+    bytes: dyn_word(wrapping(message + WS_MESSAGE_PAYLOAD))
+    net_read_publish_bytes(dyn_word(wrapping(bytes + DATA_SEQUENCE_DATA)), dyn_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)), output, length)
     I64{1}
 }
 

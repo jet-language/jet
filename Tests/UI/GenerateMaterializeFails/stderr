@@ -1,0 +1,11 @@
+Error: Jet.BuildPlanFailed: `b.generate("second")` couldn't be written to `.jet/generated/run/second.jet`: I/O error during write `.jet/generated/run/second.jet.writing`: Is a directory (os error 21)
+  --> Tests/UI/GenerateMaterializeFails/run.jet:13:7
+    |
+ 13 |     b.generate("second") {
+    |       ^^^^^^^^
+ Why: Generated Jet must become a whole file before it is checked, so a build that can't write one of its modules leaves none of them written
+ Fix: Make `.jet/generated/run` writable and clear what stands at `.jet/generated/run/second.jet.writing`, or build with `--write-generated=off`
+More: jet-lang.dev/e/Jet.BuildPlanFailed
+
+1 problem found
+Run `jet explain Jet.BuildPlanFailed` to learn more

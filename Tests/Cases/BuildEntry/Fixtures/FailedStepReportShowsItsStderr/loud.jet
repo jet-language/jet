@@ -1,0 +1,14 @@
+// A step that writes two lines to stderr, then fails.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the failing step") {
+        shell: b.probe("shell", "find_program", "sh")
+        fail: b.run("fail", b.found(shell), ["Exec", "FS"])
+        fail.arg("-c")
+        fail.arg("echo 'first line' >&2; echo 'second line' >&2; exit 7")
+        fail.writes("out.txt")
+        app: b.add_executable("app", ["loud.jet"], [fail])
+        b.default(app)
+    }
+}
+
+run: fn() {}

@@ -57,6 +57,14 @@ BuildSessionGeneratedModule: struct {
     // the generated module names as its source.
     start: Int,
     end: Int,
+    // The place of the `b.generate` call, `file:line` in the build file
+    // (build_session_site); "" for a module a `Compiler` value made, whose
+    // `producer` names its place.
+    site: String{""},
+    // Where the items of a `Code` value handed to `b.generate(name, code)`
+    // are written, `file:line` (its `#code`); "" for items written in the
+    // `b.generate` call itself.
+    code_site: String{""},
     // `meta.rewrite_body(f, code)`: the function whose body `source`
     // replaces. The driver makes the module that function with the new body
     // and withdraws the original (JetDriver BuildQueries.jet).
@@ -173,6 +181,9 @@ BuildSessionAction: struct {
     timeout_ms: Int?{None},
     start: Int{0},
     end: Int{0},
+    // The place of its `b.run` or `b.action` call, `file:line` in the build
+    // file (build_session_site).
+    site: String{""},
 }
 
 // The running compiler passed to a step (`.file(b.jet_built_from(t))` when
@@ -309,6 +320,11 @@ BuildSessionState: struct {
     start: Int,
     end: Int,
     file: String{""},
+    // The build file's display path and the byte offset each of its lines
+    // starts at (build_session_set_source), which a generated module's and
+    // a step's `site` count from.
+    build_file: String{""},
+    build_lines: [Int]{[Int]{}},
 }
 
 BuildSession: struct {
@@ -413,6 +429,47 @@ build_session_set_dependencies: fn(session: &BuildSession, dependencies: [String
 build_session_set_identity: fn(session: &BuildSession, identity: String) Never! {
     permit := session.storage.guard_edit()
     permit.value.identity = identity.copy()
+}
+
+// The build file's display path and source, whose lines the `site` of each
+// module `b.generate` makes and each step counts (build_session_site).
+build_session_set_source: fn(session: &BuildSession, file: String, source: String) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.build_file = file.copy()
+    lines := [Int]{0}
+    loop (index, byte) in source.bytes() {
+        if byte == 10 -> lines.push(index + 1)
+    }
+    permit.value.build_lines = lines.move()
+}
+
+// The place of the call at byte `at` of the call being answered, `file:line`,
+// when that call is in the build file; "" for a call elsewhere (a
+// dependency's function's) or before the driver named the build file.
+build_session_site: fn(state: BuildSessionState, at: Int) -> String Never! {
+    if state.build_file == "" || (state.file != "" && state.file != state.build_file) -> return ""
+    // The line is the count of line starts at or before `at`.
+    low := 0
+    high := state.build_lines.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if state.build_lines[middle] <= at -> low = middle + 1 else -> high = middle
+    }
+    "{state.build_file}:{low}"
+}
+
+// What made a generated module, as provenance names it: the `b.generate`
+// call and its place, then the `#code` its items are written in when a
+// `Code` value carried them there, or the `Compiler` value's call and the
+// function that made it, with its place.
+build_session_made_by: fn(row: BuildSessionGeneratedModule) -> String Never! {
+    if row.producer == .Val(maker) {
+        if row.rewrites == .Val(function) -> return "`meta.rewrite_body` of `{function}` in {maker}"
+        return "`meta.add` in {maker}"
+    }
+    call: if row.site == "" -> "`b.generate(\"{row.name}\")`" else -> "`b.generate(\"{row.name}\")` at {row.site}"
+    if row.code_site == "" -> return call
+    "{call} with the `#code` at {row.code_site}"
 }
 
 // `build_diag`: the invalid-plan report at the current build call.
@@ -590,13 +647,16 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         return build_session_set_option(state, args, false, start, end)
     }
     if method == "generate" {
-        if args.len() != 1 {
+        if args.len() != 1 && args.len() != 2 {
             return build_session_fail(state, "`b.generate` requires a name and typed item block")
         }
         name: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
+        // A `Code` value's place follows the name (JetDriver BuildAdapter).
+        code_site: if args.len() == 2 -> build_session_text(args, 1) ?? "" else -> ""
         source: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
         path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        return build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end})
+        site: build_session_site(state, start)
+        return build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, site: site, code_site: code_site})
     }
     if method == "default" {
         if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
@@ -1312,6 +1372,12 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
 build_session_error_diag: fn(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
     projection: build_session_error_projection(error)
     diagnostic := build_session_diag(state, projection.text)
+    // A path that leaves the project: a step that wrote or read it would
+    // reach past what the build owns, so nothing of the plan runs.
+    if error == .InvalidPath(_) {
+        diagnostic.why = "a build reads and writes only inside its own project, so it never touches another project's files and builds the same wherever the project is"
+        diagnostic.fix = "name the path relative to the package folder, with no leading `/` and no `..`"
+    }
     diagnostic.error = Val(error)
     diagnostic
 }

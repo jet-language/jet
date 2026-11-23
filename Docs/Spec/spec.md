@@ -7598,9 +7598,9 @@ kept output, of the bytes the build left there, then `generated`, one row per
 module `build: fn` generated, as `jet inspect graph` shows it (`id`, `name`,
 `path`, `digest`, `made_by`, `handoffs`, `authority`, `consent`). A hover in
 `jet self lsp` anywhere in a module under `.jet/generated/` that the last
-build's receipt lists names what made it: the call and function, each
-handoff of the `Compiler` value that led there, root first, the `Meta` effect
-and consent it used, and its identity.
+build's receipt lists names what made it: the `b.generate` call and its place,
+or the `Compiler` value's call and function, each handoff of that value that
+led there, root first, the `Meta` effect and consent it used, and its identity.
 `jet inspect build --times` shows the last build's rows (`kind`, `name`,
 `wall_ms`, and `made` or `reused`), or the record itself under `--json`;
 before any build has recorded one it fails with E2104. Examples:
@@ -7628,13 +7628,24 @@ effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.
 
 `b.generate(name) { ... }` produces the module
-`.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
+`.jet/generated/<package>/<name>.jet`. `b.generate(name, code)` produces it
+from a `Code` value instead, so a helper function can write the items once as
+`#code { items }` and return them: the module, its path, identity and digest
+are byte for byte the ones the same items written in the call give, and the
+package's hand-written code uses its items alike. The second argument is
+never source text: `b.generate(name, "...")` is E3502 at that argument, since
+items written as text would be read only when the build runs. Example:
+[`Tests/Cases/BuildEntry/generate_helper_value_and_inline_block_are_one_mechanism.case`](../../Tests/Cases/BuildEntry/generate_helper_value_and_inline_block_are_one_mechanism.case).
+Action outputs ending in `.jet` follow
 the same path. Built-in derives, user derives, and build entries share one
 checked expansion pass. Build-only entries and imported build entries are
 removed before runtime code generation, so build handles never reach the built program.
 The `write_generated` build option (stock `off`) says whether `jet build`
 writes each generated module to that path under the package root for
-inspection: `on` writes them, `off` writes none. It is the profile field
+inspection: `on` writes them, `off` writes none. A module written there that
+was edited by hand since, so its bytes are neither this build's module nor
+the hash the lock records for it, stops the build with E3510 and stays as it
+is. The option is the profile field
 `write_generated: on`, the flag `--write-generated=on` (which replaces the
 retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
@@ -7642,7 +7653,10 @@ Example:
 
 A problem in a generated module is reported against that module's own text,
 under its virtual path `<build-generated>/<package identity>/.jet/generated/…`,
-with a note naming the `b.generate` call that produced it.
+with a note naming the `b.generate` call that produced it and, for a `Code`
+value, the `#code` its items are written at
+(`` `b.generate("facts")` at main.jet:12 with the `#code` at main.jet:3 ``),
+which `made_by` names alike.
 
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
@@ -7711,8 +7725,16 @@ file is a file barrier in the producer's round. A module a selected step
 reads is written and checked before any step runs, whatever
 `write_generated` says. `jet inspect build --json` lists the schedule under
 `schedule`, ordered by round, then kind (`module`, then `step`), then name.
-Each row gives its round, kind and name, the outputs it promises, and what it
-waits on: each wait's path, its producer and producer kind, and its barrier.
+Each row gives its round, kind and name, the call that made it and its place
+in the build file (`made_by`, such as `` `b.generate("facts")` at main.jet:3 ``
+or `` `b.run("render")` at main.jet:9 ``, or a `Compiler` value's call as the
+`generated` rows name it), the outputs it promises, and what it waits on:
+each wait's path, its producer and producer kind, and its barrier. The
+schedule, each generated module's identity, digest and `made_by`, the lock's
+`[[comptime_inputs]]` rows, and every refusal and rollback report come from
+the declarations and the build file alone: two runs, a cold run, a warm one,
+any `--threads`, and the same calls declared in another order (which moves
+only each `made_by` place) give the same bytes.
 A build generates in at most 17 rounds (D-META-LADDER1). A step that would
 generate in round 18 or later is E3516, at its `b.run` call, naming the chain
 of steps that leads to it. A module generated twice, two names that share one
@@ -7725,15 +7747,30 @@ other files are E3502 there. Both are reported before any step runs or any
 file is written. A target source or an input under `.jet/generated/` that no
 `b.generate`, `meta.add` or step output makes is E3515, at the call that
 declared the target or step that uses it. A generated module that would shadow
-a hand-written one is E3510. When `run` or another hand-written function uses
-a module the build never made because it refused a call, the refusal is
-reported first and the check report follows: a check of the whole package
-without the modules the build never made, so it covers members `build: fn`
-doesn't reach. The check report on a name that a promised module declares
-carries a note naming both ends of the broken promise: the call that
-promised the module (`b.generate("facts")` at its line, or `meta.add` in the
-function that called it) and the function that uses the name. An unknown
-name that no promised module declares gets no such note. `--locked` checks generated input
+a hand-written one is E3510, at its `b.generate` call. A build path that is
+absolute or climbs out with `..`, such as a step's `.writes("../x.jet")`, is
+E3502 at the call that names it, before any step runs or any module is
+written. Each module is written to a staged `<path>.writing` file and renamed
+over its path, so it is whole or absent. A module that can't be written is
+E3502 at its `b.generate` call, and every module the same build had just
+written is put back as it was, so a failed write leaves no module behind.
+Nothing `build: fn` generates is published, written or recorded in the lock
+until the whole function returns, so a build cut short midway, past its step
+limit (E0952), cancelled, or ended as memory runs out, leaves the modules,
+program and lock of the last good build as they were, and the next run
+starts clean. A signal from outside jet that ends only the compile-time
+process `build: fn` runs in, as the system's SIGKILL when memory runs out,
+is E3007. Either stop is reported first, ahead of any report on a name the
+build never made.
+When `run` or another hand-written function uses a module the build never
+made because it refused a call, the refusal is reported first and the check
+report follows: a check of the whole package without the modules the build
+never made, so it covers members `build: fn` doesn't reach. The check
+report on a name that a promised module declares carries a note naming both
+ends of the broken promise: the call that promised the module
+(`b.generate("facts")` at its line, or `meta.add` in the function that
+called it) and the function that uses the name. An unknown name that no
+promised module declares gets no such note. `--locked` checks generated input
 and output hashes before materializing and records provenance after the
 complete runtime bundle is checked (D-BUILDENTRY1).
 

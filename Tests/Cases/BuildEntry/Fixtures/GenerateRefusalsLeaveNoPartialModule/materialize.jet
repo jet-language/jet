@@ -1,0 +1,15 @@
+// `first` and `second` are written side by side; the case blocks the place
+// `second` is staged, so its write fails after `first` was written.
+build: fn(b: Build) {
+    b.write_generated(.On)
+    b.generate("first") {
+        first_value: fn() -> Int { 40 }
+    }
+    b.generate("second") {
+        second_value: fn() -> Int { first_value() + 2 }
+    }
+    app: b.add_executable("app", ["materialize.jet", ".jet/generated/materialize/first.jet", ".jet/generated/materialize/second.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print("{second_value()}") }

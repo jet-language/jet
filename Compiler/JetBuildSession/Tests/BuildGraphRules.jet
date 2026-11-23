@@ -12,12 +12,14 @@ use jet_build_session.[
     build_plan_schedule,
     build_plan_selected_generated,
     build_session_abort,
+    build_session_at,
     build_session_call,
     build_session_compiler_node,
     build_session_finish,
     build_session_graph,
     build_session_new,
     build_session_set_dependencies,
+    build_session_set_source,
 ]
 
 build_graph_rules_session: fn(id: Int) -> BuildSession Never! {
@@ -637,6 +639,44 @@ build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiag
     // round 1; the one nothing selected reads is not.
     selected: loop module_row in build_plan_selected_generated(plan) -> module_row.name
     assert_eq(selected, [String]{"facts"})
+}
+
+#Test("generation_schedule_names_the_call_that_made_each_producer_and_its_place") {
+    session := build_graph_rules_session(126)
+    // Line 1 starts at byte 0, line 2 at 22, line 3 at 33.
+    build_session_set_source(session, "main.jet", "build: fn(b: Build) {{\n    render\n    facts\n}}\n")
+    tool: build_graph_rules_tool(session)
+    render: build_graph_rules_schedule_step(session, tool, "render", [String]{".jet/generated/graph/facts.jet"}, [String]{"out/render.txt"}, 26)
+    assert(build_graph_rules_ok(build_session_call(session, "generate", [BuildSessionValue]{.Text{value: "facts"}}, Val("facts_value: fn() -> Int {{ 7 }}"), false, 37, 42)))
+    // A call in another file has no place in the build file.
+    build_session_at(session, "../tool/tool.jet")
+    build_graph_rules_generate(session, "elsewhere", "elsewhere_value: fn() -> Int {{ 1 }}")
+    app: build_graph_rules_value(build_session_call(session, "add_executable", [BuildSessionValue]{.Text{value: "app"}, build_graph_rules_list([String]{"main.jet"}), .List{values: [BuildSessionValue]{render}}}, None, false, 50, 51))
+    assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 52, 53)))
+    finished: build_session_finish(session, .Unit)
+    plan: finished.plan ?? panic("the schedule admits the plan")
+    made: loop node in build_plan_schedule(plan) -> "{node.name}: {node.made_by}"
+    assert_eq(
+        made,
+        [String]{
+            "elsewhere: `b.generate(\"elsewhere\")`",
+            "facts: `b.generate(\"facts\")` at main.jet:3",
+            "render: `b.run(\"render\")` at main.jet:2",
+        },
+    )
+}
+
+#Test("generation_schedule_names_the_code_value_a_module_was_made_from") {
+    session := build_graph_rules_session(127)
+    build_session_set_source(session, "main.jet", "build: fn(b: Build) {{\n    render\n    facts\n}}\n")
+    // A `Code` value's place follows the name (JetDriver BuildAdapter).
+    assert(build_graph_rules_ok(build_session_call(session, "generate", [BuildSessionValue]{.Text{value: "facts"}, .Text{value: "helper.jet:4"}}, Val("facts_value: fn() -> Int {{ 7 }}"), false, 37, 42)))
+    app: build_graph_rules_value(build_session_call(session, "add_executable", [BuildSessionValue]{.Text{value: "app"}, build_graph_rules_list([String]{"main.jet"}), .List{values: [BuildSessionValue]{}}}, None, false, 50, 51))
+    assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 52, 53)))
+    finished: build_session_finish(session, .Unit)
+    plan: finished.plan ?? panic("the plan is admitted")
+    made: loop node in build_plan_schedule(plan) -> node.made_by
+    assert_eq(made, [String]{"`b.generate(\"facts\")` at main.jet:3 with the `#code` at helper.jet:4"})
 }
 
 #Test("generation_schedule_refuses_a_step_that_waits_on_its_own_jet_source") {

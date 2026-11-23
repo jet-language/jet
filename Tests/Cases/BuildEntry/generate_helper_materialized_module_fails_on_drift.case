@@ -1,0 +1,28 @@
+# Claim: in-tree materialization of a helper's module is opt-in and fails on
+# drift. `--write-generated=on` writes the module under the package tree and
+# the lock records its hash; a hand edit to that file afterwards leaves bytes
+# that are neither the build's module nor the recorded hash, so the next
+# build stops with E3510 and keeps the edit. Removing the edit lets the same
+# build write the module again.
+fixture: Fixtures/GenerateHelper
+env: NO_COLOR=1
+step: jet build main.jet
+exit: 0
+file: .jet/generated/main/facts.jet absent # off by default: nothing written into the tree
+step: jet build main.jet --write-generated=on
+exit: 0
+copy: .jet/generated/main/facts.jet written.facts
+file: .jet/lock ~ "path = \".jet/generated/main/facts.jet\"" # the lock records the module's hash
+write: .jet/generated/main/facts.jet = "answer: fn() -> Int { 7 }\n"
+step: jet build main.jet --write-generated=on
+exit: 1
+stderr: ~ "Jet.GeneratedModuleShadows" # the drifted file stops the build
+stderr: ~ "`b.generate(\"facts\")` would shadow the module at `.jet/generated/main/facts.jet`" # names the call and the drifted file
+file: .jet/generated/main/facts.jet = "answer: fn() -> Int { 7 }\n" # the edit stays
+remove: .jet/generated/main/facts.jet
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/facts.jet == written.facts
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"

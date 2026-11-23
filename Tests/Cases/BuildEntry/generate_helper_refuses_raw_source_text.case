@@ -1,0 +1,12 @@
+# Claim: `b.generate` never takes source text. Items are written as code, in
+# the call or in a helper's `#code` value, so `b.generate("facts", "...")` is
+# E3502 at the text argument, before the build runs.
+fixture: Fixtures/GenerateHelper
+env: NO_COLOR=1
+copy: texted.txt main.jet
+step: jet build main.jet
+exit: 1
+stderr: ~ "Jet.BuildPlanFailed" # refused before the build runs
+stderr: ~ "`b.generate` doesn't take source text" # the refusal names what is wrong
+stderr: ~ "main.jet:3:25" # at the text argument
+file: .jet/generated/main/facts.jet absent

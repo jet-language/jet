@@ -39,22 +39,179 @@ C_CLIENT_STAGE_HANDSHAKE: 2
 
 C_CLIENT_STAGE_EXCHANGE: 3
 
+/// A configured HTTP client: its request headers, redirect limit and proxy,
+/// and the policies `Client.new()` starts from and its methods set. An unset
+/// policy keeps its safe default: no cookie jar, at most C_MAX_REDIRECTS
+/// redirects with credentials stripped on every hop, the environment's
+/// proxy, HTTP/2 and HTTP/1.1, the default timeouts and TLS trust, no
+/// HTTPS-to-HTTP downgrade, and one retry for safe methods only.
 Client: struct {
     method: String,
     url: String,
     headers: [String],
     redirects: Int,
     proxy: String,
+    same_origin_credentials: Bool,
+    proxy_from_environment: Bool,
+    cookie_jar: CookieJar?,
+    http2: Bool,
+    http1: Bool,
+    http3: Bool,
+    timeouts: [Int],
+    keep_encoding: Bool,
+    tls_config: build_tls.ClientConfig?,
+    downgrade: Bool,
+    retry: RetryPolicy?,
+
+    /// The client with every policy at its safe default.
+    new: fn() -> Client Never! {
+        Client{
+            method: "",
+            url: "",
+            headers: [String]{},
+            redirects: C_MAX_REDIRECTS,
+            proxy: "",
+            same_origin_credentials: false,
+            proxy_from_environment: true,
+            cookie_jar: None,
+            http2: true,
+            http1: true,
+            http3: false,
+            timeouts: [Int]{},
+            keep_encoding: false,
+            tls_config: None,
+            downgrade: false,
+            retry: Val(.Safe),
+        }
+    }
+
+    /// Keep cookies in `jar`, one bounded store the client's clones share.
+    cookies: fn(self, jar: CookieJar) -> Client Never! {
+        out := self.copy()
+        out.cookie_jar = Val(jar)
+        out
+    }
+
+    /// Follow at most `redirect_limit(policy, C_MAX_REDIRECTS)` redirects,
+    /// keeping credentials on a same-origin hop only when a `.Follow` policy
+    /// asks.
+    redirects: fn(self, policy: RedirectPolicy) -> Client Never! {
+        out := self.copy()
+        out.redirects = redirect_limit(policy, C_MAX_REDIRECTS)
+        out.same_origin_credentials = if policy == {
+            .Follow(_, keep) -> keep
+            .Disabled | .Limited | .All -> false
+        }
+        out
+    }
+
+    /// Enable the HTTP/2, HTTP/1.1 and HTTP/3 protocol families.
+    protocols: fn(self, http2: Bool, http1: Bool, http3: Bool) -> Client Never! {
+        out := self.copy()
+        out.http2 = http2
+        out.http1 = http1
+        out.http3 = http3
+        out
+    }
+
+    /// The budgets, in milliseconds, for connecting, each read, the whole
+    /// exchange, DNS, the TLS handshake, each write and the first response
+    /// byte.
+    timeouts: fn(self, connect: Int, read: Int, total: Int, dns: Int, tls: Int, write: Int, first_byte: Int) -> Client Never! {
+        out := self.copy()
+        out.timeouts = [Int]{connect, read, total, dns, tls, write, first_byte}
+        out
+    }
+
+    /// Keep a response's raw content encoding instead of decoding it.
+    raw_encoding: fn(self) -> Client Never! {
+        out := self.copy()
+        out.keep_encoding = true
+        out
+    }
+
+    /// Take the proxy from the environment or one URL; `None` is no proxy.
+    proxy: fn(self, policy: ProxyPolicy?) -> Client Never! {
+        out := self.copy()
+        if policy == {
+            .Val(.FromEnvironment) -> {
+                out.proxy = ""
+                out.proxy_from_environment = true
+            }
+            .Val(.URL(url)) -> {
+                out.proxy = url.copy()
+                out.proxy_from_environment = false
+            }
+            .None -> {
+                out.proxy = ""
+                out.proxy_from_environment = false
+            }
+        }
+        out
+    }
+
+    /// Trust and identify on HTTPS sends as `config` says.
+    tls: fn(self, config: build_tls.ClientConfig) -> Client Never! {
+        out := self.copy()
+        out.tls_config = Val(config.copy())
+        out
+    }
+
+    /// Whether a redirect may go from HTTPS to HTTP.
+    allow_http_downgrade: fn(self, allow: Bool) -> Client Never! {
+        out := self.copy()
+        out.downgrade = allow
+        out
+    }
+
+    /// Which requests one stale pooled-connection failure retries; `None`
+    /// retries none.
+    retries: fn(self, policy: RetryPolicy?) -> Client Never! {
+        out := self.copy()
+        out.retry = policy
+        out
+    }
+
+    /// Send `req` under the client's policies. The configured client's
+    /// transport is not built yet (card #3665): CORE_UNBUILT_ROWS names
+    /// `Client.send`, so a compile that lowers a call of it refuses the call
+    /// with E2104 and this body never runs.
+    send: fn(self, _req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+        panic("core.http.client: Client.send is not built yet (card #3665)")
+    }
 }
 
 Proxy: struct {
     url: String,
 }
 
+/// The redirect limit a client or session follows (redirect_limit): none,
+/// the caller's fallback, C_MAX_REDIRECTS, or `.Follow`'s `max`, each held
+/// to 0..C_MAX_REDIRECTS. `.Follow` also says whether credentials survive a
+/// same-origin hop.
 RedirectPolicy: enum {
     Disabled,
     Limited,
     All,
+    Follow(max: Int, same_origin_credentials: Bool),
+}
+
+/// A client's cookie store: one bounded in-memory jar.
+CookieJar: enum {
+    Memory,
+}
+
+/// Where a client's proxy comes from: the environment or one URL.
+ProxyPolicy: enum {
+    FromEnvironment,
+    URL(String),
+}
+
+/// What one stale pooled-connection failure retries: safe methods, or
+/// idempotent methods too.
+RetryPolicy: enum {
+    Safe,
+    Idempotent,
 }
 
 Session: struct {
@@ -86,34 +243,28 @@ send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! { req.send
 header: fn(client: Client, line: String) -> Client Never! {
     _: header_name(line) ?? return client.copy()
     _: header_value(line) ?? return client.copy()
-    Client{
-        method: client.method.copy(),
-        url: client.url.copy(),
-        headers: append_header(client.headers, line),
-        redirects: client.redirects,
-        proxy: client.proxy.copy(),
-    }
+    out := client.copy()
+    out.headers = append_header(client.headers, line)
+    out
 }
 
 set_header: fn(client: Client, name: String, value: String) -> Client Never! {
-    Client{
-        method: client.method.copy(),
-        url: client.url.copy(),
-        headers: set_header_line(client.headers, name, value),
-        redirects: client.redirects,
-        proxy: client.proxy.copy(),
-    }
+    out := client.copy()
+    out.headers = set_header_line(client.headers, name, value)
+    out
 }
 
 with_proxy: fn(client: Client, proxy: Proxy) -> Client Never! {
-    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: client.redirects, proxy: proxy.url.copy()}
+    out := client.copy()
+    out.proxy = proxy.url.copy()
+    out.proxy_from_environment = false
+    out
 }
 
 timeout_redirects: fn(client: Client, n: Int) -> Client Never! {
-    limit := n
-    if limit < 0 -> limit = 0
-    if limit > C_MAX_REDIRECTS -> limit = C_MAX_REDIRECTS
-    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: limit, proxy: client.proxy.copy()}
+    out := client.copy()
+    out.redirects = redirect_limit(.Limited, n)
+    out
 }
 
 session: fn() -> Session Never! {
@@ -262,14 +413,15 @@ retryable_error: fn(error: HTTPError) -> Bool Never! {
 }
 
 redirect_limit: fn(policy: RedirectPolicy, fallback: Int) -> Int Never! {
-    if policy == {
-        RedirectPolicy.Disabled -> return 0
-        RedirectPolicy.All -> return C_MAX_REDIRECTS
-        else -> { _ := 0 }
+    limit: if policy == {
+        .Disabled -> 0
+        .Limited -> fallback
+        .All -> C_MAX_REDIRECTS
+        .Follow(max, _) -> max
     }
-    if fallback < 0 -> return 0
-    if fallback > C_MAX_REDIRECTS -> return C_MAX_REDIRECTS
-    fallback
+    if limit < 0 -> return 0
+    if limit > C_MAX_REDIRECTS -> return C_MAX_REDIRECTS
+    limit
 }
 
 session_get: fn(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {

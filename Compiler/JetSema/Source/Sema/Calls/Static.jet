@@ -120,6 +120,33 @@ sema_call_method_is_generated: fn(graph: SemaRegistrationGraph, nominal: SemaReg
     false
 }
 
+// The free function `<owner>_<method>` (the owner's name in lower case) that
+// the module `module_index` exports to this module: a static the owner lacks
+// may be that module's free constructor (core.http's `body_form` for a
+// written `Body.form`), so the missing-static Fix names it. A Core module's
+// twin is one its Core.rows exports list (sema_call_core_free_twin); any
+// other module's resolves as a call through the module does
+// (sema_registration_resolve_export).
+sema_call_static_free_twin: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, method: String, environment: SemaScopeEnvironment) -> String? Never! {
+    if module_index < 0 || module_index >= graph.modules.len() -> return None
+    if module_is_core(graph.modules[module_index].module_identity) {
+        return sema_call_core_free_twin(graph.modules[module_index].module_name, owner, method)
+    }
+    name: "{owner.lower()}_{method}"
+    export: sema_registration_resolve_export(graph, module_index, name, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+    if export.symbol.kind != SymbolKind.Function -> return None
+    Val(name)
+}
+
+// A Core module's free twin of `Owner.method` reads its Core.rows exports,
+// never the registration graph: Core declarations load on demand, so a
+// twin the file does not call has no registered symbol.
+sema_call_core_free_twin: fn(module_name: String, owner: String, method: String) -> String? Never! {
+    name: "{owner.lower()}_{method}"
+    if !core_module_has_member(module_name, name) -> return None
+    Val(name)
+}
+
 SEMA_CALL_SCALAR_OWNERS: [String]{"Int", "Float", "Bool", "String", "Char", "F32", "F64", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"}
 
 // `Owner.method(...)` where `Owner` is a registered type no scope binding
@@ -159,7 +186,7 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
                 if !sema_call_method_is_generated(graph, nominal, name) -> statics.push(name)
             }
             shown: loop name in statics -> "`{name}`"
-            fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
+            fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if sema_call_static_free_twin(graph, row.module_index, owner, method, environment) == .Val(twin) -> "call the free function `{twin}(...)` that `{owner}`'s module declares" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
             diagnostics.push(sema_error("E0311", method_span, "`{owner}` has no static method `{method}`", "static lookup finds an associated method of `{owner}` with no `self` receiver, and `{owner}` declares none named `{method}`", fix))
         }
         sema_call_builtin_static_discard(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1004,7 +1031,11 @@ sema_call_try_builtin_static_field: fn(base: Expr, owner: String, method: String
     // Core module provides: report it rather than leaving the call unchecked.
     if !sema_checked_module_uppercase(owner) -> return builtin
     if core_module_has_type(module_name, owner) || core_module_has_member(module_name, owner) {
-        diagnostics.push(sema_error("E0311", span, "`{owner}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", "call a static method `{owner}` declares, or call `{method}` on a `{owner}` value"))
+        fix := "call a static method `{owner}` declares, or call `{method}` on a `{owner}` value"
+        if sema_call_core_free_twin(module_name, owner, method) == .Val(twin) {
+            fix = "call the free function `{alias}.{twin}(...)` that `{module_name}` declares"
+        }
+        diagnostics.push(sema_error("E0311", span, "`{owner}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", fix))
     } else { diagnostics.push(sema_call_core_unknown_item(module_name, owner, span)) }
     sema_call_builtin_static_discard(args, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: None}
@@ -1469,7 +1500,13 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                 if instance {
                     diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{type_name}`", "instance methods need a value before the dot", "call it on a `{type_name}` value: `x.{method}(...)`"))
                 } else {
-                    diagnostics.push(sema_error("E0311", method_span, "`{type_name}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", "use a declared static method on this type"))
+                    fix := "use a declared static method on this type"
+                    if program.registration_graph == .Val(graph) && sema_type_graph_nominal_row(graph, owner_symbol.id) == .Val(row) {
+                        if sema_call_static_free_twin(graph, row.module_index, type_name, method, environment) == .Val(twin) {
+                            fix = "call the free function `{twin}(...)` that `{type_name}`'s module declares"
+                        }
+                    }
+                    diagnostics.push(sema_error("E0311", method_span, "`{type_name}` has no matching static method `{method}`", "static lookup requires a visible associated method with no `self` receiver and a valid owner type", fix))
                 }
             }
         }

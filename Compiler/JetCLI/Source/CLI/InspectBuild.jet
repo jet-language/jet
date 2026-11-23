@@ -54,6 +54,7 @@ use {
         build_options_identity,
         build_options_value,
         build_options_with_code,
+        diagnostic_from_registry,
         diagnostic_render_all,
         JET_COMPTIME_TOOLCHAIN_PREFIX,
     ]
@@ -394,7 +395,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // Under `--locked`, what each action output held before the graph runs,
     // so one that drifts from its lock row is put back.
     before: if locked -> jet_cli_action_outputs_snapshot(root, produced) else -> [JetCLIActionOutput]{}
-    shadowed: jet_cli_generated_shadow(root, generated, color)
+    shadowed: jet_cli_generated_shadow(file, root, generated, color)
     // copy: `shadowed` is a payload view of the check's result.
     if shadowed == .Val(refusal) -> return refusal.copy()
     // Under `write_generated: on` every generated source is written; a
@@ -402,14 +403,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // written before any step runs whatever the option says (JetBuildSession
     // Schedule.jet).
     write_all: build_options_value(selected_options, "write_generated") == "on"
-    loop source_file in generated {
-        if !write_all && !jet_cli_build_steps_read(graph, source_file.path) -> next
-        path: jet_cli_entry_join(root, source_file.path)
-        directory: jet_cli_parent(path) ?? root
-        fix: if write_all -> "make `{directory}` writable, or build with `--write-generated=off`" else -> "make `{directory}` writable"
-        build_files.create_dir_all(directory) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), fix, color)
-        build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), fix, color)
-    }
+    unwritten: jet_cli_generated_write(file, root, generated, graph, write_all, color)
+    // copy: `unwritten` is a payload view of the write's result.
+    if unwritten == .Val(refusal) -> return refusal.copy()
     built: jet_cli_build_run_graph(graph, projected, generated, settings, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     // Each action output is locked beside what `build: fn` generated and
@@ -560,8 +556,9 @@ jet_cli_locked_action_drift: fn(root: String, outputs: [ComptimeInput]) -[FS]> S
 // already holds something Jet didn't write there: a symlink on the way, a
 // non-file, or a file whose bytes are neither this build's source nor the
 // `[[comptime_inputs]]` hash the lock recorded for that path. Generation is
-// additive, so a hand-written file is never overwritten or shadowed.
-jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModule], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+// additive, so a hand-written file is never overwritten or shadowed. The
+// report points at the `b.generate` call in the build file `file`.
+jet_cli_generated_shadow: fn(file: String, root: String, generated: [BuildSessionGeneratedModule], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
     recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
     loop source_file in generated {
         path: jet_cli_entry_join(root, source_file.path)
@@ -584,9 +581,68 @@ jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModu
             } ?? false
             if managed -> next
         }
-        return Val(jet_cli_report_output("", "E3510", "`b.generate(\"{source_file.name}\")` would shadow the module at `{source_file.path}`", "generation is additive: what you wrote is always what compiles", "rename the generated module, or delete the hand-written one", color, JET_DRIVER_EXIT_USER_ERROR))
+        return Val(jet_cli_generated_report(file, source_file, "E3510", "`b.generate(\"{source_file.name}\")` would shadow the module at `{source_file.path}`", "generation is additive: what you wrote is always what compiles", "rename the generated module, or delete the hand-written one", color))
     }
     None
+}
+
+// Write the generated modules under `root`: every one under
+// `write_generated: on` (`write_all`), else those a step of `graph` reads,
+// the inputs promised to it. Each is written to a staged file beside its path
+// and renamed over it, so a module is whole or absent. A module that can't be
+// written puts back every module this write wrote, as each was before, and
+// fails with E3502 at its `b.generate` call in the build file `file`: no
+// module of a failed write is left behind.
+jet_cli_generated_write: fn(file: String, root: String, generated: [BuildSessionGeneratedModule], graph: BuildPlanExecution, write_all: Bool, color: Bool) -[FS, IO]> JetDriverVerbOutput? Never! {
+    written := [JetCLIActionOutput]{}
+    loop source_file in generated {
+        if !write_all && !jet_cli_build_steps_read(graph, source_file.path) -> next
+        path: jet_cli_entry_join(root, source_file.path)
+        present: build_files.is_file(path)
+        before: if present -> build_files.read_bytes(path) ?? [U8]{} else -> [U8]{}
+        if jet_cli_generated_publish(path, source_file.source) == .Val(problem) {
+            jet_cli_action_outputs_restore(root, written)
+            directory: jet_cli_parent(source_file.path) ?? "."
+            fix: if write_all -> "make `{directory}` writable and clear what stands at `{source_file.path}{JET_CLI_GENERATED_STAGED}`, or build with `--write-generated=off`" else -> "make `{directory}` writable and clear what stands at `{source_file.path}{JET_CLI_GENERATED_STAGED}`"
+            // The file system names the absolute path; the report names it from the package folder.
+            return Val(jet_cli_generated_report(file, source_file, "E3502", "`b.generate(\"{source_file.name}\")` couldn't be written to `{source_file.path}`: {problem.replace("{root}/", "")}", "generated Jet must become a whole file before it is checked, so a build that can't write one of its modules leaves none of them written", fix, color))
+        }
+        written.push(JetCLIActionOutput{path: source_file.path.copy(), present: present, bytes: before})
+    }
+    None
+}
+
+// The suffix of the staged file a generated module is written to before it
+// is renamed over its path.
+JET_CLI_GENERATED_STAGED: ".writing"
+
+// Write `source` to `path` through a staged file renamed over it; the reason
+// it couldn't, with the staged file removed, else None.
+jet_cli_generated_publish: fn(path: String, source: String) -[FS]> String? Never! {
+    build_files.create_dir_all(jet_cli_parent(path) ?? ".") ?? return Val("{err}")
+    staged: "{path}{JET_CLI_GENERATED_STAGED}"
+    if build_files.write(staged, source) == .Err(err) {
+        if build_files.is_file(staged) {
+            build_files.remove(staged).drop("a partly written module is never named by its path")
+        }
+        return Val("{err}")
+    }
+    if build_files.rename(staged, path) == .Err(err) {
+        build_files.remove(staged).drop("a staged module is never named by its path")
+        return Val("{err}")
+    }
+    None
+}
+
+// A refusal about the generated module `row`, at its `b.generate` call when
+// the build file `file` holds that call (the root's own module), else with
+// no place.
+jet_cli_generated_report: fn(file: String, row: BuildSessionGeneratedModule, code: String, what: String, why: String, fix: String, color: Bool) -[FS]> JetDriverVerbOutput Never! {
+    source: build_files.read(file) ?? ""
+    at: if row.producer == None && row.package == None && row.start < row.end && row.end <= source.count_bytes() -> Val(Span{start: row.start, end: row.end}) else -> Span?{None}
+    report: diagnostic_from_registry(code, at, what, why, fix)
+    reports: [Diagnostic]{report}
+    {stdout: "", stderr: jet_driver_report_problems(file, source, reports, color, false), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports, notice: ""})}
 }
 
 // `jet build` of a workspace index builds its members before its own plan,

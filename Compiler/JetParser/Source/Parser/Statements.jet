@@ -116,7 +116,7 @@ parser_statement_is_keyword: fn(state: &JetParserState) -> Bool Never! {
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD {
         return true
     }
-    if token.kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) {
+    if token.kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && (parser_site_value_ahead(state) || parser_code_value_ahead(state)) {
         return false
     }
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH {
@@ -566,9 +566,10 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
             parser_finish_statement(state)
             Stmt.Yield{value: value.expr, span: parser_cover(start.span, value.span)}
         }
-        // `#Todo`, the one marker allowed only as an expression, starts an
-        // ordinary expression statement, not a statement marker.
-        TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && (parser_value_at(state, 1) == "Todo" || parser_site_value_ahead(state)) -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
+        // `#Todo`, the one marker allowed only as an expression, and the
+        // `#code { ... }` value a helper ends with start an ordinary
+        // expression statement, not a statement marker.
+        TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && (parser_value_at(state, 1) == "Todo" || parser_site_value_ahead(state) || parser_code_value_ahead(state)) -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
         TOKEN_PREP -> {
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(state)
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) {

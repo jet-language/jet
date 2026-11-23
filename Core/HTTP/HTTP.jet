@@ -142,6 +142,9 @@ Header: struct {
 
 Headers: struct {
     fields: [Header],
+
+    /// No header fields (`headers()`).
+    new: fn() -> Headers Never! { headers() }
 }
 
 /// A checked field name: one RFC 9110 token (`HeaderName.new`).
@@ -188,8 +191,7 @@ priv body_carrier: module {
 }
 
 /// A message body. User code gets one from a request or response, or from
-/// `body_empty`, `body_text`, `body_bytes` and the `Body.*` constructors;
-/// its contents are private to core.http.
+/// the `body_*` constructors; its contents are private to core.http.
 Body: struct {
     priv stream: body_carrier.BodyStream,
 
@@ -1081,36 +1083,33 @@ priv body_live: fn(live: &&provider.LiveBody) -> Body Never! {
     Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}}
 }
 
-// The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
-// `http.Body.json(value)` constructors: sema checks the call and runs these.
-// A Body holds only its payload; a message names the media type in its own
-// Content-Type field, so the typed text form keeps the text.
-__body_typed_text: fn(text: String, _media_type: String) -> Body Never! { body_text(text) }
+/// `text` typed as `media_type`. A Body holds only its payload; a message
+/// names the media type in its own Content-Type field, so the body keeps the
+/// text.
+body_typed_text: fn(text: String, _media_type: String) -> Body Never! { body_text(text) }
 
-// application/x-www-form-urlencoded fields, in map order.
-__body_form: fn(fields: [String:String]) -> Body Never! {
+/// application/x-www-form-urlencoded fields, in map order.
+body_form: fn(fields: [String:String]) -> Body Never! {
     pairs := [QueryPair]{}
     loop (name, value) in fields -> pairs.push(QueryPair{key: name.copy(), value: value.copy()})
     body_text(form_encode(Query{pairs: pairs}))
 }
 
-// Compact JSON text; a value with no JSON form (a NaN Float) stops the call.
-__body_json: fn<T: Encode>(value: T) -> Body Never! {
-    text: json_codec.to_string(value) ?? panic("http.Body.json: the value has no JSON form")
+/// Compact JSON text; a value with no JSON form (a NaN Float) stops the call.
+body_json: fn<T: Encode>(value: T) -> Body Never! {
+    text: json_codec.to_string(value) ?? panic("http.body_json: the value has no JSON form")
     body_text(text)
 }
 
-// `http.Body.reader(reader)`: the reader's bytes to end of file, at most
-// 1 GiB (BodyTooLarge past it).
-__body_reader: fn(reader: &&FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
+/// The reader's bytes to end of file, at most 1 GiB (BodyTooLarge past it).
+body_reader: fn(reader: &&FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
     source := reader.move()
     body_read(source, -1)
 }
 
-// `http.Body.reader(reader, length)`: exactly `length` (at most 1 GiB) of the
-// reader's bytes. A negative length, or a reader that ends short, is
-// InvalidFraming.
-__body_reader_sized: fn(reader: &&FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
+/// Exactly `length` (at most 1 GiB) of the reader's bytes. A negative length,
+/// or a reader that ends short, is InvalidFraming.
+body_reader_sized: fn(reader: &&FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
     source := reader.move()
     if length < 0 -> return Err(.InvalidFraming)
     if length > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_CONSUME_BYTES})
@@ -1132,11 +1131,11 @@ priv body_read: fn(source: &FileReader, want: Int) -[FS.Read, Time.Wait]> Body H
     Ok(body_bytes(out))
 }
 
-// `http.Body.multipart(fields)`: multipart/form-data text fields in map
-// order, delimited by the first `jet-http-boundary-%016x` no field contains.
-// The body's first line is `--` and that boundary; the message names it in
-// its Content-Type field (`multipart/form-data; boundary=...`).
-__body_multipart: fn(fields: [String:String]) -> Body Never! {
+/// multipart/form-data text fields in map order, delimited by the first
+/// `jet-http-boundary-%016x` no field contains. The body's first line is `--`
+/// and that boundary; the message names it in its Content-Type field
+/// (`multipart/form-data; boundary=...`).
+body_multipart: fn(fields: [String:String]) -> Body Never! {
     pairs := [Header]{}
     loop (name, value) in fields -> pairs.push(Header{name: name.copy(), value: value.copy()})
     body_text(provider.client_multipart(pairs, provider.client_boundary(pairs)))

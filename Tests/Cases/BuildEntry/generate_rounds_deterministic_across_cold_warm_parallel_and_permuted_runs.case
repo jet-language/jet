@@ -1,0 +1,136 @@
+# Claim: each generation round, source identity, collision check, dependency
+# edge, lock fact and rollback result is deterministic and source-provenanced.
+# The plan names each producer's round, the call that made it and its line
+# (`made_by`), and each dependency edge with its barrier. Two runs, a warm
+# run, a cold one (no .jet), one compiler thread and eight give
+# byte-identical generated modules, step outputs, plan and lock. The same
+# calls declared in another order give the same modules, step outputs, lock,
+# rounds, edges and module identities; only each `made_by` line moves with
+# its call. A collision's report and a rollback's report and result are the
+# same bytes on every run.
+requires: tool:sh
+requires: tool:bwrap
+fixture: Fixtures/GenerateRoundsDeterministic
+env: NO_COLOR=1
+step: jet inspect build main.jet --json
+stdout: file cold.plan.json
+exit: 0
+json: file cold.plan.json doc $.build.schedule[0].round = 1
+json: file cold.plan.json doc $.build.schedule[0].name = "first"
+json: file cold.plan.json doc $.build.schedule[0].made_by = "`b.generate(\"first\")` at main.jet:23" # each producer names its call and line
+json: file cold.plan.json doc $.build.schedule[1].name = "second"
+json: file cold.plan.json doc $.build.schedule[1].made_by = "`b.generate(\"second\")` at main.jet:26"
+json: file cold.plan.json doc $.build.schedule[2].round = 1
+json: file cold.plan.json doc $.build.schedule[2].name = "tally"
+json: file cold.plan.json doc $.build.schedule[2].made_by = "`b.run(\"tally\")` at main.jet:19"
+json: file cold.plan.json doc $.build.schedule[3].round = 2 # a round after the Jet source it reads
+json: file cold.plan.json doc $.build.schedule[3].name = "render"
+json: file cold.plan.json doc $.build.schedule[3].made_by = "`b.run(\"render\")` at main.jet:14"
+json: file cold.plan.json doc $.build.schedule[3].waits = [{"path":".jet/generated/main/first.jet","kind":"module","producer":"first","barrier":"typed"}]
+json: file cold.plan.json doc $.build.schedule[4].round = 2 # a plain file adds no round
+json: file cold.plan.json doc $.build.schedule[4].name = "shown"
+json: file cold.plan.json doc $.build.schedule[4].made_by = "`b.run(\"shown\")` at main.jet:9"
+json: file cold.plan.json doc $.build.schedule[4].waits = [{"path":"rendered.txt","kind":"step","producer":"render","barrier":"file"}]
+json: file cold.plan.json doc $.build.generated[?name="first"][0].made_by = "`b.generate(\"first\")` at main.jet:23"
+capture: first_id file cold.plan.json doc $.build.generated[?name="first"][0].id
+capture: second_id file cold.plan.json doc $.build.generated[?name="second"][0].id
+step: jet build main.jet --allow=Exec,FS --threads=1
+exit: 0
+file: .jet/generated/main/first.jet = "first_value: fn() -> Int { 40 }\n"
+file: .jet/generated/main/second.jet = "second_value: fn() -> Int { first_value() + 2 }\n"
+file: .jet/lock ~ "path = \".jet/generated/main/first.jet\"\nhash = \"sha256:55dfac9efe91edbc97f45f3fc90dc7a22f418caee0ba67a3afd0b8f570de0172\"" # the lock's source identity of each module
+file: .jet/lock ~ "path = \".jet/generated/main/second.jet\"\nhash = \"sha256:20a3a521c36ecd8bb5006277887dcf7e6febe1893aa835d3c057bb19067f6a39\"" # and of the round that reads it
+file: shown.txt = "shown first_value: fn() -> Int { 40 }"
+file: tally.txt = "tally"
+copy: .jet/generated/main/first.jet good.first
+copy: .jet/generated/main/second.jet good.second
+copy: shown.txt good.shown
+copy: rendered.txt good.rendered
+copy: .jet/lock good.lock
+step launch: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"
+step: jet inspect build main.jet --json
+stdout: file warm.plan.json
+exit: 0
+file: warm.plan.json == cold.plan.json # a second, warm plan is the same bytes
+step: jet build main.jet --allow=Exec,FS --threads=8
+exit: 0
+file: .jet/generated/main/first.jet == good.first # a warm build on eight threads makes the same bytes
+file: .jet/generated/main/second.jet == good.second
+file: rendered.txt == good.rendered
+file: shown.txt == good.shown
+file: .jet/lock == good.lock
+step: jet inspect build main.jet --json --threads=8
+stdout: file parallel.plan.json
+exit: 0
+file: parallel.plan.json == cold.plan.json
+remove: .jet
+remove: rendered.txt
+remove: shown.txt
+remove: tally.txt
+step: jet build main.jet --allow=Exec,FS --threads=8
+exit: 0
+file: .jet/generated/main/first.jet == good.first # a cold build makes the same bytes
+file: .jet/generated/main/second.jet == good.second
+file: rendered.txt == good.rendered
+file: shown.txt == good.shown
+file: .jet/lock ~ "hash = \"sha256:55dfac9efe91edbc97f45f3fc90dc7a22f418caee0ba67a3afd0b8f570de0172\"" # and locks the same identities
+file: .jet/lock ~ "hash = \"sha256:20a3a521c36ecd8bb5006277887dcf7e6febe1893aa835d3c057bb19067f6a39\"" # for both modules
+copy: .jet/lock good.lock
+step: jet inspect build main.jet --json
+stdout: file again.plan.json
+exit: 0
+file: again.plan.json == cold.plan.json
+copy: permuted.txt main.jet
+step: jet inspect build main.jet --json
+stdout: file permuted.plan.json
+exit: 0
+json: file permuted.plan.json doc $.build.schedule[0].name = "first" # the same rounds and order
+json: file permuted.plan.json doc $.build.schedule[0].made_by = "`b.generate(\"first\")` at main.jet:8" # the place moved with its call
+json: file permuted.plan.json doc $.build.schedule[1].name = "second"
+json: file permuted.plan.json doc $.build.schedule[2].name = "tally"
+json: file permuted.plan.json doc $.build.schedule[3].round = 2
+json: file permuted.plan.json doc $.build.schedule[3].name = "render"
+json: file permuted.plan.json doc $.build.schedule[3].made_by = "`b.run(\"render\")` at main.jet:16"
+json: file permuted.plan.json doc $.build.schedule[3].waits = [{"path":".jet/generated/main/first.jet","kind":"module","producer":"first","barrier":"typed"}] # the same edges
+json: file permuted.plan.json doc $.build.schedule[4].round = 2
+json: file permuted.plan.json doc $.build.schedule[4].name = "shown"
+json: file permuted.plan.json doc $.build.schedule[4].waits = [{"path":"rendered.txt","kind":"step","producer":"render","barrier":"file"}]
+json: file permuted.plan.json doc $.build.generated[?name="first"][0].id = "{cap:first_id}" # the same module identities
+json: file permuted.plan.json doc $.build.generated[?name="second"][0].id = "{cap:second_id}"
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: .jet/generated/main/first.jet == good.first # the same modules
+file: .jet/generated/main/second.jet == good.second
+file: rendered.txt == good.rendered # the same step outputs
+file: shown.txt == good.shown
+file: .jet/lock == good.lock # and the same lock
+copy: collides.txt main.jet
+step collision: jet build main.jet
+stderr: file collision.stderr
+exit: nonzero
+file: collision.stderr ~ "Jet.GenerationCycle" # one module, two producers
+file: collision.stderr ~ "main.jet:7:" # at the second claim's call
+step: jet build main.jet --threads=8
+stderr: file collision.again.stderr
+exit: nonzero
+file: collision.again.stderr == collision.stderr # the collision report is the same bytes
+file: .jet/generated/main/first.jet == good.first # and wrote nothing
+copy: changed.txt main.jet
+mkdir: .jet/generated/main/second.jet.writing
+step rollback: jet build main.jet
+stderr: file rollback.stderr
+exit: 1
+file: rollback.stderr ~ "Jet.BuildPlanFailed" # the write that couldn't finish
+file: rollback.stderr ~ "main.jet:7:" # at the `b.generate("second")` it couldn't write
+file: .jet/generated/main/first.jet == good.first # the changed `first` is rolled back
+file: .jet/generated/main/second.jet == good.second
+file: .jet/generated/main/first.jet.writing absent
+step: jet build main.jet --threads=8
+stderr: file rollback.again.stderr
+exit: 1
+file: rollback.again.stderr == rollback.stderr # the same report
+file: .jet/generated/main/first.jet == good.first # and the same result
+file: .jet/generated/main/second.jet == good.second
+file: .jet/generated/main/first.jet.writing absent

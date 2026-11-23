@@ -104,7 +104,8 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
     values := [BuildSessionValue]{}
     generated := String?{None}
     // `b.generate` sends its formatted items, then one (marker, value) pair
-    // per build local the template splices (sema_build_generate_splices).
+    // per build local the template splices (sema_build_generate_splices), or
+    // one `Code` value, whose place the session keeps after the name.
     splices := [BuildSessionValue]{}
     // `b.action` sends one `BuildAction`, which the session takes as the
     // five values of the step it describes.
@@ -116,6 +117,11 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         first = args.len()
     }
     loop index in first..<args.len() {
+        if method == "generate" && index == 2 && jet_driver_code_source(args[index]) == .Val(source) {
+            generated = Val(source)
+            values.push(BuildSessionValue.Text{value: jet_driver_code_site(args[index])})
+            next
+        }
         value: jet_eval_build_session_input(args[index]) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
         if method == "generate" && index == 2 {
             // copy: `generated` outlives this loop and is handed to build_session_call, while
@@ -499,6 +505,16 @@ jet_driver_code_source: fn(value: TComptimeValue) -> String? Never! {
     None
 }
 
+// Where a `Code` value's items are written, "file:line" (sema_build_code_value).
+jet_driver_code_site: fn(value: TComptimeValue) -> String Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "site" && field.value == .String(text) -> return text.copy()
+        }
+    }
+    ""
+}
+
 // A `#code` value whose `#{name}` pastes String build locals
 // (sema_build_code_value) arrives as the value, then each paste's marker,
 // name and local text. Each marker in the value's source becomes that text,
@@ -522,7 +538,14 @@ jet_driver_code_pasted: fn(session: BuildSession, args: [TComptimeValue], span: 
         if parse_type_text(text) == None -> return jet_driver_code_paste_refusal(span, name, text)
         source = source.replace("{marker}", text)
     }
-    JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{TComptimeField{name: "source", value: TComptimeValue.String{value: source}}}}}
+    // The pasted value keeps the rest of the value, its place included.
+    kept := [TComptimeField]{TComptimeField{name: "source", value: TComptimeValue.String{value: source}}}
+    if args[0] == .Struct(_, fields) {
+        loop field in fields {
+            if field.name != "source" -> kept.push(field.copy())
+        }
+    }
+    JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "Code", fields: kept}}
 }
 
 jet_driver_code_paste_refusal: fn(span: Span, name: String, text: String) -> JetEvalBuildReply Never! {
