@@ -407,20 +407,19 @@ core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> Strin
 // record field and literal owners, the compiler-owned enum payload rows and
 // the Syntax registry's TYPE_ constants by name, and a Core module's statics
 // as `<module>.<owner>`.
-core_decl_registry_types: fn() -> [String:Bool] CoreDeclarationError! {
-    names := [String:Bool]{}
-    loop row in IR_RUNTIME_HANDLES -> names[row.jet_name] = true
-    loop row in CORE_RECORD_FIELD_ROWS -> names[row.owner] = true
-    loop row in CORE_RECORD_LITERAL_ROWS -> names[row.owner] = true
-    loop row in CORE_ENUM_PAYLOAD_ROWS -> names[row.enum_name] = true
+core_decl_registry_types: fn() -> NameTable CoreDeclarationError! {
+    names := name_table_sized(2)
+    loop row in IR_RUNTIME_HANDLES -> _ := name_intern(names, row.jet_name)
+    loop row in CORE_RECORD_FIELD_ROWS -> _ := name_intern(names, row.owner)
+    loop row in CORE_RECORD_LITERAL_ROWS -> _ := name_intern(names, row.owner)
+    loop row in CORE_ENUM_PAYLOAD_ROWS -> _ := name_intern(names, row.enum_name)
     loop row in BUILTIN_STATIC_ROWS {
-        if row.module_name != "" -> names["{row.module_name}.{row.owner}"] = true
+        if row.module_name != "" -> _ := name_intern(names, "{row.module_name}.{row.owner}")
     }
     constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? return Err(err)
-    loop name in constants.keys().to_list() {
-        if !name.starts_with("TYPE_") -> next
-        value: constants.get(name) ?? next
-        names[value] = true
+    loop id in 1..<name_count(constants.names) {
+        if !name_text(constants.names, Name{id: U32{id}}).starts_with("TYPE_") -> next
+        _ := name_intern(names, constants.values[id])
     }
     Ok(names)
 }
@@ -444,18 +443,18 @@ core_decl_module_paths: fn(declared: CoreDeclarations, listing: CoreDeclarationM
 // Every type leaf of `listing`, a module with source rows, that none of its
 // sources (`paths`) declares and that is no `from(core.x)` re-export and no
 // name a compiler registry owns (`owned`).
-core_decl_undeclared_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String], owned: [String:Bool]) -> [String] Never! {
+core_decl_undeclared_leaves: fn(sources: [CoreDeclarationFile], listing: CoreDeclarationModule, paths: [String], owned: NameTable) -> [String] Never! {
     problems := [String]{}
-    declares := [String:Bool]{}
+    declares := name_table_sized(2)
     loop path in paths {
         text: core_decl_source_text(sources, path) ?? next
         loop line in core_decl_source_lines(text) {
             name: core_decl_type_name(line)
-            if name != "" -> declares[name] = true
+            if name != "" -> _ := name_intern(declares, name)
         }
     }
     loop leaf in listing.types {
-        if leaf.from_module != "" || (declares.get(leaf.name) ?? false) || (owned.get(leaf.name) ?? false) || (owned.get("{listing.name}.{leaf.name}") ?? false) {
+        if leaf.from_module != "" || name_find(declares, leaf.name) != None || name_find(owned, leaf.name) != None || name_find(owned, "{listing.name}.{leaf.name}") != None {
             next
         }
         problems.push("{CORE_DECLARATIONS_CORE_PATH}:{listing.line}: Core type leaf {leaf.name} of {listing.name} is declared by none of its sources ({paths.join(", ")}) and is no from() re-export, runtime handle, record, enum payload, {listing.name} static or Syntax TYPE_ constant; declare it in a source, re-export it with from(), or drop it")
@@ -533,10 +532,10 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             problems.push("{CORE_DECLARATIONS_CORE_PATH}: error_types lists {name}, which is no Core type leaf a source of its module declares #Error; drop it or mark its declaration #Error")
         }
     }
-    targets := [String:String]{}
+    targets := CoreDeclTexts{}
     loop row in declared.dispatchers {
         if row.kind == "receiver" || row.constructor != "CoreCallRecord.source_owned" -> next
-        targets["{row.module_name}.{row.record.member}"] = row.record.source_target ?? row.record.member
+        core_decl_text_put(targets, "{row.module_name}.{row.record.member}", row.record.source_target ?? row.record.member)
     }
     units: loop row in declared.runtime -> row.module_name
     loop row in declared.source_rows {
@@ -549,7 +548,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         lines: core_decl_source_lines(text)
         functions: loop line in lines if core_decl_pub_fn_name(line) != "" -> core_decl_pub_fn_name(line)
         loop member in row.members {
-            target: targets.get("{row.module_name}.{member}") ?? member
+            target: core_decl_text_of(targets, "{row.module_name}.{member}") ?? member
             if !functions.contains(target) {
                 problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
             }

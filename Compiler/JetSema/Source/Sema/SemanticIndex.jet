@@ -11,6 +11,10 @@ use jet_foundation.[
     symbol_local_row,
     symbol_table_key,
     authority_grantable_roots,
+    name_column,
+    name_column_get,
+    name_column_set,
+    name_column_table,
     name_find,
     name_index,
     name_intern,
@@ -899,7 +903,8 @@ SemaCompilerIndexWalkState: struct {
     arithmetic: [TComptimeValue],
     parents: [Int],
     // The next ordinal of each (parent, slot) pair, keyed by sema_compiler_index_ordinal_key.
-    ordinals: [String:Int],
+    ordinal_keys: NameTable{name_column_table()},
+    ordinals: [Int]{name_column()},
     slot: String,
     slot_is_list: Bool,
     // The source file and the name of the module being walked.
@@ -912,7 +917,8 @@ sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
         nodes: [TComptimeValue]{},
         arithmetic: [TComptimeValue]{},
         parents: [Int]{},
-        ordinals: [String:Int]{},
+        ordinal_keys: name_column_table(),
+        ordinals: name_column(),
         slot: "root",
         slot_is_list: true,
         file: "",
@@ -1119,8 +1125,8 @@ sema_compiler_index_walk_node: fn(state: &SemaCompilerIndexWalkState, class: Str
     parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
     key: sema_compiler_index_ordinal_key(parent, state.slot)
-    ordinal: state.ordinals.get(key) ?? 0
-    state.ordinals[key] = ordinal + 1
+    ordinal: name_column_get(state.ordinal_keys, state.ordinals, key) ?? 0
+    name_column_set(state.ordinal_keys, state.ordinals, key, ordinal + 1)
     id := state.nodes.len()
     slot_kind := if state.slot_is_list -> "list" else -> "scalar"
     state.nodes.push(
@@ -2031,29 +2037,40 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, module_
 }
 
 // Function key -> the view provenance values of the first checked function
-// with that key (module, then declaration, order), built once per index; a
-// definition that is no function reads an empty list.
-sema_compiler_index_function_views: fn(graph: SemaGraphResult) -> [String:TComptimeValue] Never! {
-    views := [String:TComptimeValue]{}
+// with that key (module, then declaration, order), at the key's id in `keys`,
+// built once per index. Row 0 is the empty list a definition that is no
+// function reads.
+SemaCompilerIndexViews: struct {
+    keys: NameTable{name_table()},
+    rows: [TComptimeValue]{[TComptimeValue]{TComptimeValue.List{values: [TComptimeValue]{}}}},
+}
+
+sema_compiler_index_function_views: fn(graph: SemaGraphResult) -> SemaCompilerIndexViews Never! {
+    views := SemaCompilerIndexViews{}
     loop checked_module in graph.modules {
         loop function in checked_module.functions {
-            if views.get(function.key) == None {
-                views[function.key] = sema_compiler_index_view_provenance_values(function.return_view_provenance)
+            if name_index(name_intern(views.keys, function.key)) == views.rows.len() {
+                views.rows.push(sema_compiler_index_view_provenance_values(function.return_view_provenance))
             }
         }
     }
     views
 }
 
+sema_compiler_index_view: fn(views: SemaCompilerIndexViews, key: String) -> TComptimeValue Never! {
+    id: name_find(views.keys, key) ?? return views.rows[0]
+    views.rows[name_index(id)]
+}
+
 // One definition, once, under its key text: `local_key` for a body's local
 // (its body's own symbols hold it), else the run's key of `symbol`.
-sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, local_key: String?, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
+sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, local_key: String?, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable) {
     key := local_key ?? symbol_table_key(registration.symbols, symbol.id)
-    if seen.get(key) != None {
+    if name_find(seen, key) != None {
         return
     }
-    seen[key.copy()] = true
-    definitions.push(sema_compiler_index_definition(registration, key, caller, symbol, views.get(key) ?? TComptimeValue.List{values: [TComptimeValue]{}}))
+    _ := name_intern(seen, key)
+    definitions.push(sema_compiler_index_definition(registration, key, caller, symbol, sema_compiler_index_view(views, key)))
 }
 
 // The key of `id` in a checked body: a run-wide id's in `symbols`, a local's
@@ -2082,14 +2099,14 @@ sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, nam
 }
 
 // A checked body's local, keyed in the body's own symbols `locals`.
-sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolLocalKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
+sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolLocalKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable, refused: &[String]) {
     local_id: local.symbol_id ?? return
     key: sema_compiler_index_body_key(registration.symbols, locals, local_id, local.name, local.span, owner, refused) ?? return
     symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
     sema_compiler_index_append_definition(registration, caller, symbol, Val(key), views, definitions, seen)
 }
 
-sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
+sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable, refused: &[String]) {
     loop statement in function.body {
         if function.tree.stmts[statement] == {
             .Let(local, _, _, _, _, _) -> {
@@ -2122,7 +2139,7 @@ sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity
 // takes once for the index and the diagnostics' origins alike.
 sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source_digest: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
     definitions := [TComptimeValue]{}
-    definition_keys := [String:Bool]{}
+    definition_keys := name_table()
     function_views: sema_compiler_index_function_views(graph)
     references := [TComptimeValue]{}
     calls := [TComptimeValue]{}

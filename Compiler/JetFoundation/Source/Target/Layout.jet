@@ -148,9 +148,14 @@ TargetLayoutEngine: struct {
     items: [Item],
     qualified_items: [TargetLayoutQualifiedItem],
     name_resolutions: [TargetLayoutNameResolution],
-    item_positions: [String:Int],
-    qualified_positions: [String:Int],
-    resolution_positions: [String:Int],
+    // The first row of each item name, qualified name and resolution key
+    // (jet_target_layout_resolution_key), at the key's id in its table.
+    item_keys: NameTable,
+    item_positions: [Int],
+    qualified_keys: NameTable,
+    qualified_positions: [Int],
+    resolution_keys: NameTable,
+    resolution_positions: [Int],
 }
 
 // The target/profile and registry are fixed for this query. Completed byte
@@ -159,9 +164,12 @@ TargetLayoutEngine: struct {
 // Registry lookup indexes belong to TargetLayoutEngine and are reused across
 // queries; each query owns only its recursion tracking and completed layouts.
 JetTargetLayoutQuery: struct {
-    active: [String:Bool],
+    // 1 while the identity's layout is being computed, else 0.
+    active_keys: NameTable,
+    active: [Int],
     cycle_hits: Int,
-    completed_positions: [String:Int],
+    completed_keys: NameTable,
+    completed_positions: [Int],
     completed: [ByteLayout?],
 }
 
@@ -172,11 +180,21 @@ jet_target_layout_resolution_key: fn(owner: String, source: String) -> String Ne
 
 jet_target_layout_query: fn() -> JetTargetLayoutQuery Never! {
     JetTargetLayoutQuery{
-        active: [String:Bool]{},
+        active_keys: name_column_table(),
+        active: name_column(),
         cycle_hits: 0,
-        completed_positions: [String:Int]{},
+        completed_keys: name_column_table(),
+        completed_positions: name_column(),
         completed: [ByteLayout?]{},
     }
+}
+
+jet_target_layout_active: fn(query: JetTargetLayoutQuery, identity: String) -> Bool Never! {
+    (name_column_get(query.active_keys, query.active, identity) ?? 0) == 1
+}
+
+jet_target_layout_set_active: fn(query: &JetTargetLayoutQuery, identity: String, active: Bool) Never! {
+    name_column_set(query.active_keys, query.active, identity, if active -> 1 else -> 0)
 }
 
 jet_target_layout_support_unknown: fn() -> LayoutSupportFacts Never! {
@@ -381,22 +399,23 @@ jet_target_layout_engine: fn(items: [Item], target: JetTargetLayout) -> TargetLa
 }
 
 jet_target_layout_engine_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
-    item_positions := [String:Int]{}
+    item_keys := name_column_table(items.len())
+    item_positions := name_column(items.len())
     loop position in 0..<items.len() {
-        name: jet_target_layout_item_name(items[position])
-        if item_positions.get(name) == None -> item_positions[name] = position
+        name_column_set_first(item_keys, item_positions, jet_target_layout_item_name(items[position]), position)
     }
-    qualified_positions := [String:Int]{}
+    qualified_keys := name_column_table(qualified_items.len())
+    qualified_positions := name_column(qualified_items.len())
     loop position in 0..<qualified_items.len() {
-        name: qualified_items[position].qualified_name
-        if qualified_positions.get(name) == None -> qualified_positions[name] = position
+        name_column_set_first(qualified_keys, qualified_positions, qualified_items[position].qualified_name, position)
     }
-    resolution_positions := [String:Int]{}
+    resolution_keys := name_column_table(name_resolutions.len())
+    resolution_positions := name_column(name_resolutions.len())
     loop position in 0..<name_resolutions.len() {
         key: jet_target_layout_resolution_key(name_resolutions[position].owner_qualified_name, name_resolutions[position].source_name)
-        if resolution_positions.get(key) == None -> resolution_positions[key] = position
+        name_column_set_first(resolution_keys, resolution_positions, key, position)
     }
-    TargetLayoutEngine{target: target, items: items, qualified_items: qualified_items, name_resolutions: name_resolutions, item_positions: item_positions, qualified_positions: qualified_positions, resolution_positions: resolution_positions}
+    TargetLayoutEngine{target: target, items: items, qualified_items: qualified_items, name_resolutions: name_resolutions, item_keys: item_keys, item_positions: item_positions, qualified_keys: qualified_keys, qualified_positions: qualified_positions, resolution_keys: resolution_keys, resolution_positions: resolution_positions}
 }
 
 jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayout Never! {
@@ -536,7 +555,7 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
         types.push(field.ty)
     }
     facts: jet_target_layout_aggregate(engine, names, types, owner_qualified_name, query)
-    query.active[identity] = false
+    jet_target_layout_set_active(query, identity, false)
     if layout == {
         .CAligned(alignment, _) -> jet_target_layout_aligned_struct_facts(facts, alignment)
         .C | .Columnar -> facts
@@ -578,7 +597,7 @@ jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition
         layout: jet_target_layout_native_type(engine, ty, identity, query)
         if layout == .Val(known) -> layouts.push(known) else { break }
     }
-    query.active[identity] = false
+    jet_target_layout_set_active(query, identity, false)
     if layouts.len() != names.len() -> return jet_target_layout_unknown(names)
     aligns: loop layout in layouts -> layout.alignment
     offsets := [Int]{}
@@ -631,10 +650,10 @@ jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, own
     if jet_target_layout_numeric_type(resolved_name) == .Val(numeric_resolved) {
         return jet_target_layout_native_type(engine, numeric_resolved, owner_qualified_name, query)
     }
-    if resolved_name == name && engine.item_positions.get(name) == .Val(position) {
+    if resolved_name == name && name_column_get(engine.item_keys, engine.item_positions, name) == .Val(position) {
         return jet_target_layout_native_item(engine, engine.items[position], name, query)
     }
-    position: engine.qualified_positions.get(resolved_name) ?? return None
+    position: name_column_get(engine.qualified_keys, engine.qualified_positions, resolved_name) ?? return None
     if engine.qualified_items[position].core -> return None
     jet_target_layout_native_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, query)
 }
@@ -649,7 +668,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
         .Distinct(definition) -> {
             if !jet_target_layout_enter(query, identity) -> return None
             bytes: jet_target_layout_native_type(engine, definition.base, identity, query)
-            query.active[identity] = false
+            jet_target_layout_set_active(query, identity, false)
             bytes
         }
         .TypeAlias(definition) -> {
@@ -657,7 +676,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
                 return None
             }
             bytes: jet_target_layout_native_type(engine, definition.target, identity, query)
-            query.active[identity] = false
+            jet_target_layout_set_active(query, identity, false)
             bytes
         }
         .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
@@ -707,15 +726,15 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
     }
     alignment: if tag_layout.alignment > payload_alignment -> tag_layout.alignment else -> payload_alignment
     payload_offset: jet_layout_align_up(tag_layout.size, payload_alignment) ?? {
-        query.active[identity] = false
+        jet_target_layout_set_active(query, identity, false)
         return jet_target_layout_unknown(variant_names)
     }
     total: jet_layout_checked_add(payload_offset, payload_size) ?? {
-        query.active[identity] = false
+        jet_target_layout_set_active(query, identity, false)
         return jet_target_layout_unknown(variant_names)
     }
     size: jet_layout_align_up(total, alignment) ?? {
-        query.active[identity] = false
+        jet_target_layout_set_active(query, identity, false)
         return jet_target_layout_unknown(variant_names)
     }
     bytes: jet_target_layout_enum_bytes(all_known, size, alignment)
@@ -733,7 +752,7 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
         }
         index += 1
     }
-    query.active[identity] = false
+    jet_target_layout_set_active(query, identity, false)
     LayoutFacts{bytes: bytes, fields: facts}
 }
 
@@ -779,11 +798,11 @@ jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: 
         if stride == .Val(bytes) {
             facts.push(FieldLayoutFacts{name: variant.name, offset: Val(8), size: Val(size), alignment: Val(alignment), stride: Val(bytes)})
         } else {
-            query.active[identity] = false
+            jet_target_layout_set_active(query, identity, false)
             return jet_target_layout_unknown(variant_names)
         }
     }
-    query.active[identity] = false
+    jet_target_layout_set_active(query, identity, false)
     LayoutFacts{bytes: Val(word), fields: facts}
 }
 
@@ -908,10 +927,10 @@ jet_target_layout_bit_set: fn(engine: TargetLayoutEngine, name: String, args: [T
         return false
     }
     resolved: jet_target_layout_resolved_name(engine, owner_qualified_name, element)
-    if resolved == element && engine.item_positions.get(element) == .Val(position) {
+    if resolved == element && name_column_get(engine.item_keys, engine.item_positions, element) == .Val(position) {
         return jet_layout_bits_enum(engine.items[position])
     }
-    position: engine.qualified_positions.get(resolved) ?? return false
+    position: name_column_get(engine.qualified_keys, engine.qualified_positions, resolved) ?? return false
     jet_layout_bits_enum(engine.qualified_items[position].item)
 }
 
@@ -945,14 +964,14 @@ jet_layout_one_bit_shift: fn(value: Int) -> Int? Never! {
 // Rust: none (Jet-only pass)
 jet_target_layout_resolved_name: fn(engine: TargetLayoutEngine, owner_qualified_name: String, source_name: String) -> String Never! {
     key: jet_target_layout_resolution_key(owner_qualified_name, source_name)
-    position: engine.resolution_positions.get(key) ?? return source_name.copy()
+    position: name_column_get(engine.resolution_keys, engine.resolution_positions, key) ?? return source_name.copy()
     engine.name_resolutions[position].qualified_name
 }
 
 jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, registry_key: String, args: [Type], query: &JetTargetLayoutQuery) -> ByteLayout? {
     key: type_identity_key(Type.Apply{name: registry_key, args: args})
-    if !(query.active.get(identity) ?? false) {
-        if query.completed_positions.get(key) == .Val(position) -> return query.completed[position]
+    if !jet_target_layout_active(query, identity) {
+        if name_column_get(query.completed_keys, query.completed_positions, key) == .Val(position) -> return query.completed[position]
     }
     cycle_hits: query.cycle_hits
     result: if item == {
@@ -961,19 +980,19 @@ jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identit
         .Distinct(definition) -> {
             if !jet_target_layout_enter(query, identity) -> return None
             bytes: jet_target_layout_type_inner(engine, definition.base, identity, query)
-            query.active[identity] = false
+            jet_target_layout_set_active(query, identity, false)
             bytes
         }
         .TypeAlias(definition) -> {
             if !jet_target_layout_enter(query, identity) -> return None
             bytes: jet_target_layout_type_inner(engine, definition.target, identity, query)
-            query.active[identity] = false
+            jet_target_layout_set_active(query, identity, false)
             bytes
         }
         .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
-    if cycle_hits == query.cycle_hits && query.completed_positions.get(key) == None {
-        query.completed_positions[key] = query.completed.len()
+    if cycle_hits == query.cycle_hits && name_column_get(query.completed_keys, query.completed_positions, key) == None {
+        name_column_set(query.completed_keys, query.completed_positions, key, query.completed.len())
         query.completed.push(result.copy())
     }
     result
@@ -993,13 +1012,13 @@ jet_target_layout_named_type: fn(engine: TargetLayoutEngine, name: String, args:
         if jet_target_layout_numeric_type(resolved_name) == .Val(numeric_resolved) {
             return jet_target_layout_type_inner(engine, numeric_resolved, owner_qualified_name, query)
         }
-        position: engine.qualified_positions.get(resolved_name) ?? return None
+        position: name_column_get(engine.qualified_keys, engine.qualified_positions, resolved_name) ?? return None
         return jet_target_layout_named_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, "qualified:{position}", args, query)
     }
-    if engine.item_positions.get(name) == .Val(position) {
+    if name_column_get(engine.item_keys, engine.item_positions, name) == .Val(position) {
         return jet_target_layout_named_item(engine, engine.items[position], name, "item:{position}", args, query)
     }
-    position: engine.qualified_positions.get(name) ?? return None
+    position: name_column_get(engine.qualified_keys, engine.qualified_positions, name) ?? return None
     jet_target_layout_named_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, "qualified:{position}", args, query)
 }
 
@@ -1109,11 +1128,11 @@ jet_target_layout_supports_atomic_word: fn(target: JetTargetLayout) -> Bool Neve
 }
 
 jet_target_layout_enter: fn(query: &JetTargetLayoutQuery, identity: String) -> Bool Never! {
-    if query.active.get(identity) ?? false {
+    if jet_target_layout_active(query, identity) {
         query.cycle_hits += 1
         return false
     }
-    query.active[identity] = true
+    jet_target_layout_set_active(query, identity, true)
     true
 }
 
