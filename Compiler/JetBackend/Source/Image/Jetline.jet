@@ -34,6 +34,17 @@ X64Jetline: struct {
     ascending: Bool{false},
 }
 
+// The compilation directory the runtime library's block records
+// (JetCLI Request.jet jet_cli_runtime_ir): the runtime pack carries its
+// rows into every image it links (Image/RuntimePack.jet link_pack_write), so
+// a profile names the runtime's functions, but a function in this block is
+// the runtime's, never the program's Jet source. A stop's site (JetRuntime
+// Fault.jet), the fault report (JetRuntime Assets/FaultReport/report.S
+// `find`), the debugger's frames (JetDebug NativeFacts.jet) and `jet crash`
+// (JetCLI CLI/Crash.jet) skip it, naming its functions as routines. No
+// directory a command records is spelled so.
+X64_JETLINE_RUNTIME_DIRECTORY: "<runtime>"
+
 // The location table of the ELF file `elf` (an image or its side debug
 // file); None when it has no `.debug_jetline` section.
 x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
@@ -101,6 +112,19 @@ x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
         at = end
     }
     X64Jetline{table: table.move(), functions: functions, ascending: ascending}
+}
+
+// `lines` without the runtime library's functions, whose block records
+// X64_JETLINE_RUNTIME_DIRECTORY: the program's Jet functions, as the fault
+// report's `find` sees them. The debugger and `jet crash` read these; a
+// profile reads them all.
+x64_jetline_program: fn(lines: &&X64Jetline) -> X64Jetline Never! {
+    owned := lines.move()
+    kept := [X64JetlineFunction]{}
+    loop function in owned.functions.move() {
+        if function.dir != X64_JETLINE_RUNTIME_DIRECTORY -> kept.push(function)
+    }
+    X64Jetline{table: owned.table.move(), functions: kept, ascending: owned.ascending}
 }
 
 // The index of the function holding link-time address `pc`, else -1. An

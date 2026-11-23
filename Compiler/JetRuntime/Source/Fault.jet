@@ -621,7 +621,8 @@ trace_hex: fn(value: I64, digits: I64) {
 // `-->` line written when its file is not Core's (Trap.jet
 // trap_user_frame). True when that line was written. The table's layout is
 // DebugPrune.jet's, and its lookup is report.S `find`. Nothing when no
-// function holds pc.
+// function holds pc. The runtime's block (trace_runtime_block) holds no
+// program frame: its functions are routines, as in report.S.
 priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_function: Bool) -> Bool {
     block := table
     loop wrapping(block + I64{20}) <= table_end {
@@ -629,6 +630,10 @@ priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_funct
         if (end < wrapping(block + I64{20}) || end > table_end) { return false }
         count: trace_u32(wrapping(block + I64{4}))
         strings: wrapping(block + trace_u32(wrapping(block + I64{8})))
+        if trace_runtime_block(strings, end) {
+            block = end
+            next
+        }
         low := I64{0}
         #Unsafe("block + 12 is inside this block, which lies in the read-only table") {
             low = os_load_i64(wrapping(block + I64{12}))
@@ -670,6 +675,15 @@ priv trace_frame: fn(lines: I64, table: I64, table_end: I64, pc: I64, with_funct
         block = end
     }
     false
+}
+
+// Whether the block whose strings start at `strings` and end by `end` is
+// the runtime library's: its compilation directory, the first string, is
+// JetBackend Jetline.jet X64_JETLINE_RUNTIME_DIRECTORY.
+priv trace_runtime_block: fn(strings: I64, end: I64) -> Bool {
+    marker: rt_static_text("<runtime>")
+    length: rt_text_len(marker)
+    trace_cstr_len(strings, end) == length && rt_text_equal_bytes(strings, rt_text_data(marker), length)
 }
 
 // The line of `pc` in the function [low, high) whose rows are [rows,
