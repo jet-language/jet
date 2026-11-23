@@ -954,7 +954,10 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     if !x64_fits_i32(text_size) {
         return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
     }
-    zone_spans: x64_object_zone_spans(functions, offsets, own_sections)
+    // With own sections x64_object_take_codes moves function.code out, so read
+    // zone_spans before taking codes; without own sections function.code stays
+    // intact and zone_spans runs in parallel with DWARF and layout below.
+    zone_spans := if own_sections -> x64_object_zone_spans(functions, offsets, true) else -> [U8]{}
     // With own sections each function's code moves out to become its section's
     // piece; without own sections the `.text` workers read `function.code`
     // directly into their coalesced buffer without taking and moving all codes.
@@ -985,14 +988,24 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     dwarf_rows := [X64DwarfSections]{}
     if {
         compiler_threads_admit(threads, functions.len(), weight, X64_OBJECT_MIN_WEIGHT_PER_THREAD, 0, 0) <= 1 -> {
+            if !own_sections -> zone_spans = x64_object_zone_spans(functions, offsets, false)
             dwarf_rows.push(x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info))
             laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
         }
-        else -> {
+        own_sections -> {
             task.group x64_object_dwarf_thread {
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
                 laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
                 dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+            }
+        }
+        else -> {
+            task.group x64_object_dwarf_thread {
+                zoning: task x64_object_zone_spans(functions, offsets, false)
+                dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
+                laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
+                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+                zone_spans = zoning.join() ?? panic(compiler_threads_failure_text(err))
             }
         }
     }
@@ -1522,12 +1535,12 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
 }
 
 x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}, split: Bool{false}) -> X64ExecutableResult Never! {
-    rela_data_sec := x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA)
-    rela_eh_sec := x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME)
-    rela_info_sec := x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO)
-    rela_line_sec := x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE)
-    rela_jet_line_sec := x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE)
-    rela_addr_sec := x64_object_rela_section(".rela.debug_addr", dwarf.addr_relas, ELF64_OBJECT_DEBUG_ADDR)
+    rela_data_sec := X64ObjectSection{name: ".rela.data", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DATA, align: 8, entry_size: ELF64_RELA_SIZE}
+    rela_eh_sec := X64ObjectSection{name: ".rela.eh_frame", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_EH_FRAME, align: 8, entry_size: ELF64_RELA_SIZE}
+    rela_info_sec := X64ObjectSection{name: ".rela.debug_info", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_INFO, align: 8, entry_size: ELF64_RELA_SIZE}
+    rela_line_sec := X64ObjectSection{name: ".rela.debug_line", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_LINE, align: 8, entry_size: ELF64_RELA_SIZE}
+    rela_jet_line_sec := X64ObjectSection{name: ".rela.debug_jetline", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_JETLINE, align: 8, entry_size: ELF64_RELA_SIZE}
+    rela_addr_sec := X64ObjectSection{name: ".rela.debug_addr", kind: 4, flags: 0x40, bytes: [U8]{}, link: ELF64_OBJECT_SYMTAB, info: ELF64_OBJECT_DEBUG_ADDR, align: 8, entry_size: ELF64_RELA_SIZE}
     if parallel_relas && (data_relas.len() + dwarf.eh_relas.len() + dwarf.info_relas.len() + dwarf.line_relas.len() + dwarf.jet_line_relas.len() + dwarf.addr_relas.len()) >= 16384 {
         task.group x64_object_rela_threads {
             t_data: task x64_object_encode_relas(data_relas)
@@ -1548,6 +1561,13 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
             rela_jet_line_sec = x64_object_rela_bytes_section(".rela.debug_jetline", b_jet, ELF64_OBJECT_DEBUG_JETLINE)
             rela_addr_sec = x64_object_rela_bytes_section(".rela.debug_addr", b_addr, ELF64_OBJECT_DEBUG_ADDR)
         }
+    } else {
+        rela_data_sec = x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA)
+        rela_eh_sec = x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME)
+        rela_info_sec = x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO)
+        rela_line_sec = x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE)
+        rela_jet_line_sec = x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE)
+        rela_addr_sec = x64_object_rela_section(".rela.debug_addr", dwarf.addr_relas, ELF64_OBJECT_DEBUG_ADDR)
     }
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{

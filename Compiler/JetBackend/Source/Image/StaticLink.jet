@@ -59,7 +59,8 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/Research/jet-backend-design-2026-10-01.md.
 use {
-    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
+    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized]
+    link_crypto: core.crypto
     link_hex: core.encoding.hex
 }
 
@@ -505,14 +506,39 @@ link_cstr: fn(bufs: [[U8]], b: Int, at: Int) -> String Never! {
 
 // Whether the NUL-terminated name at `at` starts with `prefix` (and, when
 // `whole`, is exactly `prefix`).
-link_name_has: fn(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> Bool Never! {
+LINK_NAME_EH_FRAME: [U8]{U8{46}, U8{101}, U8{104}, U8{95}, U8{102}, U8{114}, U8{97}, U8{109}, U8{101}}
+
+LINK_NAME_PREINIT_ARRAY: [U8]{U8{46}, U8{112}, U8{114}, U8{101}, U8{105}, U8{110}, U8{105}, U8{116}, U8{95}, U8{97}, U8{114}, U8{114}, U8{97}, U8{121}}
+
+LINK_NAME_INIT_ARRAY: [U8]{U8{46}, U8{105}, U8{110}, U8{105}, U8{116}, U8{95}, U8{97}, U8{114}, U8{114}, U8{97}, U8{121}}
+
+LINK_NAME_FINI_ARRAY: [U8]{U8{46}, U8{102}, U8{105}, U8{110}, U8{105}, U8{95}, U8{97}, U8{114}, U8{114}, U8{97}, U8{121}}
+
+LINK_NAME_DATA_REL_RO: [U8]{U8{46}, U8{100}, U8{97}, U8{116}, U8{97}, U8{46}, U8{114}, U8{101}, U8{108}, U8{46}, U8{114}, U8{111}}
+
+LINK_NAME_INIT: [U8]{U8{46}, U8{105}, U8{110}, U8{105}, U8{116}}
+
+LINK_NAME_FINI: [U8]{U8{46}, U8{102}, U8{105}, U8{110}, U8{105}}
+
+LINK_NAME_ZONE_SPANS: [U8]{U8{46}, U8{106}, U8{101}, U8{116}, U8{46}, U8{122}, U8{111}, U8{110}, U8{101}, U8{95}, U8{115}, U8{112}, U8{97}, U8{110}, U8{115}}
+
+LINK_NAME_DEBUG: [U8]{U8{46}, U8{100}, U8{101}, U8{98}, U8{117}, U8{103}, U8{95}}
+
+link_name_has_bytes: fn(bufs: [[U8]], b: Int, at: Int, prefix: [U8], whole: Bool) -> Bool Never! {
     row: bufs[b]
-    loop (k, byte) in prefix.bytes() {
-        if at + k >= row.len() || row[at + k] != byte -> return false
+    plen: prefix.len()
+    if at + plen > row.len() -> return false
+    if plen >= 2 && (row[at] != prefix[0] || row[at + 1] != prefix[1]) -> return false
+    loop k in 0..<plen {
+        if row[at + k] != prefix[k] -> return false
     }
     if !whole -> return true
-    end: at + prefix.len()
+    end: at + plen
     end < row.len() && Int{row[end]} == 0
+}
+
+link_name_has: fn(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) -> Bool Never! {
+    link_name_has_bytes(bufs, b, at, prefix.bytes(), whole)
 }
 
 // Little-endian words without a loop (ELF.jet elf64_u16).
@@ -615,23 +641,23 @@ link_class: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     flags: link_u64(c.bufs, b, h + 8)
     name: c.obj_names[obj] + link_u32(c.bufs, b, h)
     if (flags & 2) == 0 || kind == LINK_SHT_NOTE || kind == LINK_SHT_RELA -> return LINK_DROP
-    if kind == LINK_SHT_X86_64_UNWIND || link_name_has(c.bufs, b, name, ".eh_frame", true) {
+    if kind == LINK_SHT_X86_64_UNWIND || link_name_has_bytes(c.bufs, b, name, LINK_NAME_EH_FRAME, true) {
         return LINK_EH
     }
     if (flags & 0x400) != 0 -> return if kind == LINK_SHT_NOBITS -> LINK_TBSS else -> LINK_TDATA
-    if kind == LINK_SHT_PREINIT_ARRAY || link_name_has(c.bufs, b, name, ".preinit_array", false) {
+    if kind == LINK_SHT_PREINIT_ARRAY || link_name_has_bytes(c.bufs, b, name, LINK_NAME_PREINIT_ARRAY, false) {
         return LINK_PREINIT
     }
-    if kind == LINK_SHT_INIT_ARRAY || link_name_has(c.bufs, b, name, ".init_array", false) {
+    if kind == LINK_SHT_INIT_ARRAY || link_name_has_bytes(c.bufs, b, name, LINK_NAME_INIT_ARRAY, false) {
         return LINK_INIT
     }
-    if kind == LINK_SHT_FINI_ARRAY || link_name_has(c.bufs, b, name, ".fini_array", false) {
+    if kind == LINK_SHT_FINI_ARRAY || link_name_has_bytes(c.bufs, b, name, LINK_NAME_FINI_ARRAY, false) {
         return LINK_FINI
     }
     if (flags & 4) != 0 -> return LINK_TEXT
     if (flags & 1) != 0 {
         if kind == LINK_SHT_NOBITS -> return LINK_BSS
-        if link_name_has(c.bufs, b, name, ".data.rel.ro", false) -> return LINK_RELRO
+        if link_name_has_bytes(c.bufs, b, name, LINK_NAME_DATA_REL_RO, false) -> return LINK_RELRO
         return LINK_DATA
     }
     LINK_RODATA
@@ -856,24 +882,31 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     loop k in 1..<count {
         h: shoff + 64 * k
         kind: link_u32(c.bufs, b, h + 4)
-        if kind == LINK_SHT_SYMTAB -> symtab = k else if kind == LINK_SHT_SYMTAB_SHNDX {
-            shndx_sec = k
-        } else if kind == LINK_SHT_RELA {
+        if kind == LINK_SHT_RELA {
             target: link_u32(c.bufs, b, h + 44)
             if target + 1 != k && target > 0 && target < count {
                 c.rela.add(first + target, first + k).drop("one RELA section per section")
             }
+            next
+        }
+        if kind == LINK_SHT_SYMTAB -> symtab = k else if kind == LINK_SHT_SYMTAB_SHNDX {
+            shndx_sec = k
         } else if kind == LINK_SHT_GROUP { groups.push(k) } else if kind == LINK_SHT_X86_64_UNWIND || (kind == LINK_SHT_PROGBITS && link_u8(c.bufs, b, names_at + link_u32(c.bufs, b, h) + 1) == 0x65) {
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
             eh.push(k)
         }
-        name_at: names_at + link_u32(c.bufs, b, h)
-        if link_name_has(c.bufs, b, name_at, ".init", true) || link_name_has(c.bufs, b, name_at, ".fini", true) {
-            c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
-            c.roots.push(first + k)
-        }
-        if kind == LINK_SHT_PROGBITS && link_name_has(c.bufs, b, name_at, X64_OBJECT_ZONE_SPANS, true) {
-            zone_secs.push(k)
+        if kind == LINK_SHT_PROGBITS {
+            name_at: names_at + link_u32(c.bufs, b, h)
+            c1: link_u8(c.bufs, b, name_at + 1)
+            if c1 == 105 && link_name_has_bytes(c.bufs, b, name_at, LINK_NAME_INIT, true) {
+                c.init_code.add(first + k, 0).drop("one row per section")
+                c.roots.push(first + k)
+            } else if c1 == 102 && link_name_has_bytes(c.bufs, b, name_at, LINK_NAME_FINI, true) {
+                c.init_code.add(first + k, 1).drop("one row per section")
+                c.roots.push(first + k)
+            } else if c1 == 106 && link_name_has_bytes(c.bufs, b, name_at, LINK_NAME_ZONE_SPANS, true) {
+                zone_secs.push(k)
+            }
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8) & 0x200000) != 0 {
             guard: link_u32(c.bufs, b, h + 44)
@@ -1827,6 +1860,12 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
         c.sec_fde[t] = piece
     }
     work := [Int]{}
+    if entries.len() > 256 {
+        work.try_reserve(entries.len() * 2) ?? panic("reserve failed")
+        c.live_secs.try_reserve(entries.len() * 2) ?? panic("reserve failed")
+        c.live_class.try_reserve(entries.len() * 2) ?? panic("reserve failed")
+        c.rel_base.try_reserve(entries.len() * 2) ?? panic("reserve failed")
+    }
     loop entry in entries -> link_mark(c, work, entry)
     // Init/fini arrays and SHF_GNU_RETAIN sections of every object are roots.
     loop index in 0..<c.roots.len() {
@@ -3479,7 +3518,7 @@ link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
                 next
             }
             name_at: link_sec_name(c, obj, s)
-            if !link_name_has(c.bufs, b, name_at, ".debug_", false) -> next
+            if !link_name_has_bytes(c.bufs, b, name_at, LINK_NAME_DEBUG, false) -> next
             name: link_cstr(c.bufs, b, name_at)
             name_id: name_index(name_intern(group_names, name))
             loop group_of.len() <= name_id -> group_of.push(-1)
@@ -3977,7 +4016,7 @@ link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebu
     out
 }
 
-link_sha256_whole: fn(bytes: [U8]) -> [U8] Never! { sha256_bytes(bytes[0..<bytes.len()]) }
+link_sha256_whole: fn(bytes: [U8]) -> [U8] Never! { link_crypto.sha256(bytes).bytes }
 
 link_build_id_digests: fn(image: [U8], side: [U8]) -> [U8] Never! {
     if side.len() >= 1048576 {
@@ -3989,8 +4028,8 @@ link_build_id_digests: fn(image: [U8], side: [U8]) -> [U8] Never! {
         }
         return digests
     }
-    digests := sha256_bytes(image[0..<image.len()])
-    digests.extend(sha256_bytes(side[0..<side.len()]))
+    digests := link_crypto.sha256(image).bytes
+    digests.extend(link_crypto.sha256(side).bytes)
     digests
 }
 
@@ -4000,7 +4039,7 @@ link_build_id_digests: fn(image: [U8], side: [U8]) -> [U8] Never! {
 // offset `note`). Returns the id.
 link_build_id: fn(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
     digests: link_build_id_digests(image, side)
-    hash: sha256_bytes(digests[0..<digests.len()])
+    hash: link_crypto.sha256(digests).bytes
     id := [U8]{}
     loop k in 0..<LINK_BUILD_ID_SIZE {
         image[note + 16 + k] = hash[k]
@@ -4261,7 +4300,7 @@ x64_executable_debug_apart: fn(image: [U8], debug_link: String, threads: Compile
     side_count: side_headers.len() + 2
     side_headers_at: link_write_section_headers(side, 0, side_headers)
     link_elf_sections(side, side_headers_at, side_count)
-    hash: sha256_bytes(side[0..<side.len()])
+    hash: link_crypto.sha256(side).bytes
     id := [U8]{}
     loop k in 0..<LINK_BUILD_ID_SIZE {
         out[note + 16 + k] = hash[k]

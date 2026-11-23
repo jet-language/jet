@@ -593,7 +593,7 @@ ir_x64_tables_finish: fn(m: IRModule, tables: &IRX64Tables) Never! {
             tables.data[row].relocs.push(X64DataReloc{offset: reloc.offset, target: X64DataID{value: target}, addend: reloc.addend})
         }
     }
-    ir_x64_debug_types(m, tables)
+    if tables.debug_types.len() == 0 -> ir_x64_debug_types(m, tables)
 }
 
 // Marks the data rows a function's code reads (IRX64FunctionTables hot and
@@ -975,7 +975,9 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     task.group ir_x64_select_and_tables {
         starting: task {
             reads: inputs.guard_read()
-            ir_x64_tables_start(reads.value.programs[0])
+            t := ir_x64_tables_start(reads.value.programs[0])
+            ir_x64_debug_types(reads.value.programs[0], t)
+            t.move()
         }
         ir_x64_select_rows(inputs, workers, outputs, stops)
         tables_box.push(starting.join() ?? panic(compiler_threads_failure_text(err)))
@@ -1230,26 +1232,22 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // true also names each of the program's own writable cells by a global
 // symbol (ir_debug_cell_exports), which a debugger's evaluation addresses
 // them by.
-ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
-    owned := compiled.move()
-    functions := [X64CompiledFunction]{}
-    debug := [X64FunctionDebug]{}
-    errors := ir_x64_main_rows(owned, functions, debug)
-    if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}
-    exports := [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
-    loop hook in compiler_take_rows<IRLibraryExport>(owned.program.hooks) {
-        exports.push(X64RuntimeExport{function: X64FunctionID{value: hook.function}, symbol: hook.symbol})
-    }
-    cells: if debug_info -> ir_debug_cell_exports(owned.program) else -> [X64DataExport]{}
-    program: ir_x64_object_module(owned)
-    threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
-    // What is left of the compile (its IR module above all) is read no more.
-    // When its instructions admit threads (ir_x64_release_ways) it drops on
-    // tasks of their own while the object is written; a smaller compile
-    // drops here, after the object is written, as `owned` goes.
-    ways: ir_x64_release_ways(owned.program, threads)
+IRX64ReachedPair: struct {
+    functions: [X64CompiledFunction],
+    debug: [X64FunctionDebug],
+}
+
+ir_x64_reached_pair: fn(functions_in: &&[X64CompiledFunction], debug_in: &&[X64FunctionDebug], roots: [Int], main: Bool) -> IRX64ReachedPair Never! {
+    functions := functions_in.move()
+    debug := debug_in.move()
+    ir_x64_reached_only(functions, debug, roots, main)
+    IRX64ReachedPair{functions: functions.move(), debug: debug.move()}
+}
+
+ir_x64_write_with_release: fn(owned_in: &&IRX64Result, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool, ways: Int) -> X64ExecutableResult Never! {
+    owned := owned_in.move()
     if ways <= 1 {
-        return x64_object_functions_threads(program, functions, debug, exports, cells, threads, debug_info, false, split)
+        return x64_object_functions_threads(program, functions, debug, exports, data_exports, threads, debug_info, own_sections, split)
     }
     released: Shared{IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}}
     ir_x64_release_fill(released, owned, ways)
@@ -1257,11 +1255,47 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool, split: Bool{false})
     task.group ir_x64_object_release {
         rest: task ir_x64_release_rest(released)
         dropped: task ir_x64_release_runs(released, -1)
-        objects.push(x64_object_functions_threads(program, functions, debug, exports, cells, threads, debug_info, false, split))
+        objects.push(x64_object_functions_threads(program, functions, debug, exports, data_exports, threads, debug_info, own_sections, split))
         _: rest.join() ?? panic(compiler_threads_failure_text(err))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     objects.pop() ?? panic("the object writer lost its object")
+}
+
+ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
+    owned := compiled.move()
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    errors := ir_x64_main_rows_collect(owned, functions, debug)
+    if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}
+    has_main: owned.program.entry >= 0
+    kept_roots: compiler_take_rows<Int>(owned.program.kept)
+    exports := [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
+    loop hook in compiler_take_rows<IRLibraryExport>(owned.program.hooks) {
+        exports.push(X64RuntimeExport{function: X64FunctionID{value: hook.function}, symbol: hook.symbol})
+    }
+    cells: if debug_info -> ir_debug_cell_exports(owned.program) else -> [X64DataExport]{}
+    threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
+    // What is left of the compile (its IR module above all) is read no more.
+    // When its instructions admit threads (ir_x64_release_ways) it drops on
+    // tasks of their own while the object is written; a smaller compile
+    // drops here, after the object is written, as `owned` goes.
+    ways: ir_x64_release_ways(owned.program, threads)
+    programs := [X64ObjectModule]{}
+    if ways > 1 {
+        task.group ir_x64_object_prep {
+            reached: task ir_x64_reached_pair(functions.move(), debug.move(), kept_roots, has_main)
+            programs.push(ir_x64_object_module(owned))
+            pair := reached.join() ?? panic(compiler_threads_failure_text(err))
+            functions = pair.functions.move()
+            debug = pair.debug.move()
+        }
+    } else {
+        ir_x64_reached_only(functions, debug, kept_roots, has_main)
+        programs.push(ir_x64_object_module(owned))
+    }
+    program: programs.pop() ?? panic("the object prep lost its module")
+    ir_x64_write_with_release(owned, program, functions, debug, exports, cells, threads, debug_info, false, split, ways)
 }
 
 // What ir_x64_object writes without debug info, unwritten: the data of the
@@ -1320,12 +1354,18 @@ ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
 // kept roots reach. Else why there are none: the compile's errors, or an
 // entry `main` can't run.
 ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
+    errors := ir_x64_main_rows_collect(owned, functions, debug)
+    if errors.len() > 0 -> return errors
+    ir_x64_reached_only(functions, debug, owned.program.kept, owned.program.entry >= 0)
+    [String]{}
+}
+
+ir_x64_main_rows_collect: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) -> [String] Never! {
     if owned.errors.len() > 0 -> return compiler_take_rows<String>(owned.errors)
     entry: owned.program.entry
     if entry < 0 && owned.program.kept.len() > 0 {
         debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
         functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
-        ir_x64_reached_only(functions, debug, owned.program.kept, false)
         return [String]{}
     }
     if entry < 0 || entry >= owned.program.functions.len() {
@@ -1342,7 +1382,6 @@ ir_x64_main_rows: fn(owned: &IRX64Result, functions: &[X64CompiledFunction], deb
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())
     functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
-    ir_x64_reached_only(functions, debug, owned.program.kept, true)
     [String]{}
 }
 
@@ -1711,9 +1750,31 @@ ir_x64_hash_start: fn(symbol: String) -> Int Never! {
 // own, so a link keeps only what it reaches; past the section indices
 // ELF's headers hold (the Core library) the object numbers them through
 // section 0 and `.symtab_shndx`.
+ir_x64_library_globals: fn(program: IRModule, functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], exports: [IRLibraryExport]) -> [X64RuntimeExport] Never! {
+    globals := [X64RuntimeExport]{}
+    globals.try_reserve(exports.len() + 1) ?? panic("reserve failed")
+    loop row in exports {
+        globals.push(X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()})
+    }
+    if ir_x64_zone_sites_id(functions) == .Val(id) {
+        ir_x64_zone_sites(functions, debug, id, IR_X64_ZONE_SITES_NAME)
+        globals.push(X64RuntimeExport{function: id, symbol: ir_x64_zone_sites_symbol(program), init_priority: IR_X64_ZONE_SITES_PRIORITY})
+    }
+    globals
+}
+
 ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
-    ir_x64_library_object_into(owned, exports, data_exports, debug_info, own_sections)
+    if owned.errors.len() > 0 {
+        return X64ExecutableResult{bytes: [U8]{}, errors: compiler_take_rows<String>(owned.errors)}
+    }
+    program := ir_x64_object_module(owned)
+    debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
+    functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
+    globals: ir_x64_library_globals(owned.program, functions, debug, exports)
+    threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
+    ways: ir_x64_release_ways(owned.program, threads)
+    ir_x64_write_with_release(owned, program, functions, debug, globals, data_exports, threads, debug_info, own_sections, false, ways)
 }
 
 // Same as ir_x64_library_object, borrowing `owned` so `owned.program` stays
@@ -1726,14 +1787,7 @@ ir_x64_library_object_into: fn(owned: &IRX64Result, exports: [IRLibraryExport], 
     program := ir_x64_object_module(owned)
     debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
-    globals := [X64RuntimeExport]{}
-    loop row in exports {
-        globals.push(X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()})
-    }
-    if ir_x64_zone_sites_id(functions) == .Val(id) {
-        ir_x64_zone_sites(functions, debug, id, IR_X64_ZONE_SITES_NAME)
-        globals.push(X64RuntimeExport{function: id, symbol: ir_x64_zone_sites_symbol(owned.program), init_priority: IR_X64_ZONE_SITES_PRIORITY})
-    }
+    globals: ir_x64_library_globals(owned.program, functions, debug, exports)
     x64_object_functions_threads(program, functions, debug, globals, data_exports, owned.threads, debug_info, own_sections)
 }
 
