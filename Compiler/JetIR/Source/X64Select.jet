@@ -5557,6 +5557,20 @@ ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64
 // It keeps an emission log when JET_X64_EMIT_LOG entry list `names` names
 // it (ir_x64_log_names).
 ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}) -> IRX64FunctionResult Never! {
+    patch := ir_patch_emitter_new()
+    ir_x64_select_function_in(m, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
+}
+
+ir_x64_select_function_in: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}, patch: &IRPatchEmitter) -> IRX64FunctionResult Never! {
+    if m.fast_o0 {
+        f: m.functions[row]
+        if f.frame_bound < 0 && f.asm == None && !ir_stop_key(f.key) && !ir_timing_marked(f) && (names.len() == 0 || !ir_x64_log_names(f, names)) {
+            p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
+            p_trap: if trap != -2 -> trap else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
+            p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
+            return ir_x64_patch_function_in(m, row, p_poll, p_trap, p_turn, patch)
+        }
+    }
     tables: ir_x64_function_tables(m, row, names)
     compiled := ir_x64_select_row(m, tables, row, poll, trap, turn, zone_plot, zone_frame)
     compiled.uses = tables.uses.move()
