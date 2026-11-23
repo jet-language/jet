@@ -113,9 +113,8 @@ jet_eval_ir_build_failure_text: fn(failure: IRBuildFailure) -> String Never! {
 
 // The data of the word `word` of type row `row`.
 jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, row: Int) -> TComptimeValue? {
-    ty: m.types[row]
-    checked: ir_untag(ty.ty)
-    if ty.kind == {
+    kind: m.types[row].kind
+    if kind == {
         .Unit -> return Val(TComptimeValue.Unit)
         .Bool -> return Val(TComptimeValue.Bool{value: word != 0})
         .Int -> {
@@ -134,6 +133,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             return Val(TComptimeValue.String{value: text})
         }
         .Word -> {
+            checked: ir_untag(m.types[row].ty)
             // An inline Option: the niche word is None, any other its payload's.
             if checked == .Option(inner) && ir_option_inline(m, row) {
                 if word == IR_OPTION_INT_NONE {
@@ -156,6 +156,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             return Val(TComptimeValue.Int{value: word})
         }
         .Pointer -> {
+            checked: ir_untag(m.types[row].ty)
             if checked == .Option(inner) {
                 inner_row: ir_value_type(m, p, inner) ?? return jet_eval_ir_transport_fail(s, checked)
                 if word == 0 {
@@ -217,6 +218,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             return jet_eval_ir_transport_fail(s, checked)
         }
         .Aggregate -> {
+            checked: ir_untag(m.types[row].ty)
             if ir_fixed_shape(m, p, row) == .Val(shape) {
                 // An inline `[T#N]` holds its N elements in place.
                 values := [TComptimeValue]{}
@@ -239,7 +241,16 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 }
                 values := [TComptimeValue]{}
                 if length > 0 {
+                    if length > 16 -> values.try_reserve(length) ?? return None
                     data: jet_eval_ir_read(s, word + 16, 8) ?? return None
+                    if m.types[element_row].kind == .String {
+                        loop index in 0..<length {
+                            header: jet_eval_ir_read(s, data + index * 8, 8) ?? return None
+                            text: jet_eval_ir_text(s, header) ?? return None
+                            values.push(TComptimeValue.String{value: text})
+                        }
+                        return Val(TComptimeValue.List{values: values})
+                    }
                     stride: ir_list_stride(m, element_row)
                     loop index in 0..<length {
                         item: jet_eval_ir_member_word(m, s, data, index * stride, element_row) ?? return None
@@ -279,6 +290,11 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 output: jet_eval_ir_fields(m, p, s, word, members) ?? return None
                 return Val(TComptimeValue.Struct{type_name: type_name(checked), fields: output})
             }
+            cached: s.struct_row_index.get(row) ?? -1
+            if cached >= 0 {
+                output: jet_eval_ir_cached_fields(m, p, s, word, cached) ?? return None
+                return Val(TComptimeValue.Struct{type_name: s.struct_name_cache[cached].copy(), fields: output})
+            }
             name: if checked == {
                 .Named(name) -> name
                 .Apply(name, _) -> name
@@ -288,8 +304,12 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             }
             definition: ir_type_def(p, name) ?? return jet_eval_ir_transport_fail(s, checked)
             members: ir_struct_members(m, p, definition, ir_type_args(checked)) ?? return jet_eval_ir_transport_fail(s, checked)
-            output: jet_eval_ir_fields(m, p, s, word, members) ?? return None
-            return Val(TComptimeValue.Struct{type_name: p.types[definition].name.copy(), fields: output})
+            slot: s.struct_members_cache.len()
+            s.struct_members_cache.push(members)
+            s.struct_name_cache.push(p.types[definition].name)
+            s.struct_row_index[row] = slot
+            output: jet_eval_ir_cached_fields(m, p, s, word, slot) ?? return None
+            return Val(TComptimeValue.Struct{type_name: s.struct_name_cache[slot], fields: output})
         }
     }
 }
@@ -595,11 +615,21 @@ jet_eval_ir_type_display: fn(ty: Type) -> String Never! {
 // The word of a member of type row `row` at byte `offset` of `base`: an
 // aggregate is its address, anything else is loaded.
 jet_eval_ir_member_word: fn(m: &IRModule, s: &JetEvalIRState, base: Int, offset: Int, row: Int) -> Int? Never! {
-    ty: m.types[row]
-    if ty.kind == .Aggregate -> return Val(base + offset)
-    width: jet_eval_ir_width(ty)
+    kind: m.types[row].kind
+    if kind == .Aggregate -> return Val(base + offset)
+    width: if kind == {
+        .Unit -> 0
+        .Bool -> 1
+        .Float32 -> 4
+        .Word -> {
+            size: m.types[row].size
+            if size == 1 || size == 2 || size == 4 -> size else -> 8
+        }
+        .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
+    }
     if width == 0 -> return Val(0)
-    jet_eval_ir_load(s, ty, base + offset, width)
+    signed: kind == .Int || kind == .Float || (kind == .Word && m.types[row].signed)
+    jet_eval_ir_read_as(s, base + offset, width, signed)
 }
 
 jet_eval_ir_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {
@@ -607,6 +637,17 @@ jet_eval_ir_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int
     loop member in members {
         value: jet_eval_ir_member_value(m, p, s, base, member) ?? return None
         output.push(TComptimeField{name: member.name.copy(), value: value})
+    }
+    Val(output)
+}
+
+jet_eval_ir_cached_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, slot: Int) -> [TComptimeField]? {
+    count: s.struct_members_cache[slot].len()
+    output := [TComptimeField]{}
+    loop index in 0..<count {
+        member: s.struct_members_cache[slot][index]
+        value: jet_eval_ir_member_value(m, p, s, base, member) ?? return None
+        output.push(TComptimeField{name: member.name, value: value})
     }
     Val(output)
 }

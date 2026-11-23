@@ -183,7 +183,7 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
             }
             next
         }
-        // EXIT, or a frame no compiler sends.
+        if comptime_serve_shm_cmd(frame, kind, a, b) -> next
         trap_defect_exit(I64{0})
         return I64{0}
     }
@@ -196,11 +196,67 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
     #Unsafe("the serve entry runs once, on the image's only thread, before it serves") {
         comptime_serve_root = frame
         comptime_serve_stop_code = rt_comptime_serve_stop_address()
+        comptime_serve_shm = comptime_serve_shm_init()
     }
-    comptime_serve_reply(frame, I64{0}, count, I64{0}, I64{0}, I64{0})
+    comptime_serve_reply(frame, I64{0}, count, if (comptime_serve_shm != I64{0}) -> I64{1} else -> I64{0}, I64{0}, I64{0})
     comptime_serve_send(table, count * I64{8})
     _ := comptime_serve_loop(frame)
     trap_defect_exit(I64{0})
+}
+
+comptime_serve_shm := I64{0}
+
+// Maps the shared staging memfd passed on fd 6 and closes fd 6 immediately
+// so seccomp and `#Impure` file opens start cleanly from fd 6.
+comptime_serve_shm_init: fn() -> I64 {
+    mapped: trap_syscall(I64{9}, I64{0}, I64{4194304}, I64{3}, I64{1}, I64{6}, I64{0})
+    _ := trap_syscall(I64{3}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (mapped > I64{0}) -> mapped else -> I64{0}
+}
+
+// Handles SHM_TEXT (13), SHM_WRITE (14), and SHM_LOAD (15) from the shared
+// staging window; false for any other frame kind.
+comptime_serve_shm_cmd: fn(frame: I64, kind: I64, a: I64, b: I64) -> Bool {
+    if (comptime_serve_shm == I64{0}) { return false }
+    if (kind == I64{13}) {
+        comptime_serve_reply(frame, I64{1}, jet_rt_string_from_static(comptime_serve_shm, a), I64{0}, I64{0}, I64{0})
+        return true
+    }
+    if (kind == I64{14}) {
+        if (b > I64{0}) { rt_text_bytes_copy(a, comptime_serve_shm, b) }
+        comptime_serve_reply(frame, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+        return true
+    }
+    if (kind == I64{15}) {
+        comptime_serve_reply(frame, I64{1}, comptime_serve_shm_load(a), I64{0}, I64{0}, I64{0})
+        return true
+    }
+    false
+}
+
+// Loads `count` segments described in the shared staging window (six words per
+// segment: low, map_size, vaddr, file_size, protection, shm_offset); returns 0
+// or the first failing mmap/mprotect result.
+comptime_serve_shm_load: fn(count: I64) -> I64 {
+    index := I64{0}
+    loop index < count {
+        row: wrapping(comptime_serve_shm + index * I64{48})
+        low: trap_word(row)
+        map_size: trap_word(wrapping(row + I64{8}))
+        vaddr: trap_word(wrapping(row + I64{16}))
+        file_size: trap_word(wrapping(row + I64{24}))
+        protection: trap_word(wrapping(row + I64{32}))
+        shm_offset: trap_word(wrapping(row + I64{40}))
+        mapped: trap_map(low, map_size, I64{1048610})
+        if (mapped != low) { return mapped }
+        if (file_size > I64{0}) {
+            rt_text_bytes_copy(vaddr, wrapping(comptime_serve_shm + shm_offset), file_size)
+        }
+        protected: trap_syscall(I64{10}, low, map_size, protection, I64{0}, I64{0}, I64{0})
+        if (protected != I64{0}) { return protected }
+        index += I64{1}
+    }
+    I64{0}
 }
 
 // A host route of compile-time code (JetIR ir_host_route): `count` operand
