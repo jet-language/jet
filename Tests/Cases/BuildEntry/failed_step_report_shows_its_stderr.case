@@ -1,0 +1,16 @@
+# Claim: a build step that fails is reported with what it wrote to stderr,
+# right after the report's Fix, line for line. A step that wrote nothing to
+# stderr is reported as such, and its Fix promises no stderr.
+fixture: Fixtures/FailedStepReportShowsItsStderr
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step loud: jet build loud.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "Jet.BuildProbeFailed: Build action `fail` exited with status 7" # the step's exit status
+stderr: ~ "its stderr follows\nfirst line\nsecond line\n" # the step's stderr follows the Fix
+step quiet: jet build quiet.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "Jet.BuildProbeFailed: Build action `fail` exited with status 3" # the step's exit status
+stderr: ~ "it wrote nothing to stderr" # says the stderr is empty
+stderr: !~ "its stderr follows" # and promises none

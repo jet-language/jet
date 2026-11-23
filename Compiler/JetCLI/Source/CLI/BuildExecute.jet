@@ -1088,7 +1088,15 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
             looked: loop folder in searched -> "  {folder}"
             jet_cli_build_execution_failed("E3505", "build probe `{probe}` found no folder holding {wanted}", Val("It looked in:\n{looked.join("\n")}"), fix, color)
         }
-        .Reported(report) -> jet_cli_build_execution_failed("E3505", report.message, build_action_failure_stderr(report), "fix the command the action runs; its stderr follows", color)
+        .Reported(report) -> {
+            // The action's stderr follows the report as it wrote it; an
+            // action that wrote none says so rather than promising it.
+            stderr: build_action_failure_stderr(report) ?? ""
+            if stderr.trim() == "" {
+                return jet_cli_build_execution_failed("E3505", report.message, None, "fix the command the action runs; it wrote nothing to stderr, so look at its exit status and the files it reads", color)
+            }
+            jet_cli_build_execution_failed("E3505", report.message, Val(stderr), "fix the command the action runs; its stderr follows", color)
+        }
         .InvalidGraph(graph) -> jet_cli_ice("the checked build plan is not a valid executor graph: {graph.debug_text()}")
         .HandEdited(action, path) -> jet_cli_build_execution_failed("E3502", "step `{action}` would overwrite `{path}`, which it keeps in git and which holds bytes no build wrote", None, "undo the edit (`git checkout -- {path}`) and change the step's inputs instead; the build rewrites `{path}` from them", color)
     }
