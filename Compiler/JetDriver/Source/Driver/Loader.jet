@@ -2347,6 +2347,10 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
     }
 }
 
+jet_driver_push_source_file: fn(files: &[SourceFile], file: SourceFile) Never! {
+    files.push(file.copy())
+}
+
 jet_driver_add_source_file: fn(files: &[SourceFile], file: SourceFile, diagnostics: &[Diagnostic]) {
     if file.id.value != source_file_id(file.path).value {
         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "source-file identities are stable functions of the path", "rebuild the source-file identity with source_file_id(path)"))
@@ -2364,7 +2368,31 @@ jet_driver_add_source_file: fn(files: &[SourceFile], file: SourceFile, diagnosti
             return
         }
     }
-    files.push(file.copy())
+    jet_driver_push_source_file(files, file)
+}
+
+jet_driver_add_source_file_indexed: fn(files: &[SourceFile], added_paths: &NameTable, added_row: &[Int], added_ids: &[U64:Int], file: SourceFile, diagnostics: &[Diagnostic]) {
+    if file.id.value != source_file_id(file.path).value {
+        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source-file identity does not match its canonical path", "source-file identities are stable functions of the path", "rebuild the source-file identity with source_file_id(path)"))
+        return
+    }
+    pid: name_index(name_intern(added_paths, file.path))
+    loop added_row.len() <= pid -> added_row.push(-1)
+    if added_row[pid] >= 0 {
+        existing: files[added_row[pid]]
+        if existing.id.value != file.id.value || existing.source != file.source {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "one canonical source path has conflicting source records", "a source-file identity must name one immutable byte sequence", "provide one source record for this canonical path"))
+        }
+        return
+    }
+    if added_ids.get(file.id.value) != None {
+        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two source paths have the same source-file identity", "source-file IDs must resolve to exactly one canonical path", "use distinct canonical source paths"))
+        return
+    }
+    row: files.len()
+    added_row[pid] = row
+    added_ids[file.id.value] = row
+    jet_driver_push_source_file(files, file)
 }
 
 jet_driver_valid_authority_relative_path: fn(path: String) -> Bool Never! {
@@ -2391,6 +2419,8 @@ jet_driver_validate_authorized_snapshot: fn(snapshot: JetDriverAuthorizedSourceS
     }
     entry_root_count := 0
     entry_found := false
+    seen_paths := name_table()
+    seen_count := [Int]{0}
     loop (root_index, root) in snapshot.roots {
         if root.identity.len() == 0 || root.canonical_path.len() == 0 || root.canonical_path.contains("\\") {
             diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a native source root has no canonical path or pinned identity", "source authority is bound to one opened root object", "provide the root identity and canonical path from AuthorityResolver"))
@@ -2409,51 +2439,61 @@ jet_driver_validate_authorized_snapshot: fn(snapshot: JetDriverAuthorizedSourceS
             if file.path == snapshot.entry_path && root.identity == snapshot.entry_root_identity {
                 entry_found = true
             }
-            loop previous_file_index in 0..<file_index {
-                if root.files[previous_file_index].path == file.path {
-                    diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a canonical file path", "one canonical source path names one immutable byte sequence", "provide the checked file once"))
-                }
-            }
-            loop previous_root in 0..<root_index {
-                loop previous_file in snapshot.roots[previous_root].files {
-                    if previous_file.path == file.path {
-                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical source path", "one path must have one authority owner", "remove the duplicate path from the source snapshot"))
+            pid: name_index(name_intern(seen_paths, file.path))
+            loop seen_count.len() <= pid -> seen_count.push(0)
+            if seen_count[pid] > 0 {
+                loop previous_file_index in 0..<file_index {
+                    if root.files[previous_file_index].path == file.path {
+                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a canonical file path", "one canonical source path names one immutable byte sequence", "provide the checked file once"))
                     }
                 }
-                loop previous_cache in snapshot.roots[previous_root].foreign_cache_files {
-                    if previous_cache.path == file.path {
-                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source file and foreign cache claim the same canonical path", "one path must have one authority owner and one immutable source record", "remove the duplicate path from the source snapshot"))
+                loop previous_root in 0..<root_index {
+                    loop previous_file in snapshot.roots[previous_root].files {
+                        if previous_file.path == file.path {
+                            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical source path", "one path must have one authority owner", "remove the duplicate path from the source snapshot"))
+                        }
+                    }
+                    loop previous_cache in snapshot.roots[previous_root].foreign_cache_files {
+                        if previous_cache.path == file.path {
+                            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source file and foreign cache claim the same canonical path", "one path must have one authority owner and one immutable source record", "remove the duplicate path from the source snapshot"))
+                        }
                     }
                 }
             }
+            seen_count[pid] = seen_count[pid] + 1
         }
         loop (cache_index, cache_file) in root.foreign_cache_files {
             if cache_file.identity.len() == 0 || !jet_driver_valid_authority_relative_path(cache_file.relative_path) || cache_file.path != jet_driver_authority_path(root.canonical_path, cache_file.relative_path) {
                 diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a foreign cache source is not bound to its canonical authority root", "cache bytes and object identity must come from one checked relative open beneath the pinned root", "provide the canonical path, relative path, and cache identity from the same checked handle"))
             }
-            loop source_file in root.files {
-                if source_file.path == cache_file.path {
-                    diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a foreign cache source collides with an authorized source path", "physical source and provider cache records have distinct immutable identities", "use one canonical source record for this path"))
-                }
-            }
-            loop previous_cache_index in 0..<cache_index {
-                if root.foreign_cache_files[previous_cache_index].path == cache_file.path {
-                    diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a foreign cache path", "one canonical cache path names one immutable byte sequence", "provide the checked cache file once"))
-                }
-            }
-            loop previous_root in 0..<root_index {
-                previous: snapshot.roots[previous_root]
-                loop previous_file in previous.files {
-                    if previous_file.path == cache_file.path {
-                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native records claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+            cid: name_index(name_intern(seen_paths, cache_file.path))
+            loop seen_count.len() <= cid -> seen_count.push(0)
+            if seen_count[cid] > 0 {
+                loop source_file in root.files {
+                    if source_file.path == cache_file.path {
+                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a foreign cache source collides with an authorized source path", "physical source and provider cache records have distinct immutable identities", "use one canonical source record for this path"))
                     }
                 }
-                loop previous_file in previous.foreign_cache_files {
-                    if previous_file.path == cache_file.path {
-                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+                loop previous_cache_index in 0..<cache_index {
+                    if root.foreign_cache_files[previous_cache_index].path == cache_file.path {
+                        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native source root repeats a foreign cache path", "one canonical cache path names one immutable byte sequence", "provide the checked cache file once"))
+                    }
+                }
+                loop previous_root in 0..<root_index {
+                    previous: snapshot.roots[previous_root]
+                    loop previous_file in previous.files {
+                        if previous_file.path == cache_file.path {
+                            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native records claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+                        }
+                    }
+                    loop previous_file in previous.foreign_cache_files {
+                        if previous_file.path == cache_file.path {
+                            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two native roots claim the same canonical cache path", "one path must have one authority owner and one immutable source record", "remove the duplicate cache path"))
+                        }
                     }
                 }
             }
+            seen_count[cid] = seen_count[cid] + 1
         }
     }
     if entry_root_count != 1 || !entry_found {
@@ -2519,6 +2559,17 @@ jet_driver_find_generated_source_file: fn(generated_sources: [SourceFile], path:
     found
 }
 
+jet_driver_find_generated_source_indexed: fn(generated_sources: [SourceFile], gen_paths: NameTable, gen_slot: [Int], path: String, diagnostics: &[Diagnostic]) -> SourceFile? {
+    found_name: name_find(gen_paths, path) ?? return None
+    slot: gen_slot[name_index(found_name)]
+    if slot == -2 {
+        diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source path has multiple exact text records", "generated source identities are unique and retain one immutable byte sequence", "give each generated source a unique identity"))
+        return None
+    }
+    if slot < 0 -> return None
+    Val(generated_sources[slot])
+}
+
 jet_driver_source_segment_bytes_match: fn(aggregate_bytes: [U8], segment: SemaSourceSegment, source_bytes: [U8]) -> Bool Never! {
     if segment.generated.start < 0 || segment.generated.end < segment.generated.start || segment.generated.end > aggregate_bytes.len() || segment.source_start < 0 {
         return false
@@ -2551,7 +2602,49 @@ jet_driver_source_segment_matches: fn(aggregate: String, segment: SemaSourceSegm
 
 jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], generated_sources: [SourceFile]) -> JetDriverSourceFileCollection {
     entry_root: jet_driver_entry_root_path(snapshot)
+    // Index authorized snapshot files once in O(N) so provenance checks avoid
+    // quadratic scans over roots and files.
+    auth_paths := name_table()
+    auth_root := [Int]{-1}
+    auth_slot := [Int]{-1}
+    auth_ambiguous := [Bool]{false}
+    loop (root_index, root) in snapshot.roots {
+        loop (file_index, file) in root.files {
+            id: name_index(name_intern(auth_paths, file.path))
+            loop auth_root.len() <= id {
+                auth_root.push(-1)
+                auth_slot.push(-1)
+                auth_ambiguous.push(false)
+            }
+            if auth_root[id] == -1 {
+                auth_root[id] = root_index
+                auth_slot[id] = file_index
+            } else { auth_ambiguous[id] = true }
+        }
+        loop (cache_index, file) in root.foreign_cache_files {
+            id: name_index(name_intern(auth_paths, file.path))
+            loop auth_root.len() <= id {
+                auth_root.push(-1)
+                auth_slot.push(-1)
+                auth_ambiguous.push(false)
+            }
+            if auth_root[id] == -1 {
+                auth_root[id] = root_index
+                auth_slot[id] = -2 - cache_index
+            } else { auth_ambiguous[id] = true }
+        }
+    }
+    gen_paths := name_table()
+    gen_slot := [Int]{-1}
+    loop (generated_index, generated) in generated_sources {
+        id: name_index(name_intern(gen_paths, generated.path))
+        loop gen_slot.len() <= id -> gen_slot.push(-1)
+        if gen_slot[id] == -1 -> gen_slot[id] = generated_index else -> gen_slot[id] = -2
+    }
     files := [SourceFile]{}
+    added_paths := name_table()
+    added_row := [Int]{-1}
+    added_ids := [U64:Int]{}
     diagnostics := [Diagnostic]{}
     loop loaded_module in modules {
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= source_units.len() {
@@ -2562,15 +2655,15 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
         // Embedded Core modules have no authority root: their exact text is
         // the compiler-generated record the loader retained for them.
         if jet_driver_unit_is_embedded(unit) {
-            if jet_driver_source_path_is_authorized(snapshot, unit.path) {
+            if name_find(auth_paths, jet_driver_physical_path(entry_root, unit.path)) != None {
                 diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an embedded Core module aliases an authorized physical source", "Core library identities are distinct from immutable disk snapshots", "keep the embedded library origin for embedded Core sources"))
                 next
             }
-            core_file: jet_driver_find_generated_source_file(generated_sources, unit.path, diagnostics) ?? {
+            core_file: jet_driver_find_generated_source_indexed(generated_sources, gen_paths, gen_slot, unit.path, diagnostics) ?? {
                 diagnostics.push(jet_driver_diagnostic_without_span("E0003", "an embedded Core module has no exact source text record", "Core source bytes are retained beside the loaded module", "retain the loader's Core source record"))
                 next
             }
-            jet_driver_add_source_file(files, core_file, diagnostics)
+            jet_driver_add_source_file_indexed(files, added_paths, added_row, added_ids, core_file, diagnostics)
             next
         }
         if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() {
@@ -2597,11 +2690,11 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
                 aggregate_file = Val(SourceFile{id: source_file_id(unit.path), path: unit.path, source: file.source})
             }
             .CompilerGenerated -> {
-                if unit.file_index != -1 || jet_driver_source_path_is_authorized(snapshot, unit.path) {
+                if unit.file_index != -1 || name_find(auth_paths, jet_driver_physical_path(entry_root, unit.path)) != None {
                     diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source unit aliases an authorized physical source", "generated source identities are distinct from immutable disk snapshots", "use a unique compiler-generated origin path"))
                     next
                 }
-                aggregate_file = jet_driver_find_generated_source_file(generated_sources, unit.path, diagnostics)
+                aggregate_file = jet_driver_find_generated_source_indexed(generated_sources, gen_paths, gen_slot, unit.path, diagnostics)
                 if aggregate_file == None {
                     diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source unit has no exact generated text record", "generated source bytes must be preserved separately from authorized disk files", "retain the unique generated source record"))
                     next
@@ -2609,7 +2702,7 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
             }
         }
         aggregate: aggregate_file ?? next
-        jet_driver_add_source_file(files, aggregate, diagnostics)
+        jet_driver_add_source_file_indexed(files, added_paths, added_row, added_ids, aggregate, diagnostics)
         aggregate_length: aggregate.source.count_bytes()
         previous_generated_end := -1
         loop segment in unit.source_segments {
@@ -2643,7 +2736,18 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
             }
             if segment.origin == {
                 .Snapshot -> {
-                    raw: jet_driver_find_snapshot_source_file(snapshot, unit.root_index, segment.source_file, diagnostics) ?? {
+                    raw_found := JetDriverAuthorizedSourceFile?{None}
+                    physical: jet_driver_physical_path(entry_root, segment.source_file)
+                    if name_find(auth_paths, physical) == .Val(found_name) {
+                        aid: name_index(found_name)
+                        if auth_ambiguous[aid] {
+                            raw_found = jet_driver_find_snapshot_source_file(snapshot, unit.root_index, segment.source_file, diagnostics)
+                        } else if auth_root[aid] == unit.root_index {
+                            slot: auth_slot[aid]
+                            raw_found = if slot >= 0 -> Val(root.files[slot]) else -> Val(root.foreign_cache_files[-2 - slot])
+                        }
+                    }
+                    raw: raw_found ?? {
                         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a snapshot source segment is absent from the authorized root or foreign cache snapshot", "physical source lookup uses only exact checked source records", "provide the matching immutable source or cache file"))
                         next
                     }
@@ -2657,14 +2761,14 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
                         next
                     }
                     raw_path: jet_driver_display_path(entry_root, raw.path)
-                    jet_driver_add_source_file(files, SourceFile{id: source_file_id(raw_path), path: raw_path, source: raw.source}, diagnostics)
+                    jet_driver_add_source_file_indexed(files, added_paths, added_row, added_ids, SourceFile{id: source_file_id(raw_path), path: raw_path, source: raw.source}, diagnostics)
                 }
                 .CompilerGenerated -> {
-                    if jet_driver_source_path_is_authorized(snapshot, segment.source_file) {
+                    if name_find(auth_paths, jet_driver_physical_path(entry_root, segment.source_file)) != None {
                         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated segment claims an authorized disk path", "compiler-produced text has a distinct non-disk identity", "give the generated segment a unique virtual origin"))
                         next
                     }
-                    raw: jet_driver_find_generated_source_file(generated_sources, segment.source_file, diagnostics) ?? {
+                    raw: jet_driver_find_generated_source_indexed(generated_sources, gen_paths, gen_slot, segment.source_file, diagnostics) ?? {
                         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source segment has no exact generated text record", "generated source text and identity are retained explicitly", "retain the unique generated source record"))
                         next
                     }
@@ -2673,21 +2777,24 @@ jet_driver_collect_source_files: fn(snapshot: JetDriverAuthorizedSourceSnapshot,
                         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source segment does not match its exact generated bytes", "generated provenance remains bounded by its retained compiler output", "regenerate the segment from its exact compiler-generated source"))
                         next
                     }
-                    jet_driver_add_source_file(files, raw, diagnostics)
+                    jet_driver_add_source_file_indexed(files, added_paths, added_row, added_ids, raw, diagnostics)
                 }
             }
         }
     }
-    loop (generated_index, generated) in generated_sources {
-        loop previous_generated_index in 0..<generated_index {
-            if generated_sources[previous_generated_index].path == generated.path {
-                diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two compiler-generated source records share one virtual identity", "generated source identity maps to one exact text payload", "give each generated source a unique identity"))
-            }
+    seen_generated := name_table()
+    seen_generated_count := [Int]{0}
+    loop generated in generated_sources {
+        gid: name_index(name_intern(seen_generated, generated.path))
+        loop seen_generated_count.len() <= gid -> seen_generated_count.push(0)
+        loop _ in 0..<seen_generated_count[gid] {
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "two compiler-generated source records share one virtual identity", "generated source identity maps to one exact text payload", "give each generated source a unique identity"))
         }
-        if jet_driver_source_path_is_authorized(snapshot, generated.path) {
+        seen_generated_count[gid] = seen_generated_count[gid] + 1
+        if name_find(auth_paths, jet_driver_physical_path(entry_root, generated.path)) != None {
             diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a compiler-generated source record aliases an authorized disk path", "compiler output is never substituted for an authorized source record", "use a distinct generated-source identity"))
         }
-        jet_driver_add_source_file(files, generated, diagnostics)
+        jet_driver_add_source_file_indexed(files, added_paths, added_row, added_ids, generated, diagnostics)
     }
     JetDriverSourceFileCollection{files: files, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
 }
@@ -3364,15 +3471,24 @@ jet_driver_namespace_reach: fn(modules: &[JetDriverLoadedModule], source_units: 
     }
     // Default key -> slot of its words; each default keeps the words that
     // name a namespace member or another default.
-    default_slots := [String:Int]{}
+    default_table := name_table()
+    default_has := [Bool]{false}
+    default_entries := [{key: String, slot: Int}]{}
     default_words := [[String]]{}
     default_seen := [[String:Bool]]{}
     loop region in regions {
-        if default_slots.get(region.key) != None -> next
-        default_slots[region.key] = default_words.len()
+        id: name_index(name_intern(default_table, region.key))
+        loop default_has.len() <= id -> default_has.push(false)
+        if default_has[id] -> next
+        default_has[id] = true
+        slot: default_words.len()
+        default_entries.push({key: region.key, slot: slot})
         default_words.push([String]{})
         default_seen.push([String:Bool]{})
     }
+    default_entries.sort_by(fn(left: {key: String, slot: Int}, right: {key: String, slot: Int}) { left.key <=> right.key })
+    default_slots := [String:Int]{}
+    loop entry in default_entries -> default_slots[entry.key] = entry.slot
     namespace_names := name_table()
     loop table_index in 0..<members.len() {
         loop module_index in members[table_index] {
@@ -3604,22 +3720,29 @@ jet_driver_bind_package_namespaces: fn(
             names.push(member_names)
             modules[module_index].namespace_private = member_private
         }
-        owners := [String:Int]{}
+        owner_table := name_table()
+        owner_first := [Int]{-1}
+        owner_entries := [{name: String, pos: Int}]{}
         loop position in 0..<names.len() {
             loop declared in names[position] {
-                if owners.get(declared.name) == {
-                    .Val(first) -> {
-                        if first == position -> next
-                        unit: source_units[modules[members[position]].source_unit_index]
-                        other: source_units[modules[members[first]].source_unit_index]
-                        package_name: jet_driver_path_leaf(request.authorized_sources.roots[package.root_index].canonical_path)
-                        diagnostics.push(jet_driver_diagnostic_at_source("E0624", Val(declared.span), unit.path, 0, "`{declared.name}` is declared in two files of package `{package_name}`", "the files of one package share one namespace, so each top-level name belongs to exactly one file; the other declaration is in `{other.relative_path}`.", "rename one of the declarations, or keep only one of them."))
-                        return false
-                    }
-                    .None -> _ := owners.add(declared.name, position)
+                id: name_index(name_intern(owner_table, declared.name))
+                loop owner_first.len() <= id -> owner_first.push(-1)
+                first: owner_first[id]
+                if first >= 0 {
+                    if first == position -> next
+                    unit: source_units[modules[members[position]].source_unit_index]
+                    other: source_units[modules[members[first]].source_unit_index]
+                    package_name: jet_driver_path_leaf(request.authorized_sources.roots[package.root_index].canonical_path)
+                    diagnostics.push(jet_driver_diagnostic_at_source("E0624", Val(declared.span), unit.path, 0, "`{declared.name}` is declared in two files of package `{package_name}`", "the files of one package share one namespace, so each top-level name belongs to exactly one file; the other declaration is in `{other.relative_path}`.", "rename one of the declarations, or keep only one of them."))
+                    return false
                 }
+                owner_first[id] = position
+                owner_entries.push({name: declared.name, pos: position})
             }
         }
+        owner_entries.sort_by(fn(left: {name: String, pos: Int}, right: {name: String, pos: Int}) { left.name <=> right.name })
+        owners := [String:Int]{}
+        loop entry in owner_entries -> _ := owners.add(entry.name, entry.pos)
         // A library package has no `run: fn`, not even in a `run.jet` home.
         if package.outputs.library && !package.outputs.executable {
             loop module_index in members {

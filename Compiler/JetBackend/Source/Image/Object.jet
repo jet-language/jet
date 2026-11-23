@@ -852,7 +852,7 @@ x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
 // always written. With `own_sections` (a library object) every function and
 // data object is in a section of its own (see the file comment). Each of
 // `data_exports` is a global symbol of its data object.
-x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
+x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool, split: Bool{false}) -> X64ExecutableResult Never! {
     // Owned here: their code leaves them below (x64_object_take_codes).
     functions := compiled.move()
     // Per function id + 1 its first function row (-1: none); the entry stub
@@ -1006,21 +1006,25 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     // thread of their own while the file is assembled; a smaller object
     // assembles its file first and they drop as this returns.
     if laid.workers <= 1 {
-        return X64ExecutableResult{bytes: x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, false), errors: [String]{}, imports: laid.imports.move()}
+        assembled := x64_object_file_assembled(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, false, split)
+        assembled.imports = laid.imports.move()
+        return assembled
     }
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
-    files := [[U8]]{}
+    files := [X64ExecutableResult]{}
     task.group x64_object_release_group {
         drop_fns: task x64_object_drop(released, 0)
         drop_dbg: task x64_object_drop(released, 1)
         drop_prog: task x64_object_drop(released, 2)
-        files.push(x64_object_file(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, true))
+        files.push(x64_object_file_assembled(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, true, split))
         _: drop_fns.join() ?? panic(compiler_threads_failure_text(err))
         _: drop_dbg.join() ?? panic(compiler_threads_failure_text(err))
         _: drop_prog.join() ?? panic(compiler_threads_failure_text(err))
     }
-    X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}, imports: laid.imports.move()}
+    assembled := files.pop() ?? panic("the object writer lost its file")
+    assembled.imports = laid.imports.move()
+    assembled
 }
 
 // What x64_object_lay builds for x64_object_functions_threads besides the
@@ -1435,7 +1439,89 @@ x64_object_encode_relas: fn(relas: [X64ObjectRela]) -> [U8] Never! {
 // `xindex` holds the symbols' extended section indices, empty when no
 // index reaches ELF64_OBJECT_SECTION_LIMIT; with them the object ends in
 // `.symtab_shndx`, and with that many headers section 0 holds their count.
+x64_object_materialize_one: fn(section: &&X64ObjectSection) -> [U8] Never! {
+    s := section.move()
+    if s.pieces.len() == 0 && s.relas.len() == 0 -> return s.bytes.move()
+    if s.pieces.len() == 1 && s.bytes.len() == 0 && s.relas.len() == 0 && s.pieces[0].at == 0 {
+        p: s.pieces.pop() ?? panic("lost section piece")
+        return p.bytes.move()
+    }
+    size: x64_object_section_size(s)
+    out := [U8]{}
+    if size > 0 -> out.try_reserve(size) ?? panic("reserve failed")
+    x64_object_section_write(out, 0, s)
+    out
+}
+
+x64_object_materialize_parallel: fn(items: &&[X64ObjectSection]) -> [[U8]] Never! {
+    owned := items.move()
+    if owned.len() == 0 -> return [[U8]]{}
+    head: owned.pop() ?? panic("lost section item")
+    if owned.len() == 0 -> return [[U8]]{x64_object_materialize_one(head)}
+    out := [[U8]]{}
+    task.group x64_object_materialize_threads {
+        done_head: task &&head { x64_object_materialize_one(head) }
+        rest := x64_object_materialize_parallel(owned)
+        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        out.push(first)
+        loop row in rest.move() -> out.push(row)
+    }
+    out
+}
+
+// Flattens a split-buffer object (`bytes` + `split_bufs` + `split_sec_buf`)
+// back into a single contiguous ELF relocatable object when a fallback path
+// needs flat bytes.
+x64_object_split_flatten: fn(header: &&[U8], split_bufs: [[U8]], split_sec_buf: [Int]) -> [U8] Never! {
+    if split_bufs.len() == 0 -> return header.move()
+    shoff: x64_object_test_field(header, 40, 8)
+    count := x64_object_test_field(header, 60, 2)
+    if count == 0 -> count = x64_object_test_field(header, shoff + 32, 8)
+    offsets := [Int]{}
+    end := ELF64_HEADER_SIZE
+    offsets.push(0)
+    loop k in 1..<count {
+        h: shoff + ELF64_SECTION_HEADER_SIZE * k
+        size: x64_object_test_field(header, h + 32, 8)
+        align := x64_object_test_field(header, h + 48, 8)
+        if align < 1 -> align = 1
+        loop end % align != 0 -> end += 1
+        offsets.push(end)
+        end += size
+    }
+    loop end % 8 != 0 -> end += 1
+    new_shoff: end
+    out := [U8]{}
+    out.try_reserve(new_shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object file: {err}")
+    out.extend(header[0..<ELF64_HEADER_SIZE])
+    loop shift in 0..<8 -> out[40 + shift] = U8{(new_shoff >> (8 * shift)) & 255}
+    loop k in 1..<count {
+        h: shoff + ELF64_SECTION_HEADER_SIZE * k
+        size: x64_object_test_field(header, h + 32, 8)
+        align := x64_object_test_field(header, h + 48, 8)
+        if align < 1 -> align = 1
+        elf64_pad(out, align)
+        buf_idx: if k < split_sec_buf.len() -> split_sec_buf[k] else -> -1
+        if buf_idx >= 0 -> out.extend(split_bufs[buf_idx]) else if size > 0 {
+            old_off: x64_object_test_field(header, h + 24, 8)
+            out.extend(header[old_off..<old_off + size])
+        }
+    }
+    elf64_pad(out, 8)
+    out.extend(header[shoff..<shoff + ELF64_SECTION_HEADER_SIZE * count])
+    loop k in 1..<count {
+        h: new_shoff + ELF64_SECTION_HEADER_SIZE * k
+        off: offsets[k]
+        loop shift in 0..<8 -> out[h + 24 + shift] = U8{(off >> (8 * shift)) & 255}
+    }
+    out
+}
+
 x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}) -> [U8] Never! {
+    x64_object_file_assembled(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, xindex, strtab, first_global, data_relas, exports, guard_sections, own, zone_spans, parallel_relas, false).bytes
+}
+
+x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: [X64ObjectPiece], symtab: [X64ObjectPiece], xindex: [X64ObjectPiece], strtab: [X64ObjectPiece], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection], zone_spans: [U8], parallel_relas: Bool{false}, split: Bool{false}) -> X64ExecutableResult Never! {
     rela_data_sec := x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA)
     rela_eh_sec := x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME)
     rela_info_sec := x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO)
@@ -1553,6 +1639,111 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
     }
     sections[ELF64_OBJECT_SHSTRTAB - 1].bytes = shstrtab.move()
 
+    if split {
+        // Split-buffer direct handoff: keep ELF header + `.shstrtab` + section
+        // headers in `header` (~2 KB), move single-buffer sections zero-copy,
+        // and coalesce multi-piece sections in parallel across workers.
+        sec_kinds := [Int]{}
+        sec_flags := [Int]{}
+        sec_sizes := [Int]{}
+        sec_links := [Int]{}
+        sec_infos := [Int]{}
+        sec_aligns := [Int]{}
+        sec_entries := [Int]{}
+        loop section in sections {
+            sec_kinds.push(section.kind)
+            sec_flags.push(section.flags)
+            sec_sizes.push(x64_object_section_size(section))
+            sec_links.push(section.link)
+            sec_infos.push(section.info)
+            sec_aligns.push(section.align)
+            sec_entries.push(section.entry_size)
+        }
+        split_sec_buf := [Int]{}
+        loop _ in 0..<count -> split_sec_buf.push(-1)
+        split_bufs := [[U8]]{}
+        multi_items := [X64ObjectSection]{}
+        multi_sec_indices := [Int]{}
+        shstrtab_bytes := [U8]{}
+        sections.reverse()
+        loop index in 0..<sec_kinds.len() {
+            sec := sections.pop() ?? panic("lost section")
+            sec_idx: index + 1
+            if sec_idx == ELF64_OBJECT_SHSTRTAB {
+                shstrtab_bytes = sec.bytes.move()
+                next
+            }
+            if sec_sizes[index] == 0 {
+                buf_idx: split_bufs.len()
+                split_bufs.push([U8]{})
+                split_sec_buf[sec_idx] = buf_idx
+                next
+            }
+            if sec.pieces.len() == 0 && sec.relas.len() == 0 {
+                buf_idx: split_bufs.len()
+                split_bufs.push(sec.bytes.move())
+                split_sec_buf[sec_idx] = buf_idx
+                next
+            }
+            if sec.pieces.len() == 1 && sec.bytes.len() == 0 && sec.relas.len() == 0 && sec.pieces[0].at == 0 {
+                p: sec.pieces.pop() ?? panic("lost section piece")
+                buf_idx: split_bufs.len()
+                split_bufs.push(p.bytes.move())
+                split_sec_buf[sec_idx] = buf_idx
+                next
+            }
+            multi_items.push(sec)
+            multi_sec_indices.push(sec_idx)
+        }
+        if multi_items.len() > 0 {
+            multi_items.reverse()
+            materialized := if parallel_relas && multi_items.len() > 1 -> x64_object_materialize_parallel(multi_items) else -> {
+                out_m := [[U8]]{}
+                loop multi_items.len() > 0 {
+                    item := multi_items.pop() ?? break
+                    out_m.push(x64_object_materialize_one(item))
+                }
+                out_m
+            }
+            materialized.reverse()
+            loop sec_idx in multi_sec_indices {
+                buf := materialized.pop() ?? panic("lost materialized section")
+                buf_idx: split_bufs.len()
+                split_bufs.push(buf.move())
+                split_sec_buf[sec_idx] = buf_idx
+            }
+        }
+        shstrtab_off: ELF64_HEADER_SIZE
+        shoff := shstrtab_off + shstrtab_bytes.len()
+        loop shoff % 8 != 0 -> shoff += 1
+        header := [U8]{}
+        header.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object header: {err}")
+        ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+        loop byte in ident -> header.push(U8{byte})
+        elf64_u16(header, 1)
+        elf64_u16(header, 62)
+        elf64_u32(header, 1)
+        elf64_u64(header, 0)
+        elf64_u64(header, 0)
+        elf64_u64(header, shoff)
+        elf64_u32(header, 0)
+        elf64_u16(header, ELF64_HEADER_SIZE)
+        elf64_u16(header, 0)
+        elf64_u16(header, 0)
+        elf64_u16(header, ELF64_SECTION_HEADER_SIZE)
+        elf64_u16(header, if count >= ELF64_OBJECT_SECTION_LIMIT -> 0 else -> count)
+        elf64_u16(header, ELF64_OBJECT_SHSTRTAB)
+        header.extend(shstrtab_bytes.move())
+        elf64_pad(header, 8)
+        elf64_section_header(header, 0, 0, 0, 0, if count >= ELF64_OBJECT_SECTION_LIMIT -> count else -> 0, 0, 0, 0, 0)
+        loop index in 0..<sec_kinds.len() {
+            sec_idx: index + 1
+            off: if sec_idx == ELF64_OBJECT_SHSTRTAB -> shstrtab_off else -> 0
+            elf64_section_header(header, name_offsets[index], sec_kinds[index], sec_flags[index], off, sec_sizes[index], sec_links[index], sec_infos[index], sec_aligns[index], sec_entries[index])
+        }
+        return X64ExecutableResult{bytes: header.move(), errors: [String]{}, split_bufs: split_bufs.move(), split_sec_buf: split_sec_buf.move()}
+    }
+
     // File: header, section contents, section header table. The layout
     // comes first, so the file is reserved once and each section is written
     // straight into it.
@@ -1594,5 +1785,5 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], text_align:
     loop (index, section) in sections {
         elf64_section_header(bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
     }
-    bytes
+    X64ExecutableResult{bytes: bytes.move(), errors: [String]{}}
 }

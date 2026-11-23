@@ -239,6 +239,10 @@ LinkFaultReport: enum {
 
 LinkContext: struct {
     bufs: [[U8]],
+    // Optional per-section buffer overrides for object 0 (split-buffer direct
+    // handoff from Object.jet); empty for flat objects, -1 for sections stored
+    // inline in `obj_buffer[0]` (`.shstrtab`).
+    sec_buf: [Int],
     archives: [LinkArchive],
     // archive_buffer[i] is the buffer of archives[i].
     archive_buffer: [Int],
@@ -267,6 +271,9 @@ LinkContext: struct {
     obj_symtab: [Int],
     obj_strtab: [Int],
     obj_shndx: [Int],
+    obj_symtab_buf: [Int],
+    obj_strtab_buf: [Int],
+    obj_shndx_buf: [Int],
     obj_count: [Int],
     obj_first_global: [Int],
     obj_first_section: [Int],
@@ -378,6 +385,7 @@ LinkContext: struct {
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
         bufs: bufs.move(),
+        sec_buf: [Int]{},
         archives: [LinkArchive]{},
         archive_buffer: [Int]{},
         pulled: [Int:Bool]{},
@@ -393,6 +401,9 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
         obj_symtab: [Int]{},
         obj_strtab: [Int]{},
         obj_shndx: [Int]{},
+        obj_symtab_buf: [Int]{},
+        obj_strtab_buf: [Int]{},
+        obj_shndx_buf: [Int]{},
         obj_count: [Int]{},
         obj_first_global: [Int]{},
         obj_first_section: [Int]{},
@@ -553,8 +564,26 @@ link_sec_flags: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
     link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 8)
 }
 
+// The buffer holding section `s`'s contents (separate buffer for split
+// object 0 sections, otherwise `c.obj_buffer[obj]`).
+link_sec_buf: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    if obj == 0 && s < c.sec_buf.len() {
+        split_b: c.sec_buf[s]
+        if split_b >= 0 -> return split_b
+    }
+    c.obj_buffer[obj]
+}
+
+// The buffer holding section `s`'s RELA table (or `c.obj_buffer[obj]` if none).
+link_rel_buf: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    r: link_rela_of(c, obj, s)
+    if r < 0 -> return c.obj_buffer[obj]
+    link_sec_buf(c, obj, r)
+}
+
 // Absolute offset of the section's bytes in its buffer.
 link_sec_offset: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
+    if obj == 0 && s < c.sec_buf.len() && c.sec_buf[s] >= 0 -> return 0
     c.obj_base[obj] + link_u64(c.bufs, c.obj_buffer[obj], link_hdr(c, obj, s) + 24)
 }
 
@@ -710,11 +739,11 @@ link_sym_at: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! { c.obj_symtab[o
 // Where symbol `k` of `obj` is defined: a section id, LINK_ABS, LINK_COMMON
 // or LINK_UNDEF (also for a section of a discarded COMDAT group).
 link_sym_shndx: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
-    b: c.obj_buffer[obj]
+    b: c.obj_symtab_buf[obj]
     index := link_u16(c.bufs, b, link_sym_at(c, obj, k) + 6)
     if index == 0xffff {
         if c.obj_shndx[obj] < 0 -> return LINK_UNDEF
-        index = link_u32(c.bufs, b, c.obj_shndx[obj] + 4 * k)
+        index = link_u32(c.bufs, c.obj_shndx_buf[obj], c.obj_shndx[obj] + 4 * k)
     } else {
         // Reserved st_shndx values have meaning only in the 16-bit field.
         // An extended section index equal to SHN_ABS/COMMON is still a section.
@@ -762,9 +791,9 @@ link_target_addr: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     s: link_sym_shndx(c, obj, k)
     // A defined local's value is an offset in its section: 32 bits.
     if s >= 0 {
-        return link_sec_addr(c, s) + link_u32(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
+        return link_sec_addr(c, s) + link_u32(c.bufs, c.obj_symtab_buf[obj], link_sym_at(c, obj, k) + 8)
     }
-    if s == LINK_ABS -> return link_u64(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 8)
+    if s == LINK_ABS -> return link_u64(c.bufs, c.obj_symtab_buf[obj], link_sym_at(c, obj, k) + 8)
     0
 }
 
@@ -779,7 +808,7 @@ link_target_absolute: fn(c: LinkContext, obj: Int, k: Int) -> Bool Never! {
 
 link_target_size: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
     g: link_global_of(c, obj, k)
-    if g < 0 -> return link_u64(c.bufs, c.obj_buffer[obj], link_sym_at(c, obj, k) + 16)
+    if g < 0 -> return link_u64(c.bufs, c.obj_symtab_buf[obj], link_sym_at(c, obj, k) + 16)
     f: link_final(c, g)
     if c.g_kind[f] == LINK_G_FILE -> return c.g_size[f]
     if c.g_kind[f] == LINK_G_COMMON -> return c.g_common_size[f]
@@ -820,14 +849,15 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     // One pass over the headers finds the symbol tables, the out-of-order
     // RELA sections, the COMDAT groups and the unwind tables.
     symtab := -1
-    shndx := -1
+    shndx_sec := -1
     groups := [Int]{}
     eh := [Int]{}
+    zone_secs := [Int]{}
     loop k in 1..<count {
         h: shoff + 64 * k
         kind: link_u32(c.bufs, b, h + 4)
         if kind == LINK_SHT_SYMTAB -> symtab = k else if kind == LINK_SHT_SYMTAB_SHNDX {
-            shndx = base + link_u64(c.bufs, b, h + 24)
+            shndx_sec = k
         } else if kind == LINK_SHT_RELA {
             target: link_u32(c.bufs, b, h + 44)
             if target + 1 != k && target > 0 && target < count {
@@ -843,9 +873,7 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
             c.roots.push(first + k)
         }
         if kind == LINK_SHT_PROGBITS && link_name_has(c.bufs, b, name_at, X64_OBJECT_ZONE_SPANS, true) {
-            spans_at: base + link_u64(c.bufs, b, h + 24)
-            spans_size: link_u64(c.bufs, b, h + 32)
-            link_zone_spans(c, b, spans_at, spans_size, first)
+            zone_secs.push(k)
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8) & 0x200000) != 0 {
             guard: link_u32(c.bufs, b, h + 44)
@@ -856,9 +884,8 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         }
     }
     symtab_header: shoff + 64 * symtab
-    symtab_at: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, symtab_header + 24)
     sym_count: if symtab < 0 -> 0 else -> link_u64(c.bufs, b, symtab_header + 32).div_euclid(24)
-    strtab: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, shoff + 64 * link_u32(c.bufs, b, symtab_header + 40) + 24)
+    strtab_sec: if symtab < 0 -> -1 else -> link_u32(c.bufs, b, symtab_header + 40)
     first_global: if symtab < 0 -> 0 else -> link_u32(c.bufs, b, symtab_header + 44)
     first_symbol: if obj == 0 -> 0 else -> c.obj_first_symbol[obj - 1] + c.obj_sym_count[obj - 1]
     c.obj_name.push(name.copy())
@@ -866,22 +893,40 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     c.obj_base.push(base)
     c.obj_shoff.push(shoff)
     c.obj_names.push(names_at)
-    c.obj_symtab.push(symtab_at)
-    c.obj_strtab.push(strtab)
-    c.obj_shndx.push(shndx)
     c.obj_count.push(count)
     c.obj_first_global.push(first_global)
     c.obj_first_section.push(first)
     c.obj_first_symbol.push(first_symbol)
     c.obj_sym_count.push(sym_count)
+    symtab_buf: if symtab < 0 -> b else -> link_sec_buf(c, obj, first + symtab)
+    symtab_at: if symtab < 0 -> 0 else -> link_sec_offset(c, obj, first + symtab)
+    strtab_buf: if strtab_sec < 0 -> b else -> link_sec_buf(c, obj, first + strtab_sec)
+    strtab: if strtab_sec < 0 -> 0 else -> link_sec_offset(c, obj, first + strtab_sec)
+    shndx_buf: if shndx_sec < 0 -> b else -> link_sec_buf(c, obj, first + shndx_sec)
+    shndx: if shndx_sec < 0 -> -1 else -> link_sec_offset(c, obj, first + shndx_sec)
+    c.obj_symtab.push(symtab_at)
+    c.obj_strtab.push(strtab)
+    c.obj_shndx.push(shndx)
+    c.obj_symtab_buf.push(symtab_buf)
+    c.obj_strtab_buf.push(strtab_buf)
+    c.obj_shndx_buf.push(shndx_buf)
+    loop k in zone_secs {
+        zs: first + k
+        zb: link_sec_buf(c, obj, zs)
+        zo: link_sec_offset(c, obj, zs)
+        zsz: link_sec_size(c, obj, zs)
+        link_zone_spans(c, zb, zo, zsz, first)
+    }
     loop _ in 0..<sym_count -> c.sym_global.push(-1)
     // COMDAT groups: a group whose signature was already loaded discards its
     // member sections; their symbols then read as undefined references.
     loop k in groups {
         h: shoff + 64 * k
-        at: base + link_u64(c.bufs, b, h + 24)
-        if (link_u32(c.bufs, b, at) & 1) == 0 -> next
-        text: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
+        gs: first + k
+        gb: link_sec_buf(c, obj, gs)
+        at: link_sec_offset(c, obj, gs)
+        if (link_u32(c.bufs, gb, at) & 1) == 0 -> next
+        text: link_cstr(c.bufs, strtab_buf, strtab + link_u32(c.bufs, symtab_buf, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
         signature: link_name(c, text)
         if !c.name_comdat[signature] {
             c.name_comdat[signature] = true
@@ -889,7 +934,7 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         }
         members: link_u64(c.bufs, b, h + 32).div_euclid(4)
         loop m in 1..<members {
-            member: link_u32(c.bufs, b, at + 4 * m)
+            member: link_u32(c.bufs, gb, at + 4 * m)
             if member > 0 && member < count {
                 c.discarded.add(first + member, true).drop("a section is in one group")
             }
@@ -897,16 +942,16 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     }
     loop k in first_global..<sym_count {
         at: symtab_at + 24 * k
-        info: link_u8(c.bufs, b, at + 4)
+        info: link_u8(c.bufs, symtab_buf, at + 4)
         bind: info >> 4
         if bind == 0 -> next
         section: link_sym_shndx(c, obj, k)
-        symbol_name: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, at))
+        symbol_name: link_cstr(c.bufs, strtab_buf, strtab + link_u32(c.bufs, symtab_buf, at))
         g: link_intern(c, symbol_name)
         c.sym_global[first_symbol + k] = g
         weak: bind == 2
-        value: link_u64(c.bufs, b, at + 8)
-        symbol_size: link_u64(c.bufs, b, at + 16)
+        value: link_u64(c.bufs, symtab_buf, at + 8)
+        symbol_size: link_u64(c.bufs, symtab_buf, at + 16)
         kind: c.g_kind[g].copy()
         if section == LINK_UNDEF -> link_reference(c, g, weak) else if section == LINK_COMMON {
             if kind == LINK_G_NONE || kind == LINK_G_COMMON {
@@ -982,7 +1027,8 @@ link_reloc_text: fn(c: LinkContext, s: Int, off: Int, message: String) -> String
 // Unwind tables: split each `.eh_frame` into its CIE and FDE records.
 
 link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
-    b: c.obj_buffer[obj]
+    b: link_sec_buf(c, obj, s)
+    rb: link_rel_buf(c, obj, s)
     base: link_sec_offset(c, obj, s)
     size: link_sec_size(c, obj, s)
     count: link_rel_count(c, obj, s)
@@ -1023,13 +1069,13 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
         target := -1
         loop k < count {
             at: table + 24 * k
-            rel_off: link_u64(c.bufs, b, at)
+            rel_off: link_u64(c.bufs, rb, at)
             if rel_off >= off + total -> break
             if rel_off < off {
                 link_reloc_error(c, s, rel_off, "relocations are not sorted by offset")
                 return
             }
-            if id != 0 && rel_off == off + 8 -> target = link_u32(c.bufs, b, at + 12)
+            if id != 0 && rel_off == off + 8 -> target = link_u32(c.bufs, rb, at + 12)
             k += 1
         }
         c.ep_sec.push(s)
@@ -1729,15 +1775,15 @@ link_mark: fn(c: &LinkContext, work: &[Int], s: Int) Never! {
 link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
     s: c.ep_sec[piece].copy()
     obj: c.ep_obj[piece].copy()
-    b: c.obj_buffer[obj].copy()
+    rb: link_rel_buf(c, obj, s)
     table: link_rel_table(c, obj, s)
     first: c.ep_first_reloc[piece].copy()
     end: first + c.ep_reloc_count[piece]
     pc: c.ep_start[piece] + 8
     loop k in first..<end {
         at: table + 24 * k
-        if skip_pc && link_u64(c.bufs, b, at) == pc -> next
-        t: link_target_section(c, obj, link_u32(c.bufs, b, at + 12))
+        if skip_pc && link_u64(c.bufs, rb, at) == pc -> next
+        t: link_target_section(c, obj, link_u32(c.bufs, rb, at + 12))
         link_mark(c, work, t)
     }
 }
@@ -1800,11 +1846,11 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
             s: work[head]
             head += 1
             obj: link_obj_of(c, s)
-            b: c.obj_buffer[obj]
             r: link_rela_of(c, obj, s)
             // Rows are scanned in the order they were marked.
             c.rel_base.push(c.rel_slot.len())
             if r >= 0 {
+                rb: link_sec_buf(c, obj, r)
                 count: link_sec_size(c, obj, r).div_euclid(24)
                 if count > 256 {
                     c.rel_slot.try_reserve(c.rel_slot.len() + count) ?? panic("reserve failed")
@@ -1812,13 +1858,13 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
                 table: link_sec_offset(c, obj, r)
                 loop k in 0..<count {
                     at: table + 24 * k
-                    symbol: link_u32(c.bufs, b, at + 12)
+                    symbol: link_u32(c.bufs, rb, at + 12)
                     t: link_target_section(c, obj, symbol)
                     link_mark(c, work, t)
                     if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 {
                         c.fault_report_caller = s
                     }
-                    slot: link_scan_reloc(c, reported, linker, obj, s, at, symbol)
+                    slot: link_scan_reloc(c, reported, linker, obj, s, rb, at, symbol)
                     c.rel_slot.push(slot)
                 }
             }
@@ -1873,9 +1919,13 @@ link_heat: fn(c: &LinkContext, entries: [Int], kept: [Int]) Never! {
     // The personality routines the kept CIEs name.
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
+        ep_obj: c.ep_obj[piece]
+        ep_sec: c.ep_sec[piece]
+        rb: link_rel_buf(c, ep_obj, ep_sec)
+        table: link_rel_table(c, ep_obj, ep_sec)
         loop k in 0..<c.ep_reloc_count[piece] {
-            at: link_rel_table(c, c.ep_obj[piece], c.ep_sec[piece]) + 24 * (c.ep_first_reloc[piece] + k)
-            link_heat_mark(c, hot, work, link_target_section(c, c.ep_obj[piece], link_u32(c.bufs, c.obj_buffer[c.ep_obj[piece]], at + 12)))
+            at: table + 24 * (c.ep_first_reloc[piece] + k)
+            link_heat_mark(c, hot, work, link_target_section(c, ep_obj, link_u32(c.bufs, rb, at + 12)))
         }
     }
     loop work.len() > 0 {
@@ -1884,13 +1934,12 @@ link_heat: fn(c: &LinkContext, entries: [Int], kept: [Int]) Never! {
         }
         obj: link_obj_of(c, s)
         spans: c.zone_spans.get(s) ?? [Int]{}
+        rb: link_rel_buf(c, obj, s)
         table: link_rel_table(c, obj, s)
         loop k in 0..<link_rel_count(c, obj, s) {
             at: table + 24 * k
-            if spans.len() > 0 && link_in_spans(spans, link_u64(c.bufs, c.obj_buffer[obj], at)) {
-                next
-            }
-            link_heat_mark(c, hot, work, link_target_section(c, obj, link_u32(c.bufs, c.obj_buffer[obj], at + 12)))
+            if spans.len() > 0 && link_in_spans(spans, link_u64(c.bufs, rb, at)) -> next
+            link_heat_mark(c, hot, work, link_target_section(c, obj, link_u32(c.bufs, rb, at + 12)))
         }
     }
     cold := [Bool]{}
@@ -1982,6 +2031,40 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     assert_eq(loader_u32(note, 44), 0)
 }
 
+#Test("a split-buffer direct link produces the exact bytes and side debug file of a flat object link") {
+    built_objs := [X64ExecutableResult]{}
+    loop variant in 0..<2 {
+        functions := [X64CompiledFunction]{
+            X64CompiledFunction{id: X64FunctionID{value: 0}, name: "_start", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: 1}}}}, align: X64_FUNCTION_ALIGN},
+            X64CompiledFunction{id: X64FunctionID{value: 1}, name: "helper", code: [U8]{0x48, 0x8d, 0x05, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 3, target: X64RelocTarget.Data{id: X64DataID{value: 0}}}}, align: X64_FUNCTION_ALIGN},
+        }
+        debug := [X64FunctionDebug]{
+            X64FunctionDebug{lines: [X64LineRow]{X64LineRow{at: 0, line: 10}}, body: 0, cfi: [U8]{U8{0x0e}, U8{0x10}}, ranges: [X64VariableRange]{}},
+            X64FunctionDebug{lines: [X64LineRow]{X64LineRow{at: 0, line: 20}}, body: 0, cfi: [U8]{U8{0x0e}, U8{0x10}}, ranges: [X64VariableRange]{}},
+        }
+        sources := [X64FunctionSource]{
+            X64FunctionSource{name: "_start", file: 0, line: 10, variables: [X64DebugVariable]{}},
+            X64FunctionSource{name: "helper", file: 0, line: 20, variables: [X64DebugVariable]{}},
+        }
+        exports := [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: 0}, symbol: "_start", guards: [Int]{}}}
+        data := [X64Data]{X64Data{id: X64DataID{value: 0}, bytes: [U8]{1, 2, 3, 4, 5, 6, 7, 8}, align: 8, relocs: [X64DataReloc]{}, read_only: true}}
+        program: X64ObjectModule{data: data.move(), debug: X64ModuleDebug{directory: "", files: [String]{"main.jet"}, types: [X64DebugType]{}}, functions: sources.move()}
+        built_objs.push(x64_object_functions_threads(program, functions, debug, exports, [X64DataExport]{}, compiler_threads_single(), true, false, variant == 1))
+    }
+    split_obj := built_objs.pop() ?? panic("missing split obj")
+    flat_obj := built_objs.pop() ?? panic("missing flat obj")
+    assert_eq(flat_obj.errors, [String]{})
+    assert_eq(split_obj.errors, [String]{})
+    assert(split_obj.split_bufs.len() > 0)
+    flat_link := x64_link_executable_split([String]{"prog.o"}, [[U8]]{flat_obj.bytes.move()}, LINK_BASE, compiler_threads_single(), "prog.debug", [String]{})
+    direct_link := x64_link_executable_split_direct([String]{"prog.o"}, [[U8]]{split_obj.bytes.move()}, split_obj.split_bufs.move(), split_obj.split_sec_buf, LINK_BASE, compiler_threads_single(), "prog.debug", [String]{})
+    assert_eq(flat_link.errors, [String]{})
+    assert_eq(direct_link.errors, [String]{})
+    assert_eq(direct_link.build_id, flat_link.build_id)
+    assert_eq(direct_link.bytes, flat_link.bytes)
+    assert_eq(direct_link.debug_file, flat_link.debug_file)
+}
+
 // One CIE per distinct record, written only when a kept FDE names it. A kept
 // FDE whose CIE has no relocations and repeats the bytes of a CIE already in
 // use names that CIE instead; a CIE that no kept FDE names is dropped. Every
@@ -2022,8 +2105,9 @@ link_share_cies: fn(c: &LinkContext) Never! {
 // trailing bytes.
 link_eh_record_key: fn(c: LinkContext, piece: Int) -> String Never! {
     obj: c.ep_obj[piece].copy()
-    b: c.obj_buffer[obj].copy()
-    start: link_sec_offset(c, obj, c.ep_sec[piece].copy()) + c.ep_start[piece]
+    s: c.ep_sec[piece].copy()
+    b: link_sec_buf(c, obj, s)
+    start: link_sec_offset(c, obj, s) + c.ep_start[piece]
     length: c.ep_len[piece].copy()
     words := [String]{}
     at := 0
@@ -2051,7 +2135,7 @@ link_eh_record_key: fn(c: LinkContext, piece: Int) -> String Never! {
 // `mov` into a sign-extended immediate move.
 link_got_form: fn(c: LinkContext, kind: Int, obj: Int, s: Int, off: Int, symbol: Int, addend: Int) -> Int Never! {
     if addend != -4 || off < 3 -> return 0
-    b: c.obj_buffer[obj]
+    b: link_sec_buf(c, obj, s)
     at: link_sec_offset(c, obj, s) + off
     opcode: link_u8(c.bufs, b, at - 2)
     modrm: link_u8(c.bufs, b, at - 1)
@@ -2082,19 +2166,19 @@ link_is_got_reloc: fn(kind: Int) -> Bool Never! {
 // code do not count, as with `ld --gc-sections`; the names `linker` marks by
 // their id in `names` are defined after layout), and when it is GOT-relative
 // and not relaxed, return its GOT slot (assigned on first use); otherwise -1.
-link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker: [Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
-    b: c.obj_buffer[obj].copy()
+link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker: [Bool], obj: Int, s: Int, rb: Int, at: Int, symbol: Int) -> Int Never! {
+    sym_b: c.obj_symtab_buf[obj]
     g: link_global_of(c, obj, symbol)
-    if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && (c.g_name_id[g] >= linker.len() || !linker[c.g_name_id[g]]) {
+    if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, sym_b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && (c.g_name_id[g] >= linker.len() || !linker[c.g_name_id[g]]) {
         reported.add(g, true).drop("checked absent above")
         c.undefined.push(c.g_name[g].copy())
         site: link_section_label(c, s)
         message: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
         link_error(c, message)
     }
-    kind: link_u32(c.bufs, b, at + 8)
+    kind: link_u32(c.bufs, rb, at + 8)
     if !link_is_got_reloc(kind) -> return -1
-    if link_got_form(c, kind, obj, s, link_u32(c.bufs, b, at), symbol, link_s64(c.bufs, b, at + 16)) != 0 {
+    if link_got_form(c, kind, obj, s, link_u32(c.bufs, rb, at), symbol, link_s64(c.bufs, rb, at + 16)) != 0 {
         return -1
     }
     key: link_got_key(c, obj, symbol)
@@ -2481,17 +2565,16 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
 // reads or rewrites is in the section, so `out` may hold the section alone.
 // Returns true when the relocation rewrote a TLS call sequence, so the next
 // relocation (the call to `__tls_get_addr`) must be skipped.
-link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
-    b: c.obj_buffer[obj].copy()
-    kind: link_u32(c.bufs, b, at + 8)
-    addend: link_s64(c.bufs, b, at + 16)
+link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, rb: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
+    kind: link_u32(c.bufs, rb, at + 8)
+    addend: link_s64(c.bufs, rb, at + 16)
     if slot >= 0 {
         // A GOT slot link_scan_reloc assigned.
         link_put32(out, pos, c.got_start + 8 * slot + addend - place)
         return false
     }
     if kind == LINK_R_NONE -> return false
-    symbol: link_u32(c.bufs, b, at + 12)
+    symbol: link_u32(c.bufs, rb, at + 12)
     if link_is_got_reloc(kind) {
         return link_apply_got(c, errors, out, obj, s, kind, off, symbol, addend, pos, place)
     }
@@ -2632,7 +2715,7 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
 link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) Never! {
     s: c.live_secs[row].copy()
     obj: link_obj_of(c, s)
-    b: c.obj_buffer[obj].copy()
+    b: link_sec_buf(c, obj, s)
     pos: out.len()
     start: link_sec_offset(c, obj, s)
     size: link_sec_size(c, obj, s)
@@ -2641,6 +2724,7 @@ link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) N
     if r < 0 {
         return
     }
+    rb: link_sec_buf(c, obj, r)
     count: link_sec_size(c, obj, r).div_euclid(24)
     table: link_sec_offset(c, obj, r)
     address: c.live_addr[row].copy()
@@ -2653,9 +2737,9 @@ link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) N
         }
         at: table + 24 * k
         // Section offsets fit 32 bits.
-        off: link_u32(c.bufs, b, at)
+        off: link_u32(c.bufs, rb, at)
         slot: c.rel_slot[base + k].copy()
-        skip = link_apply(c, errors, out, obj, s, at, off, slot, pos + off, address + off)
+        skip = link_apply(c, errors, out, obj, s, rb, at, off, slot, pos + off, address + off)
     }
 }
 
@@ -2668,7 +2752,8 @@ link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
         if !c.ep_keep[piece] -> next
         s: c.ep_sec[piece].copy()
         obj: c.ep_obj[piece].copy()
-        b: c.obj_buffer[obj].copy()
+        b: link_sec_buf(c, obj, s)
+        rb: link_rel_buf(c, obj, s)
         piece_start: c.ep_start[piece].copy()
         start: link_sec_offset(c, obj, s) + piece_start
         pos: out.len()
@@ -2679,10 +2764,10 @@ link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
         end: first + c.ep_reloc_count[piece]
         loop k in first..<end {
             at: table + 24 * k
-            rel_off: link_u32(c.bufs, b, at)
+            rel_off: link_u32(c.bufs, rb, at)
             off: rel_off - piece_start
             place: c.eh_start + pos - base + off
-            _ := link_apply(c, errors, out, obj, s, at, rel_off, -1, pos + off, place)
+            _ := link_apply(c, errors, out, obj, s, rb, at, rel_off, -1, pos + off, place)
         }
         cie: c.ep_cie[piece].copy()
         if cie >= 0 -> link_put32(out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
@@ -2874,9 +2959,10 @@ link_eh_unloaded: fn(c: LinkContext) -> Bool Never! {
     }
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
-        obj: c.ep_obj[piece].copy()
-        start: link_sec_offset(c, obj, c.ep_sec[piece]) + c.ep_start[piece]
-        _ := link_eh_cie(c.bufs[c.obj_buffer[obj]], start) ?? return false
+        obj: c.ep_obj[piece]
+        s: c.ep_sec[piece]
+        start: link_sec_offset(c, obj, s) + c.ep_start[piece]
+        _ := link_eh_cie(c.bufs[link_sec_buf(c, obj, s)], start) ?? return false
     }
     true
 }
@@ -3123,17 +3209,19 @@ link_section_split: fn(c: LinkContext, row: Int, parts: Int) -> [LinkSectionSlic
     if r < 0 -> return [LinkSectionSlice]{}
     count: link_sec_size(c, obj, r).div_euclid(24)
     if count < 4096 -> return [LinkSectionSlice]{}
-    b: c.obj_buffer[obj]
+    rb: link_sec_buf(c, obj, r)
     table: link_sec_offset(c, obj, r)
     base: c.rel_base[row]
     // Verify ascending offsets and plain relocation kinds in one quick scan.
     prev_off := -16
     loop k in 0..<count {
         at: table + 24 * k
-        off: link_u32(c.bufs, b, at)
+        off: link_u32(c.bufs, rb, at)
         if off < prev_off -> return [LinkSectionSlice]{}
         slot: c.rel_slot[base + k]
-        if slot < 0 && !link_reloc_plain(link_u32(c.bufs, b, at + 8)) -> return [LinkSectionSlice]{}
+        if slot < 0 && !link_reloc_plain(link_u32(c.bufs, rb, at + 8)) {
+            return [LinkSectionSlice]{}
+        }
         prev_off = off
     }
     slices := [LinkSectionSlice]{}
@@ -3144,8 +3232,8 @@ link_section_split: fn(c: LinkContext, row: Int, parts: Int) -> [LinkSectionSlic
         if target_k <= rel_from -> next
         k := target_k
         loop k < count {
-            off: link_u32(c.bufs, b, table + 24 * k)
-            prev: link_u32(c.bufs, b, table + 24 * (k - 1))
+            off: link_u32(c.bufs, rb, table + 24 * k)
+            prev: link_u32(c.bufs, rb, table + 24 * (k - 1))
             if off >= prev + 16 && off > byte_from {
                 slices.push(LinkSectionSlice{row: row, byte_start: byte_from, byte_end: off, rel_start: rel_from, rel_end: k})
                 byte_from = off
@@ -3163,21 +3251,22 @@ link_section_split: fn(c: LinkContext, row: Int, parts: Int) -> [LinkSectionSlic
 link_emit_slice: fn(c: LinkContext, slice: LinkSectionSlice, errors: &[String]) -> [U8] Never! {
     s: c.live_secs[slice.row]
     obj: link_obj_of(c, s)
-    b: c.obj_buffer[obj]
+    b: link_sec_buf(c, obj, s)
     sec_start: link_sec_offset(c, obj, s)
     out := [U8]{}
     slice_len: slice.byte_end - slice.byte_start
     out.try_reserve(slice_len) ?? panic("reserve failed")
     out.extend(c.bufs[b][sec_start + slice.byte_start..<sec_start + slice.byte_end])
     r: link_rela_of(c, obj, s)
+    rb: link_sec_buf(c, obj, r)
     table: link_sec_offset(c, obj, r)
     address: c.live_addr[slice.row]
     base: c.rel_base[slice.row]
     loop k in slice.rel_start..<slice.rel_end {
         at: table + 24 * k
-        off: link_u32(c.bufs, b, at)
+        off: link_u32(c.bufs, rb, at)
         slot: c.rel_slot[base + k]
-        _ := link_apply(c, errors, out, obj, s, at, off, slot, off - slice.byte_start, address + off)
+        _ := link_apply(c, errors, out, obj, s, rb, at, off, slot, off - slice.byte_start, address + off)
     }
     out
 }
@@ -3480,7 +3569,8 @@ LinkLocalSymPart: struct {
 }
 
 link_local_syms_range: fn(c: LinkContext, class_headers: [Int], obj: Int, start: Int, end: Int) -> LinkLocalSymPart Never! {
-    b: c.obj_buffer[obj]
+    sym_b: c.obj_symtab_buf[obj]
+    str_b: c.obj_strtab_buf[obj]
     symtab := [U8]{}
     strtab := [U8]{}
     span: end - start
@@ -3490,14 +3580,14 @@ link_local_syms_range: fn(c: LinkContext, class_headers: [Int], obj: Int, start:
     }
     loop k in start..<end {
         at: link_sym_at(c, obj, k)
-        info: link_u8(c.bufs, b, at + 4)
+        info: link_u8(c.bufs, sym_b, at + 4)
         if (info & 15) != 1 && (info & 15) != 2 -> next
-        name_offset: link_u32(c.bufs, b, at)
+        name_offset: link_u32(c.bufs, sym_b, at)
         if name_offset == 0 -> next
         s: link_sym_shndx(c, obj, k)
         header: link_symbol_header(c, class_headers, s)
         if header < 0 -> next
-        link_image_symbol_from_buf(c.bufs, b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+        link_image_symbol_from_buf(c.bufs, str_b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, sym_b, at + 8), link_u64(c.bufs, sym_b, at + 16))
     }
     LinkLocalSymPart{symtab: symtab.move(), strtab: strtab.move()}
 }
@@ -3593,17 +3683,18 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
             }
             next
         }
-        b: c.obj_buffer[obj]
+        sym_b: c.obj_symtab_buf[obj]
+        str_b: c.obj_strtab_buf[obj]
         loop k in 1..<local_end {
             at: link_sym_at(c, obj, k)
-            info: link_u8(c.bufs, b, at + 4)
+            info: link_u8(c.bufs, sym_b, at + 4)
             if (info & 15) != 1 && (info & 15) != 2 -> next
-            name_offset: link_u32(c.bufs, b, at)
+            name_offset: link_u32(c.bufs, sym_b, at)
             if name_offset == 0 -> next
             s: link_sym_shndx(c, obj, k)
             header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
-            link_image_symbol_from_buf(c.bufs, b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+            link_image_symbol_from_buf(c.bufs, str_b, c.obj_strtab[obj] + name_offset, symtab, strtab, 0, info, header, link_sec_addr(c, s) + link_u64(c.bufs, sym_b, at + 8), link_u64(c.bufs, sym_b, at + 16))
         }
     }
     first_global: symtab.len().div_euclid(24)
@@ -3869,7 +3960,16 @@ link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: L
 // the debug sections, symbol table and section headers (link_write_sections).
 link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, threads: CompilerThreads{compiler_threads_single()}) -> [U8] Never! {
     note: l.note_at - c.base
-    out := image[0..<LINK_EHDR_SIZE]
+    out := [U8]{}
+    if c.live_secs.len() > 256 {
+        debug_total := 0
+        loop sz in debug.sizes -> debug_total += sz
+        sym_est := 1 + c.g_name.len()
+        loop obj in 0..<c.obj_name.len() -> sym_est += c.obj_first_global[obj]
+        eh_est: if c.eh_debug -> c.eh_size else -> 0
+        out.try_reserve(LINK_EHDR_SIZE + LINK_BUILD_ID_NOTE_SIZE + debug_total + eh_est + sym_est * 64 + 65536) ?? panic("reserve failed")
+    }
+    out.extend(image[0..<LINK_EHDR_SIZE])
     link_put64(out, 32, 0)
     loop at in 54..<58 -> out[at] = U8{0}
     out.extend(image[note..<note + LINK_BUILD_ID_NOTE_SIZE])
@@ -3877,13 +3977,29 @@ link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebu
     out
 }
 
+link_sha256_whole: fn(bytes: [U8]) -> [U8] Never! { sha256_bytes(bytes[0..<bytes.len()]) }
+
+link_build_id_digests: fn(image: [U8], side: [U8]) -> [U8] Never! {
+    if side.len() >= 1048576 {
+        digests := [U8]{}
+        task.group link_build_id_sha {
+            t_side: task link_sha256_whole(side)
+            digests = link_sha256_whole(image)
+            digests.extend(t_side.join() ?? panic(compiler_threads_failure_text(err)))
+        }
+        return digests
+    }
+    digests := sha256_bytes(image[0..<image.len()])
+    digests.extend(sha256_bytes(side[0..<side.len()]))
+    digests
+}
+
 // Give the image `image` and its side debug file `side` their build id: the
 // first 20 bytes of the SHA-256 of their two SHA-256 digests, each taken
 // with the id still zero, written into both notes (the image's at file
 // offset `note`). Returns the id.
 link_build_id: fn(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
-    digests := sha256_bytes(image[0..<image.len()])
-    digests.extend(sha256_bytes(side[0..<side.len()]))
+    digests: link_build_id_digests(image, side)
     hash: sha256_bytes(digests[0..<digests.len()])
     id := [U8]{}
     loop k in 0..<LINK_BUILD_ID_SIZE {
@@ -4500,13 +4616,22 @@ x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, thread
     X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
 }
 
+x64_link_executable_split_direct: fn(names: [String], bufs: &&[[U8]], split_bufs: &&[[U8]], split_sec_buf: [Int], base: Int, threads: CompilerThreads, debug_link: String, roots: [String]) -> X64SplitExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, true, Val(debug_link), roots, split_bufs, split_sec_buf)
+    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
+}
+
+x64_link_executable_direct: fn(names: [String], bufs: &&[[U8]], split_bufs: &&[[U8]], split_sec_buf: [Int], base: Int, threads: CompilerThreads, debug_info: Bool, roots: [String]) -> X64ExecutableResult Never! {
+    link_executable_image(names, bufs, base, None, threads, debug_info, None, roots, split_bufs, split_sec_buf).image
+}
+
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
 // A split link (`debug_link` the side file's name, x64_link_executable_split)
 // writes the debug tail to a side file, and the image's fault report gives
 // addresses under the build id that names it. `roots` (x64_link_executable)
 // stay with what they reach, as link_collect's `kept`.
-link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?, roots: [String]) -> X64ResidentLinkResult Never! {
+link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?, roots: [String], split_bufs: &&[[U8]]{[[U8]]{}}, split_sec_buf: [Int]{[Int]{}}) -> X64ResidentLinkResult Never! {
     split: debug_link != None
     c := link_context(bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
@@ -4514,6 +4639,13 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() {
             return link_resident_failure([String]{"resident runtime input is outside the actual link inputs"})
         }
+    }
+    extra := split_bufs.move()
+    if extra.len() > 0 {
+        base_buf: c.bufs.len()
+        loop buf in extra.move() -> c.bufs.push(buf)
+        c.sec_buf.try_reserve(split_sec_buf.len()) ?? panic("reserve failed")
+        loop idx in split_sec_buf -> c.sec_buf.push(if idx >= 0 -> base_buf + idx else -> -1)
     }
     link_load_inputs(c, names)
     if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())

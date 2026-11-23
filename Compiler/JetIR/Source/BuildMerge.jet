@@ -180,12 +180,6 @@ ir_merge_with: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMerg
     }
     if trace_sink == .Val(sink) -> sink.end("ir.merge.walk", cursor)
     if trace_sink == .Val(sink) -> sink.begin("ir.merge.functions", "", -1, -1)
-    g.use_starts = [[Int]]{}
-    g.uses = [[Int]]{}
-    g.function_group = [[Int]]{}
-    g.function_job = [Int]{}
-    g.name_group = [[Int]]{}
-    g.data_group = [[Int]]{}
     out := ir_module_new()
     if parts.len() > 0 {
         out.stop_points = parts[0].stop_points
@@ -195,11 +189,19 @@ ir_merge_with: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMerg
         out.zone_table = parts[0].zone_table
     }
     recursive := if run_recursion && (g.has_entry_check || out.stop_points) -> ir_merge_recursive(g) else -> [Bool]{}
-    g.call_starts = [[Int]]{}
-    g.calls = [[Int]]{}
-    g.addr_starts = [[Int]]{}
-    g.addrs = [[Int]]{}
-    ir_merge_take_functions(parts, g, recursive, out.stop_points, out.functions)
+    dead := IRMergeDead{
+        use_starts: compiler_take_rows<[Int]>(g.use_starts),
+        uses: compiler_take_rows<[Int]>(g.uses),
+        function_group: compiler_take_rows<[Int]>(g.function_group),
+        function_job: compiler_take_rows<Int>(g.function_job),
+        name_group: compiler_take_rows<[Int]>(g.name_group),
+        data_group: compiler_take_rows<[Int]>(g.data_group),
+        call_starts: compiler_take_rows<[Int]>(g.call_starts),
+        calls: compiler_take_rows<[Int]>(g.calls),
+        addr_starts: compiler_take_rows<[Int]>(g.addr_starts),
+        addrs: compiler_take_rows<[Int]>(g.addrs),
+    }
+    ir_merge_take_functions(parts, g, recursive, out.stop_points, out.functions, dead)
     if trace_sink == .Val(sink) -> sink.end("ir.merge.functions", out.functions.len())
     if trace_sink == .Val(sink) -> sink.begin("ir.merge.rows", "", -1, -1)
     if entry >= 0 -> out.entry = g.sides[roots[entry].part].function_new[roots[entry].local]
@@ -788,12 +790,13 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
         f.result = result
     }
     loop at in 0..<f.op.len() {
-        a: f.a[at]
         if f.op[at] == {
             .ConstText | .DataAddress -> {
+                a: f.a[at]
                 if a >= 0 -> f.a[at] = side.data_new[a]
             }
             .ConstBigInt | .CallRuntime -> {
+                a: f.a[at]
                 if a >= 0 -> f.a[at] = side.name_new[a]
             }
             .Close -> {
@@ -801,6 +804,7 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
                 if name >= 0 -> f.b[at] = side.name_new[name]
             }
             .Call | .FunctionAddress -> {
+                a: f.a[at]
                 if a >= 0 -> f.a[at] = side.function_new[a]
             }
             .Nop | .Const | .Copy | .Move | .Drop | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallIndirect | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
@@ -808,10 +812,24 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
     }
 }
 
-// A merged function and its merged id, as a part's rewrite hands it back.
-IRMergeTaken: struct {
-    id: Int,
-    function: IRFunction,
+// Dead merge index tables moved onto a background drop task while the parts
+// rewrite their functions, keeping large `[[Int]]` frees off the critical path.
+IRMergeDead: struct {
+    use_starts: [[Int]],
+    uses: [[Int]],
+    function_group: [[Int]],
+    function_job: [Int],
+    name_group: [[Int]],
+    data_group: [[Int]],
+    call_starts: [[Int]],
+    calls: [[Int]],
+    addr_starts: [[Int]],
+    addrs: [[Int]],
+}
+
+ir_merge_drop_dead: fn(dead: &&IRMergeDead) -> Int Never! {
+    owned: dead.move()
+    owned.use_starts.len()
 }
 
 // Computes the cycle-membership table (`recursive[id]`) over the merged
@@ -855,19 +873,35 @@ ir_merge_recursive: fn(g: IRMerge) -> [Bool] Never! {
     ir_opt_bottom_up(calls).recursive
 }
 
+// A merged function and its merged id, as a part's rewrite hands it back.
+IRMergeTaken: struct {
+    id: Int,
+    function: IRFunction,
+}
+
 // Moves the merged functions out of their parts into `functions`, in merged
 // order (no function is copied). Each part's functions but the first part's
 // move to a thread of their own, which rewrites the merged ones to the
 // merged rows, applies recursion checks when `recursive` is non-empty, and
 // drops the rest (ir_merge_rewrite_part); the first part's are rewritten on
-// this thread.
-ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, recursive: [Bool], stop_points: Bool, functions: &[IRFunction]) Never! {
+// this thread. Dead merge index tables drop in parallel on a worker task.
+ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, recursive: [Bool], stop_points: Bool, functions: &[IRFunction], dead: &&IRMergeDead) Never! {
     count: g.function_part.len()
     lists := ir_merge_function_lists(parts)
     // Per part row its merged id (-1: not merged).
     ids := loop list in lists -> ir_merge_unset(list.len())
     loop id in 0..<count -> ids[g.function_part[id]][g.function_local[id]] = id
-    taken := ir_merge_rewrite_parts(lists, g.sides, ids, recursive, stop_points)
+    dead_tables := dead.move()
+    taken := [[IRMergeTaken]]{}
+    if lists.len() > 1 {
+        task.group ir_merge_take_group {
+            dropping: task &&dead_tables {
+                ir_merge_drop_dead(dead_tables)
+            }
+            taken = ir_merge_rewrite_parts(lists, g.sides, ids, recursive, stop_points)
+            _: dropping.join() ?? panic(compiler_threads_failure_text(err))
+        }
+    } else { taken = ir_merge_rewrite_parts(lists, g.sides, ids, recursive, stop_points) }
     functions.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count -> functions.push(ir_function_new("", "", "", "", 0))
     loop taken.len() > 0 {

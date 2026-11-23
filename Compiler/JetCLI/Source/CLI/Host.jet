@@ -36,8 +36,11 @@ use {
         x64_image_spawn,
         x64_image_unload,
         x64_link_executable,
+        x64_link_executable_direct,
         x64_link_executable_split,
+        x64_link_executable_split_direct,
         x64_link_live_undefined,
+        x64_object_split_flatten,
         x64_process_mirror,
         x64_process_nap,
         x64_process_stop,
@@ -1190,7 +1193,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         else -> {
             task.group native_foreign {
                 realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, bind)
-                object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded)
+                // Split-buffer direct handoff skips the flat ELF copy when StaticLink consumes the object directly.
+                object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot, recorded, !bind && !jet_cli_link_hooked(options))
                 if object.failure == None && trace_sink == .Val(sink) {
                     sink.begin("native.foreign", "", -1, -1)
                 }
@@ -1203,6 +1207,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if built.failure == .Val(failure) -> return JetCLINativeLinked.Failed{failure: failure}
     realized: closures.pop() ?? panic("the native route lost its C closure")
     object := built.bytes.move()
+    split_bufs := built.split_bufs.move()
+    split_sec_buf := built.split_sec_buf.move()
     if trace_sink == .Val(sink) {
         sink.end("native.foreign", if realized.inputs == .Val(found) -> found.names.len() else -> 0)
     }
@@ -1243,6 +1249,11 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
             }
         }
         if needs_live_query {
+            if split_bufs.len() > 0 {
+                object = x64_object_split_flatten(object, split_bufs, split_sec_buf)
+                split_bufs = [[U8]]{}
+                split_sec_buf = [Int]{}
+            }
             // `runtime` is the pack: the collection names the live undefined
             // symbols, and only their declarations' providers are realized.
             query := x64_link_live_undefined([String]{"{executable_path} (program object)", runtime_path}, [[U8]]{object.move(), runtime.move()})
@@ -1281,23 +1292,10 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     // The memory term is read now: the link's section pieces are new work.
     link_threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    errors := [String]{}
-    undefined := [String]{}
-    executable := x64_executable_whole([U8]{})
-    if debug_link == .Val(name) {
-        split := x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
-        errors = split.errors.copy()
-        undefined = split.undefined.copy()
-        executable = x64_executable_split(split)
-    } else {
-        image := x64_link_executable(names, bytes, base, link_threads, debug_info, link_roots)
-        if image.errors.len() > 0 && retry == .Val(inputs_again) {
-            image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info, link_roots)
-        }
-        errors = image.errors.move()
-        undefined = image.undefined.move()
-        executable = x64_executable_whole(image.bytes.move())
-    }
+    linked := jet_cli_link_image(names, bytes, split_bufs, split_sec_buf, retry, base, link_threads, debug_info, debug_link, link_roots)
+    errors: linked.errors.move()
+    undefined: linked.undefined.move()
+    executable: linked.executable.move()
     if trace_sink == .Val(sink) {
         sink.end("native.link", input_count)
         sink.progress("counters.native.link.bytes", executable.tail.len(), -1)
@@ -1695,6 +1693,8 @@ JetCLINativeObject: struct {
     bytes: [U8],
     failure: JetCLINativeFailure?,
     imports: [String]{[String]{}},
+    split_bufs: [[U8]]{[[U8]]{}},
+    split_sec_buf: [Int]{[Int]{}},
 }
 
 jet_cli_native_object_failure: fn(failure: JetCLINativeFailure) -> JetCLINativeObject Never! {
@@ -2044,7 +2044,7 @@ jet_cli_emit_log_report: fn(lines: [String]) -[FS, Env]> String Never! {
 // first (ir_x64_hot_order); `--trace` counts the names that name none
 // (`ir.object.hot_missing`). Its debug info records the sources `recorded`
 // (`.debug_jetsource`).
-jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String], recorded: [X64DebugSource]) -[FS, Env, Time, Exec.Args]> JetCLINativeObject Never! {
+jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String], recorded: [X64DebugSource], split: Bool{false}) -[FS, Env, Time, Exec.Args]> JetCLINativeObject Never! {
     trace_sink: result.trace_sink
     built := jet_cli_native_program(result, inputs, harness, options, runtime, census, file, root)
     if built.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
@@ -2066,10 +2066,10 @@ jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLow
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     hot_missing: ir_x64_hot_order(compiled, hot)
-    object := ir_x64_object(compiled, build_options_value(options, "debug_info") != "false")
+    object := ir_x64_object(compiled, build_options_value(options, "debug_info") != "false", split)
     if trace_sink == .Val(sink) {
         sink.end("ir.object", function_count)
-        sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
+        sink.progress("counters.ir.object.bytes", jet_cli_object_byte_len(object.bytes, object.split_bufs), -1)
         sink.progress("counters.ir.object.hot_missing", hot_missing, -1)
     }
     if !selection_faulted {
@@ -2080,7 +2080,7 @@ jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLow
     if object.errors.len() > 0 && object.bytes.len() == 0 {
         return jet_cli_native_object_failure(JetCLINativeFailure.Faulted)
     }
-    JetCLINativeObject{bytes: object.bytes.move(), failure: None, imports: object.imports.move()}
+    JetCLINativeObject{bytes: object.bytes.move(), failure: None, imports: object.imports.move(), split_bufs: object.split_bufs.move(), split_sec_buf: object.split_sec_buf.move()}
 }
 
 // The compilation directory the image's DWARF records for `file`, the entry
@@ -5329,4 +5329,32 @@ jet_cli_dev_files: fn(directory: String) -[FS]> [String] Never! {
         if !entry.is_dir -> files.push(entry.path)
     }
     files
+}
+
+JetCLILinkedImage: struct {
+    executable: X64Executable,
+    errors: [String],
+    undefined: [String],
+}
+
+jet_cli_link_image: fn(names: [String], bytes: &&[[U8]], split_bufs: &&[[U8]], split_sec_buf: [Int], retry: &&[[U8]]?, base: Int, link_threads: CompilerThreads, debug_info: Bool, debug_link: String?, link_roots: [String]) -> JetCLILinkedImage Never! {
+    extra := split_bufs.move()
+    if debug_link == .Val(name) {
+        split := if extra.len() > 0 -> x64_link_executable_split_direct(names, bytes, extra, split_sec_buf, base, link_threads, name, link_roots) else -> x64_link_executable_split(names, bytes, base, link_threads, name, link_roots)
+        errors: split.errors.copy()
+        undefined: split.undefined.copy()
+        return JetCLILinkedImage{executable: x64_executable_split(split), errors: errors, undefined: undefined}
+    } else {
+        image := if extra.len() > 0 -> x64_link_executable_direct(names, bytes, extra, split_sec_buf, base, link_threads, debug_info, link_roots) else -> x64_link_executable(names, bytes, base, link_threads, debug_info, link_roots)
+        if image.errors.len() > 0 && retry.move() == .Val(inputs_again) {
+            image = x64_link_executable(names, inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info, link_roots)
+        }
+        return JetCLILinkedImage{executable: x64_executable_whole(image.bytes.move()), errors: image.errors.move(), undefined: image.undefined.move()}
+    }
+}
+
+jet_cli_object_byte_len: fn(header: [U8], split_bufs: [[U8]]) -> Int Never! {
+    total := header.len()
+    loop buf in split_bufs -> total += buf.len()
+    total
 }
