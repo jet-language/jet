@@ -812,7 +812,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     if total < IR_SOURCE_INDEX_MIN_BYTES {
         index := ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
-        ir_program_bind(p, functions, decls, threads)
+        ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
         p.source_bytes = index.bytes.move()
         p.source_lines = index.lines.move()
         p.source_rows = index.rows.move()
@@ -821,7 +821,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     task.group ir_program_sources {
         indexing: task ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
-        ir_program_bind(p, functions, decls, threads)
+        ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
         index := indexing.join() ?? panic(compiler_threads_failure_text(err))
         p.source_bytes = index.bytes.move()
         p.source_lines = index.lines.move()
@@ -988,7 +988,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
 // implementation methods and trait method tables that name function rows.
 // `decls` is the run's declaration table their direct calls name.
 // The declarations stay, so one declared program serves many builds.
-ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, workers: Int) {
+ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, workers: Int, threads: CompilerThreads) -> IRBodyScanPart {
     symbols_ref: p.symbols
     type_rows_ref: p.type_rows
     types_ref: p.types
@@ -999,11 +999,18 @@ ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, w
     close_methods := name_rows()
     core_roles := [Int]{}
     decl_parts := [IRBindDeclPart]{}
+    check_boxed := [Bool]{}
+    check_boxed.try_reserve(owned.len()) ?? panic("reserve failed")
+    loop index in 0..<owned.len() {
+        check_boxed.push(owned[index].generic_params.len() == 0 && ir_owner_binders(p, owned[index]).len() == 0)
+    }
+    scanned := IRBodyScanPart{spawns: [IRBodyScanSpawn]{}, boxed: [IRBodyScanBoxed]{}}
     task.group ir_program_bind_tasks {
         t_rows: task ir_first_function_rows(owned)
         t_traits: task ir_trait_methods(owned, symbols_ref, type_rows_ref, types_ref, impl_slots_ref, impl_traits_ref)
         t_decls: task ir_bind_decl_parts(owned, decls, symbols_ref, workers)
         t_intrinsics: task ir_core_intrinsics(owned)
+        t_scan: task ir_body_scan_collect(owned, check_boxed, threads)
         loop (index, function) in owned {
             if function.role != "" -> core_roles.push(index)
             if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
@@ -1042,6 +1049,7 @@ ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, w
         p.trait_methods = t_traits.join() ?? panic(compiler_threads_failure_text(err))
         decl_parts = t_decls.join() ?? panic(compiler_threads_failure_text(err))
         p.intrinsics = t_intrinsics.join() ?? panic(compiler_threads_failure_text(err))
+        scanned = t_scan.join() ?? panic(compiler_threads_failure_text(err))
     }
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
     loop part in decl_parts {
@@ -1073,19 +1081,20 @@ ir_program_bind_parallel: fn(p: &IRProgram, owned: [FnBody], decls: DeclTable, w
     p.render_impls = render_impls
     p.close_methods = close_methods
     p.core_roles = core_roles
+    scanned
 }
 
-ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, threads: CompilerThreads{compiler_threads_single()}) Never! {
+ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, threads: CompilerThreads{compiler_threads_single()}, skip_signature_unions: Bool{false}) Never! {
     owned := functions.move()
     ir_declared_owners(owned, p.types)
-    ir_add_signature_union_types(p.types, p.type_rows, owned)
+    if !skip_signature_unions -> ir_add_signature_union_types(p.types, p.type_rows, owned)
     workers: compiler_threads_admit(threads, owned.len(), owned.len(), 1024, 0, 0)
     if workers > 1 {
-        ir_program_bind_parallel(p, owned, decls, workers) ?? panic("the IR program bind threads failed")
+        scanned := ir_program_bind_parallel(p, owned, decls, workers, threads) ?? panic("the IR program bind threads failed")
         p.functions = owned.move()
         p.quiet_points = ir_quiet_points(p)
         p.decode_helpers = ir_codec_decode_rows(p)
-        ir_program_scan_bodies(p, threads)
+        ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed)
         return
     }
     rows: ir_first_function_rows(owned)
@@ -1518,36 +1527,35 @@ ir_type_identity: fn(type_rows: NameRows, types: [TTypeDef], ty: Type) -> String
     type_carrier_identity(plain)
 }
 
-// Single-pass (parallel across `threads` for large modules) scan of every
-// function's AST nodes for both `p.spawn_sites` and `p.trait_boxed`.
-ir_program_scan_bodies: fn(p: &IRProgram, threads: CompilerThreads) Never! {
-    count: p.functions.len()
-    check_boxed := [Bool]{}
-    check_boxed.try_reserve(count) ?? panic("reserve failed")
+ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], threads: CompilerThreads) -> IRBodyScanPart Never! {
+    count: functions.len()
     weights := [Int]{}
     weights.try_reserve(count) ?? panic("reserve failed")
     total := 0
     loop index in 0..<count {
-        nodes: 1 + p.functions[index].tree.nodes.len()
+        nodes: 1 + functions[index].tree.nodes.len()
         weights.push(nodes)
         total += nodes
-        check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
     }
     workers: compiler_threads_admit(threads, count, total, IR_BODY_SCAN_MIN_NODES_PER_THREAD, 0, 0)
     spawns := [IRBodyScanSpawn]{}
     candidates := [IRBodyScanBoxed]{}
     if workers <= 1 {
         loop row in 0..<count {
-            ir_scan_function_nodes(row, p.functions[row], check_boxed[row], spawns, candidates)
+            ir_scan_function_nodes(row, functions[row], check_boxed[row], spawns, candidates)
         }
     } else {
         bounds: compiler_threads_partition(weights, workers)
-        parts := ir_body_scan_parts(p.functions, check_boxed, bounds, 0) ?? panic("the IR body scan threads failed")
+        parts := ir_body_scan_parts(functions, check_boxed, bounds, 0) ?? panic("the IR body scan threads failed")
         loop part in parts.move() {
             loop s in part.spawns -> spawns.push(s)
             loop c in part.boxed.move() -> candidates.push(c)
         }
     }
+    IRBodyScanPart{spawns: spawns.move(), boxed: candidates.move()}
+}
+
+ir_program_scan_bodies_apply: fn(p: &IRProgram, spawns: [IRBodyScanSpawn], candidates: &&[IRBodyScanBoxed]) Never! {
     files := [String:[Int]]{}
     loop s in spawns {
         file: p.functions[s.fn_row].source_file
@@ -1572,6 +1580,19 @@ ir_program_scan_bodies: fn(p: &IRProgram, threads: CompilerThreads) Never! {
     seen := name_table_sized(8)
     loop c in candidates.move() { ir_trait_boxed_put_short(p, boxed, seen, c.concrete, c.short) }
     p.trait_boxed = boxed
+}
+
+// Single-pass (parallel across `threads` for large modules) scan of every
+// function's AST nodes for both `p.spawn_sites` and `p.trait_boxed`.
+ir_program_scan_bodies: fn(p: &IRProgram, threads: CompilerThreads) Never! {
+    count: p.functions.len()
+    check_boxed := [Bool]{}
+    check_boxed.try_reserve(count) ?? panic("reserve failed")
+    loop index in 0..<count {
+        check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
+    }
+    scanned := ir_body_scan_collect(p.functions, check_boxed, threads)
+    ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed)
 }
 
 // `definition` takes over `p`'s constant rows of its key and its symbol key

@@ -517,9 +517,9 @@ ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
 ir_x64_tables_add_file: fn(tables: &IRX64Tables, f: IRFunction) Never! {
     if f.source_file != "" && f.source_file != tables.last_file {
         tables.last_file = f.source_file
-        if ir_x64_text_rows_get(tables.file_rows, f.source_file) < 0 {
-            ir_x64_text_rows_set(tables.file_rows, f.source_file, tables.files.len())
-            tables.files.push(f.source_file)
+        if ir_x64_text_rows_get(tables.file_rows, tables.last_file) < 0 {
+            ir_x64_text_rows_set(tables.file_rows, tables.last_file, tables.files.len())
+            tables.files.push(tables.last_file)
         }
     }
 }
@@ -885,10 +885,10 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
         ir_drop_early(m, threads)
         if trace_sink == .Val(sink) -> sink.end("ir.x64.drop_early", m.functions.len())
+        if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
+        ir_tail_calls(m, threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
     }
-    if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
-    ir_tail_calls(m, threads)
-    if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
     log := [String]{}
     if names.len() > 0 {
         if m.struct_fields.len() > 0 {
@@ -985,13 +985,13 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     shells := ir_x64_take_inputs(inputs)
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
     tables := tables_box.pop() ?? panic("the x64 tables task lost its tables")
+    has_stops: stops.len() == count
     functions.try_reserve(count) ?? panic("reserve failed")
     debug.try_reserve(count) ?? panic("reserve failed")
     variables.try_reserve(count) ?? panic("reserve failed")
     // Reverse once so popping yields rows 0..<count in forward order, avoiding
     // temporary 60k-row staging arrays and extra reversals.
     outputs.reverse()
-    has_stops: stops.len() == count
     if has_stops -> stops.reverse()
     rows := [Int]{}
     loop row in 0..<count {
@@ -1400,18 +1400,26 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
     loop function in functions {
         if function.id.value > max_id -> max_id = function.id.value
     }
-    // Per function id + 1 its rows, and whether it is reached.
-    id_rows := [[Int]]{}
-    reached := [Bool]{}
+    // Flat singly-linked lists per function id + 1 (`id_first` / `id_next`),
+    // avoiding one heap list allocation per function.
     span: max_id + 2
-    id_rows.try_reserve(span) ?? panic("reserve failed")
+    id_first := [Int]{}
+    reached := [Bool]{}
+    id_first.try_reserve(span) ?? panic("reserve failed")
     reached.try_reserve(span) ?? panic("reserve failed")
     loop _ in 0..<span {
-        id_rows.push([Int]{})
+        id_first.push(-1)
         reached.push(false)
     }
+    id_next := [Int]{}
+    id_next.try_reserve(functions.len()) ?? panic("reserve failed")
+    loop _ in 0..<functions.len() -> id_next.push(-1)
     loop (index, function) in functions {
-        if function.id.value >= -1 -> id_rows[function.id.value + 1].push(index)
+        at: function.id.value + 1
+        if at >= 0 {
+            id_next[index] = id_first[at]
+            id_first[at] = index
+        }
     }
     work := [Int]{}
     if main && functions.len() > 0 {
@@ -1427,7 +1435,8 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
         id: work.pop() ?? {
             break
         }
-        loop row in id_rows[id + 1] {
+        row := id_first[id + 1]
+        loop row >= 0 {
             loop reloc in functions[row].relocs {
                 if reloc.target == {
                     .Function(target) -> {
@@ -1440,6 +1449,7 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
                     .Runtime(_) | .Data(_) | .RuntimeData(_) -> {}
                 }
             }
+            row = id_next[row]
         }
     }
     all_kept := true
