@@ -163,8 +163,11 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     loop argument in args {
         if argument.flags.template_items != None -> template_count += 1
     }
+    if method == "generate" && template_count == 0 && args.len() == 2 {
+        return sema_call_build_generate_code(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if method == "generate" && template_count != 1 {
-        diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}?`"))
+        diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block or a `Code` value", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}` or `b.generate(\"name\", code)`"))
         return failed
     }
     if method != "generate" && template_count > 0 -> return failed
@@ -216,6 +219,48 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     if !ownership.accepted || !ownership.complete -> return failed
     values.extend(generated.move())
     value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `b.generate(name, code)`: the module `name` holds a `Code` value's items
+// (`#code { items }`), which a helper can write and return. It is the
+// module `b.generate(name) { items }` makes from the same items, byte for
+// byte; the value's own place is kept for the reports on that module.
+// Source text is refused: items written as text would be read only when the
+// build runs, and its problems would point into a file nobody wrote.
+sema_call_build_generate_code: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    loop argument in args {
+        if argument.label != None || argument.spread {
+            diagnostics.push(sema_error("E0764", argument.span, "`Build.generate` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
+            return failed
+        }
+    }
+    name: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    named: sema_call_type_assignable(Type.String, name.ty, environment, program) ?? return failed
+    if !named {
+        diagnostics.push(sema_type_mismatch(Type.String, name.ty, args[0].span, program))
+        return failed
+    }
+    code: sema_check_expression(args[1].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    text: sema_call_type_assignable(Type.String, code.ty, environment, program) ?? return failed
+    if text {
+        diagnostics.push(sema_error("E3502", args[1].span, "`b.generate` doesn't take source text", "generated items are Jet code checked where they are written, so a slip reports at its line; text would be read only when the build runs, and its problems would point into a file nobody wrote", "write the items in a `#code {{ ... }}` value, or in `b.generate(\"name\") {{ ... }}`"))
+        return failed
+    }
+    is_code: sema_call_type_assignable(Type.Named{name: "Code"}, code.ty, environment, program) ?? return failed
+    if !is_code {
+        diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code.ty, args[1].span, program))
+        return failed
+    }
+    params: [SemaCallParam]{
+        SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(name.ty), variadic: false},
+        SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(code.ty), variadic: false},
+    }
+    ordinary := args.copy()
+    ownership: sema_ownership_check_method_call(state, "Build.generate", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    value: sema_tree_node(sema_build_result("Unit"), TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "generate", args: [TExpr]{name, code}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
@@ -287,8 +332,12 @@ sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnv
     } else {
         splices = sema_build_generate_splices(items_written, span, true, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     }
+    // The value keeps where its items are written, "file:line", which a
+    // report on the module `b.generate` makes from it names.
+    location: sema_expression_panic_location(environment, program, scopes, span)
     source: TComptimeField{name: "source", value: TComptimeValue.String{value: splices.source.copy()}}
-    value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source}}
+    site: TComptimeField{name: "site", value: TComptimeValue.String{value: "{location.file}:{location.line}"}}
+    value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source, site}}
     node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, span)
     if splices.markers.len() == 0 {
         return sema_expr_expected(node, expected, environment, program, diagnostics)

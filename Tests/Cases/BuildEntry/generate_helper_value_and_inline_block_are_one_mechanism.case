@@ -1,0 +1,56 @@
+# Claim: a helper's `Code` value and an inline `b.generate` block are one
+# mechanism. A helper writes the items once as `#code { ... }` and returns
+# them; `b.generate("facts", facts())` makes from that value the module the
+# same items written in `b.generate("facts") { ... }` make: the same bytes,
+# path, identity and digest, and a problem in it is reported at the same
+# span of the same virtual file with the same source digest. The package's
+# hand-written code uses the generated struct and function alike, and the
+# provenance of the helper's module names the call and the helper's line.
+fixture: Fixtures/GenerateHelper
+env: NO_COLOR=1
+copy: main.jet helper.keep
+copy: inline.txt main.jet
+step: jet inspect build main.jet --json
+stdout: file inline.plan.json
+exit: 0
+json: file inline.plan.json doc $.build.generated[0].path = ".jet/generated/main/facts.jet"
+json: file inline.plan.json doc $.build.generated[0].made_by = "`b.generate(\"facts\")` at main.jet:3"
+capture: inline_id file inline.plan.json doc $.build.generated[0].id
+capture: inline_digest file inline.plan.json doc $.build.generated[0].digest
+step: jet build main.jet --write-generated=on
+exit: 0
+copy: .jet/generated/main/facts.jet inline.facts
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n" # hand-written code uses the inline items
+copy: broken_inline.txt main.jet
+step: jet build main.jet --json
+stdout: file inline.broken.json
+exit: 1
+capture: inline_file file inline.broken.json doc $.reports[0].span.file
+capture: inline_start file inline.broken.json doc $.reports[0].span.start
+capture: inline_end file inline.broken.json doc $.reports[0].span.end
+capture: inline_source file inline.broken.json doc $.reports[0].origin.source_digest
+copy: helper.keep main.jet
+step: jet inspect build main.jet --json
+stdout: file helper.plan.json
+exit: 0
+json: file helper.plan.json doc $.build.generated[0].path = ".jet/generated/main/facts.jet"
+json: file helper.plan.json doc $.build.generated[0].id = "{cap:inline_id}" # the same module identity
+json: file helper.plan.json doc $.build.generated[0].digest = "{cap:inline_digest}" # the same bytes
+json: file helper.plan.json doc $.build.generated[0].made_by = "`b.generate(\"facts\")` at main.jet:11 with the `#code` at main.jet:4" # the call and the helper's line
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/facts.jet == inline.facts # byte-identical output
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n" # hand-written code uses the helper's items
+copy: broken.txt main.jet
+step: jet build main.jet --json
+stdout: file helper.broken.json
+exit: 1
+json: file helper.broken.json doc $.reports[0].span.file = "{cap:inline_file}" # the same virtual file
+json: file helper.broken.json doc $.reports[0].span.start = {cap:inline_start} # the same span
+json: file helper.broken.json doc $.reports[0].span.end = {cap:inline_end}
+json: file helper.broken.json doc $.reports[0].origin.source_digest = "{cap:inline_source}" # the same source map
+json: file helper.broken.json doc $.reports[0].detail = " Note: `b.generate(\"facts\")` at main.jet:10 with the `#code` at main.jet:3 generated this module"

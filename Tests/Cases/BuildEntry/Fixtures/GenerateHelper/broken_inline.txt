@@ -1,0 +1,11 @@
+// The items written in the call hold a type error.
+build: fn(b: Build) {
+    b.generate("facts") {
+        Fact: struct { value: Int }
+        answer: fn() -> Fact { Fact{value: "no"} }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/facts.jet"], [])
+    b.default(app)
+}
+
+run: fn() { print("{answer().value}") }

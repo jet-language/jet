@@ -7628,13 +7628,24 @@ effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.
 
 `b.generate(name) { ... }` produces the module
-`.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
+`.jet/generated/<package>/<name>.jet`. `b.generate(name, code)` produces it
+from a `Code` value instead, so a helper function can write the items once as
+`#code { items }` and return them: the module, its path, identity and digest
+are byte for byte the ones the same items written in the call give, and the
+package's hand-written code uses its items alike. The second argument is
+never source text: `b.generate(name, "...")` is E3502 at that argument, since
+items written as text would be read only when the build runs. Example:
+[`Tests/Cases/BuildEntry/generate_helper_value_and_inline_block_are_one_mechanism.case`](../../Tests/Cases/BuildEntry/generate_helper_value_and_inline_block_are_one_mechanism.case).
+Action outputs ending in `.jet` follow
 the same path. Built-in derives, user derives, and build entries share one
 checked expansion pass. Build-only entries and imported build entries are
 removed before runtime code generation, so build handles never reach the built program.
 The `write_generated` build option (stock `off`) says whether `jet build`
 writes each generated module to that path under the package root for
-inspection: `on` writes them, `off` writes none. It is the profile field
+inspection: `on` writes them, `off` writes none. A module written there that
+was edited by hand since, so its bytes are neither this build's module nor
+the hash the lock records for it, stops the build with E3510 and stays as it
+is. The option is the profile field
 `write_generated: on`, the flag `--write-generated=on` (which replaces the
 retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
@@ -7642,7 +7653,10 @@ Example:
 
 A problem in a generated module is reported against that module's own text,
 under its virtual path `<build-generated>/<package identity>/.jet/generated/…`,
-with a note naming the `b.generate` call that produced it.
+with a note naming the `b.generate` call that produced it and, for a `Code`
+value, the `#code` its items are written at
+(`` `b.generate("facts")` at main.jet:12 with the `#code` at main.jet:3 ``),
+which `made_by` names alike.
 
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every

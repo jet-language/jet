@@ -1,0 +1,10 @@
+# Claim: a generated item from a helper's `Code` value that collides with a
+# hand-written one is reported with a note naming the `b.generate` call and
+# the helper's `#code` line, where the colliding item is written.
+fixture: Fixtures/GenerateHelper
+env: NO_COLOR=1
+copy: collides.txt main.jet
+step: jet build main.jet
+exit: 1
+stderr: ~ "Jet.DuplicatePackageName" # the generated `answer` collides with the hand-written one
+stderr: ~ "Note: `b.generate(\"facts\")` at main.jet:10 with the `#code` at main.jet:3 generated this module" # at the helper's line
