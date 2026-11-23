@@ -1,0 +1,18 @@
+build: fn(b: Build) {
+    app: b.add_executable("generated_parity", ["run.jet"], [])
+    meta: b.compiler(app)
+    meta.add(
+        #code {
+            GeneratedBanner: struct {
+                label: String,
+                count: Int,
+            }
+
+            make_banner: fn() -> GeneratedBanner {
+                GeneratedBanner{label: "jet-build-fn-parity", count: 42}
+            }
+        },
+        scope: "banner",
+    )
+    b.default(app)
+}

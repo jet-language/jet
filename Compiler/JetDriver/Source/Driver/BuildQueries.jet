@@ -481,7 +481,13 @@ jet_driver_build_load_aside: fn(threads: CompilerThreads, load: &&JetDriverLoadR
     released.detach()
 }
 
-jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
+// The entry package's build plan. `generated_only`: the query stops once
+// `build: fn` has run, answering complete with the modules it generated and
+// nothing else: no plan, no final checked compile, and none of the build's
+// own reports. A compile that runs no build of its own (`jet check`) folds
+// those modules alone (JetCLI Request.jet jet_cli_generated_request); what
+// the build reports stays `jet build`'s.
+jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, generated_only: Bool{false}) -> JetDriverBuildQueryResponse {
     request := owned_request.move()
     // The plan reads the entry package's modules (its `build: fn`) and
     // manifest facts, so Core loads as the program reaches it, with no name
@@ -670,6 +676,11 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
             next
         }
         generated.push(row)
+    }
+    if generated_only {
+        only := jet_driver_build_query_empty(request, [Diagnostic]{}, true, None)
+        only.query.generated = generated.move()
+        return only
     }
     tidy := [Diagnostic]{}
     jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
@@ -1272,6 +1283,23 @@ jet_driver_entry_package_may_have_build: fn(request: JetDriverCompileRequest) ->
     }
     loop generated in request.generated_modules {
         if generated.source.contains("build") && generated.source.contains("Build") -> return true
+    }
+    false
+}
+
+// Whether a source the request authorizes spells a call that adds a module
+// from `build: fn`: `b.generate(…)`, or `b.compiler(…)`, whose value's
+// `meta.add` and `meta.rewrite_body` do. Every root is read, not only the
+// entry's: a dependency's helper given the `Build` value may generate. A
+// check runs the entry package's `build: fn` only when this holds (JetCLI
+// Request.jet jet_cli_generated_request), so a build that only reports,
+// reflects or fetches never runs under one. Read from the bytes alone, as
+// jet_driver_entry_package_may_have_build is.
+jet_driver_sources_may_generate: fn(request: JetDriverCompileRequest) -> Bool Never! {
+    loop root in request.authorized_sources.roots {
+        loop file in root.files {
+            if file.source.contains(".generate(") || file.source.contains(".compiler(") -> return true
+        }
     }
     false
 }
