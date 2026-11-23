@@ -115,7 +115,7 @@ sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index
     }
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if sema_registration_module_index(graph, binding.symbol.module_identity) == .Val(source) {
+            if binding.symbol.ty != None && sema_registration_module_index(graph, binding.symbol.module_identity) == .Val(source) {
                 slots.push(sema_registration_qualified_symbol_type(binding.symbol, jobs, source))
             } else { slots.push(None) }
         }
@@ -129,7 +129,6 @@ sema_registration_qualified_function_types: fn(functions: [SemaRegistrationFunct
         slots.push(sema_registration_qualified_symbol_type(function.symbol, jobs, source))
         loop parameter in function.parameters {
             slots.push(sema_registration_canonical_type(parameter.ty, jobs.keys[source]))
-            slots.push(sema_registration_qualified_symbol_type(parameter.symbol, jobs, source))
         }
     }
 }
@@ -187,9 +186,6 @@ sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFun
         loop parameter in 0..<functions[row].parameters.len() {
             if sema_registration_qualified_next(slots) == .Val(ty) {
                 functions[row].parameters[parameter].ty = ty
-            }
-            if sema_registration_qualified_next(slots) == .Val(ty) {
-                functions[row].parameters[parameter].symbol.ty = Val(ty)
             }
         }
     }

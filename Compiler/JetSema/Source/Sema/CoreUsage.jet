@@ -644,6 +644,9 @@ sema_expand_core_reachable_closure: fn(roots: [String], layer: &RuntimeLayer) ->
 }
 
 sema_core_note_builtin_math_type: fn(name: String, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+    if name.count_bytes() == 0 -> return
+    first: name.bytes()[0]
+    if first < (U8{65}) || first > (U8{90}) -> return
     if !(sema_core_is_math_type(name) || sema_core_is_geometry_type(name)) {
         return
     }
@@ -1234,22 +1237,24 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                         }
                     }
                 }
-                dotted_len: recv_name.count_bytes() + 1 + method.count_bytes()
-                dotted_row := SemaCoreImport?{None}
-                plain_row := SemaCoreImport?{None}
-                loop candidate in imports {
-                    if dotted_row == None && candidate.alias.count_bytes() == dotted_len && candidate.alias.starts_with(recv_name) && candidate.alias.ends_with(method) && candidate.alias == ("{recv_name}.{method}") {
-                        dotted_row = Val(candidate)
-                        break
+                if imports.len() > 0 {
+                    dotted_len: recv_name.count_bytes() + 1 + method.count_bytes()
+                    dotted_row := SemaCoreImport?{None}
+                    plain_row := SemaCoreImport?{None}
+                    loop candidate in imports {
+                        if dotted_row == None && candidate.alias.count_bytes() == dotted_len && candidate.alias.starts_with(recv_name) && candidate.alias.ends_with(method) && candidate.alias == ("{recv_name}.{method}") {
+                            dotted_row = Val(candidate)
+                            break
+                        }
+                        if plain_row == None && candidate.alias == recv_name {
+                            plain_row = Val(candidate)
+                        }
                     }
-                    if plain_row == None && candidate.alias == recv_name {
-                        plain_row = Val(candidate)
-                    }
-                }
-                matched_row := if dotted_row != None -> dotted_row else -> plain_row
-                if matched_row == .Val(imported) {
-                    if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) {
-                        sema_core_note_usage(used, spans, sema_core_import_usage(imported, method), Val(method_span))
+                    matched_row := if dotted_row != None -> dotted_row else -> plain_row
+                    if matched_row == .Val(imported) {
+                        if sema_core_import_is_core(imported.module_name) && sema_core_import_usage_is_known(imported, method) {
+                            sema_core_note_usage(used, spans, sema_core_import_usage(imported, method), Val(method_span))
+                        }
                     }
                 }
             }
@@ -1665,15 +1670,28 @@ sema_core_module_context: fn(graph: SemaRegistrationGraph, registration_module: 
     // `<corelib>/…`, as `use sys: core.sys` or `use core.sys.[get]` registers
     // it); a Core usage is keyed by the module's name.
     imports := sema_core_registration_imports(registration_module, graph.module_table)
+    has_code_module := false
+    loop item in registration_module.program.items {
+        if item == .CodeModule(_) {
+            has_code_module = true
+            break
+        }
+    }
+    filtered := [SemaCoreImport]{}
     loop index in 0..<imports.len() {
-        target: sema_registration_module_index_text(graph, imports[index].module_name) ?? next
-        imports[index].module_name = graph.modules[target].module_name.copy()
+        target: sema_registration_module_index_text(graph, imports[index].module_name)
+        if target == .Val(target_index) {
+            imports[index].module_name = graph.modules[target_index].module_name.copy()
+        }
+        if has_code_module || sema_core_import_is_core(imports[index].module_name) || imports[index].alias == "eprint" {
+            filtered.push(imports[index])
+        }
     }
     SemaCoreModuleContext{
         tables: registration_module.program.tables,
         owner: owner,
         unshared: sema_core_source_unshared_functions(registration_module, graph.symbols, module_text(graph.module_table, registration_module.module_identity), call_facts),
-        imports: imports.move(),
+        imports: filtered.move(),
         registered: registered.move(),
     }
 }
@@ -1792,7 +1810,7 @@ sema_core_import_offer: fn(imports: &[SemaCoreImport], only: String?, row: SemaC
 }
 
 sema_core_registration_type_names: fn(registration_module: SemaRegistrationModule) -> NameTable Never! {
-    registered := name_table_sized(256)
+    registered := name_table_sized(registration_module.nominals.len() * 2 + 8)
     // The empty name is id 0, which is never a member.
     loop nominal in registration_module.nominals {
         _ := name_intern(registered, nominal.symbol.name)

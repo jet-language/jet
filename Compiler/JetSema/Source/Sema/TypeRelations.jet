@@ -884,6 +884,15 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
     if name == "" || name == "Unit" || name == "Err" || name == "Never" {
         return Type.Named{name: name}
     }
+    // O(1) fast path for already-canonical plain nominal spellings (`pkg.Type`)
+    // when the caller has no dotted local/import/namespace bindings.
+    if name.contains(".") && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
+        if graph.canonical_nominals == .Val(canonical_table) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, name_rows_hash(name)) == .Val(row) {
+                if canonical_table.is_plain_type[row] -> return Type.Named{name: name}
+            }
+        }
+    }
     // A bare `Group` the caller neither declares nor imports is the task
     // group handle `task.group` binds, never a Core struct spelled `Group`
     // (core.data's carrier, core.sys's group entry, core.ui.xkb's key group)
@@ -925,6 +934,13 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
 }
 
 sema_type_graph_resolve_apply_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String Never! {
+    if name.contains(".") && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
+        if graph.canonical_nominals == .Val(canonical_table) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, name_rows_hash(name)) == .Val(row) {
+                if canonical_table.is_plain_type[row] -> return if true -> name else -> ""
+            }
+        }
+    }
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return name
     if sema_resolved_kind(graph, resolved) == SymbolKind.Type {
         nominal: sema_type_graph_resolved_nominal_row(graph, resolved)
@@ -1472,6 +1488,13 @@ sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func
     }
 }
 
+sema_type_is_scalar_resolved: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) -> false
+    }
+}
+
 sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
     if ty == {
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
@@ -1522,10 +1545,10 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             }
             Type.Apply{name: head, args: rewritten}
         }
-        .List(inner) -> Type.List{element: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
-        .Shared(inner) -> Type.Shared{inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
-        .Option(inner) -> Type.Option{inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
-        .Result(ok, err) -> Type.Result{ok: sema_type_resolve_declared_recursive(graph, ok, caller, generic_params), err: sema_type_resolve_declared_recursive(graph, err, caller, generic_params)}
+        .List(inner) -> if sema_type_is_scalar_resolved(inner) -> ty else -> Type.List{element: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
+        .Shared(inner) -> if sema_type_is_scalar_resolved(inner) -> ty else -> Type.Shared{inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
+        .Option(inner) -> if sema_type_is_scalar_resolved(inner) -> ty else -> Type.Option{inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
+        .Result(ok, err) -> if sema_type_is_scalar_resolved(ok) && sema_type_is_scalar_resolved(err) -> ty else -> Type.Result{ok: sema_type_resolve_declared_recursive(graph, ok, caller, generic_params), err: sema_type_resolve_declared_recursive(graph, err, caller, generic_params)}
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
             rewritten: loop parameter in params -> sema_type_resolve_declared_recursive(graph, parameter, caller, generic_params)
             // A plain branch, not `ret.map(…)`: a callback would capture (copy) the whole graph.
@@ -1547,7 +1570,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_type_resolve_declared_recursive(graph, base, caller, generic_params), dimension: dimension.copy()}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
-        .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
+        .Map(key, key_span, value) -> if sema_type_is_scalar_resolved(key) && sema_type_is_scalar_resolved(value) -> ty else -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
 }
@@ -1829,6 +1852,14 @@ sema_type_graph_lookup_symbol: fn(graph: SemaRegistrationGraph, module_identity:
 // unregistered caller (-1) has no local names, imports or visible owners.
 sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> SemaRegistrationResolvedSymbol? {
     hash: name_rows_hash(name)
+    has_dot: name.contains(".")
+    if has_dot && (caller < 0 || !graph.modules[caller].has_dotted_symbols) {
+        if graph.canonical_nominals == .Val(canonical_table) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, hash) == .Val(row) {
+                return canonical_table.resolved[row]
+            }
+        }
+    }
     if caller >= 0 {
         // The identity is passed as a place: binding it copied the String.
         local: sema_registration_lookup_name_hashed(graph, caller, graph.modules[caller].module_identity, name, hash)
@@ -1836,9 +1867,11 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
     }
     // A canonical nominal spelling's owner and whole name (SemaCanonicalNominals),
     // which the cut below also finds unless the name itself holds a `.`.
-    if graph.canonical_nominals == .Val(canonical_table) {
-        if sema_registration_canonical_nominal_row(canonical_table, name, hash) == .Val(row) {
-            return sema_registration_lookup_name_at(graph, canonical_table.owners[row], graph.modules[canonical_table.owners[row]].module_identity, canonical_table.leaves[row])
+    if has_dot {
+        if graph.canonical_nominals == .Val(canonical_table) {
+            if sema_registration_canonical_nominal_row(canonical_table, name, hash) == .Val(row) {
+                return canonical_table.resolved[row]
+            }
         }
     }
     // The name is cut in place; no part list is built per lookup.
@@ -2697,14 +2730,36 @@ sema_type_generic_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
     return Val(false)
 }
 
-// Whether `required` and `offered` are one named type spelled the same way:
-// both resolve to the same type (one caller, one set of generics), and a
-// resolved type is assignable to itself, so neither needs resolving.
+// Whether `required` and `offered` are structurally identical non-callable
+// written types: both resolve to the exact same type in the same caller scope
+// and generic context, so neither needs resolution or coercion checks.
 sema_type_same_named: fn(required: Type, offered: Type) -> Bool Never! {
-    if required == .Named(name) {
-        if offered == .Named(other) -> return name != "" && name == other
+    if required == {
+        .Int -> offered == Type.Int
+        .Float -> offered == Type.Float
+        .Bool -> offered == Type.Bool
+        .String -> offered == Type.String
+        .Char -> offered == Type.Char
+        .Float32 -> offered == Type.Float32
+        .IntN(s1, b1) -> if offered == .IntN(s2, b2) -> s1 == s2 && b1 == b2 else -> false
+        .Named(name) -> if offered == .Named(other) -> name != "" && name == other else -> false
+        .List(a) -> if offered == .List(b) -> sema_type_same_named(a, b) else -> false
+        .Option(a) -> if offered == .Option(b) -> sema_type_same_named(a, b) else -> false
+        .Shared(a) -> if offered == .Shared(b) -> sema_type_same_named(a, b) else -> false
+        .Result(ok1, err1) -> if offered == .Result(ok2, err2) -> sema_type_same_named(ok1, ok2) && sema_type_same_named(err1, err2) else -> false
+        .Map(k1, _, v1) -> if offered == .Map(k2, _, v2) -> sema_type_same_named(k1, k2) && sema_type_same_named(v1, v2) else -> false
+        .Apply(n1, args1) -> {
+            if offered == .Apply(n2, args2) {
+                if n1 == "" || n1 != n2 || args1.len() != args2.len() -> return false
+                loop idx in 0..<args1.len() {
+                    if !sema_type_same_named(args1[idx], args2[idx]) -> return false
+                }
+                return true
+            }
+            false
+        }
+        .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
-    false
 }
 
 sema_type_assignable_in_graph_with_generics: fn(graph: SemaRegistrationGraph, required: Type, offered: Type, caller_module_identity: ModuleID, generic_params: [TGenericParam]) -> Bool? {

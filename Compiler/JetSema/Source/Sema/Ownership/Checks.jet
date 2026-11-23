@@ -1240,6 +1240,10 @@ sema_ownership_declaration_index: fn(state: &SemaOwnershipState, id: SymbolID) -
 // rather than manufacturing a second name-resolution table.
 sema_ownership_note_reference: fn(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     index: sema_scope_resolve_index_at(scopes, name, use_span) ?? return false
+    sema_ownership_note_reference_at(state, name, use_span, scopes, index, kind)
+}
+
+sema_ownership_note_reference_at: fn(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, index: Int, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     def_id: scopes.bindings[index].symbol.id
     declaration_index := sema_ownership_declaration_index(state, def_id)
     if declaration_index == None {
@@ -4003,15 +4007,19 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
         // Rust CallBinder `substitute_param_refs`: a default's reads of
         // earlier parameters name the call's own slot temporaries, never a
         // caller place, so those places take no part in the caller's checks.
-        binder_names: loop reference in arg.flags.binder_refs -> reference.name
         binder_rooted := false
         places := [SemaOwnershipPlace]{}
-        loop place in sema_ownership_places_from_expr_in_state(arg.expr, scopes, state) {
-            if binder_names.contains(place.root) {
-                binder_rooted = true
-                next
+        if arg.flags.binder_refs.len() == 0 {
+            places = sema_ownership_places_from_expr_in_state(arg.expr, scopes, state)
+        } else {
+            binder_names: loop reference in arg.flags.binder_refs -> reference.name
+            loop place in sema_ownership_places_from_expr_in_state(arg.expr, scopes, state) {
+                if binder_names.contains(place.root) {
+                    binder_rooted = true
+                    next
+                }
+                places.push(place)
             }
-            places.push(place)
         }
         if (scopes.writes_explicit || arg.mark != None) && !binder_rooted {
             sema_call_marks_check_argument(scopes, callee, receiver, params, param, arg, diagnostics)

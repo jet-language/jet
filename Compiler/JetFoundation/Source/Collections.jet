@@ -762,9 +762,81 @@ sema_collection_is_map: fn(receiver: Type) -> Bool Never! {
     sema_collection_family(kind) == CollectionReceivers.Map
 }
 
+sema_collection_method_contract_row: fn(receiver: Type, kind: SemaCollectionKind, family: CollectionReceivers, row: CollectionOperationRow) -> SemaCollectionMethodContract {
+    SemaCollectionMethodContract{
+        receiver: receiver,
+        kind: kind,
+        receiver_access: collection_access_convention(row.access, family),
+        minimum_arity: row.minimum_arity,
+        maximum_arity: row.maximum_arity,
+        row: row,
+        callback_indices: [Int]{},
+        seed_indices: [Int]{},
+        accepts_comparator: false,
+    }
+}
+
+sema_collection_method_contract_fast: fn(receiver: Type, kind: SemaCollectionKind, family: CollectionReceivers, method: String) -> SemaCollectionMethodContract? {
+    if family == CollectionReceivers.List {
+        row: if {
+            method == "len" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current})
+            method == "is_empty" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current})
+            method == "push" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "push", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Push}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current, stores: true})
+            method == "pop" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "pop", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Pop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current})
+            method == "clear" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current})
+            method == "contains" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "contains", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current})
+            method == "get" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetList}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current})
+            method == "extend" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "extend", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ExtendList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current, stores: true})
+            method == "first" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.First}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current})
+            method == "last" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "last", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Last}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current})
+            method == "insert" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "insert", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.InsertList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current, stores: true})
+            method == "join" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "join", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Text}, result: CollectionResult.Text, op: CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, law: CollectionLaw.Drain, empty: "empty string", status: CollectionStatus.Current})
+            method == "reverse" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "reverse", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Reverse}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current})
+            method == "slice" -> Val(CollectionOperationRow{receivers: CollectionReceivers.List, name: "slice", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListSlice}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current})
+            else -> None
+        }
+        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        return None
+    }
+    if family == CollectionReceivers.Map {
+        row: if {
+            method == "len" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current})
+            method == "is_empty" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current})
+            method == "get" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetMap}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current})
+            method == "has_key" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "has_key", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current})
+            method == "add" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "add", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current, stores: true})
+            method == "remove" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current})
+            method == "clear" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current})
+            method == "keys" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "keys", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.KeyIter, op: CollectionOp.Builtin{op: TBuiltinOp.Keys}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current})
+            method == "values" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Map, name: "values", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementIter, op: CollectionOp.Builtin{op: TBuiltinOp.Values}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current})
+            else -> None
+        }
+        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        return None
+    }
+    if family == CollectionReceivers.Set {
+        row: if {
+            method == "has" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "has", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current})
+            method == "add" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetInsert}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current, stores: true})
+            method == "len" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current})
+            method == "is_empty" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current})
+            method == "remove" -> Val(CollectionOperationRow{receivers: CollectionReceivers.Set, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current})
+            else -> None
+        }
+        if row == .Val(found) -> return Val(sema_collection_method_contract_row(receiver, kind, family, found))
+        return None
+    }
+    None
+}
+
 // The one lookup: the checked row for this receiver and method, with its
 // receiver-specific access and callback positions resolved.
 sema_collection_method_contract: fn(receiver: Type, method: String) -> SemaCollectionMethodContract? {
+    kind: sema_collection_kind(receiver) ?? return None
+    family := sema_collection_family(kind)
+    if sema_collection_method_contract_fast(receiver, kind, family, method) == .Val(fast) {
+        return Val(fast)
+    }
     sema_collection_method_contract_in(COLLECTION_OPERATIONS, receiver, method)
 }
 

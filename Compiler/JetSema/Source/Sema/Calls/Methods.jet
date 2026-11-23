@@ -2173,7 +2173,7 @@ sema_call_declares_static_method: fn(receiver: Type, method: String, program: Se
                 loop implementation in graph.modules[owner_index].impls {
                     if implementation.target_type_name != base_name -> next
                     loop function in implementation.methods {
-                        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
+                        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
                             return true
                         }
                     }
@@ -2182,7 +2182,7 @@ sema_call_declares_static_method: fn(receiver: Type, method: String, program: Se
         }
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
-                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
+                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].name != "self") {
                     return true
                 }
             }

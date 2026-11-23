@@ -275,9 +275,10 @@ sema_scope_members_vocabulary: fn(marker: String) -> [String]? Never! {
 // `check`: a dot member is legal only as a direct statement of a
 // member-declaring marker block (E0614/E0616), never nested (E0618) and never
 // in an ordinary function or method body (E0615).
-sema_scope_members_check: fn(tables: ASTTables, items: [Item]) -> [Diagnostic] {
+sema_scope_members_check: fn(tables: ASTTables, items: [Item], has_scope_member: Bool{true}) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     sema_scope_members_check_assertionless_tests(tables, items, diagnostics)
+    if !has_scope_member -> return diagnostics
     loop item in items {
         if item == {
             .Test(test) -> { sema_scope_members_check_marker_body("Test", test.body, diagnostics) }

@@ -210,11 +210,18 @@ SemaScopeDeclaration: struct {
 // foreign, audited, deprecated, lifecycle, shared, intrinsic or operator
 // call carries sit behind one optional `detail` word, so the run's many
 // plain calls hold none of them.
+// The call facts retained per call site: only `effect_bound` and `local_lambda`
+// are ever read after the call expression checks.
+SemaCallSiteFacts: struct {
+    effect_bound: [EffectRowEntry]?,
+    local_lambda: TEffectFacts?{None},
+}
+
 SemaCallSiteFact: struct {
     span: Span,
     caller_key: String,
     callee: SymbolID?,
-    facts: SemaCallFacts,
+    facts: SemaCallSiteFacts,
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (L0508).
     discarded: Bool,
@@ -1174,6 +1181,10 @@ SemaScopeTable: struct {
     comptime_runtime_locals: [String]{[String]{}},
     // The innermost `#On(.Deep)` body being checked (SemaDeepFrame).
     deep_check: SemaDeepFrame?{None},
+    // Worker-local zero-copy InternerDelta moved into SemaCheckContext for
+    // each function body pass and returned afterward (never copied by marks or
+    // snapshots).
+    type_delta: [InternerDelta]{[InternerDelta]{}},
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:
@@ -1191,13 +1202,32 @@ SemaScopeBindingUndo: struct {
     binding: SemaScopeBinding,
 }
 
-// A rollback point: the table's row counts plus a copy of its small fields.
-// `saved` holds no frames, bindings or name rows.
+// A rollback point: the table's row counts plus its small scalar/flag fields.
+// Avoids constructing a throwaway SemaScopeTable (and NameTable) on every mark.
 SemaScopeMark: struct {
     frames: Int,
     bindings: Int,
     undo: Int,
-    saved: SemaScopeTable,
+    loop_labels: [SemaScopeLoopLabel],
+    hardware_transfers: [SemaHardwareDMATransferFact],
+    hardware_definite_transfers: [SemaHardwareDMATransferFact],
+    hardware_pending_transfers: [SemaHardwareDMATransferFact],
+    current: Int,
+    knowledge_gate: SemaKnowledgeGate?,
+    return_type: Type?,
+    failure_carrier: TFailureCarrier?,
+    loop_depth: Int,
+    ownership_call_depth: Int,
+    comptime_execution_depth: Int,
+    transaction_depth: Int,
+    transaction_wall_depth: Int,
+    unit_explicit_units: Bool,
+    copies_explicit: Bool,
+    writes_explicit: Bool,
+    failures_explicit: Bool,
+    context_allocation: Int,
+    open_marks: Int,
+    deep_check: SemaDeepFrame?,
 }
 
 // The hardware transfer facts of one path, joined at a control-flow merge.
@@ -1804,7 +1834,71 @@ SemaCheckContextMark: struct {
     index_proofs: Int,
     filed_expr_ids: Int,
     next_expr_id: Int,
-    saved: SemaCheckContext,
+    saved: SemaCheckContextSaved,
+}
+
+// Only the non-append-only fields of SemaCheckContext that a mark saves and
+// rollback restores: avoids constructing a full SemaCheckContext (arena,
+// BodyTrees, maps, and 20 empty lists) on every control-flow arm or probe.
+SemaCheckContextSaved: struct {
+    exact_int_reachable: Bool,
+    unsafe_depth: Int,
+    borrow_ctx: Bool,
+    allow_string_view_read: Bool,
+    suppress_partial_move_root_read: Bool,
+    allow_fixed_constructor: Bool,
+    generic_params: [TGenericParam],
+    lambda_escapes: Bool?,
+    lambda_lending_views: Bool,
+    lending_view_parameter_keys: [String],
+    lambda_statement_tails: [SemaStatementTailFrame],
+    http_routes: SemaHTTPRouteIndex,
+    hardware_use: TargetHardwareUse,
+    return_view_receiver_key: String,
+    return_view_parameter_keys: [String],
+    return_view_provenance: ViewProvenanceMap?,
+    comptime_body_values: SemaComptimeBodyValues,
+    autodiff_safe_panic: Bool,
+    autodiff_unsafe_panic: Bool,
+    autodiff_safe_panic_context: Bool,
+    loop_value_frames: [SemaLoopValueFrame],
+    loop_break_flows: [SemaLoopBreakFlows],
+    pending_loop_value: SemaPendingLoopValue?,
+    collect_item_types: [Type?],
+    collect_item_if: Span?,
+    last_loop_result_type: Type?,
+    arrow_loop_body: Bool,
+    reactive_upgrades: [String],
+    reactive_upgrade_names: [String],
+    reactive_local_ids: [SymbolID],
+    reactive_shared_ids: [SymbolID],
+    taskgroups: SemaTaskGroupState,
+    failure_carrier_root: Bool,
+    failure_success_view: Bool,
+    failure_inference: Bool,
+    inferred_failure_carrier: TFailureCarrier?,
+    callback_return_open: Bool,
+    callback_return_closed: Bool,
+    callback_return_row: Type?,
+    failure_contract_source: String,
+    failure_repair: SemaFailureRepair?,
+    function_name: String,
+    return_alias: String?,
+    fallback_err_denial: String?,
+    lost_tail_span: Span?,
+    value_tail_span: Span?,
+    failure_direct_source: Bool,
+    failure_union_general: Bool,
+    task_body_propagates: Bool,
+    iter_borrowed: [String],
+    binding_initializer: Bool,
+    source_nesting: Int,
+    implicit_loop_subject_depth: Int,
+    subject_shorthand_depth: Int,
+    arithmetic_policy: ArithmeticPolicyFact?,
+    runtime_policy: PolicyValue?,
+    compiler_generated: Bool,
+    return_view_declared: Bool,
 }
 
 sema_check_context_mark: fn(context: &SemaCheckContext) -> SemaCheckContextMark Never! {
@@ -1841,7 +1935,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         index_proofs: context.index_proofs.len(),
         filed_expr_ids: context.filed_expr_ids.len(),
         next_expr_id: context.next_expr_id,
-        saved: SemaCheckContext{
+        saved: SemaCheckContextSaved{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
             borrow_ctx: context.borrow_ctx,
@@ -1853,30 +1947,17 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             lambda_lending_views: context.lambda_lending_views,
             lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
-            call_facts: [SemaCallSiteFact]{},
             http_routes: if context.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> context.http_routes.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-            call_return_views: [SemaCallReturnView]{},
-            local_view_provenance: [SemaLocalViewProvenance]{},
             return_view_receiver_key: context.return_view_receiver_key,
             return_view_parameter_keys: if context.return_view_parameter_keys.len() == 0 -> [String]{} else -> context.return_view_parameter_keys.copy(),
             return_view_provenance: context.return_view_provenance,
-            name_references: [SemaNameReferenceFact]{},
-            comptime_requests: [SemaComptimeRequest]{},
-            comptime_body_sources: [SemaComptimeBodySource]{},
             // copy: the publication view (shared facts owner and visible
             // length); rollback restores it, including a replaced generation.
             comptime_body_values: context.comptime_body_values.copy(),
-            comptime_body_source_modules: [Int]{},
-            comptime_body_source_rows: [[String:Int]]{},
-            compute_calls: [SemaComputeCallFact]{},
-            autodiff_obligations: [SemaAutodiffObligation]{},
-            generic_crossings: [SemaGenericCrossing]{},
-            generic_calls: [SemaGenericCall]{},
             autodiff_safe_panic: context.autodiff_safe_panic,
             autodiff_unsafe_panic: context.autodiff_unsafe_panic,
             autodiff_safe_panic_context: context.autodiff_safe_panic_context,
-            copy_events: [SemaCopyEvent]{},
             loop_value_frames: if context.loop_value_frames.len() == 0 -> [SemaLoopValueFrame]{} else -> context.loop_value_frames.copy(),
             loop_break_flows: if context.loop_break_flows.len() == 0 -> [SemaLoopBreakFlows]{} else -> sema_loop_break_flows_snapshot(context.loop_break_flows),
             pending_loop_value: context.pending_loop_value,
@@ -1901,15 +1982,9 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             function_name: context.function_name,
             return_alias: context.return_alias,
             fallback_err_denial: context.fallback_err_denial,
-            noelse_chain_starts: [Int]{},
-            fallback_tables: [Int]{},
             lost_tail_span: context.lost_tail_span,
             value_tail_span: context.value_tail_span,
-            failure_edges: [String]{},
             failure_direct_source: context.failure_direct_source,
-            failure_union_members: [Type]{},
-            failure_union_cases: [SemaFailureCase]{},
-            failure_union_edges: [String]{},
             failure_union_general: context.failure_union_general,
             task_body_propagates: context.task_body_propagates,
             iter_borrowed: if context.iter_borrowed.len() == 0 -> [String]{} else -> context.iter_borrowed.copy(),
@@ -1928,7 +2003,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
 // Closes `mark` without rolling back: the checks since it are kept. In-place
 // edit rows stay for any enclosing mark.
 sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
-    table.open_marks = mark.saved.open_marks
+    table.open_marks = mark.open_marks
 }
 
 // Restores `context` to `mark`: appended rows are dropped (a check only appends
@@ -2175,33 +2250,26 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
         frames: table.frames.len(),
         bindings: table.bindings.len(),
         undo: table.binding_undo.len(),
-        saved: SemaScopeTable{
-            module_identity: table.module_identity,
-            frames: [SemaScopeFrame]{},
-            bindings: [SemaScopeBinding]{},
-            name_slots: name_table_sized(2),
-            name_positions: [[Int]]{},
-            loop_labels: table.loop_labels.copy(),
-            hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
-            hardware_definite_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
-            hardware_pending_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
-            current: table.current,
-            knowledge_gate: table.knowledge_gate,
-            return_type: table.return_type,
-            failure_carrier: table.failure_carrier,
-            loop_depth: table.loop_depth,
-            ownership_call_depth: table.ownership_call_depth,
-            comptime_execution_depth: table.comptime_execution_depth,
-            transaction_depth: table.transaction_depth,
-            transaction_wall_depth: table.transaction_wall_depth,
-            unit_explicit_units: table.unit_explicit_units,
-            copies_explicit: table.copies_explicit,
-            writes_explicit: table.writes_explicit,
-            failures_explicit: table.failures_explicit,
-            context_allocation: table.context_allocation,
-            open_marks: table.open_marks,
-            deep_check: table.deep_check,
-        },
+        loop_labels: if table.loop_labels.len() == 0 -> [SemaScopeLoopLabel]{} else -> table.loop_labels.copy(),
+        hardware_transfers: if table.hardware_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
+        hardware_definite_transfers: if table.hardware_definite_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_definite_transfers),
+        hardware_pending_transfers: if table.hardware_pending_transfers.len() == 0 -> [SemaHardwareDMATransferFact]{} else -> sema_scope_hardware_transfers_snapshot(table.hardware_pending_transfers),
+        current: table.current,
+        knowledge_gate: table.knowledge_gate,
+        return_type: table.return_type,
+        failure_carrier: table.failure_carrier,
+        loop_depth: table.loop_depth,
+        ownership_call_depth: table.ownership_call_depth,
+        comptime_execution_depth: table.comptime_execution_depth,
+        transaction_depth: table.transaction_depth,
+        transaction_wall_depth: table.transaction_wall_depth,
+        unit_explicit_units: table.unit_explicit_units,
+        copies_explicit: table.copies_explicit,
+        writes_explicit: table.writes_explicit,
+        failures_explicit: table.failures_explicit,
+        context_allocation: table.context_allocation,
+        open_marks: table.open_marks,
+        deep_check: table.deep_check,
     }
     table.open_marks += 1
     mark
@@ -2227,28 +2295,43 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
         _ := table.bindings.pop()
     }
     loop table.frames.len() > mark.frames -> _ := table.frames.pop()
-    saved: mark.saved
-    table.loop_labels = saved.loop_labels.copy()
-    table.hardware_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_transfers)
-    table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_definite_transfers)
-    table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(saved.hardware_pending_transfers)
-    table.current = saved.current
-    table.knowledge_gate = saved.knowledge_gate
-    table.return_type = saved.return_type
-    table.failure_carrier = saved.failure_carrier
-    table.loop_depth = saved.loop_depth
-    table.ownership_call_depth = saved.ownership_call_depth
-    table.comptime_execution_depth = saved.comptime_execution_depth
-    table.transaction_depth = saved.transaction_depth
-    table.transaction_wall_depth = saved.transaction_wall_depth
-    table.unit_explicit_units = saved.unit_explicit_units
-    table.copies_explicit = saved.copies_explicit
-    table.writes_explicit = saved.writes_explicit
-    table.failures_explicit = saved.failures_explicit
-    table.context_allocation = saved.context_allocation
-    table.deep_check = saved.deep_check
+    if mark.loop_labels.len() == 0 {
+        if table.loop_labels.len() > 0 -> table.loop_labels = [SemaScopeLoopLabel]{}
+    } else {
+        table.loop_labels = mark.loop_labels.copy()
+    }
+    if mark.hardware_transfers.len() == 0 {
+        if table.hardware_transfers.len() > 0 -> table.hardware_transfers = [SemaHardwareDMATransferFact]{}
+    } else {
+        table.hardware_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_transfers)
+    }
+    if mark.hardware_definite_transfers.len() == 0 {
+        if table.hardware_definite_transfers.len() > 0 -> table.hardware_definite_transfers = [SemaHardwareDMATransferFact]{}
+    } else {
+        table.hardware_definite_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_definite_transfers)
+    }
+    if mark.hardware_pending_transfers.len() == 0 {
+        if table.hardware_pending_transfers.len() > 0 -> table.hardware_pending_transfers = [SemaHardwareDMATransferFact]{}
+    } else {
+        table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(mark.hardware_pending_transfers)
+    }
+    table.current = mark.current
+    table.knowledge_gate = mark.knowledge_gate
+    table.return_type = mark.return_type
+    table.failure_carrier = mark.failure_carrier
+    table.loop_depth = mark.loop_depth
+    table.ownership_call_depth = mark.ownership_call_depth
+    table.comptime_execution_depth = mark.comptime_execution_depth
+    table.transaction_depth = mark.transaction_depth
+    table.transaction_wall_depth = mark.transaction_wall_depth
+    table.unit_explicit_units = mark.unit_explicit_units
+    table.copies_explicit = mark.copies_explicit
+    table.writes_explicit = mark.writes_explicit
+    table.failures_explicit = mark.failures_explicit
+    table.context_allocation = mark.context_allocation
+    table.deep_check = mark.deep_check
     // Exact even when a nested mark was abandoned by an early return.
-    table.open_marks = saved.open_marks
+    table.open_marks = mark.open_marks
 }
 
 // Call before editing `table.bindings[index]` in place, so an open rollback
@@ -2449,7 +2532,7 @@ sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrat
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
             if !func.site_names.contains(binding.symbol.name) {
-                sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, key: symbol_table_key(graph.symbols, binding.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+                sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: sema_registration_binding_symbol(graph, binding), key: symbol_table_key(graph.symbols, binding.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
             }
         }
     }
@@ -2738,6 +2821,14 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
     if table.base_binding_count > 0 {
         hash: name_text_hash(name)
         local_slot: sema_scope_name_slot_hashed(table, name, hash)
+        if table.lookup_counters == None {
+            if local_slot == .Val(ls) {
+                found: sema_scope_resolve_in_positions(table, table.name_positions[ls])
+                if found != None -> return found
+            }
+            bs: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash) ?? return None
+            return sema_scope_resolve_in_positions(table, table.base_table[0].name_positions[bs])
+        }
         base_slot: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash)
         if local_slot == None {
             bs: base_slot ?? return sema_scope_counted(table, 0, None)
@@ -2938,6 +3029,14 @@ sema_scope_resolve_index_at: fn(table: SemaScopeTable, name: String, use_span: S
     if table.base_binding_count > 0 {
         hash: name_text_hash(name)
         local_slot: sema_scope_name_slot_hashed(table, name, hash)
+        if table.lookup_counters == None {
+            if local_slot == .Val(ls) {
+                found: sema_scope_resolve_at_in_positions(table, table.name_positions[ls], use_span)
+                if found != None -> return found
+            }
+            bs: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash) ?? return None
+            return sema_scope_resolve_at_in_positions(table, table.base_table[0].name_positions[bs], use_span)
+        }
         base_slot: sema_scope_name_slot_in(table.base_table[0].name_slots, table.base_table[0].name_positions, name, hash)
         if local_slot == None {
             bs: base_slot ?? return sema_scope_counted(table, 0, None)
@@ -3242,7 +3341,7 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
 sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
     name: sema_scope_place_root(place) ?? return
     index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: sema_scope_binding_symbol(environment, scopes, index).kind
+    kind: scopes.bindings[index].symbol.kind
     if kind != SymbolKind.Parameter && kind != SymbolKind.Local {
         context.module_writes.push(TEffectSpan{name: name, span: span})
         return
@@ -3262,7 +3361,7 @@ sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaSco
 sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
     name: sema_scope_place_root(place) ?? return
     index: sema_scope_resolve_index(scopes, name) ?? return
-    kind: sema_scope_binding_symbol(environment, scopes, index).kind
+    kind: scopes.bindings[index].symbol.kind
     if kind == SymbolKind.Parameter || kind == SymbolKind.Local {
         return
     }

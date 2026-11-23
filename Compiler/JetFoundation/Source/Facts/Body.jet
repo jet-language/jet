@@ -24,7 +24,7 @@ BodyTree: struct {
     stmt_base: Int{0},
     // The keys of the body's own symbol ids (SYMBOL_LOCAL_BIT): its locals
     // and the keys it minted that no registration holds (symbol_key).
-    symbols: SymbolLocalKeys{symbol_local_keys()},
+    symbols: SymbolLocalKeys{SymbolLocalKeys{bytes: [U8]{}, ends: [Int]{0}, hashes: [Int]{NAME_EMPTY_HASH}, slots: [Int]{}, mask: 0}},
 }
 
 // One expression: its node id, its checked form and its source span. Its type
@@ -52,11 +52,15 @@ body_tree_new: fn() -> BodyTree Never! {
 // those slots would otherwise stay for that long. The type table keeps its
 // slots: each generic instance looks its fact types up in them
 // (sema_instance_type, ir_fact_type).
-body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}) -> BodyTree Never! {
+body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
     sealed := tree
-    sealed.nodes = body_rows_fitted(sealed.nodes.move())
-    sealed.stmts = body_rows_fitted(sealed.stmts.move())
-    sealed.expr_types = body_rows_fitted(sealed.expr_types.move())
+    if !nodes_fitted {
+        sealed.nodes = body_rows_fitted(sealed.nodes.move())
+        sealed.expr_types = body_rows_fitted(sealed.expr_types.move())
+    }
+    if !stmts_fitted {
+        sealed.stmts = body_rows_fitted(sealed.stmts.move())
+    }
     sealed.types.types = body_rows_fitted(sealed.types.types.move())
     if keep_type_slots {
         sealed.types.hashes = body_rows_fitted(sealed.types.hashes.move())
@@ -66,7 +70,7 @@ body_tree_sealed: fn(tree: &&BodyTree, keep_type_slots: Bool{true}) -> BodyTree 
     }
     sealed.symbols.bytes = body_rows_fitted(sealed.symbols.bytes.move())
     sealed.symbols.ends = body_rows_fitted(sealed.symbols.ends.move())
-    sealed.symbols.hashes = body_rows_fitted(sealed.symbols.hashes.move())
+    sealed.symbols.hashes = [Int]{}
     symbol_local_keys_seal(sealed.symbols)
     sealed
 }

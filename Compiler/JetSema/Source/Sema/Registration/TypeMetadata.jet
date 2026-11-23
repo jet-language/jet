@@ -4,10 +4,13 @@ use jet_foundation.[
     EnumDef,
     Item,
     Marker,
+    NameTable,
     StructDef,
     TraitImplBlock,
     Type,
     VariantPayload,
+    name_count,
+    name_find,
     owned_trait_requested,
     type_name,
 ]
@@ -86,8 +89,9 @@ sema_type_metadata_impl_key: fn(type_name: String, trait_name: String) -> String
     "{type_name.len()}:{type_name}:{trait_name}"
 }
 
-sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: [String:Bool], type_name: String, trait_name: String) -> Bool Never! {
-    declared_trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) != None
+sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: NameTable, type_name: String, trait_name: String) -> Bool Never! {
+    if name_count(declared_trait_impls) <= 1 -> return false
+    name_find(declared_trait_impls, sema_type_metadata_impl_key(type_name, trait_name)) != None
 }
 
 sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
@@ -99,7 +103,7 @@ sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, st
 // that same module's top-level trait impl declarations (see
 // `sema_registration_push_declaration`), so unrelated modules cannot suppress
 // this type's selection.
-sema_type_metadata_auto_derives: fn(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
+sema_type_metadata_auto_derives: fn(definition: Item, declared_trait_impls: NameTable) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
             eligible: sema_type_metadata_struct_auto_ok(value)

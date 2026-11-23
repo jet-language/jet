@@ -316,6 +316,10 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         source_file: module_row.source_file.copy()
         source_origin: module_row.source_origin.copy()
         source_segments: module_row.source_segments.copy()
+        if generated.len() > 0 {
+            module_row.program.has_scope_member = true
+            module_row.program.has_task_spawn = true
+        }
         loop item in generated {
             module_row.program.items.push(item.copy())
             if item == {

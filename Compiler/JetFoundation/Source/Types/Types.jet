@@ -665,11 +665,9 @@ SymbolLocalKeys: struct {
     mask: Int,
 }
 
-// A body's keys: few, so the table starts small.
+// A body's keys: few, so slots are built lazily on the first non-empty key.
 symbol_local_keys: fn() -> SymbolLocalKeys Never! {
-    keys := SymbolLocalKeys{bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: (loop _ in 0..<SYMBOL_LOCAL_INITIAL_SLOTS -> 0), mask: SYMBOL_LOCAL_INITIAL_SLOTS - 1}
-    _ := symbol_local_keys_intern(keys, "")
-    keys
+    SymbolLocalKeys{bytes: [U8]{}, ends: [Int]{0}, hashes: [Int]{NAME_EMPTY_HASH}, slots: [Int]{}, mask: 0}
 }
 
 // How many rows `keys` holds, the empty key's included.
@@ -701,8 +699,16 @@ symbol_local_keys_spells: fn(keys: SymbolLocalKeys, row: Int, bytes: [U8]) -> Bo
 // scanned.
 symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int? Never! {
     if keys.slots.len() == 0 {
-        loop row in 0..<keys.hashes.len() {
-            if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
+        if keys.hashes.len() == keys.ends.len() {
+            loop row in 0..<keys.hashes.len() {
+                if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
+                    return Val(row)
+                }
+            }
+            return None
+        }
+        loop row in 0..<keys.ends.len() {
+            if symbol_local_keys_spells(keys, row, key.bytes()) {
                 return Val(row)
             }
         }
@@ -730,6 +736,11 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
     row: keys.ends.len()
     if row >= SYMBOL_LOCAL_BOUND {
         panic("a body's symbol keys are full ({SYMBOL_LOCAL_BOUND} keys)")
+    }
+    if keys.hashes.len() < row {
+        loop index in keys.hashes.len()..<row {
+            keys.hashes.push(name_rows_hash(String.from_bytes(keys.bytes.slice(symbol_local_keys_start(keys, index), keys.ends[index])) ?? ""))
+        }
     }
     keys.bytes.extend(key.bytes())
     keys.ends.push(keys.bytes.len())

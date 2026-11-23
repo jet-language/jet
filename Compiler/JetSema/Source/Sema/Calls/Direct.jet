@@ -2003,13 +2003,48 @@ sema_call_direct_checked_resolved: fn(state: &SemaOwnershipState, candidate: Sem
         resolved: sema_call_materialize_defaults(params, binding, args, resolved_defaults, call.name_span, diagnostics) ?? return None
         binding = resolved
     }
-    abi: sema_call_direct_target_abi(candidate, environment, program)
+    abi := SemaRegistrationCallableABI?{None}
+    callee_facts := SemaContractCalleeFacts?{None}
+    callee_facts_resolved := false
+    has_markers := true
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_row_of(graph, candidate.symbol.id) == .Val(row) {
+            callee_facts_resolved = true
+            if row == {
+                .Function(module_index, index) -> {
+                    abi = Val(graph.modules[module_index].functions[index].abi)
+                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].functions[index].declaration)
+                    has_markers = graph.modules[module_index].functions[index].declaration.markers.len() > 0
+                }
+                .NominalMethod(module_index, owner, index) -> {
+                    abi = Val(graph.modules[module_index].nominals[owner].methods[index].abi)
+                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].nominals[owner].methods[index].declaration)
+                    has_markers = graph.modules[module_index].nominals[owner].methods[index].declaration.markers.len() > 0
+                }
+                .ImplMethod(module_index, owner, index) -> {
+                    abi = Val(graph.modules[module_index].impls[owner].methods[index].abi)
+                    callee_facts = sema_contract_call_site_facts_of_func(graph.modules[module_index].impls[owner].methods[index].declaration)
+                    has_markers = graph.modules[module_index].impls[owner].methods[index].declaration.markers.len() > 0
+                }
+                .Foreign(module_index, index) -> {
+                    abi = Val(graph.modules[module_index].foreign_functions[index].abi)
+                    has_markers = false
+                }
+            }
+        } else {
+            abi = sema_call_direct_target_abi(candidate, environment, program)
+        }
+    } else {
+        abi = sema_call_direct_target_abi(candidate, environment, program)
+    }
     {lowered, pins} := sema_call_check_bound_arguments_owned(state, call.name, params, abi, true, binding, args, environment, program, scopes, tail_store, context, call.name_span, diagnostics) ?? {
         sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, scopes, context, diagnostics)
         return None
     }
     sema_call_lint_shared_loop_arguments(call.args, environment, scopes, diagnostics)
-    callee_facts: sema_contract_function_facts(environment, program, candidate.symbol.id)
+    if !callee_facts_resolved {
+        callee_facts = sema_contract_call_site_facts(environment, program, candidate.symbol.id)
+    }
     if callee_facts == .Val(facts) {
         if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, binding.slots, call.args, scopes, state, diagnostics) {
             return None
@@ -2043,9 +2078,12 @@ sema_call_direct_checked_resolved: fn(state: &SemaOwnershipState, candidate: Sem
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
-    policy_diagnostic_count: diagnostics.len()
-    policy_value: sema_policy_direct_value(candidate, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if sema_has_error_since(diagnostics, policy_diagnostic_count) -> return None
+    policy_value := TExpr?{None}
+    if has_markers {
+        policy_diagnostic_count: diagnostics.len()
+        policy_value = sema_policy_direct_value(candidate, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics)
+        if sema_has_error_since(diagnostics, policy_diagnostic_count) -> return None
+    }
     call_value: if policy_value == .Val(callee) -> {
         sema_tree_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span)
     } else -> {

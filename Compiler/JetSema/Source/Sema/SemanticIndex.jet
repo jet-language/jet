@@ -324,7 +324,7 @@ sema_compiler_index_parameter_values: fn(registration: SemaRegistrationGraph, ca
             TComptimeValue.Struct{
                 type_name: "CompilerParam",
                 fields: [TComptimeField]{
-                    TComptimeField{name: "name", value: sema_compiler_index_string(parameter.symbol.name)},
+                    TComptimeField{name: "name", value: sema_compiler_index_string(parameter.name)},
                     TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, parameter.ty)},
                 },
             },
@@ -1726,7 +1726,7 @@ sema_compiler_index_function_signature: fn(function: SemaRegistrationFunction) -
             variadic := false
             if index < function.parameters.len() {
                 parameter := function.parameters[index]
-                label = if parameter.public_label == .Val(value) -> value else -> parameter.symbol.name
+                label = if parameter.public_label == .Val(value) -> value else -> parameter.name
                 zone = parameter.zone
                 variadic = parameter.variadic
             }
