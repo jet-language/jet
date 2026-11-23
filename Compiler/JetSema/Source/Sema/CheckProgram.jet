@@ -11091,12 +11091,12 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module, graph.module_table)
     loop function in source_module.functions {
-        sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, true))
+        sources.push(sema_comptime_effect_source(graph, source_module, function, compute_aliases, true))
     }
     loop nominal in source_module.nominals {
         block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
         loop (index, function) in nominal.methods {
-            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, false)
+            source := sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id), source_module.module_identity)
             if index < block_traits.len() -> source.trait_symbol = block_traits[index].copy()
             sources.push(source)
@@ -11108,7 +11108,7 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
             trait_id = if implementation.trait_symbol == .Val(symbol) -> Val(symbol.id) else -> sema_effect_impl_trait(graph, source_module.module_identity, trait_name)
         }
         loop function in implementation.methods {
-            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, compute_aliases, false)
+            source := sema_comptime_effect_source(graph, source_module, function, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal, source_module.module_identity)
             source.trait_symbol = trait_id.copy()
             sources.push(source)
@@ -11117,13 +11117,16 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
     sources
 }
 
-// The effect source of the function `symbol` declared by `func`: its body
-// facts, walked from its body, and, for a `top_level` function, its pending
-// kernel (`compute_aliases`: its module's aliases of `core.compute`).
-sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, func: Func, symbol: SymbolID, compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
-    facts := sema_effect_body_facts(func)
-    if top_level -> facts.kernel = sema_kernel_pending(func, compute_aliases)
-    sema_effect_source_from_header(func, symbol_table_key(graph.symbols, symbol), facts)
+// The effect source of the registered function `function` of
+// `source_module`: its body facts, walked from its body (read from its item
+// when the row holds none, sema_registration_function_body), and, for a
+// `top_level` function, its pending kernel (`compute_aliases`: its module's
+// aliases of `core.compute`).
+sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, function: SemaRegistrationFunction, compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
+    body: sema_registration_function_body(source_module, function)
+    facts := sema_effect_body_facts(body)
+    if top_level -> facts.kernel = sema_kernel_pending(function.declaration, body, compute_aliases)
+    sema_effect_source_from_header(function.declaration, symbol_table_key(graph.symbols, function.symbol.id), facts)
 }
 
 // The trait each of `nominal`'s methods implements, by method row: None for

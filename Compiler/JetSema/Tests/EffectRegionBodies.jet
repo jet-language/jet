@@ -1,0 +1,36 @@
+// A registration row's declaration may hold no body: the body pass reads it
+// from the row's item (sema_registration_function_body). The effect sources
+// read it the same way, so a function's `#FX(…)` regions and `#On(.Deep)`
+// bodies, and a method's, are checked against what they reach (E0712, E0713).
+// The checks go through the production parser, registration graph and
+// finalization (hole_header_errors).
+
+// The codes of the errors `source` checks with, in report order.
+effect_region_codes: fn(source: String) -> [String] {
+    failures := [String]{}
+    errors: hole_header_errors(failures, source) ?? panic("EffectRegionBodies: {failures.join("; ")}")
+    loop error in errors -> error.code.copy()
+}
+
+#Test("a function's deep check and FX region are checked against what they reach") {
+    deep: effect_region_codes("run: fn(n: Int) {{\n    #On(.Deep) {{\n        print(\"count is {{n}}\")\n    }}\n}}\n")
+    assert(deep == [String]{"E0713"}, "a deep check that prints: {deep:Debug}")
+    // The fixture's effect module declares only IO and Panic, so `Net` is
+    // also an unknown effect (E0119); the region is still checked.
+    region: effect_region_codes("run: fn() {{\n    #FX(Net) {{\n        print(\"x\")\n    }}\n}}\n")
+    assert(region.contains("E0712"), "an FX(Net) region that prints: {region:Debug}")
+    covered: effect_region_codes("run: fn() {{\n    #FX(IO) {{\n        print(\"x\")\n    }}\n}}\n")
+    assert(covered.len() == 0, "an FX(IO) region that prints: {covered:Debug}")
+}
+
+#Test("a method's deep check is checked against what it reaches") {
+    codes: effect_region_codes("Tree: struct {{\n    size: Int,\n\n    check: fn(self) {{\n        #On(.Deep) {{\n            print(\"size {{self.size}}\")\n        }}\n    }}\n}}\n")
+    assert(codes == [String]{"E0713"}, "a method's deep check that prints: {codes:Debug}")
+}
+
+// A `#Nondeterministic` block is the function's declared exception to its
+// `-[]>` bound (assume_det_spans), read from the body like the regions.
+#Test("a nondeterministic block inside a pure function is its declared exception") {
+    codes: effect_region_codes("risky: fn() -[]> {{\n    #Nondeterministic(\"ambient print is deliberate\") {{ print(\"side effect\") }}\n}}\n")
+    assert(codes.len() == 0, "a pure function's nondeterministic print: {codes:Debug}")
+}
