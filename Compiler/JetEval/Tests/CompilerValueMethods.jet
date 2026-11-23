@@ -1,0 +1,52 @@
+// Generated compiler-value projection routes (JetEval CompilerValueMethods.jet).
+use {
+    jet_foundation.[TComptimeField, TComptimeValue]
+    jet_eval.[
+        jet_eval_compiler_value_answer,
+        jet_eval_compiler_value_method_record,
+        jet_eval_compiler_value_method_supported,
+    ]
+}
+
+#Test("generated compiler value methods accept CoreRecordRows fields and project values") {
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "source"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "schema_version"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "syntax"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "diagnostics"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "functions"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "effects"))
+    assert(jet_eval_compiler_value_method_record("CompilerChecked", "semantic_index"))
+    assert(!jet_eval_compiler_value_method_record("CompilerChecked", "nonexistent_field"))
+    assert(!jet_eval_compiler_value_method_record("Compiler", "add"))
+    assert(jet_eval_compiler_value_method_supported("CompilerChecked", "source", 0))
+    assert(jet_eval_compiler_value_method_supported("CompilerChecked", "schema_version", 0))
+    assert(jet_eval_compiler_value_method_supported("CompilerLexed", "tokens", 0))
+    assert(jet_eval_compiler_value_method_supported("CompilerManifest", "dependencies", 0))
+    assert(jet_eval_compiler_value_method_supported("CompilerPackage", "build_profiles", 0))
+    assert(jet_eval_compiler_value_method_supported("ProgramInfo", "revision", 0))
+    assert(jet_eval_compiler_value_method_supported("FunctionInfo", "reaches_panic", 0))
+    assert(jet_eval_compiler_value_method_supported("EffectInfo", "has", 1))
+    assert(!jet_eval_compiler_value_method_supported("CompilerChecked", "source", 1))
+    source_receiver: TComptimeValue.Struct{
+        type_name: "CompilerChecked",
+        fields: [TComptimeField]{
+            TComptimeField{name: "source", value: TComptimeValue.String{value: "run: fn() {{}}"}},
+            TComptimeField{name: "schema_version", value: TComptimeValue.Int{value: 1}},
+        },
+    }
+    if jet_eval_compiler_value_answer("CompilerChecked", "source", [TComptimeValue]{source_receiver}) == {
+        .Value(TComptimeValue.String(text)) -> assert_eq(text, "run: fn() {{}}")
+        .Value(_) | .Fault(_) -> panic("CompilerChecked.source did not project its String field")
+    }
+    version_receiver: TComptimeValue.Struct{
+        type_name: "CompilerChecked",
+        fields: [TComptimeField]{
+            TComptimeField{name: "source", value: TComptimeValue.String{value: "run: fn() {{}}"}},
+            TComptimeField{name: "schema_version", value: TComptimeValue.Int{value: 1}},
+        },
+    }
+    if jet_eval_compiler_value_answer("CompilerChecked", "schema_version", [TComptimeValue]{version_receiver}) == {
+        .Value(TComptimeValue.Int(version)) -> assert_eq(version, 1)
+        .Value(_) | .Fault(_) -> panic("CompilerChecked.schema_version did not project its Int field")
+    }
+}
