@@ -474,13 +474,21 @@ sema_user_rule_row_generates: fn(row: [EffectRowEntry]?) -> Bool Never! {
 }
 
 // Each entry of a written template row is `Meta.Generate` or a denial: the
-// template runs inside the compiler, which reading needs no effect for.
+// template runs inside the compiler, which reading needs no effect for. A
+// `Meta.Code` entry asks for an action above marker expansion (rewriting a
+// body, making a type from text), which only the root build's `Compiler`
+// value performs, so its report points there.
 sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
     loop declaration in sema_marker_module_declarations(items, "", false) {
         entries: declaration.row ?? next
         loop entry in entries {
             if entry.name == META_GENERATE || entry.name.starts_with("!") -> next
-            diagnostics.push(sema_error("E0774", entry.span, "`{entry.name}` in `{declaration.name}`'s template row is outside `Marker.expand`'s row", "a marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect", "remove `{entry.name}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads"))
+            what: "`{entry.name}` in `{declaration.name}`'s template row is outside `Marker.expand`'s row"
+            if entry.name == "Meta.Code" || entry.name.starts_with("Meta.Code.") {
+                diagnostics.push(sema_error("E0774", entry.span, what, "a marker's template holds no `Compiler` value, and rewriting a body or making a type from text is above marker expansion: only the root build's `Compiler` value does it", "remove `{entry.name}`, and do the change in the root package's `build: fn` through `b.compiler(app)`: `meta.rewrite_body(f, #code {{ ... }})` or `meta.add_struct(...)`"))
+                next
+            }
+            diagnostics.push(sema_error("E0774", entry.span, what, "a marker's template runs inside the compiler, where its row may name `Meta.Generate` and nothing else; reading the program needs no effect", "remove `{entry.name}`: write `-[Meta.Generate]>` for a template that writes code, or `-[]>` for one that only reads"))
         }
     }
 }

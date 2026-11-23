@@ -1,0 +1,19 @@
+// @programmable_build
+// @cli_build
+// `meta.add` of source text may declare a type made from any value, so it
+// checks `Meta.Generate`, `Meta.Code.Types` and `Meta.Code.Raw` together. The
+// package holds `Meta.Code`, but a row that prohibits `Meta.Code.Raw` refuses
+// the call.
+package: { name: "app", authority: { allow: [Meta.Code] } }
+
+build: fn(b: Build) -[Meta.Generate, Meta.Code]> {
+    app: b.add_executable("app", ["meta_ladder_add_text_denied_by_a_raw_row.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+install: fn(meta: Compiler) -[!Meta.Code.Raw]> {
+    meta.add("Shape: struct {{ id: I64 }}\n", scope: "shape")
+}
+
+run: fn() { print(2) }

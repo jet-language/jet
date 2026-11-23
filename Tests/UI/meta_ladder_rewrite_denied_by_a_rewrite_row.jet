@@ -1,0 +1,24 @@
+// @programmable_build
+// @cli_build
+// `meta.rewrite_body` is `Meta.Code.Rewrite`. The package holds that expert
+// effect, but a function whose written row prohibits it still can't rewrite.
+package: { name: "app", authority: { allow: [Meta.Code.Rewrite] } }
+
+build: fn(b: Build) -[Meta.Code.Rewrite]> {
+    app: b.add_executable("app", ["meta_ladder_rewrite_denied_by_a_rewrite_row.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+install: fn(meta: Compiler) -[!Meta.Code.Rewrite]> {
+    meta.rewrite_body(
+        answer,
+        #code {
+            3
+        },
+    )
+}
+
+answer: fn() -> Int { 2 }
+
+run: fn() { print(answer()) }
