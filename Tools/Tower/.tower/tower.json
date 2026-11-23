@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113248,
+    "rev": 113250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72225,7 +72225,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed SSoT-2 Slice 1 (ba92e090d6): migrated all 70 raw os_syscall_i64 calls across 19 Compiler/JetRuntime files onto 30 single-home typed Linux syscall wrappers in Compiler/JetBackend/Source/OS/Linux.jet using canonical OS_SYS_* constants, unwrapping 40 redundant #Unsafe blocks. UnsafeRatchet shrunk 1670->1660 (runtime regions 596->555, memory kernel outside=0). Verified full Compiler+JetRuntime+Core+Wasm build, Hello.jet run, JetBackend 30/30, CompilerData 0 rises, Tests/Guards 217/217."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -72353,8 +72359,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T11:29:21.054Z",
-      "updated": "2026-11-22T02:10:23.730Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T02:27:19.981Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
     {
@@ -134583,6 +134589,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T02:27:36.161Z",
+      "by": "Orchestrator",
+      "action": "status.post",
+      "ref": "status0rl95yx",
+      "note": "Orchestrator Single-Source-of-Truth (SSoT) Audit & Memory Kernel / 30M LOC/s Status Board (2026-11-22 21:27 EST, dev ba92e090d6). LANDED SSoT-1 (JetLexer single TOKEN_* table, 106 duplicate K_* deleted, 361059bf5b), SSoT-2 (OS/Linux.jet single-home typed Linux syscall wrappers, 0 raw os_syscall_i64 in JetRuntime, #Unsafe 1670->1660, ba92e090d6), and IRX64ColdKind deduplication (1d11568b1b); verified Jetpack/Foundation/Source/Syntax.jet already single-source via SyntaxRegistry.jet. Memory Kernel (#6842) DONE with 0 raw memory actions outside declared kernel files. Pillar 2 Slice 1 (X64Patch O0 stencils) LANDED; Pillar 1 (#6978/#6793) is in final Throughput.jet benchmarking; Pillar 2 Slice 2 in flight."
+    },
+    {
+      "at": "2026-11-23T02:27:19.981Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c07py9jv",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-23T02:16:17.895Z",
       "by": "Orchestrator",
       "action": "briefing.post",
@@ -140341,17 +140361,17 @@
     }
   ],
   "statusSnapshot": {
-    "id": "status00bes3z",
+    "id": "status0rl95yx",
     "by": "Orchestrator",
-    "created": "2026-11-23T00:59:33.638Z",
-    "summary": "Orchestrator Single-Source-of-Truth (SSoT) Audit & Memory Kernel / 30M LOC/s Status Board (2026-11-22 20:00 EST, dev b6f3fe265b). Memory Kernel (#6842) is DONE with 0 raw memory actions outside declared kernel files (1,012 regions in Compiler/Runtime/Core/Jetpack: 388 raw-memory/FFI inside kernel, 624 non-memory #Unsafe queued on #6976). Found 9 live Multiple-Sources-of-Truth hotspots across Compiler, Runtime, Core, Jetpack, and Tests — ranked and mapped to owning cards below. Active execution: 100% locked on 30M LOC/s Architectural Pillars (#6978, #6793-#6798) through 05:00 EST, then immediate G1->G6 rapid burndown.",
+    "created": "2026-11-23T02:27:36.161Z",
+    "summary": "Orchestrator Single-Source-of-Truth (SSoT) Audit & Memory Kernel / 30M LOC/s Status Board (2026-11-22 21:27 EST, dev ba92e090d6). LANDED SSoT-1 (JetLexer single TOKEN_* table, 106 duplicate K_* deleted, 361059bf5b), SSoT-2 (OS/Linux.jet single-home typed Linux syscall wrappers, 0 raw os_syscall_i64 in JetRuntime, #Unsafe 1670->1660, ba92e090d6), and IRX64ColdKind deduplication (1d11568b1b); verified Jetpack/Foundation/Source/Syntax.jet already single-source via SyntaxRegistry.jet. Memory Kernel (#6842) DONE with 0 raw memory actions outside declared kernel files. Pillar 2 Slice 1 (X64Patch O0 stencils) LANDED; Pillar 1 (#6978/#6793) is in final Throughput.jet benchmarking; Pillar 2 Slice 2 in flight.",
     "milestones": [
       {
         "title": "Single Source of Truth: Audited Memory Kernel & Unsafe Chokepoints",
-        "state": "Memory kernel (#6842) DONE: 0 raw memory actions outside declared policy.memory kernel files (Core/Mem, 9 JetRuntime files, 3 JetBackend files, embedded.jet). Remaining: collapse 624 non-memory #Unsafe regions (incl. 200 raw os_syscall* sites across 27 files) on #6976, and reach <=1.00x asm ceiling on all kernel primitives on #6975.",
+        "state": "Memory kernel (#6842) DONE: 0 raw memory actions outside declared kernel files. SSoT-2 LANDED (ba92e090d6): all 70 raw os_syscall_i64 calls across 19 JetRuntime files migrated to 30 single-home typed wrappers in OS/Linux.jet (#Unsafe baseline shrunk 1670->1660, runtime regions 596->555). Remaining on #6976: startup-state once-only primitive, Core host-leaf calls, and remaining non-memory #Unsafe regions. Asm ceiling for kernel primitives tracked on #6975.",
         "progress": {
           "Memory Kernel Chokepoint (#6842)": 100,
-          "Non-Memory #Unsafe Consolidation (#6976)": 0,
+          "Non-Memory #Unsafe Consolidation (#6976)": 25,
           "Memory Kernel Asm Ceiling (#6975)": 17
         },
         "links": [
@@ -140365,11 +140385,11 @@
       },
       {
         "title": "Single Source of Truth: Compiler Type, AST & IR Representations (30M LOC/s)",
-        "state": "IN FLIGHT: Eliminating dual Type enum (2,899 sites in 149 JetSema files) vs TypeID Interner (#6978), 2-3x duplicated AST function bodies in Registration/Items.jet (#6793), and dual comptime/O0 lowering paths (#6795, #6798).",
+        "state": "Pillar 2 Slice 1 LANDED (1d11568b1b: X64Patch O0 stencils, ir.x64 CPU -40.3%, wall -29.2%, jet-bare -1.16s, -181 MB RSS, IRPatchColdKind deduplicated onto IRX64ColdKind). Pillar 1 (#6978/#6793 TypeID Interner + flat sema + zero AST copies) is in final Throughput.jet benchmarking. Pillar 2 Slice 2 (per-part fused O0 emit + Request.jet Core overlap) IN FLIGHT.",
         "progress": {
-          "Pillar 1: TypeID Interner & Flat Sema (#6978)": 10,
-          "Pillar 2: Copy-and-Patch O0 & Direct Link (#6795)": 25,
-          "Pillar 3-6: Comptime/SoA/TaskGraph/SIMD (#6793-#6798)": 4
+          "Pillar 1: TypeID Interner & Flat Sema (#6978)": 85,
+          "Pillar 2: Copy-and-Patch O0 & Direct Link (#6795)": 65,
+          "Pillar 3-6: Comptime/SoA/TaskGraph/SIMD (#6793-#6798)": 8
         },
         "links": [
           {
@@ -140388,11 +140408,11 @@
       },
       {
         "title": "Single Source of Truth: Registries, API Twins & Generated Copies",
-        "state": "17/18 met on #6568; CoreValueSignatures.jet already deleted. Remaining live dual-truth files: (1) Compiler/JetSema/Source/Sema/Calls/Core.jet (1,813 lines) duplicating Core/ APIs (#6151), (2) Tokens.jet TOKEN_* vs Terminators.jet K_* (685 lines), (3) Jetpack/Foundation/Source/Syntax.jet (88 lines) copying JetFoundation/Data/Syntax (#4020), (4) RuntimeInterface.jet (435 lines) manual copy-on-drift, (5) hand-maintained JET_CLI_CORE_LOWERED & diagnostics_coverage_allowlist.tsv (93 lines).",
+        "state": "LANDED (361059bf5b): JetLexer 106 duplicate K_* tags collapsed onto single TOKEN_* table in Tokens.jet (-236 lines). VERIFIED CLEAN: Jetpack/Foundation/Source/Syntax.jet already single-source via SyntaxRegistry.jet. Remaining live dual-truth items: (1) JetSema/Source/Sema/Calls/Core.jet (1,813 lines) duplicating Core/ APIs (#6151, starts after Pillar 1), (2) RuntimeInterface.jet manual copy-on-drift, (3) JET_CLI_CORE_LOWERED & diagnostics_coverage_allowlist.tsv.",
         "progress": {
-          "Core/Diagnostic SSoT (#6568)": 94,
-          "Core API Twin Removal (#6151)": 40,
-          "Syntax/Token/Interface SSoT (#4020)": 60
+          "Core/Diagnostic SSoT (#6568)": 96,
+          "Lexer/Syntax Token Table SSoT": 100,
+          "Core API Twin Removal (#6151)": 40
         },
         "links": [
           {
@@ -140421,7 +140441,7 @@
     "workstreams": [
       {
         "title": "SSoT-1: Dual Type Representation (Type heap enum vs TypeID Interner)",
-        "state": "IN FLIGHT (Stream A / Pillar 1): Compiler/JetFoundation/Source/Types/Types.jet (2,899 ': Type' sites across 149 JetSema files) vs TypeIDs.jet (854 lines). Collapsing to one Interner + O(1) canonical u32 TypeID + zero AST body deep copies in Registration/Items.jet.",
+        "state": "FINAL BENCHMARKING (Stream A / Pillar 1): Running Throughput.jet on 28 JetFoundation/JetSema files collapsing Type enum + String tables + AST deep copies onto TypeID Interner + flat tables (#6978, #6793).",
         "workers": [
           "Stream A (CodegenOpt worktree)"
         ],
@@ -140436,14 +140456,12 @@
         ]
       },
       {
-        "title": "SSoT-2: Scattered Raw Syscalls & Non-Memory #Unsafe Regions (624 regions, 200 os_syscall* sites)",
-        "state": "QUEUED FOR G4 (#6976): 200 raw os_syscall* call sites duplicated across 27 files (Loader.jet 97, PerfSamples.jet 21, Alloc.jet 11, SessionHost.jet 11, Fault.jet 6, Thread.jet 5, etc.) plus 624 non-memory #Unsafe regions (startup-state writes, Core host-leaf calls, Secret/Crypto). Collapse to one typed syscall table in OS/Linux.jet and one once-only startup primitive.",
+        "title": "SSoT-2: Single-Home Typed Linux Syscalls & Non-Memory #Unsafe Consolidation (#6976)",
+        "state": "SLICE 1 LANDED (ba92e090d6): 0 raw os_syscall_i64 calls left in Compiler/JetRuntime (70 sites across 19 files migrated to 30 typed wrappers in OS/Linux.jet; #Unsafe 1670->1660, 0 outside kernel). Next (orchestrator/G4): migrate Loader.jet raw os_syscall_i64 & host_syscall/observe_syscall magic numbers, once-only startup state primitive, and Core host-leaf calls.",
         "workers": [
-          "Unassigned (G4 burndown queue)"
+          "Orchestrator"
         ],
-        "blockers": [
-          "Sequenced after 30M LOC/s architectural pillars"
-        ],
+        "blockers": [],
         "links": [
           {
             "card": "c07py9jv"
@@ -140452,12 +140470,12 @@
       },
       {
         "title": "SSoT-3: Compiler Hand-Written Core API Twin (JetSema/Source/Sema/Calls/Core.jet, 1,813 lines)",
-        "state": "QUEUED FOR G1-G6 (#6151): CoreValueSignatures.jet is deleted, but Core.jet (1,813 lines) still maintains compiler-side Core API definitions beside Core/ sources. Derive all Core rows directly from Core/ sources.",
+        "state": "QUEUED NEXT AFTER PILLAR 1 (#6151): CoreValueSignatures.jet is deleted; Core.jet (1,813 lines) waits for Pillar 1 to finish touching JetSema so there is zero merge conflict.",
         "workers": [
-          "Unassigned (G1-G6 queue)"
+          "Orchestrator / Stream A (post-Pillar 1)"
         ],
         "blockers": [
-          "Sequenced after 30M LOC/s architectural pillars"
+          "Waiting for Pillar 1 JetSema landing"
         ],
         "links": [
           {
@@ -140466,14 +140484,12 @@
         ]
       },
       {
-        "title": "SSoT-4: Dual Lexer Token Tables & Jetpack Syntax Copy (Tokens.jet vs Terminators.jet, Jetpack Syntax.jet)",
-        "state": "QUEUED FOR G1-G6: (a) JetLexer/Source/Lexer/Tokens.jet (TOKEN_*) vs Terminators.jet (K_*, 685 lines) maintain two parallel token-number tables checked by LexerKeywordRows.jet; collapse to one table. (b) Jetpack/Foundation/Source/Syntax.jet (88 lines) duplicates JetFoundation/Data/Syntax (#4020); derive or import from JetFoundation.",
+        "title": "SSoT-4: Dual Lexer Token Tables & Jetpack Syntax Registry",
+        "state": "RESOLVED (361059bf5b): Deleted all 106 duplicate K_* constants in Terminators.jet, unified on Tokens.jet TOKEN_*, simplified LexerKeywordRows.jet, retired KEYWORD_SOURCES closed list. Verified Jetpack/Foundation/Source/Syntax.jet already single-source via Tools/Agent/JetpackSyntax.jet.",
         "workers": [
-          "Unassigned (G1-G6 queue)"
+          "Orchestrator (DONE)"
         ],
-        "blockers": [
-          "Sequenced after 30M LOC/s architectural pillars"
-        ],
+        "blockers": [],
         "links": [
           {
             "card": "c0xuffg1"
@@ -140482,13 +140498,11 @@
       },
       {
         "title": "SSoT-5: Manual-Sync RuntimeInterface.jet & Hand-Maintained Lists (JET_CLI_CORE_LOWERED, diagnostics_coverage_allowlist.tsv)",
-        "state": "QUEUED FOR G1-G6: (a) JetFoundation/Source/Registry/RuntimeInterface.jet (435 lines) fails build on drift and requires manual copy-over instead of single-source generation. (b) CoreLibrary.jet JET_CLI_CORE_LOWERED (35 packages) and Tests/diagnostics_coverage_allowlist.tsv (93 lines) rely on guard tests instead of direct derivation from source metadata.",
+        "state": "QUEUED NEXT: (a) Make RuntimeInterface.jet auto-generated like PreludeSources/LexerKeywordRows instead of manual copy-on-drift. (b) Derive JET_CLI_CORE_LOWERED & diagnostics_coverage_allowlist.tsv directly from source metadata.",
         "workers": [
-          "Unassigned (G1-G6 queue)"
+          "Orchestrator"
         ],
-        "blockers": [
-          "Sequenced after 30M LOC/s architectural pillars"
-        ],
+        "blockers": [],
         "links": [
           {
             "card": "c0xuffg1"
@@ -140497,7 +140511,7 @@
       },
       {
         "title": "SSoT-6: Unified O0 / Comptime / Native / Wasm Lowering (I9 One Meaning)",
-        "state": "IN FLIGHT (Stream B / Pillar 2 -> Pillar 3): Building X64Patch copy-and-patch O0 stencils (#6795) and routing JetEval/Source/IR/Native.jet comptime batches (currently bypassing fast_o0 onto O2 regalloc!) onto the same O0 path + shared-memory child (#6798).",
+        "state": "SLICE 1 LANDED (1d11568b1b), SLICE 2 IN FLIGHT (Stream B / Pillar 2 -> Pillar 3): X64Patch O0 stencils landed (IRPatchColdKind deduplicated onto IRX64ColdKind). Now fusing per-part O0 emit + Request.jet Core overlap, then routing JetEval/Source/IR/Native.jet comptime batches onto X64Patch + shared-memory child (#6798).",
         "workers": [
           "Stream B (GoalsOrder worktree)"
         ],
