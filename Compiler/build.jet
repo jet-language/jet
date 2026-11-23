@@ -1,8 +1,9 @@
 // `jet build Compiler/`: the toolchain. The `jet` executable is JetCLI's run
 // entry, compiled with every package it depends on (JetCLI/package.jet lists
-// them). The `prelude-sources` and `lexer-keywords` steps first regenerate
-// the sources that copy or project other sources (Toolchain/PreludeSources.jet,
-// Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
+// them). The `prelude-sources`, `lexer-keywords` and `compiler-value-methods`
+// steps first regenerate the sources that copy or project other sources
+// (Toolchain/PreludeSources.jet, Toolchain/LexerKeywordRows.jet,
+// Toolchain/CompilerValueMethods.jet); git keeps them, so a stale one is
 // rewritten and a hand edit is refused. That compile is `jet-bare`. The
 // `runtime` step lowers jet's runtime pack with it into jet-runtime/, run by
 // `runtime-pack`, Toolchain/RuntimePack.jet built for this machine: a script
@@ -98,12 +99,20 @@ build: fn(b: Build) -[Exec, FS]> {
         keywords.file(b.folder("JetFoundation/Data/Syntax"), flag: "--syntax=")
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
+        compiler_values: b.run("compiler-value-methods", b.jet(), ["Exec", "FS"])
+        compiler_values.arg("run")
+        compiler_values.arg("--allow=FS")
+        compiler_values.input("Toolchain/CompilerValueMethods.jet")
+        compiler_values.arg("--")
+        compiler_values.arg("--write")
+        compiler_values.reads("JetFoundation/Source/Registry/CoreRecordRows.jet")
+        compiler_values.writes("JetEval/Source/CompilerValueMethods.jet", kept: true)
         stencils_bin: b.add_executable("x64-stencils-gen", ["Toolchain/X64Stencils/Main.jet"], [prelude])
         stencils: b.run("x64-stencils", b.host(stencils_bin), ["FS"])
         stencils.arg("--check")
         stencils.reads("JetIR/Source/X64StencilData.jet")
         stencils.output("JetCLI/.jet/build/x64-stencils.stamp", flag: "--stamp=")
-        bare: b.add_executable("jet-bare", ["JetCLI/run.jet"], [prelude, keywords, stencils])
+        bare: b.add_executable("jet-bare", ["JetCLI/run.jet"], [prelude, keywords, stencils, compiler_values])
         pack: b.add_executable("runtime-pack", ["Toolchain/RuntimePack.jet"], [])
         runtime: b.run("runtime", b.host(pack), ["Exec", "FS"])
         runtime.arg("pack")
