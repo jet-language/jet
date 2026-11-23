@@ -251,6 +251,7 @@ the text before it.
 | `JET_BIN` | `Compiler/test.jet` | The jet under test, handed to the Jetpack bootstrap and to suite children. |
 | `JET_BIND_TEMP` | `Jetpack/PackageModel/Source/Foreign/WorkerSupervisor.jet` | The private scratch directory a foreign binder's supervisor gives its worker. |
 | `JET_BUILD_OUTPUT` | `Compiler/JetCLI/Source/CLI/RustForeign.jet` | The output directory inside the Rust foreign build sandbox. |
+| `JET_BUILD_THREADS` | `Compiler/JetCLI/Source/CLI/Request.jet` | The compiler thread cap `jet build --threads N` hands every step it runs, outside the step's key; a jet the step starts (a `jet doc` of the toolchain's runtime-pack step, say) takes it when its own command line names none. |
 | `JET_CI_EVIDENCE_DIR` | `Compiler/JetCLI/Source/CLI/TestProfile.jet` | Receives each corpus suite's case verdicts as `<suite>.json`. |
 | `JET_CODEMOD_CRASH_AFTER_JOURNAL` | `Compiler/JetCLI/Source/CLI/SourceTransaction.jet` | Fault injection: with `1`, a source transaction exits after writing its journal. |
 | `JET_CODEMOD_CRASH_AFTER_RENAME` | `Compiler/JetCLI/Source/CLI/SourceTransaction.jet` | Fault injection: a source transaction exits after the rename this number counts, from 1. |

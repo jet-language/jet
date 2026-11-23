@@ -1253,38 +1253,51 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler288: lock0 FIFOhead8/tail16 idleHead24 watch32 live40 parked48
+// Scheduler296: lock0 FIFOhead8/tail16 idleHead24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
 // blocked208 monitorArmed216 monitor224 sizedPools232 liveLock240
-// liveTasks248 queued256 waitLock264 spare272 settled280.
+// liveTasks248 queued256 waitLock264 spare272 settled280 rings288.
 // waitLock is the mutex under which tasks arm and disarm waits and deliver
 // deadlocks (WaitCycle.jet).
 // liveTasks heads the list of every task state not yet freed, under its own
 // mutex liveLock (Task.jet task_live_link), not the thread lock.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
-// The run queue holds submitted task states; queued counts them. It is the
-// two hooks jet_rt_scheduler_queue_push and jet_rt_scheduler_queue_pop, whose
+// The run queue holds submitted task states. It is the two hooks
+// jet_rt_scheduler_queue_push and jet_rt_scheduler_queue_pop, whose
 // definitions here are the FIFO (linked through the tasks' reserved word
 // @88). A program a target profile gives a scheduler provider defines both,
 // and its link binds the runtime's calls to them (scheduler_queue_push).
+// rings is 1 once the runtime's own FIFO took a job: from then on, with a
+// pool of more than one carrier, a job a fiber submits goes on its carrier's
+// ring instead (scheduler_ring_push), which that carrier takes from without
+// the lock and an idle one steals from under it; a provider's queue, never
+// reached by rings, keeps every job. queued counts the jobs of the queue and
+// the rings, and each one being put on a ring, so it never reads less than
+// the jobs there.
 // ready holds fibers to resume (Fiber.jet). live counts tasks taken and
 // not finished, parked their parked fibers, fibers the fiber stacks mapped,
 // pooled (pool, linked through Fiber next@48, and the sizedPools lists of
 // larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
+// queued and live change atomically, a ring's take without the lock: a job
+// taken counts in live before it leaves queued, so a reader that loads
+// queued first, then live, never finds both zero while a job is left.
 // settled counts the live jobs that have run to their end: a task that
 // published its outcome (Task.jet task_run), so its join may have returned,
 // or a parallel worker that counted itself off its walk. The job adds itself
 // atomically, without the lock; the carrier takes it off settled and live
 // together, under the lock, once it is back on its own stack, so settled
 // never exceeds live under the lock.
-// carriers is a word list (scheduler_words) of Carrier96 records {argument0
+// carriers is a word list (scheduler_words) of Carrier128 records {argument0
 // handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56 fiber64 index72
-// wake80 next88}, changed only under the lock; fiber64 is the fiber the
+// wake80 next88 ring96 top104 bottom112}, changed only under the lock;
+// fiber64 is the fiber the
 // carrier runs, 0 between fibers (Fiber.jet fiber_run), and index72 the
-// carrier's `context.thread` (scheduler_carrier_free_index). Every carrier on
+// carrier's `context.thread` (scheduler_carrier_free_index). ring96 is the
+// carrier's ring of SCHEDULER_RING_SLOTS jobs, from top104 (the next to take)
+// to bottom112 (the next to fill), both only ever growing. Every carrier on
 // it stays joinable so jet_rt_scheduler_shutdown can join it. The poolSize
 // carriers start one at a time, on demand: a submit starts one only when no
 // idle carrier is left to wake (idle - woken), so a process that submits a
@@ -1335,22 +1348,35 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
 
-SCHEDULER_ROOT_BYTES: I64{288}
+SCHEDULER_ROOT_BYTES: I64{296}
 
 SCHEDULER_CONTROL_BYTES: I64{232}
 
-SCHEDULER_CARRIER_BYTES: I64{96}
+SCHEDULER_CARRIER_BYTES: I64{128}
 
-// The Carrier96 word holding the carrier's thread index.
+// The Carrier128 word holding the carrier's thread index.
 SCHEDULER_CARRIER_INDEX: I64{72}
 
-// The Carrier96 futex word an idle carrier sleeps on: 0 while it is
+// The Carrier128 futex word an idle carrier sleeps on: 0 while it is
 // unclaimed, 1 once a wake claimed it (scheduler_wake_idle).
 SCHEDULER_CARRIER_WAKE: I64{80}
 
-// The Carrier96 link of the idle list (idleHead24) and the spare records
+// The Carrier128 link of the idle list (idleHead24) and the spare records
 // (spare272).
 SCHEDULER_CARRIER_NEXT: I64{88}
+
+// The Carrier128 words of the carrier's ring: its slots (0: it has none, as
+// a join's own record, Task.jet task_run_joined), the next job to take and
+// the next slot to fill.
+SCHEDULER_CARRIER_RING: I64{96}
+
+SCHEDULER_CARRIER_TOP: I64{104}
+
+SCHEDULER_CARRIER_BOTTOM: I64{112}
+
+// The jobs a carrier's ring holds; a power of two. A fiber's submit past
+// them goes to the run queue.
+SCHEDULER_RING_SLOTS: I64{256}
 
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
 
@@ -1461,11 +1487,18 @@ scheduler_carrier_list_join: fn(list: I64) -> I64 {
     }
     at = I64{0}
     loop at < length {
-        jet_rt_free(sync_load(wrapping(data + at * I64{8})), SCHEDULER_CARRIER_BYTES, I64{8})
+        scheduler_carrier_free(sync_load(wrapping(data + at * I64{8})))
         at += I64{1}
     }
     scheduler_words_drop(list)
     length
+}
+
+// Frees a record no carrier runs on any more, with its ring.
+scheduler_carrier_free: fn(record: I64) {
+    ring: sync_load(wrapping(record + SCHEDULER_CARRIER_RING))
+    if (ring != I64{0}) { jet_rt_free(ring, wrapping(SCHEDULER_RING_SLOTS * I64{8}), I64{8}) }
+    jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
 }
 
 // Keeps a record no carrier runs on for the next start (spare272); the root
@@ -1497,7 +1530,8 @@ scheduler_carrier_free_index: fn(list: I64) -> I64 {
 // carrier (which locks the root before it reads its handle) and shutdown
 // both see a complete record, and two starts never take one index. The
 // record is a retired carrier's when one is spare; that carrier's thread,
-// which returned at its retirement, is joined first.
+// which returned at its retirement, is joined first, and its ring, empty
+// since it retired, is the new carrier's.
 scheduler_start_worker: fn(root: I64) {
     sync_thread_lock(root)
     record := sync_load(wrapping(root + I64{272}))
@@ -1505,12 +1539,16 @@ scheduler_start_worker: fn(root: I64) {
         sync_store(wrapping(root + I64{272}), sync_load(wrapping(record + SCHEDULER_CARRIER_NEXT)))
     }
     sync_thread_unlock(root)
+    ring := I64{0}
     if (record == I64{0}) { record = jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8}) } else {
         retired: sync_load(wrapping(record + I64{8}))
         if (retired != I64{0}) { _ := thread_join(retired, I64{0}) }
+        ring = sync_load(wrapping(record + SCHEDULER_CARRIER_RING))
     }
     thread_zero(record, SCHEDULER_CARRIER_BYTES)
     sync_store(record, root)
+    if (ring == I64{0}) { ring = jet_rt_alloc(wrapping(SCHEDULER_RING_SLOTS * I64{8}), I64{8}) }
+    sync_store(wrapping(record + SCHEDULER_CARRIER_RING), ring)
     sync_thread_lock(root)
     sync_store(wrapping(record + SCHEDULER_CARRIER_INDEX), scheduler_carrier_free_index(scheduler_carrier_list(root)))
     handle: thread_spawn(rt_scheduler_worker_address(), record)
@@ -1558,16 +1596,23 @@ scheduler_get: fn() -> I64 {
     root
 }
 
-// Queues a job (scheduler_run_job) for a carrier (scheduler_work_taker).
+// Queues a job (scheduler_run_job) for a carrier (scheduler_work_taker): on
+// the ring of the carrier the calling fiber runs on when it can
+// (scheduler_ring_push), else on the run queue. A ring's job takes the root
+// lock only to reach an idle carrier, start one or arm the monitor
+// (scheduler_ring_unwatched). It is counted in queued before any carrier
+// can take it (scheduler_job_taken).
 // Unsigned pool sizes above i64.MAX are attempted just as Rust does, failing
 // at thread_spawn.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
-    sync_thread_lock(root)
-    jet_rt_scheduler_queue_push(task)
-    sync_store(wrapping(root + I64{256}), wrapping(sync_load(wrapping(root + I64{256})) + I64{1}))
     jet_rt_observe_pool(I64{-1}, I64{1})
+    _ := sync_add(wrapping(root + I64{256}), I64{1})
+    ringed: scheduler_ring_push(root, task)
+    if (ringed && !scheduler_ring_unwatched(root)) { return }
+    sync_thread_lock(root)
+    if !ringed -> jet_rt_scheduler_queue_push(task)
     taker: scheduler_work_taker(root)
     sync_thread_unlock(root)
     scheduler_take(root, taker)
@@ -1885,7 +1930,14 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
         if !scheduler_monitor_needed(root) {
             sync_store(wrapping(root + I64{208}), I64{0})
             scheduler_checks_settle(root)
-            sync_store(armed, I64{0})
+            _ := sync_swap(armed, I64{0})
+            // A ring's submit that loaded the word armed before this swap
+            // counted its job in queued first (scheduler_ring_unwatched):
+            // seen now, it is watched for.
+            if scheduler_monitor_needed(root) {
+                sync_thread_unlock(root)
+                next
+            }
             sync_thread_unlock(root)
             _ := sync_futex_wait(armed, I64{0}, I64{-1})
             next
@@ -1979,13 +2031,128 @@ scheduler_watch_kick: fn(root: I64, deadline_ns: I64) {
 
 // The run queue's next task, 0 when it holds none; the root lock is held.
 scheduler_pop: fn(root: I64) -> I64 {
-    queued: sync_load(wrapping(root + I64{256}))
-    if (queued == I64{0}) { return I64{0} }
+    if (sync_load(wrapping(root + I64{256})) == I64{0}) { return I64{0} }
     task: jet_rt_scheduler_queue_pop()
     if (task == I64{0}) { return I64{0} }
-    sync_store(wrapping(root + I64{256}), wrapping(queued - I64{1}))
-    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    scheduler_job_taken(root)
     task
+}
+
+// The next job for the carrier of `record`, 0 when none waits: the run
+// queue's first, else its own ring's oldest, else one stolen off another
+// carrier's ring. The root lock is held.
+scheduler_pop_any: fn(root: I64, record: I64) -> I64 {
+    task: scheduler_pop(root)
+    if (task != I64{0}) { return task }
+    own: scheduler_ring_take(record)
+    if (own != I64{0}) {
+        scheduler_job_taken(root)
+        return own
+    }
+    scheduler_ring_steal(root, record)
+}
+
+// A job just taken off the run queue or a ring counts in live before it
+// leaves queued, so no reader that loads queued, then live, finds both zero
+// meanwhile (Scheduler296).
+scheduler_job_taken: fn(root: I64) {
+    _ := sync_add(wrapping(root + I64{40}), I64{1})
+    _ := sync_add(wrapping(root + I64{256}), I64{-1})
+}
+
+// Puts `task`, already counted in queued, on the ring of the carrier the
+// calling fiber runs on, which is that ring's only filler: false, nothing
+// put, unless the runtime's own run queue is in use (rings288), more than
+// one carrier may run, the calling thread is a fiber on a carrier with a
+// ring and the ring has room. The slot is filled before bottom publishes it,
+// and the swap orders that publication before the loads of
+// scheduler_ring_unwatched, as the idle count's add orders an idle
+// carrier's look at the rings (scheduler_carrier_idle): either that carrier
+// sees the job, or this submit sees it idle.
+scheduler_ring_push: fn(root: I64, task: I64) -> Bool {
+    if (sync_load(wrapping(root + I64{288})) == I64{0} || sync_load(wrapping(root + I64{112})) <= I64{1}) { return false }
+    fiber: fiber_current()
+    if (fiber == I64{0}) { return false }
+    record: sync_load(wrapping(fiber + I64{16}))
+    ring: sync_load(wrapping(record + SCHEDULER_CARRIER_RING))
+    if (ring == I64{0}) { return false }
+    bottom: sync_load(wrapping(record + SCHEDULER_CARRIER_BOTTOM))
+    if (wrapping(bottom - sync_load(wrapping(record + SCHEDULER_CARRIER_TOP))) >= SCHEDULER_RING_SLOTS) { return false }
+    sync_store(wrapping(ring + ((bottom & wrapping(SCHEDULER_RING_SLOTS - I64{1})) << I64{3})), task)
+    _ := sync_swap(wrapping(record + SCHEDULER_CARRIER_BOTTOM), wrapping(bottom + I64{1}))
+    true
+}
+
+// Whether a job just put on a ring needs the root lock to reach a carrier
+// (scheduler_work_taker): an idle carrier is left unclaimed, the monitor
+// does not watch, or one more carrier may start (scheduler_carrier_room).
+// While every carrier is busy, the pool is full and the monitor watches, the
+// ring's carrier or a thief takes the job once its own work ends, and the
+// monitor starts a carrier for it should the busy ones block. The loads are
+// racy: a stale one only takes the lock.
+scheduler_ring_unwatched: fn(root: I64) -> Bool {
+    if (sync_load(wrapping(root + I64{120})) > sync_load(wrapping(root + I64{160}))) { return true }
+    if (sync_load(wrapping(root + I64{216})) == I64{0}) { return true }
+    started: sync_load(wrapping(root + I64{152}))
+    pool: sync_load(wrapping(root + I64{112}))
+    if (pool < I64{0}) { return started != pool }
+    started < wrapping(pool + sync_load(wrapping(root + I64{208})))
+}
+
+// The oldest job on the ring of `record`, taken, or 0 when it holds none.
+// Its carrier takes without the root lock and a thief under it
+// (scheduler_ring_steal): the compare-exchange on top decides which one
+// gets the job. A slot is filled again only once top passed it, so a taker
+// whose exchange succeeds read the job the slot held.
+scheduler_ring_take: fn(record: I64) -> I64 {
+    ring: sync_load(wrapping(record + SCHEDULER_CARRIER_RING))
+    if (ring == I64{0}) { return I64{0} }
+    loop {
+        top: sync_load(wrapping(record + SCHEDULER_CARRIER_TOP))
+        if (top >= sync_load(wrapping(record + SCHEDULER_CARRIER_BOTTOM))) { return I64{0} }
+        task: sync_load(wrapping(ring + ((top & wrapping(SCHEDULER_RING_SLOTS - I64{1})) << I64{3})))
+        if (sync_cas(wrapping(record + SCHEDULER_CARRIER_TOP), top, wrapping(top + I64{1})) == top) { return task }
+    }
+}
+
+// A job stolen off another carrier's ring for the carrier of `record`, 0
+// when every other ring is empty. The root lock is held, so no listed ring
+// is freed meanwhile. The search starts at a carrier that moves with this
+// one's runs, so the thieves spread over the rings.
+scheduler_ring_steal: fn(root: I64, record: I64) -> I64 {
+    list: sync_load(wrapping(root + I64{128}))
+    if (list == I64{0}) { return I64{0} }
+    length: sync_load(list)
+    data: sync_load(wrapping(list + I64{16}))
+    start: if (length == I64{0}) -> I64{0} else -> (sync_load(wrapping(record + I64{40})) & I64{1048575}) % length
+    at := I64{0}
+    loop at < length {
+        other: sync_load(wrapping(data + ((start + at) % length) * I64{8}))
+        if (other != record) {
+            task: scheduler_ring_take(other)
+            if (task != I64{0}) {
+                scheduler_job_taken(root)
+                return task
+            }
+        }
+        at += I64{1}
+    }
+    I64{0}
+}
+
+// Whether a listed carrier's ring holds a job; the root lock is held.
+scheduler_rings_waiting: fn(root: I64) -> Bool {
+    list: sync_load(wrapping(root + I64{128}))
+    if (list == I64{0}) { return false }
+    length: sync_load(list)
+    data: sync_load(wrapping(list + I64{16}))
+    at := I64{0}
+    loop at < length {
+        record: sync_load(wrapping(data + at * I64{8}))
+        if (sync_load(wrapping(record + SCHEDULER_CARRIER_TOP)) < sync_load(wrapping(record + SCHEDULER_CARRIER_BOTTOM))) { return true }
+        at += I64{1}
+    }
+    false
 }
 
 // The run queue's hooks, which hold the submitted task states the root's
@@ -2002,6 +2169,8 @@ scheduler_pop: fn(root: I64) -> I64 {
         sync_store(wrapping(tail + I64{88}), task)
     }
     sync_store(wrapping(root + I64{16}), task)
+    // This queue, not a provider's, holds the jobs: rings may take them.
+    sync_store(wrapping(root + I64{288}), I64{1})
 }
 
 #Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {
@@ -2014,8 +2183,8 @@ scheduler_pop: fn(root: I64) -> I64 {
     task
 }
 
-// An idle carrier's wait on its wake word (Carrier96 wake80); the root lock is
-// held on entry and on return. The carrier clears the word and goes on the
+// An idle carrier's wait on its wake word (Carrier128 wake80); the root lock
+// is held on entry and on return. The carrier clears the word and goes on the
 // idle list's head under the lock that found no work, so a wake that claims
 // it later has stored 1 before the futex wait reads the word, which then
 // returns at once: no claim is lost between the unlock and the sleep. Back
@@ -2023,9 +2192,15 @@ scheduler_pop: fn(root: I64) -> I64 {
 // itself off the list. With no carrier watching the fiber timers, it
 // watches them: it sleeps only until the earliest deadline. It spins first
 // (scheduler_idle_spin), `busy_since` the time it last left an idle wait or
-// started.
+// started. A ring is filled without the lock: counted idle, the carrier
+// looks at the rings once more and, should one hold a job, leaves the idle
+// count again to steal it (scheduler_ring_push).
 scheduler_carrier_idle: fn(root: I64, record: I64, busy_since: I64) {
     deadline: scheduler_idle_enter(root, record)
+    if scheduler_rings_waiting(root) {
+        scheduler_idle_leave(root, record, deadline)
+        return
+    }
     sync_thread_unlock(root)
     word: wrapping(record + SCHEDULER_CARRIER_WAKE)
     if !scheduler_idle_spin(word, busy_since, deadline) {
@@ -2072,9 +2247,11 @@ scheduler_idle_spin: fn(word: I64, busy_since: I64, deadline: I64) -> Bool {
 // The carrier of `record` goes idle (scheduler_carrier_idle): counted
 // (idle120), its wake word cleared and its record at the idle list's head,
 // so the carrier that idled last is claimed first. The deadline it sleeps
-// to, -1 for none. The root lock is held.
+// to, -1 for none. The root lock is held. The count's add is atomic, a full
+// barrier between it and the carrier's next look at the rings, which are
+// filled without the lock (scheduler_ring_push).
 scheduler_idle_enter: fn(root: I64, record: I64) -> I64 {
-    sync_store(wrapping(root + I64{120}), sync_load(wrapping(root + I64{120})) + I64{1})
+    _ := sync_add(wrapping(root + I64{120}), I64{1})
     deadline := I64{-1}
     timers: sync_load(wrapping(root + I64{136}))
     if (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0}) {
@@ -2121,12 +2298,16 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
 }
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
-// and, idle, fires their timers. The record is its Carrier96; runs turns odd
-// while it runs a job and even again after, for the monitor. A carrier whose
-// fiber just yielded starts a queued job before it takes a ready fiber, so a
-// turn it gave reaches a job that has no fiber yet: with more busy fibers
-// than carriers the ready queue never empties, and a job taken only once it
-// had would never start.
+// and, idle, fires their timers. The record is its Carrier128; runs turns
+// odd while it runs a job and even again after, for the monitor. A carrier
+// whose fiber just yielded starts a queued job before it takes a ready
+// fiber, so a turn it gave reaches a job that has no fiber yet: with more
+// busy fibers than carriers the ready queue never empties, and a job taken
+// only once it had would never start. While no fiber waits ready and the
+// run queue is empty, the carrier takes its own ring's next job without the
+// root lock (a job there means no shutdown runs: it is counted in queued);
+// else it looks under the lock, stealing off another ring last
+// (scheduler_pop_any).
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
@@ -2138,38 +2319,46 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
     busy_since := sync_now_ns()
     loop {
         fiber_timers_fire(root)
-        sync_thread_lock(root)
-        if (sync_load(wrapping(root + I64{144})) != I64{0}) {
-            // jet_rt_scheduler_shutdown owns this record and joins this thread.
-            sync_thread_unlock(root)
-            return I64{0}
+        task := I64{0}
+        if (yielded == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{8})) == I64{0}) {
+            task = scheduler_ring_take(record)
+            if (task != I64{0}) { scheduler_job_taken(root) }
         }
-        task := if (yielded != I64{0}) -> scheduler_pop(root) else -> I64{0}
-        fiber := if (task == I64{0}) -> fiber_ready_pop(root) else -> I64{0}
-        if (task == I64{0} && fiber == I64{0}) { task = scheduler_pop(root) }
-        if (fiber == I64{0} && task == I64{0}) {
-            if scheduler_carrier_excess(root) {
-                scheduler_carrier_retire(root, record)
+        fiber := I64{0}
+        if (task == I64{0}) {
+            sync_thread_lock(root)
+            if (sync_load(wrapping(root + I64{144})) != I64{0}) {
+                // jet_rt_scheduler_shutdown owns this record and joins this thread.
+                sync_thread_unlock(root)
                 return I64{0}
             }
-            scheduler_carrier_idle(root, record, busy_since)
+            task = if (yielded != I64{0}) -> scheduler_pop_any(root, record) else -> I64{0}
+            fiber = if (task == I64{0}) -> fiber_ready_pop(root) else -> I64{0}
+            if (task == I64{0} && fiber == I64{0}) { task = scheduler_pop_any(root, record) }
+            if (fiber == I64{0} && task == I64{0}) {
+                if scheduler_carrier_excess(root) {
+                    scheduler_carrier_retire(root, record)
+                    return I64{0}
+                }
+                scheduler_carrier_idle(root, record, busy_since)
+                sync_thread_unlock(root)
+                busy_since = sync_now_ns()
+                next
+            }
+            // Work still waiting takes the next carrier, as a submit's or a
+            // fiber's wake would have had no claim been on its way
+            // (scheduler_wake_work). Leaving the watch to no one would sleep the
+            // timers through.
+            timers: sync_load(wrapping(root + I64{136}))
+            taker: if {
+                (sync_load(wrapping(root + I64{256})) != I64{0}) -> scheduler_work_taker(root)
+                (sync_load(wrapping(root + I64{168})) != I64{0}) -> fiber_ready_taker(root)
+                (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0}) -> scheduler_wake_idle(root)
+                else -> I64{0}
+            }
             sync_thread_unlock(root)
-            busy_since = sync_now_ns()
-            next
+            scheduler_take(root, taker)
         }
-        // Work still waiting takes the next carrier, as a submit's or a
-        // fiber's wake would have had no claim been on its way
-        // (scheduler_wake_work). Leaving the watch to no one would sleep the
-        // timers through.
-        timers: sync_load(wrapping(root + I64{136}))
-        taker: if {
-            (sync_load(wrapping(root + I64{256})) != I64{0}) -> scheduler_work_taker(root)
-            (sync_load(wrapping(root + I64{168})) != I64{0}) -> fiber_ready_taker(root)
-            (timers != I64{0} && sync_load(wrapping(root + I64{32})) == I64{0} && sync_load(wrapping(timers + I64{16})) >= I64{0}) -> scheduler_wake_idle(root)
-            else -> I64{0}
-        }
-        sync_thread_unlock(root)
-        scheduler_take(root, taker)
         runs: wrapping(record + I64{40})
         sync_store(runs, wrapping(sync_load(runs) + I64{1}))
         if (task != I64{0}) {
@@ -2181,7 +2370,7 @@ scheduler_idle_unlink: fn(root: I64, record: I64) {
                 scheduler_run_job(task)
                 sync_store(runs, wrapping(sync_load(runs) + I64{1}))
                 sync_thread_lock(root)
-                sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+                _ := sync_add(wrapping(root + I64{40}), I64{-1})
                 _ := sync_add(wrapping(root + I64{280}), I64{-1})
                 sync_thread_unlock(root)
                 next
@@ -2453,8 +2642,14 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
     }
     sync_thread_lock(root)
     loop {
+        // queued before live: a carrier takes a ring's job without the lock,
+        // counting it in live first (scheduler_job_taken).
+        if (sync_load(wrapping(root + I64{256})) != I64{0}) {
+            sync_thread_unlock(root)
+            return I64{-1}
+        }
         live: sync_load(wrapping(root + I64{40}))
-        if (sync_load(wrapping(root + I64{256})) != I64{0} || live != sync_load(wrapping(root + I64{280}))) {
+        if (live != sync_load(wrapping(root + I64{280}))) {
             sync_thread_unlock(root)
             return I64{-1}
         }
@@ -2513,7 +2708,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
             _ := thread_join_gone(retired)
             joined += I64{1}
         }
-        jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
+        scheduler_carrier_free(record)
     }
     jet_rt_observe_pool(I64{0}, I64{0})
     joined

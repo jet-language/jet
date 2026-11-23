@@ -183,6 +183,63 @@ scheduler_test_idle_claims: fn(sleeper: I64) {
     jet_rt_free(root, SCHEDULER_ROOT_BYTES, I64{8})
 }
 
+// The carriers' rings, on a root and two carrier records of the test's own:
+// a ring gives its jobs oldest first, to its carrier or a thief, across the
+// slots' wrap; a thief skips its own ring; each job taken counts in live
+// and off queued; and the idle look at the rings sees a job until the last
+// is taken.
+scheduler_test_rings: fn() {
+    root: jet_rt_alloc(SCHEDULER_ROOT_BYTES, I64{8})
+    thread_zero(root, SCHEDULER_ROOT_BYTES)
+    records: jet_rt_alloc(SCHEDULER_CARRIER_BYTES * I64{2}, I64{8})
+    thread_zero(records, SCHEDULER_CARRIER_BYTES * I64{2})
+    owner: records
+    thief: owner + SCHEDULER_CARRIER_BYTES
+    ring_bytes: SCHEDULER_RING_SLOTS * I64{8}
+    sync_store(owner + SCHEDULER_CARRIER_RING, jet_rt_alloc(ring_bytes, I64{8}))
+    sync_store(thief + SCHEDULER_CARRIER_RING, jet_rt_alloc(ring_bytes, I64{8}))
+    list: jet_rt_alloc(I64{24}, I64{8})
+    data: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(list, I64{2})
+    sync_store(list + I64{8}, I64{2})
+    sync_store(list + I64{16}, data)
+    sync_store(data, owner)
+    sync_store(data + I64{8}, thief)
+    sync_store(root + I64{128}, list)
+    scheduler_test_require(!scheduler_rings_waiting(root) && scheduler_ring_take(owner) == I64{0})
+    // Four jobs across the wrap: slots 254, 255, 0 and 1.
+    start: SCHEDULER_RING_SLOTS - I64{2}
+    sync_store(owner + SCHEDULER_CARRIER_TOP, start)
+    slots: sync_load(owner + SCHEDULER_CARRIER_RING)
+    at := I64{0}
+    loop at < (I64{4}) {
+        sync_store(slots + (((start + at) & (SCHEDULER_RING_SLOTS - I64{1})) << I64{3}), I64{1000} + at)
+        at += I64{1}
+    }
+    sync_store(owner + SCHEDULER_CARRIER_BOTTOM, start + I64{4})
+    sync_store(root + I64{256}, I64{4})
+    sync_thread_lock(root)
+    scheduler_test_require(scheduler_rings_waiting(root))
+    scheduler_test_require(scheduler_ring_take(owner) == I64{1000})
+    scheduler_job_taken(root)
+    scheduler_test_require(sync_load(root + I64{40}) == I64{1} && sync_load(root + I64{256}) == I64{3})
+    scheduler_test_require(scheduler_ring_steal(root, thief) == I64{1001})
+    scheduler_test_require(scheduler_ring_steal(root, thief) == I64{1002})
+    scheduler_test_require(sync_load(root + I64{40}) == I64{3} && sync_load(root + I64{256}) == I64{1})
+    // The last job is the owner's own: a steal for it finds none.
+    scheduler_test_require(scheduler_ring_steal(root, owner) == I64{0} && scheduler_rings_waiting(root))
+    scheduler_test_require(scheduler_ring_take(owner) == I64{1003} && scheduler_ring_take(owner) == I64{0})
+    scheduler_job_taken(root)
+    scheduler_test_require(!scheduler_rings_waiting(root) && sync_load(root + I64{40}) == I64{4} && sync_load(root + I64{256}) == I64{0})
+    sync_thread_unlock(root)
+    jet_rt_free(data, I64{16}, I64{8})
+    jet_rt_free(list, I64{24}, I64{8})
+    jet_rt_free(sync_load(owner + SCHEDULER_CARRIER_RING), ring_bytes, I64{8})
+    jet_rt_free(sync_load(thief + SCHEDULER_CARRIER_RING), ring_bytes, I64{8})
+    jet_rt_free(records, SCHEDULER_CARRIER_BYTES * I64{2}, I64{8})
+    jet_rt_free(root, SCHEDULER_ROOT_BYTES, I64{8})
+}
+
 #Export(c) jet_rt_scheduler_fixture_run: fn(callbacks: I64) -> I64 {
     meta: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})
@@ -210,6 +267,7 @@ scheduler_test_idle_claims: fn(sleeper: I64) {
     sync_store(exit_args + I64{24}, I64{3})
     _ := jet_rt_scheduler_fixture_exit_worker(exit_args)
     scheduler_test_idle_claims(sync_load(callbacks + I64{48}))
+    scheduler_test_rings()
     out: jet_rt_alloc(I64{32}, I64{8})
     root: scheduler_control_new()
     save: jet_rt_alloc(I64{32}, I64{8})

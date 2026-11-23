@@ -7539,13 +7539,15 @@ run: fn() { print("hello") }
 that make its inputs, the targets it runs as `b.host` tools, and its target's
 dependencies' steps; a target waits for its own and its dependencies' steps
 and the steps that make its sources. Every step's grant is checked and every
-probe runs before anything else does. Then whatever is ready runs: the ready
-steps together, up to `--threads` at once, and a ready target compiles while
-they run when it reads nothing they write (a script target reads only its
-own file, any other target every file under its source root); otherwise it
-compiles after them. A
-failure stops only what waits on it, the rest of the graph still runs, and
-every failure is reported. Steps and targets that wait on each other are
+probe runs before anything else does. Then whatever is ready runs as soon as
+it is: the ready steps together, up to `--threads` at once, and up to two
+ready targets at once, which share the `--threads` cap; a ready target
+compiles while steps run when it reads nothing they write (a script target
+reads only its own file, any other target every file under its source root);
+otherwise it compiles after them. Each jet a step starts keeps to the
+build's `--threads` cap. A failure stops only what waits on it, the rest of
+the graph still runs, and every failure is reported, in the graph's order
+whatever order the work finished in. Steps and targets that wait on each other are
 refused (E3502) before anything runs. A step's key covers its declared input
 content, argv, authority, toolchain, probes, signing identity, and
 generated-source hashes.

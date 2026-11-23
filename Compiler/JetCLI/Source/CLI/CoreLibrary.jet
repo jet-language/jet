@@ -33,7 +33,7 @@ use {
         jet_driver_runtime_interface_sources,
     ]
     jet_eval.[JetEvalNativeSession]
-    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, interner_empty, symbol_table]
+    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_threads_join, compiler_threads_leave, compiler_transfer_rows, interner_empty, symbol_table]
     jet_ir.[IRCoreExport, IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
     jet_sema.[SemaCoreBody, SemaCoreCaptures, sema_core_bodies_bytes, sema_core_bodies_problem, sema_core_seal_bound]
@@ -127,7 +127,7 @@ jet_cli_core_library_ir: fn(native: Shared<JetEvalNativeSession>, compiler_threa
 }
 
 jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
-    checked := jet_cli_core_checked(native, trace_sink)
+    checked := jet_cli_core_checked(native, compiler_threads.cap, trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> {
             return jet_cli_core_library_stopped("The Core check of the Core library stopped:\n{output.stderr}{output.stdout}", compiler_threads)
@@ -209,14 +209,21 @@ jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITra
 // The Core library end-to-end on its background task: check, IR build, O2
 // optimize, lint, then once the runtime's thread receipt arrives on
 // `threads_arrival`, compile machine code (`ir.x64`, `ir.object`) and write
-// all Core artifacts in parallel with the runtime's web partition.
+// all Core artifacts in parallel with the runtime's web partition. It shares
+// the process's compiler threads with the runtime build while it compiles
+// (compiler_threads_join), and leaves them while it waits for the receipt.
 jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: String, threads_arrival: Receiver<[String]?>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+    compiler_threads_join()
     built := jet_cli_core_library_ir(native, compiler_threads, trace_sink)
+    compiler_threads_leave()
     if built.stopped != None {
         return jet_cli_core_library_made(built, prefix, [String]{}, trace_sink)
     }
     runtime_threads: threads_arrival.receive() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: ""}
-    jet_cli_core_library_made(built, prefix, runtime_threads, trace_sink)
+    compiler_threads_join()
+    made := jet_cli_core_library_made(built, prefix, runtime_threads, trace_sink)
+    compiler_threads_leave()
+    made
 }
 
 // The Core library's machine code (jet_cli_core_library) from its IR
@@ -382,14 +389,16 @@ jet_cli_core_identity: fn() -> String {
     ""
 }
 
-jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
+// The Core check runs on `threads` (None: the CLI's default, Request.jet
+// jet_cli_driver_request), the cap of the runtime build beside it.
+jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, threads: Int?, trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
     scratch: core_library_files.temp_dir("jet-core-library") ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, false, false)}
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
     core_library_files.write(entry, source) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't write the Core entry `{entry}`: {jet_cli_io_error_text(err)}", None, false, false)}
     prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, false, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
-        .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, None, JetDriverCompileMode.Check, None, "", None, true)
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, false, threads, JetDriverCompileMode.Check, None, "", None, true)
     }
     if prepared.move() == {
         .Refused(output) -> JetCLICoreChecked.Stopped{output: output}

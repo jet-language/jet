@@ -220,9 +220,8 @@ ir_comptime_item_key: fn(module_name: String, key: String) -> String Never! {
     "{module_name}.__comptime_item.{key}"
 }
 
-// The next unclaimed part of a dynamically scheduled lowering: a claiming
-// thread takes a read guard once and claims part after part with one atomic
-// add.
+// The next unclaimed part of a dynamically scheduled lowering, taken with
+// one atomic add; every claiming thread reads the queue in place.
 IRPartQueue: struct {
     next: Atomic<Int>,
 }

@@ -138,7 +138,7 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     outcomes := [BuildActionOutcomeRow]{}
     loop stage in model.stages {
         loop batch in build_execution_batches(plan, stage.actions) {
-            results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len(), None)
+            results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len(), None, None)
             completed := [BuildActionOutcomeRow]{}
             loop index in 0..<batch.len() {
                 if results[index] == {
@@ -304,14 +304,16 @@ BUILD_STEP_TRACE_FOLDER: ".jet-trace"
 // `JET_TRACE_FILE` in its work tree's BUILD_STEP_TRACE_FOLDER (outside its
 // key: a trace changes no output), and every trace file a process of it wrote
 // there is moved to `traces` as `<action id>-<file>` once it exits, whether it
-// succeeded or not.
-build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [ActionOutcome BuildExecutionError!] Never! {
+// succeeded or not. With `threads`, the build's compiler thread cap, each
+// staged child also runs with `JET_BUILD_THREADS` (outside its key too: a
+// cap changes no output), which each jet it starts takes as its own.
+build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [ActionOutcome BuildExecutionError!] Never! {
     results := [ActionOutcome BuildExecutionError!]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
     stamps := StampTable.load(project_root)
     loop action_id in ids {
-        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps, traces) == {
+        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps, traces, threads) == {
             .Ok(start) -> {
                 if start == {
                     .Restored -> { results.push(Ok(ActionOutcome.RestoredFromCache)) }
@@ -462,8 +464,8 @@ build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActi
 // hashed, runnable where the input is, with each folder bound read-only at
 // its path and each found program it is passed named by the path it runs at
 // there; with `traces` (build_execute_actions) it also gets its trace folder
-// and `JET_TRACE_FILE`.
-build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+// and `JET_TRACE_FILE`, and with `threads` `JET_BUILD_THREADS`.
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
         if !grants.contains(cap) {
             return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
@@ -579,6 +581,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         work: if sys.is_linux() -> BUILD_WORK_MOUNT else -> sandbox
         runtime_env["JET_TRACE_FILE"] = "{work}/{BUILD_STEP_TRACE_FOLDER}/%p.json"
     }
+    if threads == .Val(cap) -> runtime_env["JET_BUILD_THREADS"] = "{cap}"
     loop folder in action.folders {
         source: build_folder_source(project_root, folder) ?? return Err(build_io_action(action, err))
         if sys.is_linux() {

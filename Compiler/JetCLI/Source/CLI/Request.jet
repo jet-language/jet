@@ -25,6 +25,7 @@ use {
         CoreSourceOwnedRow,
         core_decl_fail,
         core_decl_parts,
+        ENV_JET_BUILD_THREADS,
         ENV_JET_COMPILER_IDENTITY,
         ENV_JET_FRONT_CORE_OBJECT_OUTPUT,
         ENV_JET_FRONT_LIBRARY_LIFECYCLE,
@@ -37,6 +38,8 @@ use {
         ENV_JET_TOOLCHAIN_ROOT,
         compiler_take_rows,
         compiler_threads_failure_text,
+        compiler_threads_join,
+        compiler_threads_leave,
         foundation_byte_text,
         foundation_json_quote,
         ModuleLayer,
@@ -225,7 +228,11 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // front end at once, so the front end's compile state drops on a detached
 // task meanwhile (JetDriverCompileRequest.release_state_aside). The Core
 // interface (jet_cli_core_interface_made) is made beside all of it and
-// joined last: neither machine code nor the pack reads it.
+// joined last: neither machine code nor the pack reads it. The runtime and
+// the Core build share this process's compiler threads
+// (compiler_threads_join): while both compile each phase admits its share
+// of the cap, the Core check waiting for its image holds none, and Core
+// takes the whole cap once the runtime's object is made.
 jet_cli_runtime_library: fn(request: &&JetDriverCompileRequest, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     selected := request.move()
     selected.release_state_aside = true
@@ -250,7 +257,8 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     problem: jet_cli_core_identity()
     if problem != "" -> return jet_driver_compile_escaped_failure(problem)
     // The Core build's own threads, with the memory free when it starts, as
-    // each phase of a library build reads it (jet_cli_runtime_ir).
+    // each phase of a library build reads it (jet_cli_runtime_ir): the same
+    // cap as the runtime's, shared with it while both compile.
     core_threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     // The runtime image the Core check's compile-time code runs on arrives
     // once (None: there is none); the check's request holds the session.
@@ -260,6 +268,7 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     { sender: runtime_threads, receiver: threads_arrival }: channel<[String]?>()
     building: task jet_cli_core_library_built(jet_eval_native_session(JET_CLI_RUNTIME_IMAGE_FILE, JetCLICoreImageReader{arrival: arrival}), core_prefix, threads_arrival, core_threads, trace_sink)
     checked := X64ImageFile?{None}
+    compiler_threads_join()
     runtime_ir := jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     made := if runtime_ir.move() == {
         .Stopped(result) -> {
@@ -271,6 +280,7 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
             jet_cli_runtime_made_built(result, library, interface_text, threads, prefix, checked, trace_sink)
         }
     }
+    compiler_threads_leave()
     jet_cli_core_image_send(image, checked.move()).drop("a Core check that stopped reads no image")
     // Start Core interface extraction after Core is unblocked so it does not
     // contend with the critical-path runtime compile; it still completes many
@@ -1515,6 +1525,17 @@ jet_cli_default_threads: fn(logical: Int, work: Int) -[FS, Time]> Int Never! {
     jet_cli_load_window(logical, allowed, jet_cli_load_sample())
 }
 
+// The compiler thread cap a `jet build` hands the jets its steps start
+// (JET_BUILD_THREADS, Jetpack Executor.jet build_execute_actions): `--threads`
+// of the build, so a step's compile keeps to it. None when unset or no whole
+// number of at least one.
+jet_cli_build_threads: fn() -[Env]> Int? Never! {
+    text: cli_sys.get(ENV_JET_BUILD_THREADS) ?? return None
+    count: Int.parse(text) ?? return None
+    if count < 1 -> return None
+    Val(count)
+}
+
 // One end of a load window: `/proc/stat`'s text (`""` when unread), this
 // process's CPU time (`own_ns`, -1 when unread) and the instant of the read.
 JetCLILoadSample: struct {
@@ -1861,8 +1882,9 @@ JetCLIToolchainPackages: struct {
 
 // The driver request for `snapshot` on this host: the Core rows, the
 // canonical effect source, the host facts, the lock's build stamp and build
-// contributions, and at most `threads` compiler threads (`None` admits
-// threads automatically, up to one per CPU it may run on).
+// contributions, and at most `threads` compiler threads (`None` takes the cap
+// the build running this jet as a step handed it, jet_cli_build_threads, else
+// admits threads automatically, up to one per CPU it may run on).
 jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os: cli_sys.name()
     cores: cli_sys.cpu_count()
@@ -1886,7 +1908,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         record_store: None,
         core_interface: Val(jet_cli_core_interface()),
         trace_sink: None,
-        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores, work)), cores: cores, memory_available: jet_cli_memory_available()},
+        compiler_threads: CompilerThreads{cap: Val(threads ?? (jet_cli_build_threads() ?? jet_cli_default_threads(cores, work))), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
         eval_entry: eval_entry,
         tests_optional: mode == JetDriverCompileMode.Test && (cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None || cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None),
@@ -1971,13 +1993,17 @@ JetCLINativeImageReader: struct {
 // The Core library check's read of its runtime image
 // (jet_cli_core_check_image): it waits until the runtime build hands the
 // image over on `arrival`, once. None when there is none, or the runtime
-// build is gone.
+// build is gone. While it waits the check leaves the compiler threads it
+// shares with the runtime build (compiler_threads_leave), whose phases then
+// take the whole cap.
 JetCLICoreImageReader: struct {
     arrival: Receiver<X64ImageFile?>,
 
     impl JetEvalNativeImageReader {
         read: fn(self, _file: String) -[FS.Read, Env, FFI.Asm, Time.Wait]> X64ImageFile? {
-            arrived: self.arrival.receive() ?? return None
+            compiler_threads_leave()
+            arrived: jet_cli_core_image_received(self.arrival)
+            compiler_threads_join()
             arrived
         }
 
@@ -1985,6 +2011,13 @@ JetCLICoreImageReader: struct {
             jet_cli_native_code_listed(pid, listing)
         }
     }
+}
+
+// The image `arrival` hands over, or None when there is none or the runtime
+// build is gone.
+jet_cli_core_image_received: fn(arrival: Receiver<X64ImageFile?>) -[Time.Wait]> X64ImageFile? {
+    image: arrival.receive() ?? return None
+    Val(image)
 }
 
 // ENV_JET_PERF_CODE (`jet perf attach`, Perf/Outside.jet): the functions

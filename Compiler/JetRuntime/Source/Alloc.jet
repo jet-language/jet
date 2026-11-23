@@ -5,14 +5,17 @@
 // State layout: word 0 of the state page is the detached-thread GS target
 // (Thread.jet thread_detached_base): it always reads zero, so thread_base()
 // yields 0 on a thread that has no TCB and the allocator takes its locked
-// path there. Word 208 holds the table of the 32 arenas (216 bytes each:
-// [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
-// 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
-// the large-block cache owns lock 216, cached bytes 224 (atomic) and 59 class heads
-// from 256; the slab regions own lock 736, cursor 744, end 752, the
-// free-slab stack 760 and the next region size 768 (alloc_slab_map); words
-// 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP); words 776
-// to 896 are the region window's base, cursor and class stacks
+// path there. Word 208 holds the table of the 32 arenas (256 bytes each,
+// four cache lines: [lock 0][8 available-slab heads 8..64][8 retained-
+// empty-slab counts 72..128][8 live totals 136..192][scratch row 200..208
+// for uncached takes][free-slab stack 216][its count 224][slab batch cursor
+// 232][batch end 240][region-size scratch 248]); the 32 large-block cache
+// shards follow from alloc_root + 12288 (512 bytes each: [lock 0][59 class
+// heads 8..480]), and the cached bytes of every shard and kept row are word
+// 224 (atomic). The slab regions own lock 736, cursor 744, end 752, the
+// shared free-slab stack 760 and the next region size 768 (alloc_slab_map);
+// words 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP); words
+// 776 to 896 are the region window's base, cursor and class stacks
 // (ALLOC_WINDOW).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
@@ -38,7 +41,7 @@
 // eight [head][count] rows, one per class, of blocks threaded through their
 // first two words as [next][slab]. The cache needs no atomic: only its owner
 // touches it. It refills with up to 32 blocks of one slab under the arena
-// lock of the stack band's arena (alloc_arena), and when it holds 64 blocks a
+// lock of the thread's own arena (alloc_arena), and when it holds 64 blocks a
 // free first returns 32 of them, each to its own slab under that slab's
 // arena lock. A cached block counts as live in its slab, so a slab is unmapped
 // only when no payload and no cache holds any of its blocks; the arena row's
@@ -46,17 +49,18 @@
 // alloc_live_blocks subtracts the cached ones for the leak-witness fixtures.
 // Thread exit (jet_rt_thread_detach) returns the whole cache. A thread without
 // a TCB (before attach, foreign) allocates from the arena its stack band
-// selects (alloc_arena) and a block returns to its slab's arena;
+// selects (alloc_arena_index) and a block returns to its slab's arena;
 // each arena's slab metadata is protected by that arena's futex lock
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
-// stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
+// arenas never contend and a waiter never burns a core. Payloads belong exclusively to
 // their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
 // arena stay linked to avoid relinking on every temporary; additional empty
-// slabs go on the process's free-slab stack, still mapped, for the next new
-// slab of any class (alloc_slab_map: slabs are carved from slab regions and
+// slabs go on the arena's free-slab stack, still mapped, for the arena's next
+// new slab of any class, and past ALLOC_ARENA_FREE_SLAB_CAP spill to the
+// shared stack (alloc_slab_map: slabs are carved from slab regions and
 // their pages never fault twice). Large mappings are rounded to a size class (at most 25% over
 // the page-rounded need) and a freed one is kept, in a row of the freeing
-// thread's TCB (ALLOC_LARGE_ROWS) or on its class list, while the cache holds
+// thread's TCB (ALLOC_LARGE_ROWS) or on a class list of its arena's shard, while the cache holds
 // at most ALLOC_LARGE_CACHE_BYTES in all (resident pages a compiler keeps, so
 // the bound stays small), for the next allocation of that class instead of
 // munmap + mmap; reused large blocks are not zeroed, as small blocks never
@@ -756,12 +760,11 @@ alloc_reservation_record_free: fn(record: I64, record_bytes: I64) {
         return
     }
     // mmap is zero-filled: the locks, every free-list head, every live total
-    // and the large cache start at zero. One mapping holds the state page and,
-    // in the two pages after it, the 32 arenas (32 * 216 bytes).
-    #Unsafe("runtime-init runs before any other thread exists") {
-        alloc_root = alloc_map(I64{12288}, I64{12288})
-    }
-    #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
+    // and the large cache shards start at zero. One 7-page mapping holds the
+    // state page (4096 B), the 32 cache-line-aligned arenas (32 * 256 = 8192 B),
+    // and the 32 large-block cache shards (32 * 512 = 16384 B).
+    #Unsafe("runtime-init runs before any other thread exists; the fresh state page is private to initialization, which precedes every allocation") {
+        alloc_root = alloc_map(I64{28672}, I64{28672})
         os_store_i64(wrapping(alloc_root + I64{208}), wrapping(alloc_root + I64{4096}))
     }
     // The initializing thread has no TCB yet; point its GS at the zero word
@@ -804,27 +807,42 @@ rt_alloc_check_sweep_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// The arena roots: rows of the table.
+// The arena roots: 256-byte cache-line-aligned rows of the table.
 alloc_arena_root: fn(index: I64) -> I64 {
     #Unsafe("initialization wrote the arena table word once, before any allocation") {
-        return wrapping(os_load_i64(wrapping(alloc_root + I64{208})) + wrapping(index * I64{216}))
+        return wrapping(os_load_i64(wrapping(alloc_root + I64{208})) + (index << I64{8}))
     }
 }
 
-// The calling thread's arena. Thread and fiber stacks are disjoint mappings
-// of at least 8 MiB (Thread.jet thread_stack_bytes, THREAD_STACK_DEFAULT; a
-// stack cut under a finite RLIMIT_AS may be smaller), so tasks running at the
-// same time sit in different 8 MiB stack bands; the band's hash picks one of
-// the 32 arenas. A deeper stack spans several bands, and its thread moves
-// between their arenas as it recurses. Any arena is correct for any thread:
-// the choice only spreads lock traffic, and a block always returns to the
-// arena of its slab.
-alloc_arena: fn() -> I64 {
-    band := I64{0}
-    #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
-        band = os_stack_address_i64() >> I64{23}
+// The large-block cache shard of arena `index` (0..31): 512 bytes each from
+// alloc_root + 12288.
+alloc_large_shard: fn(index: I64) -> I64 {
+    wrapping(alloc_root + wrapping(I64{12288} + (index << I64{9})))
+}
+
+// The calling thread's arena index (0..31). The main thread (index 0) and
+// the pool carriers (1 up, densely; a fiber takes its carrier's) use their
+// THREAD_TCB_INDEX, so up to 31 carriers each have an arena of their own;
+// another attached thread uses its kernel tid's low bits, and a thread
+// without a TCB the hash of its 8 MiB stack band. Any arena is correct for
+// any thread: the choice only spreads lock traffic, and a block always
+// returns to the arena of its slab.
+alloc_arena_index: fn() -> I64 {
+    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word; an unattached thread only reads its stack pointer register") {
+        base: os_tls_base_i64()
+        if (base != I64{0}) {
+            idx: os_load_i64(wrapping(base + THREAD_TCB_INDEX))
+            if (idx >= I64{0}) { return idx & I64{31} }
+            return os_load_i64(wrapping(base + I64{8})) & I64{31}
+        }
+        band: os_stack_address_i64() >> I64{23}
+        return (wrapping(band * I64{-7046029254386353131}) >> I64{59}) & I64{31}
     }
-    alloc_arena_root((wrapping(band * I64{-7046029254386353131}) >> I64{59}) & I64{31})
+}
+
+// The calling thread's arena root.
+alloc_arena: fn() -> I64 {
+    alloc_arena_root(alloc_arena_index())
 }
 
 // Live payloads of class `width`: every block handed out of a slab across
@@ -882,6 +900,8 @@ priv alloc_lock: fn(root: I64) {
     }
 }
 
+priv alloc_try_lock: fn(root: I64) -> Bool { sync_cas(root, I64{0}, I64{1}) == I64{0} }
+
 alloc_unlock: fn(root: I64) {
     #Unsafe("the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word") {
         if (os_swap_i64(root, I64{0}) == I64{2}) {
@@ -892,14 +912,18 @@ alloc_unlock: fn(root: I64) {
 
 // A fork's hold on the heap (RouteSys.jet jet_sys_fork_raw): every
 // allocator lock, taken in the order the allocator nests them (the
-// quarantine before the large cache and an arena, an arena before the slab
-// regions; the policy lock nests nothing), so the child's copy of the heap
-// is consistent and none of its locks belongs to a thread the child lacks.
+// quarantine before the large-cache shards and arenas, an arena before the
+// slab regions; the policy lock nests nothing), so the child's copy of the
+// heap is consistent and none of its locks belongs to a thread the child lacks.
 alloc_fork_hold: fn() {
     alloc_lock(wrapping(alloc_root + I64{136}))
     alloc_lock(wrapping(alloc_root + I64{16}))
-    alloc_lock(wrapping(alloc_root + I64{216}))
     index := I64{0}
+    loop index < (I64{32}) {
+        alloc_lock(alloc_large_shard(index))
+        index = wrapping(index + I64{1})
+    }
+    index = I64{0}
     loop index < (I64{32}) {
         alloc_lock(alloc_arena_root(index))
         index = wrapping(index + I64{1})
@@ -917,7 +941,11 @@ alloc_fork_release: fn() {
         index = wrapping(index - I64{1})
         alloc_unlock(alloc_arena_root(index))
     }
-    alloc_unlock(wrapping(alloc_root + I64{216}))
+    index = I64{32}
+    loop index > (I64{0}) {
+        index = wrapping(index - I64{1})
+        alloc_unlock(alloc_large_shard(index))
+    }
     alloc_unlock(wrapping(alloc_root + I64{16}))
     alloc_unlock(wrapping(alloc_root + I64{136}))
 }
@@ -959,66 +987,208 @@ priv alloc_link: fn(slab: I64, head: I64) {
 // tight address-space limit (Process memory_limit is RLIMIT_AS) starts and
 // grows toward it. A region that cannot be mapped is retried at half the
 // size, down to one slab. A slab that is no longer needed (more empty slabs than
-// ALLOC_RETAINED_EMPTY_SLABS) goes on the process's free-slab stack and serves
-// the next new slab of any class and arena. Its pages are never returned, so
-// they never fault again.
-// State page words: lock 736, region cursor 744, region end 752, free-slab
-// stack 760 (a stacked slab's first word links the next), next region size
-// 768 (zero before the first region).
+// ALLOC_RETAINED_EMPTY_SLABS) goes on its arena's free-slab stack and serves
+// that arena's next new slab of any class; past ALLOC_ARENA_FREE_SLAB_CAP the
+// arena moves ALLOC_ARENA_FREE_SLAB_BATCH of them to the shared stack, which
+// serves every arena. Its pages are never returned, so they never fault again.
+// An arena takes a slab from its own stack, else from its own batch of
+// ALLOC_ARENA_REGION_BATCH slabs carved off the region at once, both under
+// its own lock alone: the shared slab-region lock is taken once per batch,
+// and a region is mapped outside it.
+// State page words: lock 736, region cursor 744, region end 752, shared
+// free-slab stack 760 (a stacked slab's first word links the next), next
+// region size 768 (zero before the first region). Arena words (alloc_arena_root):
+// free-slab stack 216, its count 224, batch cursor 232, batch end 240.
 ALLOC_SLAB_BYTES: I64{65536}
 
 ALLOC_REGION_FIRST: I64{1048576}
 
 ALLOC_REGION: I64{33554432}
 
-// A slab's 64 KiB: a stacked slab, else the next of the current region,
-// mapping a new region when it is used up. Zero when no region can be
-// mapped. A stacked slab's bytes are stale: alloc_new_slab rewrites its header.
-alloc_slab_map: fn() -> I64 {
-    lock: wrapping(alloc_root + I64{736})
-    slab := I64{0}
-    alloc_lock(lock)
-    #Unsafe("the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word") {
-        stack: wrapping(alloc_root + I64{760})
-        slab = os_load_i64(stack)
-        if (slab != I64{0}) { os_store_i64(stack, os_load_i64(slab)) } else {
-            cursor: wrapping(alloc_root + I64{744})
-            end: wrapping(alloc_root + I64{752})
-            if (os_load_i64(cursor) == os_load_i64(end)) {
-                next: wrapping(alloc_root + I64{768})
-                size := os_load_i64(next)
-                if (size == I64{0}) { size = ALLOC_REGION_FIRST }
-                region := I64{0}
-                loop region == (I64{0}) && size >= ALLOC_SLAB_BYTES {
-                    region = alloc_region_map(size)
-                    if (region == I64{0}) { size = size >> I64{1} }
-                }
-                if (region != I64{0}) {
-                    os_store_i64(cursor, region)
-                    os_store_i64(end, wrapping(region + size))
-                    os_store_i64(next, if (size < ALLOC_REGION) -> size << I64{1} else -> size)
-                }
-            }
-            at: os_load_i64(cursor)
-            if (at != os_load_i64(end)) {
-                slab = at
-                os_store_i64(cursor, wrapping(at + ALLOC_SLAB_BYTES))
-            }
-        }
+ALLOC_ARENA_FREE_SLAB_CAP: I64{8}
+
+ALLOC_ARENA_FREE_SLAB_BATCH: I64{4}
+
+ALLOC_ARENA_REGION_BATCH: I64{8}
+
+// A new slab region of `desired` bytes, else of half the size and so on down
+// to one slab; its base, its size stored in `size_cell`, or zero.
+priv alloc_region_map_retry: fn(desired: I64, size_cell: I64) -> I64 {
+    size := desired
+    region := I64{0}
+    loop region == (I64{0}) && size >= ALLOC_SLAB_BYTES {
+        region = alloc_region_map(size)
+        if (region == I64{0}) { size = size >> I64{1} }
     }
-    alloc_unlock(lock)
-    slab
+    sync_store(size_cell, if (region != I64{0}) -> size else -> I64{0})
+    region
 }
 
-// Puts a slab no class holds on the free-slab stack, mapped.
-priv alloc_slab_retire: fn(slab: I64) {
-    lock: wrapping(alloc_root + I64{736})
-    alloc_lock(lock)
-    #Unsafe("the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block") {
-        stack: wrapping(alloc_root + I64{760})
-        os_store_i64(slab, os_load_i64(stack))
-        os_store_i64(stack, slab)
+// After a region of `size` was mapped: the next one is twice as large, up to
+// ALLOC_REGION. The caller holds the slab-region lock.
+priv alloc_region_grow: fn(size: I64) {
+    next: wrapping(alloc_root + I64{768})
+    target: if (size < ALLOC_REGION) -> size << I64{1} else -> size
+    if (sync_load(next) < target) { sync_store(next, target) }
+}
+
+// One idle slab of another arena than `root` (stacked, or left in its
+// batch), or zero: the last resort once no region can be mapped. The caller
+// holds `root`, so every other arena is only tried, never waited for.
+priv alloc_slab_steal: fn(root: I64) -> I64 {
+    index := I64{0}
+    loop index < (I64{32}) {
+        other: alloc_arena_root(index)
+        if (other != root && (sync_load(wrapping(other + I64{216})) != I64{0} || sync_load(wrapping(other + I64{232})) != sync_load(wrapping(other + I64{240}))) && alloc_try_lock(other)) {
+            slab: sync_load(wrapping(other + I64{216}))
+            if (slab != I64{0}) {
+                sync_store(wrapping(other + I64{216}), sync_load(slab))
+                sync_store(wrapping(other + I64{224}), wrapping(sync_load(wrapping(other + I64{224})) - I64{1}))
+                alloc_unlock(other)
+                return slab
+            }
+            at: sync_load(wrapping(other + I64{232}))
+            if (at != sync_load(wrapping(other + I64{240}))) {
+                sync_store(wrapping(other + I64{232}), wrapping(at + ALLOC_SLAB_BYTES))
+                alloc_unlock(other)
+                return at
+            }
+            alloc_unlock(other)
+        }
+        index = wrapping(index + I64{1})
     }
+    I64{0}
+}
+
+// A slab's 64 KiB for arena `root`, whose lock the caller holds: off the
+// arena's stack, else out of its batch, else (under the slab-region lock)
+// off the shared stack, moving up to ALLOC_ARENA_FREE_SLAB_BATCH - 1 more to
+// the arena's, else a new batch of the region, mapping a new region when it
+// is used up. Zero when no region can be mapped and no arena has a slab idle.
+// A stacked slab's bytes are stale: alloc_new_slab rewrites its header.
+alloc_slab_map: fn(root: I64) -> I64 {
+    own_stack: wrapping(root + I64{216})
+    own_count: wrapping(root + I64{224})
+    stacked: sync_load(own_stack)
+    if (stacked != I64{0}) {
+        sync_store(own_stack, sync_load(stacked))
+        sync_store(own_count, wrapping(sync_load(own_count) - I64{1}))
+        return stacked
+    }
+    own_cursor: wrapping(root + I64{232})
+    own_end: wrapping(root + I64{240})
+    carved: sync_load(own_cursor)
+    if (carved != sync_load(own_end)) {
+        sync_store(own_cursor, wrapping(carved + ALLOC_SLAB_BYTES))
+        return carved
+    }
+    lock: wrapping(alloc_root + I64{736})
+    stack: wrapping(alloc_root + I64{760})
+    cursor: wrapping(alloc_root + I64{744})
+    end: wrapping(alloc_root + I64{752})
+    batch: wrapping(ALLOC_ARENA_REGION_BATCH * ALLOC_SLAB_BYTES)
+    alloc_lock(lock)
+    top: sync_load(stack)
+    if (top != I64{0}) {
+        moved := I64{0}
+        rest := sync_load(top)
+        loop rest != (I64{0}) && moved < wrapping(ALLOC_ARENA_FREE_SLAB_BATCH - I64{1}) {
+            following: sync_load(rest)
+            sync_store(rest, sync_load(own_stack))
+            sync_store(own_stack, rest)
+            moved = wrapping(moved + I64{1})
+            rest = following
+        }
+        sync_store(stack, rest)
+        alloc_unlock(lock)
+        sync_store(own_count, wrapping(sync_load(own_count) + moved))
+        return top
+    }
+    at: sync_load(cursor)
+    left: wrapping(sync_load(end) - at)
+    if (left != I64{0}) {
+        carve: if (left < batch) -> left else -> batch
+        sync_store(cursor, wrapping(at + carve))
+        alloc_unlock(lock)
+        sync_store(own_cursor, wrapping(at + ALLOC_SLAB_BYTES))
+        sync_store(own_end, wrapping(at + carve))
+        return at
+    }
+    desired: sync_load(wrapping(alloc_root + I64{768}))
+    alloc_unlock(lock)
+    // mmap and madvise run outside the slab-region lock: no other arena
+    // waits on them.
+    size_cell: wrapping(root + I64{248})
+    region: alloc_region_map_retry(if (desired == I64{0}) -> ALLOC_REGION_FIRST else -> desired, size_cell)
+    size: sync_load(size_cell)
+    alloc_lock(lock)
+    if (region == I64{0}) {
+        // Another arena may have stacked a slab or mapped a region meanwhile.
+        again: sync_load(stack)
+        if (again != I64{0}) {
+            sync_store(stack, sync_load(again))
+            alloc_unlock(lock)
+            return again
+        }
+        again_at: sync_load(cursor)
+        if (again_at != sync_load(end)) {
+            sync_store(cursor, wrapping(again_at + ALLOC_SLAB_BYTES))
+            alloc_unlock(lock)
+            return again_at
+        }
+        alloc_unlock(lock)
+        return alloc_slab_steal(root)
+    }
+    alloc_region_grow(size)
+    carve: if (size < batch) -> size else -> batch
+    if (sync_load(cursor) == sync_load(end)) {
+        sync_store(cursor, wrapping(region + carve))
+        sync_store(end, wrapping(region + size))
+    } else {
+        // Another arena mapped a region meanwhile: the slabs past this
+        // arena's batch go on the shared stack, so none is lost.
+        spare := wrapping(region + carve)
+        head := sync_load(stack)
+        loop spare < wrapping(region + size) {
+            sync_store(spare, head)
+            head = spare
+            spare = wrapping(spare + ALLOC_SLAB_BYTES)
+        }
+        sync_store(stack, head)
+    }
+    alloc_unlock(lock)
+    sync_store(own_cursor, wrapping(region + ALLOC_SLAB_BYTES))
+    sync_store(own_end, wrapping(region + carve))
+    region
+}
+
+// Puts `slab`, which no class holds, on arena `root`'s free-slab stack,
+// mapped; the caller holds `root`. Past ALLOC_ARENA_FREE_SLAB_CAP the
+// ALLOC_ARENA_FREE_SLAB_BATCH most recent move to the shared stack as one
+// chain.
+priv alloc_slab_retire: fn(root: I64, slab: I64) {
+    own_stack: wrapping(root + I64{216})
+    own_count: wrapping(root + I64{224})
+    sync_store(slab, sync_load(own_stack))
+    sync_store(own_stack, slab)
+    count: wrapping(sync_load(own_count) + I64{1})
+    if (count <= ALLOC_ARENA_FREE_SLAB_CAP) {
+        sync_store(own_count, count)
+        return
+    }
+    tail := slab
+    moved := I64{1}
+    loop moved < ALLOC_ARENA_FREE_SLAB_BATCH {
+        tail = sync_load(tail)
+        moved = wrapping(moved + I64{1})
+    }
+    sync_store(own_stack, sync_load(tail))
+    sync_store(own_count, wrapping(count - ALLOC_ARENA_FREE_SLAB_BATCH))
+    lock: wrapping(alloc_root + I64{736})
+    stack: wrapping(alloc_root + I64{760})
+    alloc_lock(lock)
+    sync_store(tail, sync_load(stack))
+    sync_store(stack, slab)
     alloc_unlock(lock)
 }
 
@@ -1036,8 +1206,8 @@ alloc_region_map: fn(bytes: I64) -> I64 {
 
 // A slab for class `slot` of arena `root`, linked on the class list `head`.
 // Its header: [next 0][prev 8][free 16][live 24][head 32][arena 40][carve 48].
-alloc_new_slab: fn(root: I64, head: I64, slot: I64) -> I64 {
-    slab: alloc_slab_map()
+priv alloc_new_slab: fn(root: I64, head: I64, slot: I64) -> I64 {
+    slab: alloc_slab_map(root)
     if (slab == I64{0}) { return I64{0} }
     first: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
     #Unsafe("the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers") {
@@ -1056,7 +1226,7 @@ alloc_new_slab: fn(root: I64, head: I64, slot: I64) -> I64 {
 // Empty slabs a class keeps linked per arena, so a burst of temporaries
 // (a thread's cache drains 32 blocks at a time) does not give up a slab it
 // takes again moments later: at most 8 x 64 KiB per class and arena. Any
-// further empty slab goes on the free-slab stack (alloc_slab_retire).
+// further empty slab goes on the arena's free-slab stack (alloc_slab_retire).
 ALLOC_RETAINED_EMPTY_SLABS: I64{8}
 
 // Take up to `limit` free blocks of the class's head slab under the held
@@ -1113,7 +1283,7 @@ priv alloc_slab_take: fn(root: I64, head: I64, slot: I64, row: I64, limit: I64) 
 // is linked again when it had no block left to give (an empty free list and
 // nothing left to carve); a slab whose last block
 // returns stays linked as one of the class's retained empty slabs
-// (ALLOC_RETAINED_EMPTY_SLABS) or goes on the free-slab stack.
+// (ALLOC_RETAINED_EMPTY_SLABS) or goes on the arena's free-slab stack.
 priv alloc_slab_return: fn(slab: I64, block: I64) {
     #Unsafe("the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free: os_load_i64(wrapping(slab + I64{16}))
@@ -1134,7 +1304,7 @@ priv alloc_slab_return: fn(slab: I64, block: I64) {
                 os_store_i64(retained, wrapping(count + I64{1}))
             } else {
                 alloc_unlink(slab)
-                alloc_slab_retire(slab)
+                alloc_slab_retire(os_load_i64(wrapping(slab + I64{40})), slab)
             }
         }
     }
@@ -1392,11 +1562,13 @@ ALLOC_LARGE_CACHE_BYTES: I64{16777216}
 // Each attached TCB keeps up to ALLOC_LARGE_ROW_COUNT freed class-sized
 // mappings of at most ALLOC_LARGE_ROW_LIMIT bytes in [mapping][bytes] rows
 // at ALLOC_LARGE_ROWS (Thread.jet), an empty row's bytes zero. A thread
-// takes and keeps them without the large-cache lock, so threads that free
-// and reallocate lists of like sizes no longer queue on that one lock (or
-// on munmap + mmap). A kept mapping counts in the cached bytes
-// (alloc_root + 224) as a shared one does, so ALLOC_LARGE_CACHE_BYTES bounds
-// both; that word is atomic because rows change it outside the lock. A
+// takes and keeps them without any lock, so threads that free and
+// reallocate lists of like sizes never queue on a lock (or on munmap +
+// mmap). Any other freed mapping goes on a class list of the freeing
+// thread's shard (alloc_large_shard), each shard under its own lock, so
+// threads on different arenas never share one. A kept mapping counts in the
+// cached bytes (alloc_root + 224) as a shelved one does, so
+// ALLOC_LARGE_CACHE_BYTES bounds both; that word is atomic. A
 // mapping is reachable from exactly one TCB or one class list: a fiber takes
 // its carrier's rows while it runs (alloc_cache_lend, alloc_cache_reclaim),
 // and thread exit shelves them (alloc_large_rows_flush).
@@ -1465,16 +1637,17 @@ alloc_large_keep: fn(mapping: I64, bytes: I64) -> Bool {
     false
 }
 
-// Links counted mapping `mapping` onto the list of its `class`.
+// Links counted mapping `mapping` onto the list of its `class` in the
+// calling thread's shard.
 priv alloc_large_shelve: fn(mapping: I64, class: I64) {
-    lock: wrapping(alloc_root + I64{216})
-    head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
-    alloc_lock(lock)
-    #Unsafe("the large-cache lock owns every class list; the mapping's first word is no live payload once it is freed") {
+    shard: alloc_large_shard(alloc_arena_index())
+    head: wrapping(shard + wrapping(I64{8} + wrapping(class * I64{8})))
+    alloc_lock(shard)
+    #Unsafe("the shard's lock owns its class lists; the mapping's first word is no live payload once it is freed") {
         os_store_i64(mapping, os_load_i64(head))
         os_store_i64(head, mapping)
     }
-    alloc_unlock(lock)
+    alloc_unlock(shard)
 }
 
 // Moves the kept-mapping rows of TCB `from` to TCB `to`, emptying `from`.
@@ -1522,20 +1695,32 @@ alloc_large_rows_flush: fn() {
 }
 
 // A cached mapping of `class`: one the calling thread kept, else one
-// unlinked from its class list, out of the cached count; or zero.
+// unlinked from the class's list in the calling thread's shard or, that list
+// empty, in the next shard whose list holds one; out of the cached count; or
+// zero.
 priv alloc_large_cached: fn(class: I64) -> I64 {
     bytes: wrapping(alloc_large_class_pages(class) * I64{4096})
     kept: alloc_large_take(bytes)
     if (kept != I64{0}) { return kept }
-    lock: wrapping(alloc_root + I64{216})
-    head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
-    alloc_lock(lock)
+    own: alloc_arena_index()
+    offset: wrapping(I64{8} + wrapping(class * I64{8}))
     mapping := I64{0}
-    #Unsafe("the large-cache lock owns every class list and its link words") {
-        mapping = os_load_i64(head)
-        if (mapping != I64{0}) { os_store_i64(head, os_load_i64(mapping)) }
+    step := I64{0}
+    loop mapping == (I64{0}) && step < (I64{32}) {
+        shard: alloc_large_shard(wrapping(own + step) & I64{31})
+        head: wrapping(shard + offset)
+        // An empty list is passed by one word read, without its lock; one
+        // emptied meanwhile reads empty under the lock.
+        if (sync_load(head) != I64{0}) {
+            alloc_lock(shard)
+            #Unsafe("the shard's lock owns its class lists and their link words") {
+                mapping = os_load_i64(head)
+                if (mapping != I64{0}) { os_store_i64(head, os_load_i64(mapping)) }
+            }
+            alloc_unlock(shard)
+        }
+        step = wrapping(step + I64{1})
     }
-    alloc_unlock(lock)
     if (mapping != I64{0}) {
         _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
     }

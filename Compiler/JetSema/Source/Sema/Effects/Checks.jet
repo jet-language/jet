@@ -5605,7 +5605,7 @@ sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffe
     if count > job_node.len() -> count = job_node.len()
     bounds: compiler_threads_partition(weights, count)
     jobs: SemaStackJobs{module_index: job_module.move(), function: job_function.move(), node: job_node.move(), closed: closed}
-    queue: Shared{SemaEffectCollectQueue{next: 0}}
+    queue: SemaEffectCollectQueue{next: 0}
     parts := [SemaStackBodies]{}
     loop _ in 0..<count -> parts.push(sema_effect_stack_bodies_empty())
     sema_effect_stack_bodies_claimers(modules, nodes, calls, types, jobs, bounds, queue, 0, workers, parts)
@@ -5643,7 +5643,7 @@ sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodi
 
 // Runs frame-sizing threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[SemaStackBodies]) {
+sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[SemaStackBodies]) {
     if from >= workers {
         return
     }
@@ -5659,11 +5659,10 @@ sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [
 }
 
 // One thread: sizes the parts it claims, each into its own rows.
-sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaStackBodiesPart] {
+sema_effect_stack_bodies_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, types: JetFrameTypes, jobs: SemaStackJobs, bounds: [Int], queue: SemaEffectCollectQueue) -> [SemaStackBodiesPart] {
     claimed := [SemaStackBodiesPart]{}
-    ranks: queue.guard_read()
     loop {
-        part: ranks.value.next.add(1)
+        part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
         bodies := sema_effect_stack_bodies_empty()
         loop job in bounds[part]..<bounds[part + 1] {
@@ -7609,7 +7608,7 @@ sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaE
     bounds: compiler_threads_partition(unit_weights, count)
     module_rows := loop module_row in inputs -> module_row.module_index
     jobs: SemaEffectCollectJobs{module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), module_has_unsafe: module_has_unsafe}
-    queue: Shared{SemaEffectCollectQueue{next: 0}}
+    queue: SemaEffectCollectQueue{next: 0}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(modules, nodes, calls, jobs, bounds, queue, 0, workers, parts)
@@ -7630,8 +7629,8 @@ SemaEffectCollectJobs: struct {
     module_has_unsafe: [Bool],
 }
 
-// The next unclaimed part of the collection, taken with one atomic add under
-// a read guard each thread holds for its run.
+// The next unclaimed part of the collection, taken with one atomic add;
+// every thread reads the queue in place.
 SemaEffectCollectQueue: struct {
     next: Atomic<Int>,
 }
@@ -7676,7 +7675,7 @@ sema_effect_collect_place: fn(nodes: &[SemaEffectNode], jobs: SemaEffectCollectJ
 
 // Runs collecting threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
+sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue, from: Int, workers: Int, parts: &[[SemaEffectCollected]]) {
     if from >= workers {
         return
     }
@@ -7693,11 +7692,10 @@ sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaE
 
 // One thread: collects the parts it claims, in order, each unit into its own
 // copy of the unit's node row.
-sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaEffectCollectedPart] {
+sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEffectNode], calls: SemaEffectCallIndex, jobs: SemaEffectCollectJobs, bounds: [Int], queue: SemaEffectCollectQueue) -> [SemaEffectCollectedPart] {
     claimed := [SemaEffectCollectedPart]{}
-    ranks: queue.guard_read()
     loop {
-        part: ranks.value.next.add(1)
+        part: queue.next.add(1)
         if part >= bounds.len() - 1 -> break
         collected := [SemaEffectCollected]{}
         loop unit in bounds[part]..<bounds[part + 1] {
