@@ -603,9 +603,18 @@ result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_t
     first: token(tokens, at)
     if {
         is_identifier(first) -> at = after_generics(tokens, chain(tokens, at).end)
-        first == "[" || first == "(" || first == "{{" -> at = compound_end(tokens, at)
+        first == "[" || first == "(" -> at = compound_end(tokens, at)
+        first == "{{" -> {
+            at = compound_end(tokens, at)
+            // After an effect row (`-[Time.Wait]> {{ … }}`) the brace may
+            // open the body: a record result has its body brace after it on
+            // its line.
+            if !brace_follows(source, tokens, at) -> return ""
+        }
         else -> return ""
     }
+    // `-[Net]> BrowserError!` declares a failure and no result.
+    if token(tokens, at) == "!" -> return ""
     if token(tokens, at) == "?" -> at += 1
     last: tokens[at - 1]
     spelling: String.from_bytes_lossy(source[tokens[start].offset..<last.offset + last.value.bytes().len()])
@@ -613,6 +622,19 @@ result_type: fn(source: [U8], tokens: [Token], start: Int, unit: String, local_t
     // prelude names, type parameters and compound types keep their spelling.
     if local_types.has_key(first) && start == at - 1 -> return "{unit}.{spelling}"
     spelling
+}
+
+// Whether a `{` token follows token `at` on the line of token `at - 1`.
+brace_follows: fn(source: [U8], tokens: [Token], at: Int) -> Bool Never! {
+    from := tokens[at - 1].offset
+    loop index in at..<tokens.len() {
+        loop byte in source[from..<tokens[index].offset] {
+            if (Int{byte}) == NEWLINE -> return false
+        }
+        if tokens[index].value == "{{" -> return true
+        from = tokens[index].offset
+    }
+    false
 }
 
 // The token where the result type of a function whose parameters close just
@@ -2049,8 +2071,8 @@ find_function: fn(report: Report, name: String) -> Function Never! {
 }
 
 #Test("signatures keep generics, parameters and the result type, without comments or layout") {
-    found: public_functions("Core/Demo/Demo.jet", "plain: fn() {{}}\n    pick: fn<T: [Encode, Decode]>(\n        items: [T], // the source\n        at: Int,\n    ) -> T? Never! {{ None }}\n    Box: struct {{ put: fn(&self, value: fn(Int) -> Int) -[FS]> Bool Never! {{ true }} }}\n  ")
-    assert_eq(found.map(fn(row) { row.signature.copy() }), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool"})
+    found: public_functions("Core/Demo/Demo.jet", "plain: fn() {{}}\n    pick: fn<T: [Encode, Decode]>(\n        items: [T], // the source\n        at: Int,\n    ) -> T? Never! {{ None }}\n    Box: struct {{ put: fn(&self, value: fn(Int) -> Int) -[FS]> Bool Never! {{ true }} }}\n    answer: fn(value: Int) -[Time.Wait]> {{ print(value) }}\n    pair: fn() -[IO]> {{x: Int}} {{ {{x: 1}} }}\n    send: fn(text: String) -[Net]> IOError! {{ print(text) }}\n  ")
+    assert_eq(found.map(fn(row) { row.signature.copy() }), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool", "(value: Int)", "() -> {{x: Int}}", "(text: String)"})
 }
 
 untested_row: fn(unit: String, name: String, signature: String) -> Untested Never! {

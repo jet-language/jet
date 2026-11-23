@@ -113,7 +113,7 @@ count_kind: fn(kind: SurfaceKind, text: String) -> Int Never! {
         }
         .LexicalForm -> {
             loop line in block_lines(text, "LEXICAL_LEDGER") {
-                if line.trim().starts_with("{{ spelling:") -> count += 1
+                if line.trim().starts_with("{{spelling:") -> count += 1
             }
         }
         .Marker -> {
@@ -396,7 +396,7 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     keywords: "LexerKeyword: struct {{\n    retired: Bool,\n}}\n\nLEXER_KEYWORDS: [LexerKeyword]{{\n    {{constant: \"KW_FN\", kind: \"KwFn\", tag: \"TOKEN_KW_FN\", retired: false}},\n    {{constant: \"KW_COPY\", kind: \"KwCopy\", tag: \"TOKEN_KW_COPY\", retired: true}},\n    {{constant: \"KW_IF\", kind: \"KwIf\", tag: \"TOKEN_KW_IF\", retired: false}},\n}}\n"
     // The retired row stays reserved but is not counted.
     assert_eq(count_kind(.Keyword, keywords), 2)
-    forms: "LEXICAL_LEDGER: [LexicalEntry]{{\n    {{ spelling: \":\", meaning: \"binding\" }},\n    {{ spelling: \"#\", meaning: \"marker\" }},\n}}\nOTHER: [LexicalEntry]{{\n    {{ spelling: \"x\", meaning: \"y\" }},\n}}\n"
+    forms: "LEXICAL_LEDGER: [LexicalEntry]{{\n    {{spelling: \":\", meaning: \"binding\"}},\n    {{spelling: \"#\", meaning: \"marker\"}},\n}}\nOTHER: [LexicalEntry]{{\n    {{spelling: \"x\", meaning: \"y\"}},\n}}\n"
     assert_eq(count_kind(.LexicalForm, forms), 2)
     // A comment that mentions `impl Marker` is no declaration.
     markers: "// each marker has an `impl Marker {{ … }}` block\nPolicy: struct {{\n    impl Marker {{\n        inherits: true,\n    }}\n}}\nInline: struct {{\n    impl Marker {{}}\n}}\n"
@@ -458,20 +458,20 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
 
 #Test("public Core functions are reported by module and compared in a ballot, never gated") {
     assert_eq(public_functions("use x\nread: fn(path: String) -> String {{ path }}\npub write: fn() {{}}\npriv helper: fn() {{}}\nType: struct {{\n    method: fn(self) {{}}\n}}\nNAME: \"fn\"\nfunctional: \"x\"\n"), 2)
-    assert_eq(core_module("Core", "Core/HTTP/Client.jet"), "Http")
+    assert_eq(core_module("Core", "Core/HTTP/Client.jet"), "HTTP")
     assert_eq(core_module("Core", "Core/Data/Arrow/Table.jet"), "Data/Arrow")
     assert_eq(core_module("old/Core", "old/Core/Top.jet"), "Core")
     before := [String:Int]{}
-    before["Http"] = 10
+    before["HTTP"] = 10
     before["Text"] = 4
     after := [String:Int]{}
-    after["Http"] = 12
+    after["HTTP"] = 12
     after["Text"] = 4
     after["Wasm"] = 3
     ballot: ballot_text("../old", [Int]{25, 74, 77, 52, 50}, [Int]{25, 74, 78, 52, 50}, before, after)
     assert(ballot.contains("  markers: 77 -> 78 (+1)\n"))
     assert(ballot.contains("  keywords: 25 -> 25 (0)\n"))
-    assert(ballot.contains("  Http: 10 -> 12 (+2)\n  Wasm: 0 -> 3 (+3)\n  total: 14 -> 19 (+5)\n"))
+    assert(ballot.contains("  HTTP: 10 -> 12 (+2)\n  Wasm: 0 -> 3 (+3)\n  total: 14 -> 19 (+5)\n"))
     // An unchanged module is left out of the ballot.
     assert(!ballot.contains("Text:"))
     // Core growth never reaches the budget check: it reads only the counts.
