@@ -1,4 +1,4 @@
-// Private source-coupled raw-token tags, not keyword spellings.
+// Statement-termination scanner over the single canonical TOKEN_* kinds in Tokens.jet.
 // Each input row is [kind, byte_start, byte_end, case_name_start].
 // Each output row is [event, raw_token_index, byte_position].
 use jet_foundation.[
@@ -6,218 +6,6 @@ use jet_foundation.[
     Span,
     diagnostic_from_registry,
 ]
-
-K_IDENT: 1
-
-K_RAW_STRING: 2
-
-K_STRING: 3
-
-K_INT: 4
-
-K_FLOAT: 5
-
-K_UNIT_NUMBER: 6
-
-K_CHAR: 7
-
-K_TRUE: 8
-
-K_FALSE: 9
-
-K_SELF: 10
-
-K_NULL: 11
-
-K_BREAK: 12
-
-K_RETURN: 13
-
-K_RPAREN: 14
-
-K_RBRACKET: 15
-
-K_RBRACE: 16
-
-K_QUESTION: 17
-
-K_PLUS_PLUS: 18
-
-K_MINUS_MINUS: 19
-
-K_GT: 20
-
-K_SHR: 21
-
-K_FENCE_CLOSE: 22
-
-K_DOT: 23
-
-K_QUESTION_DOT: 24
-
-K_AND_AND: 25
-
-K_OR_OR: 26
-
-K_PLUS: 27
-
-K_MINUS: 28
-
-K_STAR: 29
-
-K_SLASH: 30
-
-K_SLASH_PERCENT: 31
-
-K_PERCENT: 32
-
-K_PERCENT_PERCENT: 33
-
-K_EQ_EQ: 34
-
-K_NOT_EQ: 35
-
-K_LT: 36
-
-K_LE: 37
-
-K_GE: 38
-
-K_COMPARE: 39
-
-K_AMP: 40
-
-K_PIPE: 41
-
-K_CARET: 42
-
-K_TILDE_PIPE: 43
-
-K_SHL: 44
-
-K_QUESTION_QUESTION: 45
-
-K_LBRACE: 46
-
-K_LPAREN: 47
-
-K_LBRACKET: 48
-
-K_EOF: 49
-
-K_BANG: 50
-
-K_UNIFIED_ARROW: 51
-
-K_EQ: 54
-
-K_LINE_COMMENT: 55
-
-K_BLOCK_COMMENT: 56
-
-K_FN: 57
-
-K_PRIV: 59
-
-K_IF: 60
-
-K_ELSE: 61
-
-K_IN: 62
-
-K_MUTATE: 63
-
-K_MOVE: 64
-
-K_COPY: 65
-
-K_STRUCT: 66
-
-K_ENUM: 67
-
-K_IMPL: 68
-
-K_TRAIT: 69
-
-K_IT: 73
-
-K_CONST: 74
-
-K_PREP: 75
-
-K_LOOP: 76
-
-K_YIELD: 77
-
-K_USE: 78
-
-K_EXTERN: 79
-
-K_MODULE: 80
-
-K_FENCE_OPEN: 81
-
-K_COLON: 82
-
-K_COLON_COLON: 83
-
-K_COLON_EQ: 84
-
-K_COMMA: 85
-
-K_SEMI: 86
-
-K_DOT_DOT: 87
-
-K_DOT_DOT_LT: 88
-
-K_DOT_DOT_DOT: 89
-
-K_AT: 90
-
-K_TILDE: 91
-
-K_TILDE_PIPE_EQ: 92
-
-K_TILDE_TILDE: 93
-
-K_PLUS_EQ: 94
-
-K_MINUS_EQ: 95
-
-K_STAR_EQ: 96
-
-K_SLASH_EQ: 97
-
-K_SLASH_PERCENT_EQ: 98
-
-K_PERCENT_EQ: 99
-
-K_PERCENT_PERCENT_EQ: 100
-
-K_AMP_EQ: 101
-
-K_PIPE_EQ: 102
-
-K_CARET_EQ: 103
-
-K_SHL_EQ: 104
-
-K_SHR_EQ: 105
-
-K_HASH: 106
-
-K_DOLLAR: 107
-
-K_PIPE_GT: 108
-
-K_LT_GT: 109
-
-K_TILDE_EQ: 110
-
-K_AMP_TILDE: 111
-
-K_AMP_TILDE_EQ: 112
 
 // Facts hold four ints per token, so `index * 4 < facts.len()` is the bound
 // check without a division on every call.
@@ -228,73 +16,73 @@ kind_at: fn(facts: [Int], index: Int) -> Int Never! {
 
 ends_statement: fn(kind: Int) -> Bool Never! {
     if kind == {
-        K_IDENT -> true
-        K_RAW_STRING -> true
-        K_STRING -> true
-        K_INT -> true
-        K_FLOAT -> true
-        K_UNIT_NUMBER -> true
-        K_CHAR -> true
-        K_TRUE -> true
-        K_FALSE -> true
-        K_SELF -> true
-        K_NULL -> true
-        K_BREAK -> true
-        K_RETURN -> true
-        K_RPAREN -> true
-        K_RBRACKET -> true
-        K_RBRACE -> true
-        K_QUESTION -> true
-        K_BANG -> true
-        K_GT -> true
-        K_SHR -> true
-        K_LT_GT -> true
-        K_FENCE_CLOSE -> true
+        TOKEN_IDENT -> true
+        TOKEN_RAW_STRING -> true
+        TOKEN_STRING -> true
+        TOKEN_INT -> true
+        TOKEN_FLOAT -> true
+        TOKEN_UNIT_NUMBER -> true
+        TOKEN_CHAR -> true
+        TOKEN_TRUE -> true
+        TOKEN_FALSE -> true
+        TOKEN_SELF -> true
+        TOKEN_NULL -> true
+        TOKEN_BREAK -> true
+        TOKEN_RETURN -> true
+        TOKEN_RPAREN -> true
+        TOKEN_RBRACKET -> true
+        TOKEN_RBRACE -> true
+        TOKEN_QUESTION -> true
+        TOKEN_BANG -> true
+        TOKEN_GT -> true
+        TOKEN_SHR -> true
+        TOKEN_LT_GT -> true
+        TOKEN_FENCE_CLOSE -> true
         // A bodiless declaration ends its line on its kind word
         // (`pricing: module`).
-        K_MODULE -> true
+        TOKEN_KW_MODULE -> true
         else -> false
     }
 }
 
 suppresses_terminator: fn(kind: Int) -> Bool Never! {
     if kind == {
-        K_FENCE_CLOSE -> true
-        K_DOT -> true
-        K_QUESTION_DOT -> true
-        K_AND_AND -> true
-        K_OR_OR -> true
-        K_PLUS -> true
-        K_MINUS -> true
-        K_STAR -> true
-        K_SLASH -> true
-        K_SLASH_PERCENT -> true
-        K_PERCENT -> true
-        K_PERCENT_PERCENT -> true
-        K_EQ_EQ -> true
-        K_NOT_EQ -> true
-        K_LT -> true
-        K_GT -> true
-        K_LE -> true
-        K_GE -> true
-        K_COMPARE -> true
-        K_AMP -> true
-        K_PIPE -> true
-        K_CARET -> true
-        K_TILDE -> true
-        K_AMP_TILDE -> true
-        K_TILDE_PIPE -> true
-        K_SHL -> true
-        K_SHR -> true
-        K_PIPE_GT -> true
-        K_QUESTION_QUESTION -> true
+        TOKEN_FENCE_CLOSE -> true
+        TOKEN_DOT -> true
+        TOKEN_QUESTION_DOT -> true
+        TOKEN_AND_AND -> true
+        TOKEN_OR_OR -> true
+        TOKEN_PLUS -> true
+        TOKEN_MINUS -> true
+        TOKEN_STAR -> true
+        TOKEN_SLASH -> true
+        TOKEN_SLASH_PERCENT -> true
+        TOKEN_PERCENT -> true
+        TOKEN_PERCENT_PERCENT -> true
+        TOKEN_EQ_EQ -> true
+        TOKEN_NOT_EQ -> true
+        TOKEN_LT -> true
+        TOKEN_GT -> true
+        TOKEN_LE -> true
+        TOKEN_GE -> true
+        TOKEN_COMPARE -> true
+        TOKEN_AMP -> true
+        TOKEN_PIPE -> true
+        TOKEN_CARET -> true
+        TOKEN_TILDE -> true
+        TOKEN_AMP_TILDE -> true
+        TOKEN_TILDE_PIPE -> true
+        TOKEN_SHL -> true
+        TOKEN_SHR -> true
+        TOKEN_PIPE_GT -> true
+        TOKEN_QUESTION_QUESTION -> true
         else -> false
     }
 }
 
 arrow: fn(kind: Int) -> Bool Never! {
     if kind == {
-        K_UNIFIED_ARROW -> true
+        TOKEN_UNIFIED_ARROW -> true
         else -> false
     }
 }
@@ -310,38 +98,38 @@ newline_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
 }
 
 scope_member_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index) != K_DOT || kind_at(facts, index + 1) != K_IDENT -> return false
+    if kind_at(facts, index) != TOKEN_DOT || kind_at(facts, index + 1) != TOKEN_IDENT -> return false
     cursor := index + 2
-    if kind_at(facts, cursor) == K_LBRACE -> return true
-    if kind_at(facts, cursor) != K_LPAREN -> return false
+    if kind_at(facts, cursor) == TOKEN_LBRACE -> return true
+    if kind_at(facts, cursor) != TOKEN_LPAREN -> return false
     depth := 0
     loop cursor * 4 < facts.len() {
         kind: kind_at(facts, cursor)
-        if kind == K_LPAREN -> depth += 1
-        if kind == K_RPAREN {
+        if kind == TOKEN_LPAREN -> depth += 1
+        if kind == TOKEN_RPAREN {
             depth -= 1
             if depth == 0 {
                 cursor += 1
                 break
             }
         }
-        if kind == K_EOF -> return false
+        if kind == TOKEN_EOF -> return false
         cursor += 1
     }
-    return kind_at(facts, cursor) == K_LBRACE
+    return kind_at(facts, cursor) == TOKEN_LBRACE
 }
 
 leading_dot_variant: fn(facts: [Int], index: Int) -> Bool Never! {
     kind: kind_at(facts, index)
-    if kind == K_NULL -> return true
-    return kind == K_IDENT && facts[index * 4 + 3] == 1
+    if kind == TOKEN_NULL -> return true
+    return kind == TOKEN_IDENT && facts[index * 4 + 3] == 1
 }
 
 skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
     cursor := index
     loop {
         kind: kind_at(facts, cursor)
-        if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT -> cursor += 1 else -> break
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> cursor += 1 else -> break
     }
     return cursor
 }
@@ -355,9 +143,9 @@ lex_may_pin_inline_version: fn(source: [U8]) -> Bool Never! {
     facts: raw_token_facts(source, false)
     index := 0
     loop index * 4 < facts.len() {
-        if kind_at(facts, index) == K_HASH {
+        if kind_at(facts, index) == TOKEN_HASH {
             after: kind_at(facts, skip_comment_tokens(facts, index + 1))
-            if after == K_INT || after == K_FLOAT || after == K_UNIT_NUMBER -> return true
+            if after == TOKEN_INT || after == TOKEN_FLOAT || after == TOKEN_UNIT_NUMBER -> return true
         }
         index += 1
     }
@@ -365,21 +153,21 @@ lex_may_pin_inline_version: fn(source: [U8]) -> Bool Never! {
 }
 
 dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index) != K_DOT -> return false
+    if kind_at(facts, index) != TOKEN_DOT -> return false
     cursor := skip_comment_tokens(facts, index + 1)
-    if kind_at(facts, cursor) == K_LBRACE {
+    if kind_at(facts, cursor) == TOKEN_LBRACE {
         depth := 0
         loop cursor * 4 < facts.len() {
             kind: kind_at(facts, cursor)
-            if kind == K_LBRACE -> depth += 1
-            if kind == K_RBRACE {
+            if kind == TOKEN_LBRACE -> depth += 1
+            if kind == TOKEN_RBRACE {
                 depth -= 1
                 if depth == 0 {
                     cursor += 1
                     break
                 }
             }
-            if kind == K_EOF -> return false
+            if kind == TOKEN_EOF -> return false
             cursor += 1
         }
         cursor = skip_comment_tokens(facts, cursor)
@@ -394,34 +182,34 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
     loop {
         cursor = skip_comment_tokens(facts, cursor)
         loop {
-            if kind_at(facts, cursor) != K_DOT -> break
+            if kind_at(facts, cursor) != TOKEN_DOT -> break
             variant := skip_comment_tokens(facts, cursor + 1)
             if !leading_dot_variant(facts, variant) -> break
             cursor = variant + 1
             cursor = skip_comment_tokens(facts, cursor)
         }
         cursor = skip_comment_tokens(facts, cursor)
-        if kind_at(facts, cursor) == K_LPAREN {
+        if kind_at(facts, cursor) == TOKEN_LPAREN {
             depth := 0
             loop cursor * 4 < facts.len() {
                 kind: kind_at(facts, cursor)
-                if kind == K_LPAREN -> depth += 1
-                if kind == K_RPAREN {
+                if kind == TOKEN_LPAREN -> depth += 1
+                if kind == TOKEN_RPAREN {
                     depth -= 1
                     if depth == 0 {
                         cursor += 1
                         break
                     }
                 }
-                if kind == K_EOF -> return false
+                if kind == TOKEN_EOF -> return false
                 cursor += 1
             }
         }
         cursor = skip_comment_tokens(facts, cursor)
-        if kind_at(facts, cursor) != K_PIPE -> break
+        if kind_at(facts, cursor) != TOKEN_PIPE -> break
         cursor += 1
         cursor = skip_comment_tokens(facts, cursor)
-        if kind_at(facts, cursor) != K_DOT -> return false
+        if kind_at(facts, cursor) != TOKEN_DOT -> return false
         cursor = arm_name_end(facts, skip_comment_tokens(facts, cursor + 1))
         if cursor < 0 -> return false
     }
@@ -432,8 +220,8 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
     // line must not turn a fluent chain into a new arm.
     connector: kind_at(facts, cursor)
     is_boolean_connector: if connector == {
-        K_AND_AND -> true
-        K_OR_OR -> true
+        TOKEN_AND_AND -> true
+        TOKEN_OR_OR -> true
         else -> false
     }
     if is_boolean_connector {
@@ -442,16 +230,16 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         loop cursor * 4 < facts.len() {
             kind: kind_at(facts, cursor)
             is_open_delimiter: if kind == {
-                K_LPAREN -> true
-                K_LBRACKET -> true
-                K_LBRACE -> true
+                TOKEN_LPAREN -> true
+                TOKEN_LBRACKET -> true
+                TOKEN_LBRACE -> true
                 else -> false
             }
             if is_open_delimiter -> depth += 1 else {
                 is_close_delimiter: if kind == {
-                    K_RPAREN -> true
-                    K_RBRACKET -> true
-                    K_RBRACE -> true
+                    TOKEN_RPAREN -> true
+                    TOKEN_RBRACKET -> true
+                    TOKEN_RBRACE -> true
                     else -> false
                 }
                 if {
@@ -476,19 +264,19 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
 // one instance (`Box<Int, String>`); -1 when no arm name starts at `index`.
 arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
     cursor := index
-    loop kind_at(facts, cursor) == K_IDENT && facts[cursor * 4 + 3] != 1 && kind_at(facts, cursor + 1) == K_DOT {
+    loop kind_at(facts, cursor) == TOKEN_IDENT && facts[cursor * 4 + 3] != 1 && kind_at(facts, cursor + 1) == TOKEN_DOT {
         cursor += 2
     }
     if !leading_dot_variant(facts, cursor) -> return -1
     cursor += 1
-    if kind_at(facts, cursor) != K_LT -> return cursor
+    if kind_at(facts, cursor) != TOKEN_LT -> return cursor
     depth := 0
     loop cursor * 4 < facts.len() {
         kind: kind_at(facts, cursor)
-        if kind == K_EOF || kind == K_LBRACE || kind == K_RBRACE || arrow(kind) -> return -1
-        if kind == K_LT -> depth += 1
-        if kind == K_GT -> depth -= 1
-        if kind == K_SHR -> depth -= 2
+        if kind == TOKEN_EOF || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || arrow(kind) -> return -1
+        if kind == TOKEN_LT -> depth += 1
+        if kind == TOKEN_GT -> depth -= 1
+        if kind == TOKEN_SHR -> depth -= 2
         if depth <= 0 -> return cursor + 1
         cursor += 1
     }
@@ -501,27 +289,27 @@ arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
 // logical-and or power line keeps a space after its operator.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     mark: kind_at(facts, index)
-    if mark != K_AMP && mark != K_AND_AND && mark != K_CARET && mark != K_TILDE -> return false
+    if mark != TOKEN_AMP && mark != TOKEN_AND_AND && mark != TOKEN_CARET && mark != TOKEN_TILDE -> return false
     name: kind_at(facts, index + 1)
-    if name != K_IDENT && name != K_SELF -> return false
+    if name != TOKEN_IDENT && name != TOKEN_SELF -> return false
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
 // `{ member: local, … }: tuple` at line start renames tuple members, so
 // it begins a statement rather than continuing the line above.
 tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index + 1) != K_IDENT -> return false
+    if kind_at(facts, index + 1) != TOKEN_IDENT -> return false
     depth := 0
     at := index
     loop at * 4 < facts.len() {
         kind: kind_at(facts, at)
-        if kind == K_EOF -> return false
-        if kind == K_LBRACE -> depth += 1
-        if kind == K_RBRACE {
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE {
             depth -= 1
             if depth == 0 {
                 after: kind_at(facts, at + 1)
-                return after == K_COLON || after == K_COLON_COLON || after == K_COLON_EQ
+                return after == TOKEN_COLON || after == TOKEN_COLON_COLON || after == TOKEN_COLON_EQ
             }
         }
         at += 1
@@ -534,20 +322,20 @@ tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
 // the line above: a `,` at its own level separates its members and its
 // first member is `name:` or a bare name.
 record_value_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    if kind_at(facts, index + 1) != K_IDENT -> return false
+    if kind_at(facts, index + 1) != TOKEN_IDENT -> return false
     first: kind_at(facts, index + 2)
-    if first != K_COLON && first != K_COMMA -> return false
+    if first != TOKEN_COLON && first != TOKEN_COMMA -> return false
     depth := 0
     at := index
     loop at * 4 < facts.len() {
         kind: kind_at(facts, at)
-        if kind == K_EOF -> return false
-        if kind == K_LBRACE || kind == K_LPAREN || kind == K_LBRACKET -> depth += 1
-        if kind == K_RBRACE || kind == K_RPAREN || kind == K_RBRACKET {
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
             depth -= 1
             if depth == 0 -> return false
         }
-        if kind == K_COMMA && depth == 1 -> return true
+        if kind == TOKEN_COMMA && depth == 1 -> return true
         at += 1
     }
     false
@@ -558,7 +346,7 @@ record_value_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
 // is a multiplication continued on the next line.
 ends_statement_at: fn(facts: [Int], index: Int) -> Bool Never! {
     kind: kind_at(facts, index)
-    if kind == K_STAR -> return index > 0 && kind_at(facts, index - 1) == K_DOT
+    if kind == TOKEN_STAR -> return index > 0 && kind_at(facts, index - 1) == TOKEN_DOT
     ends_statement(kind)
 }
 
@@ -569,16 +357,16 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     loop index * 4 < facts.len() {
         kind: kind_at(facts, index)
         is_comment: if kind == {
-            K_LINE_COMMENT -> true
-            K_BLOCK_COMMENT -> true
+            TOKEN_LINE_COMMENT -> true
+            TOKEN_BLOCK_COMMENT -> true
             else -> false
         }
         if is_comment -> index += 1 else {
             if {
-                kind == K_EOF -> {
+                kind == TOKEN_EOF -> {
                     if last_code >= 0 {
                         previous: kind_at(facts, last_code)
-                        if ends_statement_at(facts, last_code) && previous != K_RBRACE {
+                        if ends_statement_at(facts, last_code) && previous != TOKEN_RBRACE {
                             events.push(1)
                             events.push(index)
                             events.push(facts[last_code * 4 + 2])
@@ -593,23 +381,23 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                         start: facts[index * 4 + 1]
                         if newline_between(source, end, start) && ends_statement_at(facts, last_code) {
                             split: if kind == {
-                                K_UNIFIED_ARROW -> true
-                                K_LBRACE -> true
+                                TOKEN_UNIFIED_ARROW -> true
+                                TOKEN_LBRACE -> true
                                 else -> false
                             }
                             if {
-                                kind == K_LBRACE && (tuple_rename_starts_at(facts, index) || (previous != K_RBRACE && record_value_starts_at(facts, index))) -> {
+                                kind == TOKEN_LBRACE && (tuple_rename_starts_at(facts, index) || (previous != TOKEN_RBRACE && record_value_starts_at(facts, index))) -> {
                                     events.push(1)
                                     events.push(index)
                                     events.push(end)
                                 }
-                                split && previous == K_RPAREN -> {
+                                split && previous == TOKEN_RPAREN -> {
                                     events.push(2)
                                     events.push(index)
                                     events.push(start)
                                 }
                                 else -> {
-                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != K_RPAREN && kind != K_RBRACKET {
+                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET {
                                         events.push(1)
                                         events.push(index)
                                         events.push(end)
@@ -629,8 +417,8 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
 
 split_spelling: fn(kind: Int) -> String Never! {
     if kind == {
-        K_UNIFIED_ARROW -> "->"
-        K_LBRACE -> "{{"
+        TOKEN_UNIFIED_ARROW -> "->"
+        TOKEN_LBRACE -> "{{"
         else -> ""
     }
 }
@@ -645,7 +433,7 @@ terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_i
         event: events[at_event * 3]
         at: events[at_event * 3 + 2]
         if {
-            event == 1 -> { tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at})) }
+            event == 1 -> { tokens.push(token_synthetic(TOKEN_SEMI, Span{start: at, end: at})) }
             else -> {
                 kind: kind_at(facts, raw_index)
                 start: facts[raw_index * 4 + 1]

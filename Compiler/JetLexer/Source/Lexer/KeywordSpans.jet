@@ -6,82 +6,82 @@ word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Nev
     kind: if end - start == {
         2 -> if byte_at(source, start + 0) == {
             // Syntax.KW_FN
-            102 -> if byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT
+            102 -> if byte_at(source, start + 1) == 110 -> TOKEN_KW_FN else -> TOKEN_IDENT
             105 -> if byte_at(source, start + 1) == {
                 // Syntax.KW_IF
-                102 -> K_IF
+                102 -> TOKEN_KW_IF
                 // Syntax.KW_IN
-                110 -> K_IN
+                110 -> TOKEN_KW_IN
                 // Syntax.KW_IT
-                116 -> K_IT
-                else -> K_IDENT
+                116 -> TOKEN_KW_IT
+                else -> TOKEN_IDENT
             }
-            else -> K_IDENT
+            else -> TOKEN_IDENT
         }
         3 -> if byte_at(source, start + 0) == {
             // Syntax.KW_MUTATE
-            109 -> if byte_at(source, start + 1) == 117 && byte_at(source, start + 2) == 116 -> K_MUTATE else -> K_IDENT
+            109 -> if byte_at(source, start + 1) == 117 && byte_at(source, start + 2) == 116 -> TOKEN_KW_MUTATE else -> TOKEN_IDENT
             // Syntax.KW_USE
-            117 -> if byte_at(source, start + 1) == 115 && byte_at(source, start + 2) == 101 -> K_USE else -> K_IDENT
-            else -> K_IDENT
+            117 -> if byte_at(source, start + 1) == 115 && byte_at(source, start + 2) == 101 -> TOKEN_KW_USE else -> TOKEN_IDENT
+            else -> TOKEN_IDENT
         }
         4 -> if byte_at(source, start + 0) == {
             // Syntax.LIT_NULL
-            78 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 101 -> K_NULL else -> K_IDENT
+            78 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 101 -> TOKEN_NULL else -> TOKEN_IDENT
             // Syntax.KW_COPY
-            99 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 121 -> K_COPY else -> K_IDENT
+            99 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 121 -> TOKEN_KW_COPY else -> TOKEN_IDENT
             101 -> if byte_at(source, start + 1) == {
                 // Syntax.KW_ELSE
-                108 -> if byte_at(source, start + 2) == 115 && byte_at(source, start + 3) == 101 -> K_ELSE else -> K_IDENT
+                108 -> if byte_at(source, start + 2) == 115 && byte_at(source, start + 3) == 101 -> TOKEN_KW_ELSE else -> TOKEN_IDENT
                 // Syntax.KW_ENUM
-                110 -> if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 109 -> K_ENUM else -> K_IDENT
-                else -> K_IDENT
+                110 -> if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 109 -> TOKEN_KW_ENUM else -> TOKEN_IDENT
+                else -> TOKEN_IDENT
             }
             // Syntax.KW_IMPL
-            105 -> if byte_at(source, start + 1) == 109 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 108 -> K_IMPL else -> K_IDENT
+            105 -> if byte_at(source, start + 1) == 109 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 108 -> TOKEN_KW_IMPL else -> TOKEN_IDENT
             // Syntax.KW_LOOP
-            108 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 111 && byte_at(source, start + 3) == 112 -> K_LOOP else -> K_IDENT
+            108 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 111 && byte_at(source, start + 3) == 112 -> TOKEN_KW_LOOP else -> TOKEN_IDENT
             // Syntax.KW_PRIV
-            112 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 105 && byte_at(source, start + 3) == 118 -> K_PRIV else -> K_IDENT
+            112 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 105 && byte_at(source, start + 3) == 118 -> TOKEN_KW_PRIV else -> TOKEN_IDENT
             // Syntax.KW_SELF
-            115 -> if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 102 -> K_SELF else -> K_IDENT
+            115 -> if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 102 -> TOKEN_SELF else -> TOKEN_IDENT
             116 -> if byte_at(source, start + 1) == {
                 // Syntax.KW_MOVE
-                97 -> if byte_at(source, start + 2) == 107 && byte_at(source, start + 3) == 101 -> K_MOVE else -> K_IDENT
+                97 -> if byte_at(source, start + 2) == 107 && byte_at(source, start + 3) == 101 -> TOKEN_KW_MOVE else -> TOKEN_IDENT
                 // Syntax.LIT_TRUE
-                114 -> if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 101 -> K_TRUE else -> K_IDENT
-                else -> K_IDENT
+                114 -> if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 101 -> TOKEN_TRUE else -> TOKEN_IDENT
+                else -> TOKEN_IDENT
             }
-            else -> K_IDENT
+            else -> TOKEN_IDENT
         }
         5 -> if byte_at(source, start + 0) == {
             // Syntax.KW_BREAK
-            98 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 97 && byte_at(source, start + 4) == 107 -> K_BREAK else -> K_IDENT
+            98 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 97 && byte_at(source, start + 4) == 107 -> TOKEN_BREAK else -> TOKEN_IDENT
             // Syntax.KW_CONST
-            99 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 116 -> K_CONST else -> K_IDENT
+            99 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 116 -> TOKEN_KW_CONST else -> TOKEN_IDENT
             // Syntax.LIT_FALSE
-            102 -> if byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 101 -> K_FALSE else -> K_IDENT
+            102 -> if byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 101 -> TOKEN_FALSE else -> TOKEN_IDENT
             // Syntax.KW_TRAIT
-            116 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 97 && byte_at(source, start + 3) == 105 && byte_at(source, start + 4) == 116 -> K_TRAIT else -> K_IDENT
+            116 -> if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 97 && byte_at(source, start + 3) == 105 && byte_at(source, start + 4) == 116 -> TOKEN_KW_TRAIT else -> TOKEN_IDENT
             // Syntax.KW_YIELD
-            121 -> if byte_at(source, start + 1) == 105 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 108 && byte_at(source, start + 4) == 100 -> K_YIELD else -> K_IDENT
-            else -> K_IDENT
+            121 -> if byte_at(source, start + 1) == 105 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 108 && byte_at(source, start + 4) == 100 -> TOKEN_KW_YIELD else -> TOKEN_IDENT
+            else -> TOKEN_IDENT
         }
         6 -> if byte_at(source, start + 0) == {
             // Syntax.KW_EXTERN
-            101 -> if byte_at(source, start + 1) == 120 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_EXTERN else -> K_IDENT
+            101 -> if byte_at(source, start + 1) == 120 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> TOKEN_KW_EXTERN else -> TOKEN_IDENT
             // Syntax.KW_MODULE
-            109 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 100 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 108 && byte_at(source, start + 5) == 101 -> K_MODULE else -> K_IDENT
+            109 -> if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 100 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 108 && byte_at(source, start + 5) == 101 -> TOKEN_KW_MODULE else -> TOKEN_IDENT
             // Syntax.KW_RETURN
-            114 -> if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_RETURN else -> K_IDENT
+            114 -> if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> TOKEN_RETURN else -> TOKEN_IDENT
             // Syntax.KW_STRUCT
-            115 -> if byte_at(source, start + 1) == 116 && byte_at(source, start + 2) == 114 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 99 && byte_at(source, start + 5) == 116 -> K_STRUCT else -> K_IDENT
-            else -> K_IDENT
+            115 -> if byte_at(source, start + 1) == 116 && byte_at(source, start + 2) == 114 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 99 && byte_at(source, start + 5) == 116 -> TOKEN_KW_STRUCT else -> TOKEN_IDENT
+            else -> TOKEN_IDENT
         }
-        else -> K_IDENT
+        else -> TOKEN_IDENT
     }
     // Only exact in becomes a member after a postfix dot.
-    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT
+    if kind == TOKEN_KW_IN && (previous_kind == TOKEN_DOT || previous_kind == TOKEN_QUESTION_DOT) -> return TOKEN_IDENT
     kind
 }
 
