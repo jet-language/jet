@@ -4148,6 +4148,7 @@ x64_executable_debug_apart: fn(image: [U8], debug_link: String, threads: Compile
         cursor = at + plan.segments[lowest].file_size
     }
     out := [U8]{}
+    out.try_reserve(image.len()) ?? return Err("the split executable needs {image.len()} bytes: {err}")
     loop k in order {
         segment: plan.segments[k]
         link_pad_to(out, placed[k], 0)
@@ -4175,7 +4176,18 @@ x64_executable_debug_apart: fn(image: [U8], debug_link: String, threads: Compile
             else -> {}
         }
     }
-    side := image[0..<LINK_EHDR_SIZE]
+    side_est := LINK_EHDR_SIZE + LINK_BUILD_ID_NOTE_SIZE + count * 96
+    loop k in 1..<count {
+        if index_of[k] == 0 && k != names_index {
+            at: shoff + k * 64
+            if loader_u32(image, at + 4) != LINK_SHT_NOBITS {
+                side_est += loader_u64(image, at + 32) + 16
+            }
+        }
+    }
+    side := [U8]{}
+    side.try_reserve(side_est) ?? return Err("the debug side file needs {side_est} bytes: {err}")
+    side.extend(image[0..<LINK_EHDR_SIZE])
     link_put64(side, 32, 0)
     loop at in 54..<58 -> side[at] = U8{0}
     link_build_id_note(side)
