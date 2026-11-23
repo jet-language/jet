@@ -1753,11 +1753,14 @@ rejected without a body allocation.
 | --- | --- | --- |
 | `method_parse(token)` / `method_text(method)` | `Method` / `String` | Parse or render standard and custom methods. |
 | `version_parse(token)` / `version_text(version)` | `Version` / `String` | Parse or render HTTP/1.0 through HTTP/3 labels. |
-| `headers()` / `headers_get(h, name)` | `Headers` / `String?` | Create headers or read a case-insensitive first value. |
+| `headers()` / `Headers.new()` / `headers_get(h, name)` | `Headers` / `String?` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
 | `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct an empty, text, or byte body. |
-| `Body.reader(reader)` / `Body.reader(reader, length)` | `Body HTTPError!` | Take a `FileReader` and read its bytes when the body is made. With no length, read to end of file, at most 1 GiB. With a length, read exactly that many bytes: more than 1 GiB is `BodyTooLarge`, and a negative length or a source that ends short is `InvalidFraming`. The upload is not streamed. |
-| `Body.multipart(fields)` | `Body` | `multipart/form-data` text fields in map order. The boundary is the first `jet-http-boundary-%016x` that no field contains, and the body's first line is `--` plus that boundary, which the message's `Content-Type` names. |
+| `body_typed_text(text, media_type)` | `Body` | The text as the body; the message names `media_type` in its own `Content-Type` field. |
+| `body_form(fields)` | `Body` | `application/x-www-form-urlencoded` fields in map order. |
+| `body_json(value)` | `Body` | The value's compact JSON text, for any `T: Encode`; a value with no JSON form (a NaN `Float`) stops the call. |
+| `body_reader(reader)` / `body_reader_sized(reader, length)` | `Body HTTPError!` | Take a `FileReader` and read its bytes when the body is made. `body_reader` reads to end of file, at most 1 GiB. `body_reader_sized` reads exactly `length` bytes: more than 1 GiB is `BodyTooLarge`, and a negative length or a source that ends short is `InvalidFraming`. The upload is not streamed. |
+| `body_multipart(fields)` | `Body` | `multipart/form-data` text fields in map order. The boundary is the first `jet-http-boundary-%016x` that no field contains, and the body's first line is `--` plus that boundary, which the message's `Content-Type` names. |
 | `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
 | `get(url)` / `post(url, body)` | `HTTPResponse HTTPError!` | Perform one-shot GET or POST calls with URL and body checks. |
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse HTTPError!` | Perform one-shot PUT or PATCH calls. |
@@ -1824,8 +1827,9 @@ meaning rather than becoming an I/O error.
 `Body` is a struct whose contents sit in a `priv` field, over a carrier type
 that core.http declares in a `priv module` (D-PRIVATE-NATIVE-CARRIER1=A). User
 code can neither name the carrier nor build a `Body` by hand; both are E0605.
-Bodies come only from requests, responses, `body_empty`, `body_text`,
-`body_bytes` and the `Body.*` constructors above.
+Bodies come only from requests, responses and the `body_*` constructors
+above. `Body` declares no static constructors: a written `http.Body.form(...)`
+is E0311, whose Fix names the free function `http.body_form(...)`.
 
 A response body that is not gzip-encoded stays on its connection, plain or
 TLS, and the client reads it only as the program asks for it. `bytes`,

@@ -32,7 +32,7 @@ run: fn() {
     third: safe.send(request("GET", "warm2")) ?? panic("warm2")
     assert_eq(drain(third), "x".bytes())
     // Reset-readiness point 3.
-    if safe.send(request("POST", "unsafe").body(message.Body.bytes("nope".bytes()))) == {
+    if safe.send(request("POST", "unsafe").body(message.body_bytes("nope".bytes()))) == {
         .Err(_) -> {}
         else -> panic("Safe must refuse POST retry")
     }
