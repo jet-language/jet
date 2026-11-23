@@ -105,6 +105,10 @@ JetDriverHostFacts: struct {
     target_triple: String?,
     active_os: String?,
     compiler_identity: String?,
+    // The source key the running compiler was built from (its runtime
+    // pack's IDENTITY names it), which `b.jet_built_from` compares with the
+    // build tree's; None when it names none.
+    compiler_source: String?{None},
 }
 
 // Rust `CompileMode`: `Program` compiles a package for check, build, or run
@@ -596,6 +600,9 @@ JetDriverBuildInputs: trait {
     // Open each component relative to one retained root with nofollow; read
     // the same opened regular file, bounded before and during the read.
     read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!,
+    // The source key of the toolchain tree that holds `directory`, the sha256
+    // naming each file of its Compiler/, Core/ and Jetpack/ folders.
+    source_key: fn(self, directory: String) -[FS.Read]> String JetDriverBuildInputError!,
 }
 
 // A single raw HTTP GET. No redirects, status interpretation, digest checks
@@ -638,6 +645,11 @@ JetDriverSharedBuildInputs: struct {
     read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
         permit: self.storage.guard_read()
         permit.value.transport.read_rooted(root, relative, limit)
+    }
+
+    source_key: fn(self, directory: String) -[FS.Read]> String JetDriverBuildInputError! {
+        permit: self.storage.guard_read()
+        permit.value.transport.source_key(directory)
     }
 }
 

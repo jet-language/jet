@@ -29,6 +29,7 @@ use {
         build_session_set_args,
         build_session_set_dependencies,
         build_session_set_identity,
+        build_session_set_jet_source,
     ]
 }
 
@@ -620,6 +621,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     session_id: jet_driver_build_next_session_id(scope) ?? return jet_driver_build_query_empty(request, errors, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(session, request.build_args)
+    build_session_set_jet_source(session, request.host_facts.compiler_source ?? "")
     build_session_set_dependencies(session, sources.dependency_roots)
     build_session_set_identity(session, package)
     config: jet_driver_build_run_config(request, session, sources.host_held, path)
