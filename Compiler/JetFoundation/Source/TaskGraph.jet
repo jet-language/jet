@@ -1,0 +1,237 @@
+// Dependency-driven scheduling of compiler work, without phase barriers.
+//
+// A compile's work is a graph of nodes: a module's parse, its declarations,
+// a function's check or its IR. A node waits only on the nodes whose results
+// it reads, never on a whole phase. A schedule (compiler_task_schedule) hands
+// out each node as soon as the last node it waits on has finished, onto one
+// of up to the compiler's thread limit of slots. Among ready nodes the
+// heaviest goes first, so a long node does not begin last and hold the run's
+// end.
+//
+// The schedule is plain data and holds no work. The phase that runs a graph
+// keeps its own coordinator loop inside its task group. It lends its
+// read-only tables to each node's task, passes the task the results of the
+// nodes it waits on, and keeps each finished node's result in that node's
+// row. It looks like this:
+//
+//     schedule := compiler_task_schedule(graph, threads)
+//     { sender: done, receiver: finished }: channel<Ran>()
+//     task.group nodes(limit: schedule.workers) {
+//         loop !compiler_task_schedule_done(schedule) {
+//             if compiler_task_schedule_next(schedule) == .Val(start) {
+//                 clock: compiler_task_clock(trace_sink)
+//                 task run_node(tables, start, inputs, clock, done)
+//                 next
+//             }
+//             if compiler_task_schedule_stuck(schedule) -> panic(...)
+//             ran: finished.receive() ?? panic(...)
+//             compiler_task_schedule_finish(schedule, ran.start)
+//             results[ran.start.node] = ...
+//             compiler_task_trace(trace_sink, kind, label, ran.start, ran.span)
+//         }
+//     }
+//
+// A node's results live in its own row, so completion order never reaches a
+// result, a diagnostic or an emitted byte. They are the same for any thread
+// count.
+//
+// Traced, each node is one span of the run's kind. The trace sink stays on
+// the calling thread. A node's task reads its clocks
+// (compiler_task_clock_start, compiler_task_clock_stop), and the coordinator
+// writes the span once the node has finished. It goes on the lane of the
+// thread slot that ran the node (CompilerTraceSink.span).
+use {
+    graph_tasks: core.tasks
+    graph_time: core.time
+}
+
+// The nodes `0..<waits.len()` and their edges.
+CompilerTaskGraph: struct {
+    // How many unfinished nodes each node waits on.
+    waits: [Int],
+    // The nodes that wait on each node, each once.
+    dependents: [[Int]],
+    // Each node's expected work, at least 1: the heaviest ready node starts first.
+    weights: [Int],
+}
+
+// A graph of `count` independent nodes of weight 1.
+compiler_task_graph: fn(count: Int) -> CompilerTaskGraph Never! {
+    graph := CompilerTaskGraph{waits: [Int]{}, dependents: [[Int]]{}, weights: [Int]{}}
+    loop _ in 0..<count {
+        graph.waits.push(0)
+        graph.dependents.push([Int]{})
+        graph.weights.push(1)
+    }
+    graph
+}
+
+// Node `node` waits on node `on`. An edge added twice counts once.
+compiler_task_graph_wait: fn(graph: &CompilerTaskGraph, node: Int, on: Int) Never! {
+    if graph.dependents[on].contains(node) {
+        return
+    }
+    graph.dependents[on].push(node)
+    graph.waits[node] = graph.waits[node] + 1
+}
+
+// Node `node` is expected to hold `weight` units of work (at least 1).
+compiler_task_graph_weigh: fn(graph: &CompilerTaskGraph, node: Int, weight: Int) Never! {
+    graph.weights[node] = if weight < 1 -> 1 else -> weight
+}
+
+// A run of a graph's nodes on `workers` thread slots. `graph.waits` counts
+// each node's unfinished nodes as the run goes. `ready` is the heap of nodes
+// with none left that have not started; `idle` is the slots no node holds.
+CompilerTaskSchedule: struct {
+    graph: CompilerTaskGraph,
+    ready: [Int],
+    idle: [Int],
+    workers: Int,
+    finished: Int,
+}
+
+// A node to start and the thread slot it holds until it finishes.
+CompilerTaskStart: struct {
+    node: Int,
+    slot: Int,
+}
+
+// The run of `graph`, which it takes, on as many slots as `threads` admits,
+// and never more slots than nodes.
+compiler_task_schedule: fn(graph: &&CompilerTaskGraph, threads: CompilerThreads) -> CompilerTaskSchedule Never! {
+    count: graph.waits.len()
+    workers := compiler_threads_limit(threads)
+    if workers > count -> workers = count
+    if workers < 1 -> workers = 1
+    schedule := CompilerTaskSchedule{graph: graph.move(), ready: [Int]{}, idle: [Int]{}, workers: workers, finished: 0}
+    loop node in 0..<count {
+        if schedule.graph.waits[node] == 0 {
+            compiler_task_heap_push(schedule.ready, schedule.graph.weights, node)
+        }
+    }
+    loop slot in 0..<workers -> schedule.idle.push(workers - 1 - slot)
+    schedule
+}
+
+// The heaviest ready node (the lower node on a tie) and an idle slot, which
+// it now holds. None when no node is ready or no slot is idle.
+compiler_task_schedule_next: fn(schedule: &CompilerTaskSchedule) -> CompilerTaskStart? Never! {
+    if schedule.ready.len() == 0 || schedule.idle.len() == 0 -> return None
+    node: compiler_task_heap_pop(schedule.ready, schedule.graph.weights)
+    slot: schedule.idle.pop() ?? panic("a compiler task schedule lost an idle slot")
+    Val(CompilerTaskStart{node: node, slot: slot})
+}
+
+// The node `start` started has finished. Its slot is idle again, and each
+// node that waited on it alone is ready.
+compiler_task_schedule_finish: fn(schedule: &CompilerTaskSchedule, start: CompilerTaskStart) Never! {
+    schedule.idle.push(start.slot)
+    schedule.finished += 1
+    loop dependent in schedule.graph.dependents[start.node] {
+        schedule.graph.waits[dependent] = schedule.graph.waits[dependent] - 1
+        if schedule.graph.waits[dependent] == 0 {
+            compiler_task_heap_push(schedule.ready, schedule.graph.weights, dependent)
+        }
+    }
+}
+
+// Whether every node has finished.
+compiler_task_schedule_done: fn(schedule: CompilerTaskSchedule) -> Bool Never! {
+    schedule.finished == schedule.graph.waits.len()
+}
+
+// Whether the run can go no further. Nodes remain, yet none is ready and
+// none is running, so each one left waits in a cycle.
+compiler_task_schedule_stuck: fn(schedule: CompilerTaskSchedule) -> Bool Never! {
+    !compiler_task_schedule_done(schedule) && schedule.ready.len() == 0 && schedule.idle.len() == schedule.workers
+}
+
+// Per-slot span sink for traced task-graph runs.
+CompilerTaskTraceSink: trait {
+    span: fn(self, name: String, detail: String, slot: Int, start_us: Int, end_us: Int, cpu_ns: Int) -[FS, Time]> Never!,
+}
+
+// A node's clocks: read only in a traced run (`on`). From
+// compiler_task_clock_start on, it holds when the node started.
+CompilerTaskClock: struct {
+    on: Bool,
+    start_us: Int{0},
+    start_cpu: Int{0},
+}
+
+// When a node ran: its start and end on the trace's clock (µs) and its task's
+// CPU time (ns). All 0 in an untraced run.
+CompilerTaskSpan: struct {
+    start_us: Int,
+    end_us: Int,
+    cpu_ns: Int,
+}
+
+// The clock a run's nodes read: on when the run is traced.
+compiler_task_clock: fn(trace_sink: CompilerTaskTraceSink?) -> CompilerTaskClock Never! {
+    CompilerTaskClock{on: trace_sink != None}
+}
+
+// `clock` started now, on the node's task.
+compiler_task_clock_start: fn(clock: CompilerTaskClock) -> CompilerTaskClock Never! {
+    if !clock.on -> return CompilerTaskClock{on: false}
+    CompilerTaskClock{on: true, start_us: graph_time.instant().start_ns /% 1000, start_cpu: graph_tasks.cpu_ns()}
+}
+
+// The span from when `clock` started until now, on the node's task.
+compiler_task_clock_stop: fn(clock: CompilerTaskClock) -> CompilerTaskSpan Never! {
+    if !clock.on -> return CompilerTaskSpan{start_us: 0, end_us: 0, cpu_ns: 0}
+    CompilerTaskSpan{start_us: clock.start_us, end_us: graph_time.instant().start_ns /% 1000, cpu_ns: graph_tasks.cpu_ns() - clock.start_cpu}
+}
+
+// Writes the span of the finished node `start` to `trace_sink`: a span of
+// kind `kind`, named `label`, on its slot's lane.
+compiler_task_trace: fn(trace_sink: CompilerTaskTraceSink?, kind: String, label: String, start: CompilerTaskStart, span: CompilerTaskSpan) Never! {
+    if trace_sink == .Val(sink) {
+        sink.span(kind, label, start.slot, span.start_us, span.end_us, span.cpu_ns)
+    }
+}
+
+// Whether node `a` starts before node `b` when both are ready: the heavier
+// first, the lower node on a tie.
+compiler_task_before: fn(weights: [Int], a: Int, b: Int) -> Bool Never! {
+    weights[a] > weights[b] || (weights[a] == weights[b] && a < b)
+}
+
+// Adds `node` to the binary heap `heap`, ordered by compiler_task_before.
+compiler_task_heap_push: fn(heap: &[Int], weights: [Int], node: Int) Never! {
+    heap.push(node)
+    at := heap.len() - 1
+    loop at > 0 {
+        parent: (at - 1) /% 2
+        if !compiler_task_before(weights, heap[at], heap[parent]) -> break
+        held: heap[parent]
+        heap[parent] = heap[at]
+        heap[at] = held
+        at = parent
+    }
+}
+
+// Takes the first node of the non-empty heap `heap`.
+compiler_task_heap_pop: fn(heap: &[Int], weights: [Int]) -> Int Never! {
+    first: heap[0]
+    last: heap.pop() ?? panic("a compiler task heap was empty")
+    if heap.len() == 0 -> return first
+    heap[0] = last
+    at := 0
+    loop {
+        left: at * 2 + 1
+        if left >= heap.len() -> break
+        child := left
+        if left + 1 < heap.len() && compiler_task_before(weights, heap[left + 1], heap[left]) {
+            child = left + 1
+        }
+        if !compiler_task_before(weights, heap[child], heap[at]) -> break
+        held: heap[child]
+        heap[child] = heap[at]
+        heap[at] = held
+        at = child
+    }
+    first
+}

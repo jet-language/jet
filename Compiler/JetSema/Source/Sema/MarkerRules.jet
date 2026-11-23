@@ -42,6 +42,9 @@ use jet_foundation.[
     symbol_table_key,
     type_name,
     module_text,
+    name_rows,
+    name_rows_get_text,
+    name_rows_set_first,
 ]
 
 SemaMarkerRuleArgumentObservation: struct {
@@ -2379,12 +2382,15 @@ SemaInlineAlwaysEdge: struct {
 // would hold the next one without end). A lambda's facts are its enclosing
 // function's.
 sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
-    // The marked functions, as module and function indexes into `modules`.
+    // The marked functions, as module and function indexes into `modules`,
+    // and each marked key's first position in that list.
     marked_modules := [Int]{}
     marked_functions := [Int]{}
+    marked_keys := name_rows()
     loop (module_index, module_result) in modules {
         loop (function_index, function) in module_result.functions {
             if function.is_inline_always {
+                name_rows_set_first(marked_keys, function.key, marked_modules.len())
                 marked_modules.push(module_index)
                 marked_functions.push(function_index)
             }
@@ -2397,7 +2403,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         segments_index: sema_registration_module_index(graph, module_result.module_identity) ?? next
         start: diagnostics.len()
         loop fact in module_result.call_facts {
-            caller: sema_inline_always_marked_index(modules, marked_modules, marked_functions, fact.caller_key) ?? next
+            caller: name_rows_get_text(marked_keys, fact.caller_key) ?? next
             name: modules[marked_modules[caller]].functions[marked_functions[caller]].name
             if fact.detail == .Val(detail) {
                 if detail.intrinsic_api == .Val(api) {
@@ -2407,7 +2413,7 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
                 }
             }
             callee_id: fact.callee ?? next
-            callee: sema_inline_always_marked_index(modules, marked_modules, marked_functions, symbol_table_key(graph.symbols, callee_id)) ?? next
+            callee: name_rows_get_text(marked_keys, symbol_table_key(graph.symbols, callee_id)) ?? next
             // A direct call of itself is the local half's E0917.
             if callee != caller {
                 edges.push(SemaInlineAlwaysEdge{caller: caller, callee: callee, module: module_index, span: fact.span})
@@ -2416,10 +2422,14 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
         if diagnostics.len() > start -> found = true
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[segments_index].source_segments)
     }
+    // Each marked function's call edges, in edge order, so the walk reads
+    // only its own.
+    calls := (loop _ in marked_modules -> [Int]{})
+    loop (index, edge) in edges -> calls[edge.caller].push(index)
     state := (loop _ in marked_modules -> 0)
     back := [Int]{}
     loop node in 0..<marked_modules.len() {
-        if state[node] == 0 -> sema_inline_always_walk(node, edges, state, back)
+        if state[node] == 0 -> sema_inline_always_walk(node, edges, calls, state, back)
     }
     loop index in back {
         edge: edges[index]
@@ -2434,26 +2444,16 @@ sema_inline_always_check_calls: fn(graph: SemaRegistrationGraph, modules: [SemaG
     found
 }
 
-// The position in the marked list of the marked function whose key is
-// `key`, or None.
-sema_inline_always_marked_index: fn(modules: [SemaGraphModuleResult], marked_modules: [Int], marked_functions: [Int], key: String) -> Int? Never! {
-    loop index in 0..<marked_modules.len() {
-        if modules[marked_modules[index]].functions[marked_functions[index]].key == key {
-            return Val(index)
-        }
-    }
-    None
-}
-
 // A depth-first walk of the marked calls from `node`: `state` is 0 before a
 // function's walk, 1 during it and 2 after, and each call of a function
-// still being walked closes a cycle, its edge index onto `back`.
-sema_inline_always_walk: fn(node: Int, edges: [SemaInlineAlwaysEdge], state: &[Int], back: &[Int]) Never! {
+// still being walked closes a cycle, its edge index onto `back`. `calls`
+// holds each function's edge indexes in edge order.
+sema_inline_always_walk: fn(node: Int, edges: [SemaInlineAlwaysEdge], calls: [[Int]], state: &[Int], back: &[Int]) Never! {
     state[node] = 1
-    loop (index, edge) in edges {
-        if edge.caller != node -> next
+    loop index in calls[node] {
+        edge: edges[index]
         if state[edge.callee] == 1 -> back.push(index)
-        if state[edge.callee] == 0 -> sema_inline_always_walk(edge.callee, edges, state, back)
+        if state[edge.callee] == 0 -> sema_inline_always_walk(edge.callee, edges, calls, state, back)
     }
     state[node] = 2
 }

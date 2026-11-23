@@ -13566,13 +13566,13 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         walk_inputs.beside -> {
             task.group sema_finalize_effect_walks {
                 walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-                effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+                effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed, trace_sink: trace_sink)
                 if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
                 walked = walking.join() ?? panic(compiler_threads_failure_text(err))
             }
         }
         else -> {
-            effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+            effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed, trace_sink: trace_sink)
             if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
             walked = sema_finalize_walk_all(final_graph, walk_inputs)
         }
@@ -13932,8 +13932,8 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
 // graph's rows: the root package's denials, its modules' caps and the
 // policies of `package_policies`. It borrows `symbols`, the run's symbol
 // table, and hands it back in its result.
-sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, interner: &&Interner, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: NameTable, threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
-    sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), interner.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries)
+sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, interner: &&Interner, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: NameTable, threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool, trace_sink: CompilerTraceSink?) -> SemaEffectGraphResult {
+    sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), interner.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries, trace_sink: trace_sink)
 }
 
 // Walks every function, method, test and conversion body of each module
