@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113246,
+    "rev": 113248,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52612,7 +52612,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed Pillar 2 Slice 1 (1d11568b1b): Copy-and-Patch O0 stencil emitter (Compiler/JetIR/Source/X64Patch.jet, all 52 IROps, zero regalloc/relax/dying, reusable per-worker scratch, O(N) suffix-shared stop edges, cache-line-padded chunked scatter, IRPatchColdKind deduplicated onto IRX64ColdKind). Verified Stage-1->Stage-2->Stage-3 exact SHA-256 fixed point, O0 -j12==-j24 determinism, I9 parity, CodegenCeiling 9/9, CompilerData 0 rises, UnsafeRatchet ok, JetBackend/JetIR/JetDriver/JetCLI 269/269, Tests/Guards 217/217. Interleaved A/B vs pareto-w6b-dist: ir.x64 CPU -40.3% (9560->5710ms), ir.x64 wall -29.2% (1052->744ms), backend total -20.5% (-4710ms CPU), jet-bare -O0 -1.16s (-7.1%), Peak RSS -181 MB, output binary -17.2 MB (-7.3%), .debug_jetline -24.7%."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -52660,8 +52666,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-22T02:10:23.720Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-23T02:16:17.083Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
     {
@@ -134577,6 +134583,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T02:16:17.895Z",
+      "by": "Orchestrator",
+      "action": "briefing.post",
+      "ref": "briefing06b851e",
+      "note": "30M LOC/s Architectural Overhaul — Pillar Status (22%)"
+    },
+    {
+      "at": "2026-11-23T02:16:17.083Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-23T00:59:33.638Z",
       "by": "Orchestrator",
       "action": "status.post",
@@ -139030,6 +139050,14 @@
   "nextNum": 368,
   "rev": 2,
   "briefings": [
+    {
+      "id": "briefing06b851e",
+      "title": "30M LOC/s Architectural Overhaul — Pillar Status (22%)",
+      "body": "# 30M LOC/s Architectural Overhaul — Pillar Status\n\n**Goal:** Cold, uncached `30M LOC/s` compilation speed + hand-optimized-grade machine codegen (zero compile caching, strict I9 parity, Peak RSS `< 1.0 GiB`).\n**Target Window:** Architectural overhauls executing nonstop to **2026-11-23 05:00 EST**, followed immediately by rapid **G1 → G6** burndown.\n**Last Updated:** 2026-11-22 21:16 EST (`dev` `1d11568b1b`)\n\n---\n\n## Overall Architectural Progress: **22%**\n\n| Pillar | Tower Card(s) | Status | % Complete | Active Owner | Latest Landed / In-Flight Slice |\n|---|---|---|---:|---|---|\n| **1. Integer `TypeID` & Flat Symbol/Type Interning** | `#6978`, `#6793 c2` | **IN FLIGHT** | **35%** | Stream A (`CodegenOpt`) | Actively completing & verifying across 28 `JetFoundation`/`JetSema` files: zero-alloc `TypeID` scalar interning + O(1) `canonical` column + `InternerDelta` worker fork/merge + flat `NameTable`/`[U32:...]` sema tables + removing 2–3× full AST-body deep copies in `Registration/Items.jet`. |\n| **2. Copy-and-Patch `-O0` Codegen & Direct Emit** | `#6795` | **MAJOR LANDING** | **65%** | Stream B (`GoalsOrder`) | **LANDED (`1d11568b1b`):** Full copy-and-patch `-O0` stencil emitter (`Compiler/JetIR/Source/X64Patch.jet`, all 52 `IROp`s, zero regalloc/relax/dying, reusable per-worker scratch, O(N) suffix-shared stop/cleanup edges, cache-line-padded chunked scatter). Interleaved A/B: **`ir.x64` CPU `-40.3%` (`9.56s → 5.71s`)**, **`ir.x64` wall `-29.2%` (`1052ms → 744ms`)**, **backend total `-20.5%` (`-4.71s CPU`)**, **`jet-bare -O0` `-1.16s` (`-7.1%`)**, **Peak RSS `-181 MB`**, **output binary `-17.2 MB` (`-7.3%`)**, **`.debug_jetline` `-24.7%`**, `S2 == S3` & `-O0` `-j12 == -j24` exact SHA-256 match! **NEXT (launching now):** Slice 2 — fuse per-part `-O0` `DropEarly` + `X64Patch` inside IR build workers (eliminating `ir.merge.functions` 550 ms + `drop_early` 109 ms + Peak RSS) & overlap Core `ir.x64`/`ir.object` with `runtime.web` in `Request.jet`. |\n| **3. One Warm Shared-Memory Comptime Child** | `#6798` | **QUEUED NEXT** | **5%** | Stream B (`GoalsOrder`) | Blueprint ready: enable `m.fast_o0 = true` in `JetEval/Source/IR/Native.jet` (routing all 512 comptime evals onto Pillar 2's `X64Patch` instead of `-O2` regalloc!) + `memfd`/`MAP_SHARED` shared-memory value & code channel in `SessionHost.jet`/`ComptimeServe.jet`. Launches right after Pillar 2 Slice 2. |\n| **4. Flat Arena SoA AST / TExpr / IR** | `#6793 c3, c4, c5` | **QUEUED NEXT** | **10%** | Stream A + Stream B | `Rows<T>` shipped (`#6793 c9` met). Full SoA flat arenas for AST/TExpr/Scopes (Stream A) and IRModule/IRFunction (Stream B) launch immediately after Pillars 1 & 2/3 to cut Peak RSS `< 1.0 GiB`. |\n| **5. Barrier-Free `CompilerTaskGraph` & Pipeline** | `#6794` | **QUEUED** | **5%** | Stream B (`GoalsOrder`) | Streaming work-stealing `CompilerTaskGraph` eliminating global parse/sema/IR/emit phase barriers starts after Pillar 3/4B. |\n| **6. Parallel SIMD Lex/Parse & Shared `-O0` Generics** | `#6796`, `#6797` | **QUEUED** | **0%** | Stream A (`CodegenOpt`) | Intra-file SIMD chunked lex/parse (`<= 1 ns/byte`) + shared generic `-O0` codegen follow Pillar 4A. |\n\n### Parallel Single-Source-of-Truth (SSoT) Landings (Orchestrator)\n- **LANDED (`361059bf5b`):** Collapsed `JetLexer`'s 106 duplicate `K_*` token-tag constants (`Terminators.jet`) onto the single canonical `TOKEN_*` table in `Tokens.jet` (`-236` net lines, `LexerKeywordRows.jet` simplified, `KEYWORD_SOURCES` closed-list row retired).\n- **LANDED (`1d11568b1b`):** Deduplicated `IRPatchColdKind` onto `IRX64ColdKind` (`X64Patch.jet` / `X64Select.jet`).\n- **NEXT (starting now):** `#6976 c2` — collapse all 56 raw `os_syscall_i64` call sites in `Compiler/JetRuntime/` onto one typed Linux syscall wrapper table in `Compiler/JetBackend/Source/OS/Linux.jet`.\n\n---\n\n## Live Cold Uncached Benchmarks (Interleaved A/B + Gates)\n\n| Metric | Pre-Overhaul (`174a8cdeda`) | Wave 6B (`b6f3fe265b`) | Pillar 2 Slice 1 (`1d11568b1b`) | Delta vs Wave 6B |\n|---|---:|---:|---:|---:|\n| **`ir.x64` CPU (`jet-bare -O0 -j24`)** | — | `9,560 ms` | **`5,710 ms`** (`-j12`: `5,150 ms`) | **`-40.3%`** |\n| **`ir.x64` wall (`jet-bare -O0 -j24`)** | — | `1,051.9 ms` | **`744.4 ms`** | **`-29.2%`** |\n| **Backend total (`ir.x64+object+link`)** | — | `2,292.6 ms` | **`1,822.5 ms`** | **`-20.5%` (`-4.71s CPU`)** |\n| **Standalone `jet-bare -O0 -j24` (interleaved A/B)** | `15.05s` (idle) | `16.347s` (load) | **`15.188s` (load)** | **`-1.159s` (`-7.1%`)** |\n| **Peak RSS (`jet-bare -O0 -j24`)** | — | `5,560.5 MB` | **`5,379.6 MB`** | **`-180.9 MB` (`-3.3%`)** |\n| **Output `jet-bare` binary / `.text` / `.debug_jetline`** | — | `234.7 / 124.6 / 16.0 MB` | **`217.4 / 116.8 / 12.1 MB`** | **`-7.3% / -6.3% / -24.7%`** |\n| **Full `jet build -O0 -j24 Compiler` (interleaved load)** | `40.69s` (idle) | `38.91s` (idle) / `63.66s` (load) | **`43.95s` (load)** *(idle run after pillars)* | **`-31%` under load** |\n| **Gates (`CodegenCeiling`, `CompilerData`, `Unsafe`, `Guards`)** | ALL PASS | ALL PASS | **ALL PASS (`9/9`, `0 rises`, `217/217`)** | `S2 == S3` exact |\n\n*Note: All builds are live, cold, uncached (`reused: false`). Clean idle-host full timing + Gauntlet + `Throughput.jet` refresh runs as soon as concurrent architectural builds clear.*\n",
+      "by": "Orchestrator",
+      "created": "2026-11-23T02:16:17.895Z",
+      "sections": []
+    },
     {
       "id": "briefing0tqrjsb",
       "title": "30M LOC/s Architectural Overhaul — Pillar Status (12%)",
