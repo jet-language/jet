@@ -7727,7 +7727,13 @@ file is written. A target source or an input under `.jet/generated/` that no
 declared the target or step that uses it. A generated module that would shadow
 a hand-written one is E3510. When `run` or another hand-written function uses
 a module the build never made because it refused a call, the refusal is
-reported first and the check report follows. `--locked` checks generated input
+reported first and the check report follows: a check of the whole package
+without the modules the build never made, so it covers members `build: fn`
+doesn't reach. The check report on a name that a promised module declares
+carries a note naming both ends of the broken promise: the call that
+promised the module (`b.generate("facts")` at its line, or `meta.add` in the
+function that called it) and the function that uses the name. An unknown
+name that no promised module declares gets no such note. `--locked` checks generated input
 and output hashes before materializing and records provenance after the
 complete runtime bundle is checked (D-BUILDENTRY1).
 

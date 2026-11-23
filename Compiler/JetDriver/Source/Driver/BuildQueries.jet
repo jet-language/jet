@@ -1,7 +1,8 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, jet_target_layout_item_name, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
+    jet_parser.[parse_source]
     jet_eval.[JetEvalConfig, jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -22,6 +23,7 @@ use {
         build_session_append_unique,
         build_session_call,
         build_session_package_dir,
+        build_session_promised,
         build_session_refused,
         build_session_compiler_node,
         build_session_finish,
@@ -649,21 +651,29 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         } else -> {
             None
         }
+        if (problem == None || staged_failed) && jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules, path) {
+            return jet_driver_build_query_failed(request, errors, ran, true)
+        }
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, build_session_refused(session), problem)
     }
     if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
         build_session_abort(session)
         ran.push(diagnostic)
-        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+        checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules, path)
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
     value: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
         build_session_abort(session)
         ran.push(jet_driver_diagnostic_without_span("E3502", "`build: fn` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
-        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+        checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules, path)
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
     finished: build_session_finish(session, value)
     loop error in finished.diagnostics -> ran.push(jet_driver_build_rule_report(error))
-    plan: finished.plan.move() ?? return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+    plan: finished.plan.move() ?? {
+        checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules, path)
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
+    }
     // The selected generated modules, owned by the build's package: the
     // final checked bundle below and every target compile of the plan
     // (the response's `generated`) load them beside the package's sources.
@@ -685,7 +695,8 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     tidy := [Diagnostic]{}
     jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
     if jet_driver_has_errors(ran) {
-        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+        checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules, path)
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
@@ -854,6 +865,110 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
         }
         diagnostics[index].detail = note
     }
+}
+
+// The reports on the names a failed build's promised modules declare: the
+// build failed before it made any of them (build_session_promised). After a
+// failed staging check (`staged`) they are its reports. A staging check that
+// passed loaded only the members `build: fn` reaches (build_entry_reach), so
+// a member that uses a promised name was never checked: unless the query
+// wants only the generated modules (`generated_only`), the package is
+// checked whole without them, and when that check fails its reports replace
+// `errors`. Each unknown name a promised module declares gets its promise
+// note (jet_driver_build_promise_notes). True when `errors` became that
+// check's reports, which follow the build's own (jet_driver_build_query_failed).
+jet_driver_build_promise_reports: fn(request: &JetDriverCompileRequest, errors: &[Diagnostic], staged: Bool, generated_only: Bool, session: BuildSession, modules: [JetDriverSourceQueryModule], build_path: String) -> Bool {
+    if staged {
+        jet_driver_build_promise_notes(errors, session, modules, build_path)
+        return false
+    }
+    if generated_only || build_session_promised(session).len() == 0 -> return false
+    demand_core := request.doc_core_on_demand
+    request.doc_core_on_demand = true
+    checked := jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, false)
+    request.doc_core_on_demand = demand_core
+    if checked.internal_problem != None || !jet_driver_has_errors(checked.diagnostics) {
+        return false
+    }
+    errors.clear()
+    loop report in checked.diagnostics.move() -> errors.push(report)
+    jet_driver_build_promise_notes(errors, session, modules, build_path)
+    true
+}
+
+// The build failed, so it made none of the modules it promised, and a check
+// without them reported `diagnostics` (jet_driver_build_promise_reports). A
+// report of an unknown name that a promised module declares names, as its
+// note (`detail`), the call that promised the module (its producer) and the
+// function that uses the name (its consumer). A name no promised module
+// declares stays an ordinary unknown name. `build_path` is the build file's
+// physical path.
+jet_driver_build_promise_notes: fn(diagnostics: &[Diagnostic], session: BuildSession, modules: [JetDriverSourceQueryModule], build_path: String) Never! {
+    promised: build_session_promised(session)
+    if promised.len() == 0 {
+        return
+    }
+    build_file := ""
+    build_source := ""
+    loop loaded in modules {
+        if loaded.physical_path == build_path {
+            // copy: the site text reads the build file after `modules` is read.
+            build_file = loaded.path.copy()
+            build_source = loaded.source.copy()
+            break
+        }
+    }
+    loop index in 0..<diagnostics.len() {
+        if diagnostics[index].detail != None -> next
+        name: jet_driver_build_unknown_name(diagnostics[index]) ?? next
+        loop row in promised {
+            if row.rewrites != None || !jet_driver_build_module_declares(row.source, name) -> next
+            producer: if row.producer == .Val(maker) -> "`meta.add` in {maker}" else -> "`b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_file, build_source, row.start)}"
+            consumer: jet_driver_build_consumer(diagnostics[index], modules)
+            diagnostics[index].detail = Val(" Note: {consumer} uses `{name}`, which {producer} promised in the generated module `{row.name}`; the build failed before it made that module, so fix the build's report first")
+            break
+        }
+    }
+}
+
+// The name an unknown-name report (E0102 Jet.UnknownFunction, E0107
+// Jet.UnknownName, E0119 Jet.UnknownType) is about: the first name its
+// `what` quotes. None for any other report.
+jet_driver_build_unknown_name: fn(diagnostic: Diagnostic) -> String? Never! {
+    if diagnostic.code != "E0102" && diagnostic.code != "E0107" && diagnostic.code != "E0119" {
+        return None
+    }
+    parts: diagnostic.what.split("`").to_list()
+    if parts.len() < 3 || parts[1] == "" -> return None
+    Val(parts[1])
+}
+
+// Whether the generated module `source` declares `name` at its top level.
+jet_driver_build_module_declares: fn(source: String, name: String) -> Bool Never! {
+    parsed: parse_source(source.bytes())
+    loop item in parsed.program.items {
+        if jet_driver_reach_item_name(item) == name || jet_target_layout_item_name(item) == name {
+            return true
+        }
+    }
+    false
+}
+
+// The top-level function whose body holds the report's place, quoted, or
+// "this code" when none does.
+jet_driver_build_consumer: fn(diagnostic: Diagnostic, modules: [JetDriverSourceQueryModule]) -> String Never! {
+    path: diagnostic.source_path ?? return "this code"
+    span: diagnostic.span ?? return "this code"
+    at: span.start + (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
+    loop loaded in modules {
+        if loaded.path != path && loaded.physical_path != path -> next
+        loop item in loaded.program.items {
+            if item == .Func(function) && function.span.start <= at && at < function.span.end {
+                return "`{function.name}`"
+            }
+        }
+    }
+    "this code"
 }
 
 // The response row of one selected generated module. A `meta.rewrite_body`

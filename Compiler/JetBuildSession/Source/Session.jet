@@ -360,6 +360,15 @@ build_session_refused: fn(session: BuildSession) -> Bool Never! {
     permit.value.refused
 }
 
+// The modules the build promised so far: each `b.generate`, `meta.add` and
+// `meta.rewrite_body` call the session accepted, also when the build then
+// failed and made none of them.
+build_session_promised: fn(session: BuildSession) -> [BuildSessionGeneratedModule] Never! {
+    permit: session.storage.guard_read()
+    // copy: the rows outlive the read of the session.
+    permit.value.generated.copy()
+}
+
 // The next call's span is in source file `file` (a dependency's function's
 // call as well as the build file's), which an option it sets names as its
 // site.
