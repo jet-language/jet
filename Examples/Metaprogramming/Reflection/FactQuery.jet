@@ -1,0 +1,28 @@
+// One fact query, two readers: `compiler.query` reads the toolchain's schema
+// store while the program builds, and `jet inspect facts --store=schema
+// --kind=marker` renders the very same call. The program prints its answer the
+// way the command prints it, so the two outputs are equal, line for line, on
+// every tier: the rows fold to constants and cost nothing at run time.
+use compiler: core.compiler
+
+SCHEMA: #run compiler.schema()
+
+IDENTITY: #run SCHEMA.identity().text()
+
+// One line per marker row: the marker's name and the sites it applies to.
+// A store that can't answer is a MetadataError, never an empty list.
+marker_lines: fn(snapshot: compiler.SchemaSnapshot) -> [String] {
+    lines := [String]{}
+    rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, compiler.FactKind.Marker) ?? panic("the schema store refused: {err}")
+    loop row in rows {
+        if row == .Schema(fact) -> lines.push("{fact.name}  {fact.scope.join(", ")}")
+    }
+    lines
+}
+
+MARKERS: #run marker_lines(SCHEMA)
+
+run: fn() {
+    print("schema snapshot {IDENTITY}, kind marker: {MARKERS.len()} facts, complete")
+    loop line in MARKERS -> print(line)
+}

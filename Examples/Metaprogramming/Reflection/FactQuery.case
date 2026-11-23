@@ -1,0 +1,27 @@
+# `jet inspect facts` renders the very `compiler.query` FactQuery.jet makes
+# while it builds: the command's marker rows, their count and the snapshot
+# identity equal the program's own rendering of the same query on O0, O1 and
+# O2. A store with nothing to read answers with its MetadataError, never an
+# empty list.
+env: NO_COLOR=1
+step cli: jet inspect facts --store=schema --kind=marker
+exit: 0
+stdout: ~ "schema snapshot " # the header names the snapshot
+stdout: ~ " facts, complete" # the query ends complete
+stderr: empty
+step o0: jet run -O0 FactQuery.jet
+exit: 0
+stdout: == cli
+stderr: empty
+step o1: jet run -O1 FactQuery.jet
+exit: 0
+stdout: == cli
+stderr: empty
+step o2: jet run -O2 FactQuery.jet
+exit: 0
+stdout: == cli
+stderr: empty
+step: jet inspect facts --store=run --kind=claim missing.receipt
+exit: nonzero
+stdout: empty
+stderr: = FactQuery.missing.stderr
