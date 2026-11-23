@@ -22,13 +22,14 @@ ir_scope_guard_type: fn(ty: Type) -> Bool Never! {
 
 // The row of a Task handle: an owned runtime JetTask whose drop joins or
 // detaches it.
-ir_task_row: fn(m: &IRModule, ty: Type) -> Int Never! {
-    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_task_drop", ""))
+ir_task_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+    tid: ir_intern_tid(m, p, ty)
+    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_native_task_drop", ""))
 }
 
 // The row of a ScopeGuard: the callback's closure box, whose drop (the
 // generated jet_ir_scope_guard_drop) runs the callback, then retires the box.
-ir_scope_guard_row: fn(m: &IRModule, ty: Type) -> Int Never! {
+ir_scope_guard_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
     symbol: "jet_ir_scope_guard_drop"
     if name_rows_value(m.function_rows, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
@@ -39,12 +40,13 @@ ir_scope_guard_row: fn(m: &IRModule, ty: Type) -> Int Never! {
         a := ir_builder_new(m.functions[id].copy())
         pointer_row: ir_pointer_row(m)
         guard: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "guard"))
-        _: ir_call_closure(m, a, guard, [Int]{}, -1)
+        _: ir_call_closure(m, p, a, guard, [Int]{}, -1)
         ir_closure_unref(m, a, guard)
         ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
     }
-    ir_intern_type(m, "ScopeGuard", ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ""))
+    tid: ir_intern_tid(m, p, ty)
+    ir_intern_type(m, "ScopeGuard", ir_owned_layout(IRTypeKind.Pointer, tid, symbol, ""))
 }
 
 // Retires one reference to the closure box `boxed`; the last owner runs the
@@ -78,7 +80,7 @@ ir_closure_share: fn() -> String Never! { "#closure.share" }
 
 // The row of a function value of type `ty`, whose drop is the generated
 // jet_ir_closure_drop (a null box holds nothing).
-ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
+ir_closure_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
     symbol: "jet_ir_closure_drop"
     if name_rows_value(m.function_rows, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
@@ -97,7 +99,8 @@ ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
         ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
     }
-    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ir_closure_share()))
+    tid: ir_intern_tid(m, p, ty)
+    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, symbol, ir_closure_share()))
 }
 
 // The row of the code word a function value of type `ty` holds at 8: a
@@ -106,14 +109,15 @@ ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
 // passed by its address, so the row keys its mark (`fn(&[Int])` code is not
 // `fn([Int])` code). A box of any other type (a scope guard's, a hook's)
 // holds a plain pointer.
-ir_code_row: fn(m: &IRModule, ty: Type) -> Int Never! {
+ir_code_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
     if ir_untag(ty) == .Fn(params, _, _, _, metadata, _) {
         code_ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{ir_untag(ty)}}
         written := ""
         loop index in 0..<params.len() {
             if function_param_writes(metadata, index) -> written = "{written}&{index}"
         }
-        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}{written}", ir_layout(IRTypeKind.Pointer, code_ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        code_tid: ir_intern_tid(m, p, code_ty)
+        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}{written}", ir_layout(IRTypeKind.Pointer, code_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     }
     ir_pointer_row(m)
 }
@@ -141,7 +145,7 @@ IR_CLOSURE_LOCK: 24
 // helper of its capture shape; the caller stores the code at 8 and the
 // captures (`captures`: by value, or a held place's address). A box whose
 // body owns captures starts unstarted (IR_TASK_STARTED).
-ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
+ir_closure_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     boxed: ir_box_alloc(m, b, bytes, row)
     one: ir_word_const(m, b, 1)
     ir_emit(b.f, IROp.Store, -1, boxed, 0, one, b.line)
@@ -153,7 +157,7 @@ ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: 
         }
     }
     pointer_row: ir_pointer_row(m)
-    release_id: ir_closure_release(m, bytes, captures)
+    release_id: ir_closure_release(m, p, bytes, captures)
     release: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.FunctionAddress, release, release_id, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, boxed, 16, release, b.line)
@@ -168,7 +172,7 @@ ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: 
 // body's start and scope end would have, so a Sender handed to the task
 // (ir_hand_senders) leaves the runtime's sender ledger exact. One per
 // capture shape.
-ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
+ir_closure_release: fn(m: &IRModule, p: IRProgram, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     owned := [IRCaptureSlot]{}
     unstarted := [IRCaptureSlot]{}
     key := "#closure.release<{ir_align8(bytes)}"
@@ -202,7 +206,7 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
         ir_open_if(a.f, never, a.line)
         loop capture in unstarted {
             value: ir_load_at(m, a, boxed, capture.offset, capture.row)
-            if ir_sender_owned(m, capture) {
+            if ir_sender_owned(m, p, capture) {
                 _: ir_runtime(m, a, "jet_rt_native_sender_take", [Int]{value}, -1)
             }
             if capture.close >= 0 -> ir_close_call(a, capture.close, value)
@@ -227,7 +231,7 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
 // (lazy.release): a fresh box moves over, a held one gains an owner for it.
 // (-1, -1) with `b` failed on an error.
 ir_closure_handover: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, closure: Int, span: Span) -> {held: Int, release: Int} Never! {
-    closure_ty: m.types[b.f.slot_type[closure]].ty.copy()
+    closure_ty: ir_row_ty(m, p, b.f.slot_type[closure])
     held: if b.fresh[closure] -> closure else -> ir_copy_value(m, p, b, closure, span)
     if ir_failed(b) -> return {held: -1, release: -1}
     b.fresh[held] = false
@@ -438,7 +442,7 @@ ir_alloc_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ctor: TAll
     }
     if ctor == .FixedOver {
         if args.len() != 1 -> return ir_fail_slot(b, span, "Fixed.over with {args.len()} arguments")
-        buffer_ty: ir_ty(p, b, args[0].value)
+        buffer_ty: ir_ty(m, p, b, args[0].value)
         element_ty: if ir_untag(buffer_ty) == .FixedList(element, _) -> element else -> {
             return ir_fail_slot(b, span, "Fixed.over buffer of type {ir_type_name(buffer_ty)}")
         }
@@ -504,7 +508,7 @@ ir_task_control: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, op
         .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .HTTPClientMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> "jet_rt_native_task_cancel"
     }
     if args.len() == 1 {
-        mode_ty: ir_ty(p, b, args[0])
+        mode_ty: ir_ty(m, p, b, args[0])
         pause_mode: Type.Named{name: "TaskPauseMode"}
         if ir_untag(mode_ty) != pause_mode {
             return ir_fail_slot(b, span, "Task.pause mode of type {ir_type_name(mode_ty)}")

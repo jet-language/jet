@@ -86,10 +86,36 @@ TCostFact: struct {
     written: Bool{false},
 }
 
-// The checked type of node `id` of `tree`, when the tree files one.
-body_cost_type: fn(tree: BodyTree, id: Int) -> Type? Never! {
-    row: checked_expr_type_id(tree.expr_types, id) ?? return None
-    Val(tree.types.types[row])
+checked_cost_type_id_bounds: fn(table: Interner, id: TypeID) -> TIntegerBounds? Never! {
+    plain: type_id_unwrap_tagged(table, id)
+    if type_kind(table, plain) == {
+        .InlineRange -> {
+            bounds: type_id_range(table, plain)
+            checked_cost_bounded(bounds.lo, bounds.hi)
+        }
+        .IntN -> {
+            signed: type_id_int_signed(table, plain)
+            bits: type_id_int_bits(table, plain)
+            if bits <= 0 || bits > 128 || (!signed && bits == 128) -> return None
+            if signed {
+                limit: 1 << (bits - 1)
+                return Val(TIntegerBounds{lo: -limit, hi: limit - 1})
+            }
+            Val(TIntegerBounds{lo: 0, hi: (1 << bits) - 1})
+        }
+        .Int | .Float | .Bool | .String | .Char | .List | .Map | .Shared | .Option | .Result | .Fn | .Named | .Apply | .TraitObject | .Tuple | .FixedList | .Float32 | .Tagged | .Union | .Case | .Quantity | .Measure -> None
+    }
+}
+
+// The checked TypeID of node `id` of `tree`, when the tree files one.
+body_cost_type_id: fn(tree: BodyTree, id: Int) -> TypeID? Never! {
+    checked_expr_type_id(tree.expr_types, id)
+}
+
+// The checked written type of node `id` of `tree`, when the tree files one.
+body_cost_type: fn(table: Interner, tree: BodyTree, id: Int) -> Type? Never! {
+    tid: checked_expr_type_id(tree.expr_types, id) ?? return None
+    Val(type_syntax(table, tid))
 }
 
 // Whether `bounds` stays on the packed Int rail, which never spills.
@@ -98,79 +124,69 @@ checked_cost_fits_inline: fn(bounds: TIntegerBounds) -> Bool Never! {
 }
 
 // The values node `id` of a checked body may take, proved as JetSema
-// CostTree.jet checked_cost_integer_bounds proves them over the checked tree:
-// a literal, a local's recorded bounds or its range loop's
-// (body_cost_loop_counter_bounds), an inline-range or `i64` conversion,
-// a negation or arithmetic of bounded operands, a `??` of bounded sides; else
-// the bounds of the node's type.
-body_cost_integer_bounds: fn(tree: BodyTree, id: Int) -> TIntegerBounds? Never! {
-    body_cost_integer_bounds_in(tree, id, tree.nodes[body_node_index(tree, id)])
+// CostTree.jet checked_cost_integer_bounds proves them over the checked tree.
+body_cost_integer_bounds: fn(table: Interner, tree: BodyTree, id: Int) -> TIntegerBounds? Never! {
+    body_cost_integer_bounds_in(table, tree, id, tree.nodes[body_node_index(tree, id)])
 }
 
-body_cost_integer_bounds_in: fn(tree: BodyTree, id: Int, node: BodyNode) -> TIntegerBounds? Never! {
+body_cost_integer_bounds_in: fn(table: Interner, tree: BodyTree, id: Int, node: BodyNode) -> TIntegerBounds? Never! {
     bounds := TIntegerBounds?{None}
     if node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value)) else if node.kind == .CtLit(value) {
         if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
     } else if node.kind == .Local(local) {
         bounds = local.integer_bounds
-        if bounds == None -> bounds = body_cost_loop_counter_bounds(tree, local)
+        if bounds == None -> bounds = body_cost_loop_counter_bounds(table, tree, local)
     } else if node.kind == .NumericMethod(receiver, operation) {
         if operation == .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi}) else if operation == .CastAs(destination) {
-            if destination == "i64" && body_cost_integer_bounds(tree, receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
+            if destination == "i64" && body_cost_integer_bounds(table, tree, receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
                 bounds = Val(original)
             }
         }
     } else if node.kind == .Unary(op, operand) {
-        if op == TUnaryOp.Neg && body_cost_integer_bounds(tree, operand) == .Val(inner) {
+        if op == TUnaryOp.Neg && body_cost_integer_bounds(table, tree, operand) == .Val(inner) {
             bounds = checked_cost_bounded(-inner.hi, -inner.lo)
         }
     } else if node.kind == .Binary(op, _, _, left, right) {
-        if body_cost_integer_bounds(tree, left) == .Val(lhs) && body_cost_integer_bounds(tree, right) == .Val(rhs) {
+        if body_cost_integer_bounds(table, tree, left) == .Val(lhs) && body_cost_integer_bounds(table, tree, right) == .Val(rhs) {
             bounds = checked_cost_combine_bounds(op, lhs, rhs)
         }
     } else if node.kind == .OrFallback(value, fallback, _) {
         success := TIntegerBounds?{None}
-        if body_cost_type(tree, value) == .Val(carrier) {
-            if carrier == .Option(inner) -> success = checked_cost_type_bounds(inner) else if carrier == .Result(ok, _) {
-                success = checked_cost_type_bounds(ok)
+        if body_cost_type_id(tree, value) == .Val(carrier) {
+            kind: type_kind(table, carrier)
+            if kind == TypeKind.Option || kind == TypeKind.Result {
+                success = checked_cost_type_id_bounds(table, type_a_type(table, carrier))
             }
         }
         if fallback == .Value(alternative) {
-            if success == .Val(normal) && body_cost_integer_bounds(tree, alternative) == .Val(other) {
+            if success == .Val(normal) && body_cost_integer_bounds(table, tree, alternative) == .Val(other) {
                 bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
             }
         } else { bounds = success }
     }
     if bounds != None -> return bounds
-    ty: body_cost_type(tree, id) ?? return None
-    checked_cost_type_bounds(ty)
+    tid: body_cost_type_id(tree, id) ?? return None
+    checked_cost_type_id_bounds(table, tid)
 }
 
-// The values the counter `local` of a range loop of `tree` takes in its body
-// (JetIR ir_range_loop): from its start up to its end when the step is
-// positive or absent, down to it when the step is negative, and between the
-// two when the step's sign is unknown; one short of the end when the range
-// excludes it. None for a local no range loop counts with.
-body_cost_loop_counter_bounds: fn(tree: BodyTree, local: TLocal) -> TIntegerBounds? Never! {
+body_cost_loop_counter_bounds: fn(table: Interner, tree: BodyTree, local: TLocal) -> TIntegerBounds? Never! {
     if local.mutable || local.ty != Type.Int || local.symbol_id == None -> return None
     loop statement in tree.stmts {
         if statement == .ForRange(_, counter, start, end, step, exclusive, _, _, _) && counter.symbol_id == local.symbol_id {
-            return body_cost_range_bounds(tree, start, end, step, if exclusive -> 1 else -> 0)
+            return body_cost_range_bounds(table, tree, start, end, step, if exclusive -> 1 else -> 0)
         }
         if statement == .Range(_, counter, source, start, end, step, exclusive, _, _, _) && source == None && counter.symbol_id == local.symbol_id {
-            return body_cost_range_bounds(tree, start, end, step, if exclusive -> 1 else -> 0)
+            return body_cost_range_bounds(table, tree, start, end, step, if exclusive -> 1 else -> 0)
         }
     }
     None
 }
 
-// The values a range loop's counter takes from `start` to `end` by `step`,
-// stopping `short` before the end (body_cost_loop_counter_bounds).
-body_cost_range_bounds: fn(tree: BodyTree, start: Int, end: Int, step: Int?, short: Int) -> TIntegerBounds? Never! {
-    first: body_cost_integer_bounds(tree, start) ?? return None
-    last: body_cost_integer_bounds(tree, end) ?? return None
+body_cost_range_bounds: fn(table: Interner, tree: BodyTree, start: Int, end: Int, step: Int?, short: Int) -> TIntegerBounds? Never! {
+    first: body_cost_integer_bounds(table, tree, start) ?? return None
+    last: body_cost_integer_bounds(table, tree, end) ?? return None
     if step == .Val(stride) {
-        by: body_cost_integer_bounds(tree, stride) ?? return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
+        by: body_cost_integer_bounds(table, tree, stride) ?? return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
         if by.hi <= -1 -> return checked_cost_bounded(last.lo + short, first.hi)
         if by.lo < 1 {
             return checked_cost_bounded(checked_cost_min(first.lo, last.lo), checked_cost_max(first.hi, last.hi))
@@ -192,23 +208,8 @@ checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) 
     TCostFact{kind: TCostKind.ExactIntSpill, state: if removed -> TCostState.OptimizerRemoved else -> TCostState.SemanticRemainder}
 }
 
-// The cost of node `node` of a checked body, as the Rust reference's
-// cost_fact_for_expr reads a typed expression: a read-only view made owned
-// (a view local stored into an owned slot, or `text.lines()`, which copies
-// each line of `text` out into an owned String as the written call's own
-// work), a copy sema made without
-// one being written that allocates (a share site's copy of a value still
-// used later, or a materialized argument; a bitwise copy or a Shared
-// handle's count bump is Scalar and no site), an edit of a map's possibly
-// shared backing store, exact Int `+`, `-`, `*` (written, or under
-// `wrapping`/`saturating`) or negation, a list read through the generic
-// representation, or an operation that builds an Option or a Result. The
-// `Ok` checking wraps a fallible function's plain result in spans exactly its
-// payload; no construction is written there, so it is no site. A view made
-// owned where the source writes the copy (a written `copy`, `freeze(view)`)
-// spans more than the view, so it is no hidden copy and no site either.
-body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
-    ty: body_cost_type(tree, node.id) ?? return None
+body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
+    tid: body_cost_type_id(tree, node.id) ?? return None
     if node.kind == .MaterializeView(value) {
         view: tree.nodes[body_node_index(tree, value)].span
         if view.start != node.span.start || view.end != node.span.end -> return None
@@ -219,26 +220,26 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
             return Val(TCostFact{kind: TCostKind.ImplicitCopy, state: TCostState.SemanticRemainder})
         }
     }
-    if node.kind == .BuiltinMethod(receiver, operation, _) && body_cost_type(tree, receiver) == .Val(receiver_type) {
-        if checked_builtin_mutates_receiver(operation) && receiver_type == .Map(_, _, _) {
+    if node.kind == .BuiltinMethod(receiver, operation, _) && body_cost_type_id(tree, receiver) == .Val(receiver_tid) {
+        if checked_builtin_mutates_receiver(operation) && type_kind(table, receiver_tid) == TypeKind.Map {
             return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
         }
-        if operation == TBuiltinOp.Lines && receiver_type == Type.String {
+        if operation == TBuiltinOp.Lines && receiver_tid.id == TYPE_STRING.id {
             return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder, written: true})
         }
     }
-    if ty == Type.Int {
+    if tid.id == TYPE_INT.id {
         if node.kind == .Binary(op, _, _, left, right) {
             if op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul {
-                return Val(body_cost_int_operation_fact(tree, op, left, right))
+                return Val(body_cost_int_operation_fact(table, tree, op, left, right))
             }
         } else if node.kind == .OverflowOpt(prefix, operation, _, left, right) {
             if body_cost_int_policy_operator(prefix, operation) == .Val(op) {
-                return Val(body_cost_int_operation_fact(tree, op, left, right))
+                return Val(body_cost_int_operation_fact(table, tree, op, left, right))
             }
         } else if node.kind == .Unary(op, operand) {
             if op == TUnaryOp.Neg {
-                inner: body_cost_integer_bounds(tree, operand)
+                inner: body_cost_integer_bounds(table, tree, operand)
                 result := TIntegerBounds?{None}
                 if inner == .Val(bounds) -> result = checked_cost_bounded(-bounds.hi, -bounds.lo)
                 return Val(checked_cost_int_fact([TIntegerBounds?]{inner}, result))
@@ -246,10 +247,10 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
         }
     }
     if node.kind == .Index(base, _, kind, _, _, _) {
-        if kind != TIndexKind.Map && body_cost_type(tree, base) == .Val(base_type) {
+        if kind != TIndexKind.Map && body_cost_type_id(tree, base) == .Val(base_tid) {
             fallback: TCostFact{kind: TCostKind.RepresentationFallback, state: TCostState.SemanticRemainder}
-            if base_type == .List(_) -> return Val(fallback)
-            if base_type == .FixedList(_, _) -> return Val(fallback)
+            bk: type_kind(table, base_tid)
+            if bk == TypeKind.List || bk == TypeKind.FixedList -> return Val(fallback)
         }
     }
     if node.kind == .Ok(value) {
@@ -258,17 +259,17 @@ body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
     }
     if body_cost_builds_outcome(node.kind) {
         outcome: TCostFact{kind: TCostKind.OutcomeConstruction, state: TCostState.SemanticRemainder}
-        if ty == .Option(_) -> return Val(outcome)
-        if ty == .Result(_, _) -> return Val(outcome)
+        tk: type_kind(table, tid)
+        if tk == TypeKind.Option || tk == TypeKind.Result -> return Val(outcome)
     }
     None
 }
 
 // The cost of the exact Int `left op right`, `op` `+`, `-` or `*`
 // (body_cost_fact).
-body_cost_int_operation_fact: fn(tree: BodyTree, op: TBinaryOp, left: Int, right: Int) -> TCostFact Never! {
-    lhs: body_cost_integer_bounds(tree, left)
-    rhs: body_cost_integer_bounds(tree, right)
+body_cost_int_operation_fact: fn(table: Interner, tree: BodyTree, op: TBinaryOp, left: Int, right: Int) -> TCostFact Never! {
+    lhs: body_cost_integer_bounds(table, tree, left)
+    rhs: body_cost_integer_bounds(table, tree, right)
     result := TIntegerBounds?{None}
     if lhs == .Val(first) && rhs == .Val(second) {
         result = checked_cost_combine_bounds(op, first, second)

@@ -7,6 +7,7 @@ use jet_foundation.[
     BodyTree,
     Diagnostic,
     FnBody,
+    Interner,
     Span,
     SymbolTable,
     TMethodRef,
@@ -26,14 +27,14 @@ JetDriverSQLRowHit: struct {
 }
 
 // Collects L0308 hits for one checked function at index `pos`.
-jet_driver_sql_row_loop_function_hits: fn(pos: Int, function: FnBody, symbols: SymbolTable, hits: &[JetDriverSQLRowHit]) Never! {
+jet_driver_sql_row_loop_function_hits: fn(pos: Int, function: FnBody, symbols: SymbolTable, interner: Interner, hits: &[JetDriverSQLRowHit]) Never! {
     if !jet_driver_cost_reports(function) {
         return
     }
     tree: function.tree
     bodies := [Span]{}
     loop statement in tree.stmts {
-        if statement == .ForIn(_, variable, _, _, collection, _, _, _, _, _, _, span) && jet_driver_sql_rows(variable.ty, body_type(tree, collection)) {
+        if statement == .ForIn(_, variable, _, _, collection, _, _, _, _, _, _, span) && jet_driver_sql_rows(variable.ty, body_type(interner, tree, collection)) {
             bodies.push(Span{start: body_node(tree, collection).span.end, end: span.end})
         }
     }
@@ -70,10 +71,10 @@ jet_driver_sql_row_loop_hits_to_lints: fn(load: JetDriverLoadResult, functions: 
 // The L0308 tidy errors of `functions`, whose method keys `symbols` holds:
 // one per query call inside a loop over rows, at the call, once however many
 // specializations share its source.
-jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable) -> [Diagnostic] {
+jet_driver_sql_row_loop_lints: fn(load: JetDriverLoadResult, functions: [FnBody], symbols: SymbolTable, interner: Interner) -> [Diagnostic] {
     hits := [JetDriverSQLRowHit]{}
     loop (pos, function) in functions {
-        jet_driver_sql_row_loop_function_hits(pos, function, symbols, hits)
+        jet_driver_sql_row_loop_function_hits(pos, function, symbols, interner, hits)
     }
     jet_driver_sql_row_loop_hits_to_lints(load, functions, hits)
 }

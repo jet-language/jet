@@ -7,7 +7,7 @@
 // `: block` hint at the body's end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Diagnostic, Span, TOOL_STAGE_LSP_COMPLETION, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json]
+    jet_foundation.[Diagnostic, Span, TOOL_STAGE_LSP_COMPLETION, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json, interner_empty]
     jet_parser.[parse_source]
     jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
     jet_semindex.[SemEffectProjection, semindex_build, semindex_build_symbols]
@@ -37,7 +37,7 @@ LSPFixtureChecker: struct {
                 )
                 if overlay.path == entry -> diagnostics = parsed.diagnostics.copy()
             }
-            index: semindex_build(modules, SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+            index: semindex_build(modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
             symbols: semindex_build_symbols(index, modules)
             LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
         }

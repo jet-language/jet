@@ -33,7 +33,7 @@
 //   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
 //   happen (JetRuntime TestContracts.jet).
 use {
-    jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
+    jet_foundation.[Interner, BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
     jet_sema.[SemaCheckedForeignFunction, sema_type_def_instance_type]
 }
 
@@ -74,8 +74,8 @@ IRTestHarness: struct {
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
-ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
+    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     p.checks = checks
     p.zone_table = true
     p.sentries = ir_checks_sentries(checks)
@@ -104,7 +104,10 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
         }
         check_ids.push(id)
     }
-    if failures.len() > 0 -> return IRBuildResult{program: m, failures: failures}
+    if failures.len() > 0 {
+        ir_module_finalize_interner(m, p.interner.move())
+        return IRBuildResult{program: m, failures: failures}
+    }
     override: if harness.stock -> -1 else -> ir_test_override(m, p)
     built: ir_build_queue(m, p, failures, 0)
     m.entry = ir_test_main(m, p, harness, bodies, check_ids, override, failures)
@@ -112,6 +115,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
     _: ir_build_queue(m, p, failures, built)
     ir_debug_variants(m, p)
     ir_drop_glues(m, p)
+    ir_module_finalize_interner(m, p.interner.move())
     merged := ir_merge_serial(m)
     ir_recursion_checks(merged, 1)
     IRBuildResult{program: merged.move(), failures: failures}
@@ -264,7 +268,7 @@ ir_test_invoke: fn(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFai
     }
     if result >= 0 && !ir_failed(b) {
         row: b.f.slot_type[result]
-        ty: m.types[row].ty.copy()
+        ty: ir_row_ty(m, p, row)
         if ir_untag(ty) == {
             .Result(_, err_ty) -> {
                 // A kept `T Never!` carrier never holds an Err.
@@ -496,7 +500,7 @@ ir_test_generate_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, l
 // `element`s, in fresh frame storage.
 ir_test_generate_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, row: Int, element: Type, count: Int, span: Span) -> Int Never! {
     element_row: ir_value_type(m, p, element) ?? return ir_type_fail(b, span, element)
-    list: ir_list_empty(m, b, row)
+    list: ir_list_empty(m, p, b, row)
     index: ir_count_open(m, b, count)
     value: ir_test_generate(m, p, b, ctx, element, span)
     if ir_failed(b) -> return -1

@@ -105,8 +105,9 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
         row: ir_function_row(p, key) ?? -1
         if row >= 0 -> callee = ir_function_row_id(m, p, row, [Type]{}) ?? -1
     }
+    bare_tid: ir_intern_tid(m, p, bare)
     if c_symbol == "" && callee < 0 {
-        return ir_intern_type(m, identity, ir_layout(IRTypeKind.Pointer, bare, 8, 8, IRClass.Pointer, false, 64, ""))
+        return ir_intern_type(m, identity, ir_layout(IRTypeKind.Pointer, bare_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     }
     symbol: if c_symbol != "" -> "jet_ir_ffi_close_{c_symbol}" else -> ir_hashed_function("ffi.handle.close", handle.close_function ?? "", "jet_ir_ffi_close_fn_", "", 0).symbol
     if name_rows_value(m.function_rows, symbol) == None {
@@ -129,7 +130,7 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
         ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
         m.functions[id] = a.f.move()
     }
-    ir_intern_type(m, identity, ir_owned_layout(IRTypeKind.Pointer, bare, symbol, ""))
+    ir_intern_type(m, identity, ir_owned_layout(IRTypeKind.Pointer, bare_tid, symbol, ""))
 }
 
 // A foreign call in compile-time code or a build invocation stops the
@@ -396,7 +397,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
         .Aggregate -> {
             raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
             length: ir_load_at(m, b, length_address, 0, length_row)
-            dst = ir_foreign_list_result(m, b, result_row, result_element, result_width, raw, length)
+            dst = ir_foreign_list_result(m, p, b, result_row, result_element, result_width, raw, length)
         }
         .Word | .Float | .Float32 | .Char | .Pointer -> {
             dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
@@ -558,7 +559,7 @@ ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
         .Aggregate -> {}
         .Unit | .Int | .Char | .String | .Pointer -> return None
     }
-    ty: ir_untag(m.types[row].ty)
+    ty: ir_untag(ir_row_ty(m, p, row))
     nominal: ir_nominal_name(ty) ?? return None
     definition: ir_type_def(p, nominal) ?? return None
     if p.types[definition].layout == None -> return None
@@ -601,7 +602,7 @@ ir_foreign_restride: fn(m: &IRModule, b: &IRBuilder, to: Int, to_stride: Int, fr
 // A new List of type row `row` holding the `length` elements of the C array
 // at `raw` (`width` bytes each), copied at the List's stride; empty when the
 // array is null or empty. The C array stays its library's.
-ir_foreign_list_result: fn(m: &IRModule, b: &IRBuilder, row: Int, element: Int, width: Int, raw: Int, length: Int) -> Int Never! {
+ir_foreign_list_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element: Int, width: Int, raw: Int, length: Int) -> Int Never! {
     stride: ir_list_stride(m, element)
     word_row: ir_word_row(m)
     storage: ir_fresh_temp(m, b, row)
@@ -617,7 +618,7 @@ ir_foreign_list_result: fn(m: &IRModule, b: &IRBuilder, row: Int, element: Int, 
     stride_slot: ir_word_const(m, b, stride)
     bytes: ir_word_op(m, b, IROp.Mul, count, stride_slot)
     eight: ir_word_const(m, b, 8)
-    buffer_row: ir_list_alloc_row(m, element)
+    buffer_row: ir_list_alloc_row(m, p, element)
     data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, buffer_row)
     if width == stride -> _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, raw, bytes}, -1) else {
         ir_foreign_restride(m, b, data, stride, raw, width, count, width)
@@ -648,7 +649,7 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
             result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-            if !ir_rust_slot_crosses(m, result_row) {
+            if !ir_rust_slot_crosses(m, p, result_row) {
                 return ir_fail_slot(b, span, "extern rust result {ir_type_name(ty)} has no native slot descriptor")
             }
         }
@@ -666,7 +667,7 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
             return ir_fail_slot(b, span, "extern rust parameter {param.name} has no native slot descriptor: only read Strings and scalars cross")
         }
         row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
-        if !ir_rust_slot_crosses(m, row) {
+        if !ir_rust_slot_crosses(m, p, row) {
             return ir_fail_slot(b, span, "extern rust parameter {param.name} has no native slot descriptor: only read Strings and scalars cross")
         }
         value: ir_value_as(m, p, b, arg.value, row, span)
@@ -728,11 +729,11 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
 // Whether a value of type row `row` crosses a Rust slot descriptor: a String
 // as its bytes, or in the value word an exact Int, a machine integer, a
 // float, a Bool or a Char.
-ir_rust_slot_crosses: fn(m: &IRModule, row: Int) -> Bool Never! {
+ir_rust_slot_crosses: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_option_inline(m, row) -> return false
     if m.types[row].kind == {
         .Int | .Bool | .Float | .Float32 | .Char | .String -> true
-        .Word -> ir_untag(m.types[row].ty) == .IntN(_, _)
+        .Word -> ir_untag(ir_row_ty(m, p, row)) == .IntN(_, _)
         .Unit | .Pointer | .Aggregate -> false
     }
 }
@@ -740,7 +741,7 @@ ir_rust_slot_crosses: fn(m: &IRModule, row: Int) -> Bool Never! {
 // Whether type row `row` is a struct whose bytes hold only machine scalars:
 // inline integer words, floats and Bools with no drop, and structs of them.
 ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
-    ty: ir_untag(m.types[row].ty)
+    ty: ir_untag(ir_row_ty(m, p, row))
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
     members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false

@@ -158,7 +158,7 @@ ir_para_fold_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span:
 ir_para_fold_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callback: Int, callback_ty: Type, args: [Int], ty: Type, box_row: Int, acc_row: Int, span: Span) -> Int Never! {
     ret: ir_closure_result(callback_ty) ?? return ir_fail_slot(b, span, "parallel fold callback {ir_type_name(callback_ty)}")
     if ir_untag(ret) == .Result(_, err) {
-        if !ir_never_type(err) -> return ir_call_closure(m, b, callback, args, box_row)
+        if !ir_never_type(err) -> return ir_call_closure(m, p, b, callback, args, box_row)
     }
     value: ir_call_callback(m, p, b, callback, callback_ty, args, acc_row, span)
     ir_result_box(m, p, b, ty, true, value)
@@ -251,7 +251,7 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     callback: operands[0]
-    callback_ty: ir_ty(p, b, args[0])
+    callback_ty: ir_ty(m, p, b, args[0])
     signature: ir_para_signature(callback_ty) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
     out_row: ir_value_type(m, p, signature.result) ?? return ir_type_fail(b, span, signature.result)
     id: ir_para_helper(m, p, b, "map", callback_ty, span)
@@ -267,7 +267,7 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     ir_emit(b.f, IROp.Const, output, 0, -1, -1, b.line)
     some: ir_bool_op(m, b, IROp.Gt, length, zero)
     ir_open_if(b.f, some, b.line)
-    output_row: ir_list_alloc_row(m, out_row)
+    output_row: ir_list_alloc_row(m, p, out_row)
     allocated: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, align}, output_row)
     ir_emit(b.f, IROp.Copy, output, allocated, -1, -1, b.line)
     ir_end(b.f, b.line)
@@ -290,7 +290,7 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
         if mapped_row != out_row {
             return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through {ir_type_name(callback_ty)}")
         }
-        result: ir_list_empty(m, b, result_row)
+        result: ir_list_empty(m, p, b, result_row)
         ir_emit(b.f, IROp.Store, -1, result, 0, length, b.line)
         ir_emit(b.f, IROp.Store, -1, result, 8, length, b.line)
         ir_emit(b.f, IROp.Store, -1, result, 16, output, b.line)
@@ -327,7 +327,7 @@ ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
         ir_para_list_clear(m, b, false_list)
         ir_para_list_clear(m, b, true_list)
     } else {
-        result = ir_list_empty(m, b, selection_row)
+        result = ir_list_empty(m, p, b, selection_row)
         true_list = result
     }
     if fallible {
@@ -455,7 +455,7 @@ ir_para_map_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     if m.types[ok_row].kind == .Unit {
         return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} over Unit results")
     }
-    mapped: ir_list_empty(m, b, list_row)
+    mapped: ir_list_empty(m, p, b, list_row)
     produced: ir_list_element(m, p, b, mapped) ?? return ir_type_fail(b, span, list_ty)
     if produced != ok_row {
         return ir_fail_slot(b, span, "para_map to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
@@ -521,9 +521,9 @@ ir_para_fold_try: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, acc_ty
     seed: operands[0]
     step: operands[1]
     merge: operands[2]
-    seed_ty: m.types[b.f.slot_type[seed]].ty.copy()
-    step_ty: m.types[b.f.slot_type[step]].ty.copy()
-    merge_ty: m.types[b.f.slot_type[merge]].ty.copy()
+    seed_ty: ir_row_ty(m, p, b.f.slot_type[seed])
+    step_ty: ir_row_ty(m, p, b.f.slot_type[step])
+    merge_ty: ir_row_ty(m, p, b.f.slot_type[merge])
     fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: seed_ty.copy()}, TypeTupleField{name: "step", ty: step_ty}, TypeTupleField{name: "result", ty: ty.copy()}}
     id: ir_para_helper(m, p, b, "fold", Type.Tuple{fields: fields}, span)
     if id < 0 -> return -1
@@ -627,7 +627,7 @@ ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: In
     seed: operands[0]
     step: operands[1]
     merge: operands[2]
-    fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: m.types[b.f.slot_type[seed]].ty.copy()}, TypeTupleField{name: "step", ty: m.types[b.f.slot_type[step]].ty.copy()}}
+    fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: ir_row_ty(m, p, b.f.slot_type[seed])}, TypeTupleField{name: "step", ty: ir_row_ty(m, p, b.f.slot_type[step])}}
     id: ir_para_helper(m, p, b, "fold", Type.Tuple{fields: fields}, span)
     if id < 0 -> return -1
     chunk_fold: ir_lazy_address(m, b, id)
@@ -639,7 +639,7 @@ ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: In
     zero: ir_word_const(m, b, 0)
     empty: ir_bool_op(m, b, IROp.Eq, length, zero)
     ir_open_if(b.f, empty, b.line)
-    seed_ty: m.types[b.f.slot_type[seed]].ty.copy()
+    seed_ty: ir_row_ty(m, p, b.f.slot_type[seed])
     seeded: ir_call_callback(m, p, b, seed, seed_ty, [Int]{}, result_row, span)
     ir_para_move_into(m, b, result, seeded, result_row)
     ir_else(b.f, b.line)
@@ -678,7 +678,7 @@ ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: In
     right_address: ir_element_address(m, b, accumulators, right_at, stride)
     left: ir_load_at(m, b, left_address, 0, result_row)
     right: ir_load_at(m, b, right_address, 0, result_row)
-    merge_ty: m.types[b.f.slot_type[merge]].ty.copy()
+    merge_ty: ir_row_ty(m, p, b.f.slot_type[merge])
     merged: ir_call_callback(m, p, b, merge, merge_ty, [Int]{left, right}, result_row, span)
     if ir_has_drop(m, b, left) {
         ir_emit(b.f, IROp.Drop, -1, left, -1, -1, b.line)

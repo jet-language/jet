@@ -81,7 +81,7 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
     covered: loop row in cover.covered -> row.name
     assert(covered.contains("helper") && covered.contains("measure"), "the non-generic functions are covered: {covered}")
     assert(covered.contains("pick__generic__Int") && covered.contains("pick__generic__Bool") && !covered.contains("pick"), "a generic function is covered per specialization: {covered}")
-    report: jet_driver_cost_report(held.functions, cover.covered, callees)
+    report: jet_driver_cost_report(held.functions, cover.covered, callees, held.registration.interner)
     assert_eq(report.functions, covered)
     sites: loop site in report.sites -> "{site.function} {site.kind:Debug} {site.state:Debug} depth {site.loop_depth}"
     assert_eq(sites, [String]{"helper ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 1", "measure StopPoll SemanticRemainder depth 1"})

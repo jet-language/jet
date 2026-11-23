@@ -5,10 +5,10 @@
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
 use {
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleTable, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, module_text, symbol_key_text, symbol_table]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, Interner, ModuleTable, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, interner_empty, module_text, symbol_key_text, symbol_table]
     jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, ir_comptime_item_function, ir_comptime_item_key, ir_program_declared]
-    jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
+    jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_build_interner, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
 }
 
 // The declared IR program (ir_program_declared) over the type, impl and
@@ -24,7 +24,7 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
         loop definition in checked.declarations.impls -> impls.push(definition.copy())
         loop definition in checked.declarations.constants -> constants.push(definition.copy())
     }
-    ir_program_declared(type_defs, impls, constants, [FnBody]{}, symbol_table())
+    ir_program_declared(type_defs, impls, constants, [FnBody]{}, symbol_table(), interner_empty())
 }
 
 // The IR of `batch`'s entries: the batch's checked closure and each entry's
@@ -38,20 +38,20 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
 // (JetDriverComptimeEntry.computed) read them by calling their item
 // functions for this build. Either builds on up to `threads` compiler
 // threads.
-jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, table: ModuleTable, threads: CompilerThreads) -> JetEvalIRComptime {
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, interner: Interner, table: ModuleTable, threads: CompilerThreads) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     computed := [TConstantDef]{}
     loop entry in batch.entries {
         module_name: module_text(table, entry.request.module_identity)
-        item := ir_comptime_item_function(entry.request, module_name)
+        item := ir_comptime_item_function(interner, entry.request, module_name)
         // The request's expression carries its own function-local ids
         // (sema_publish_expression): the item's body returns it.
         item.tree = entry.request.expression.tree.copy()
         item.tree.stmts.push(StmtKind.Return{value: Val(entry.request.expression.root), span: entry.request.span})
         item.body = [Int]{item.tree.stmts.len() - 1}
         if entry.computed {
-            typed: jet_driver_comptime_item_value(entry.source, TComptimeValue.Unit, entry.request.expression)
+            typed: jet_driver_comptime_item_value(interner, entry.source, TComptimeValue.Unit, entry.request.expression)
             row := jet_driver_comptime_value_row(typed, typed.key, table)
             row.item_function = ir_comptime_item_key(module_name, entry.request.key)
             computed.push(row)
@@ -65,7 +65,7 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDri
         functions.push(item)
     }
     if batch.bare {
-        return jet_eval_ir_comptime_build(functions, decls, symbol_table(), keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, batch.foreign.copy(), true, threads: threads)
+        return jet_eval_ir_comptime_build(functions, decls, symbol_table(), jet_eval_ir_build_interner(interner), keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, batch.foreign.copy(), true, threads: threads)
     }
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
@@ -77,7 +77,7 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDri
     }
     staging.landed = values.len()
     landed.extend(computed)
-    jet_eval_ir_comptime_build_over(staging.program.copy(), functions, decls, symbols, keys, landed, batch.foreign.copy(), staging.taken, threads)
+    jet_eval_ir_comptime_build_over(staging.program.copy(), functions, decls, symbols, interner, keys, landed, batch.foreign.copy(), staging.taken, threads)
 }
 
 // The constant row of landed value `value` under `key`, named in `table`.
@@ -103,7 +103,7 @@ jet_driver_invocation_run: fn(inputs: &&JetDriverLoweringInputs, args: [TComptim
         return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
     }
     declarations := jet_driver_checked_declarations(checked)
-    built := jet_eval_ir_comptime_build(checked.functions.move(), checked.decls, checked.symbols.move(), keys, declarations.type_defs.move(), declarations.impls.move(), declarations.constants.move(), declarations.foreign.move(), false)
+    built := jet_eval_ir_comptime_build(checked.functions.move(), checked.decls, checked.symbols.move(), checked.interner.move(), keys, declarations.type_defs.move(), declarations.impls.move(), declarations.constants.move(), declarations.foreign.move(), false)
     if built.build_failures.len() > 0 {
         return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
     }

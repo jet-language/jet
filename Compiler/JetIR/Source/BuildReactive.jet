@@ -46,10 +46,11 @@ ir_reactive_type: fn(p: IRProgram, ty: Type) -> Bool Never! { ir_reactive_kind(p
 
 // The owned handle row: a copy shares the cell (or adds an Effect owner).
 ir_reactive_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+    tid: ir_intern_tid(m, p, ty)
     if (ir_reactive_kind(p, ty) ?? "") == "Effect" {
-        return ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_jet_reactive_effect", "jet_rt_handle_clone_jet_reactive_effect"))
+        return ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_handle_drop_jet_reactive_effect", "jet_rt_handle_clone_jet_reactive_effect"))
     }
-    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_jet_reactive_cell", "jet_rt_handle_clone_jet_reactive_cell"))
+    ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_handle_drop_jet_reactive_cell", "jet_rt_handle_clone_jet_reactive_cell"))
 }
 
 ir_reactive_element: fn(ty: Type) -> Type Never! {
@@ -145,7 +146,7 @@ ir_reactive_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, handle
 // `.value` / `.version` of a cell and `.last` / `.active` of an Effect:
 // untracked reads.
 ir_reactive_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, field: String, span: Span) -> Int Never! {
-    kind: ir_reactive_kind(p, ir_ty(p, b, receiver)) ?? return ir_fail_slot(b, span, "field: struct {field}")
+    kind: ir_reactive_kind(p, ir_ty(m, p, b, receiver)) ?? return ir_fail_slot(b, span, "field: struct {field}")
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
     result := -1
@@ -257,7 +258,7 @@ ir_ui_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: S
     row: ir_lazy_definition(p, item_ty) ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)}")
     text_index: ir_variant_index(p, row, "Text") ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)} without Text")
     uri_index: ir_variant_index(p, row, "URI") ?? return ir_fail(a, span, "drop item {ir_type_name(item_ty)} without URI")
-    args: ir_row_args(m, item_row)
+    args: ir_row_args(m, p, item_row)
     text_members: ir_variant_members(m, p, row, args, text_index) ?? return ir_fail(a, span, "payload of Text")
     uri_members: ir_variant_members(m, p, row, args, uri_index) ?? return ir_fail(a, span, "payload of URI")
     if m.types[item_row].kind != .Pointer || text_members.len() != 1 || uri_members.len() != 1 || text_members[0].offset != uri_members[0].offset {
@@ -272,7 +273,7 @@ ir_ui_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: S
     discriminant: ir_word_op(m, a, IROp.Add, first, shift)
     ir_emit(a.f, IROp.Store, -1, item, 0, discriminant, a.line)
     ir_member_store(m, p, a, item, text_members[0], text)
-    _: ir_call_closure(m, a, env, [Int]{item}, -1)
+    _: ir_call_closure(m, p, a, env, [Int]{item}, -1)
     ir_emit(a.f, IROp.Drop, -1, item, -1, -1, a.line)
     done: ir_word_const(m, a, 0)
     ir_emit(a.f, IROp.Return, -1, done, -1, -1, a.line)
@@ -285,7 +286,7 @@ ir_reactive_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
         .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod -> {}
         .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .EventMethod(_) | .LayoutMethod(_) | .HTTPClientMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> return None
     }
-    kind: ir_reactive_kind(p, ir_ty(p, b, receiver)) ?? return None
+    kind: ir_reactive_kind(p, ir_ty(m, p, b, receiver)) ?? return None
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return Val(-1)
     result := -1
@@ -302,7 +303,7 @@ ir_reactive_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
             return Val(ir_fail_slot(b, span, "{kind}.set with {args.len()} arguments"))
         }
         slot := ir_word_const(m, b, 0)
-        if !ir_unit_type(ir_reactive_element(ir_ty(p, b, receiver))) {
+        if !ir_unit_type(ir_reactive_element(ir_ty(m, p, b, receiver))) {
             value: ir_expr(m, p, b, args[0])
             if ir_failed(b) || value < 0 -> return Val(-1)
             slot = ir_reactive_moved_slot(m, p, b, value, span)

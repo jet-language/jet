@@ -29,8 +29,15 @@ use {
         TextEdit,
         StructureFact,
         StructureFactKind,
+        TypeKind,
         Type,
+        Interner,
+        InternerDelta,
         checked_expr_type_id,
+        delta_type_kind,
+        delta_type_syntax,
+        type_kind,
+        type_syntax,
         compiler_threads_admit,
         compiler_threads_failure_text,
         compiler_threads_partition,
@@ -549,9 +556,10 @@ sema_liveness_type_names: fn(ty: Type, names: &NameTable) -[Mem.Alloc]> Never! {
 }
 
 // The types node `id`'s checked type holds.
-sema_liveness_node_type_names: fn(tree: BodyTree, id: Int, names: &NameTable) -[Mem.Alloc]> Never! {
-    index: checked_expr_type_id(tree.expr_types, id) ?? return
-    sema_liveness_type_names(tree.types.types[index], names)
+sema_liveness_node_type_names: fn(interner: Interner, type_delta: [InternerDelta], tree: BodyTree, id: Int, names: &NameTable) -[Mem.Alloc]> Never! {
+    tid: checked_expr_type_id(tree.expr_types, id) ?? return
+    ty: if type_delta.len() > 0 -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid)
+    sema_liveness_type_names(ty, names)
 }
 
 sema_liveness_note_field: fn(field: TFieldRef, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
@@ -666,8 +674,9 @@ sema_liveness_keyed: fn(operation: TClosureOp) -> Bool Never! {
     operation == .SortBy || operation == .SortByDesc || operation == .TrySortBy || operation == .TrySortByDesc || operation == .MinBy || operation == .MaxBy || operation == .ListMinMaxBy || operation == .ListBinarySearchBy || operation == .IsSortedBy || operation == .GroupBy || operation == .CountBy || operation == .DedupBy
 }
 
-sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: &SemaLivenessMemberUses, type_delta: [InternerDelta]{[InternerDelta]{}}) -[Mem.Alloc]> Never! {
     tree: function.tree
+    has_delta: type_delta.len() > 0
     // A plain assignment's target is written, not read; `+=` reads it.
     written := [Int:Bool]{}
     loop statement in tree.stmts {
@@ -713,8 +722,11 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
         // The program's compiler index (`b.program.types()`,
         // `b.program.definitions()`) reflects every type the program declares.
         if kind == .HostCall(call) && call == .Method(receiver, method, _) && (method == "types" || method == "definitions") {
-            if checked_expr_type_id(tree.expr_types, receiver) == .Val(index) && sema_call_compiler_value_owner(tree.types.types[index]) == Val("ProgramInfo") {
-                uses.program_index = true
+            if checked_expr_type_id(tree.expr_types, receiver) == .Val(tid) {
+                owner_ty: if has_delta -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid)
+                if sema_call_compiler_value_owner(owner_ty) == Val("ProgramInfo") {
+                    uses.program_index = true
+                }
             }
         }
         if kind == .PatternMatches(_, pattern) -> sema_liveness_pattern_uses(pattern.shape, uses)
@@ -725,11 +737,11 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
         }
         if kind == .CtLit(value) -> sema_liveness_comptime_uses(value, uses)
         if kind == .Binary(op, _, _, lhs, _) && sema_liveness_compares(op) {
-            sema_liveness_node_type_names(tree, lhs, uses.read_types)
+            sema_liveness_node_type_names(interner, type_delta, tree, lhs, uses.read_types)
         }
         if kind == .CompareChain(operands, _, _) {
             loop operand in operands {
-                sema_liveness_node_type_names(tree, operand, uses.read_types)
+                sema_liveness_node_type_names(interner, type_delta, tree, operand, uses.read_types)
             }
         }
         if kind == .MethodCall(receiver, method, type_args, _) {
@@ -737,7 +749,7 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
             // `a.display()`, `a.debug()` and `a.to_string()` print it.
             name: method.name
             if name == "equal" || name == "compare" || name == "display" || name == "debug" || name == "to_string" {
-                sema_liveness_node_type_names(tree, receiver, uses.read_types)
+                sema_liveness_node_type_names(interner, type_delta, tree, receiver, uses.read_types)
             }
             sema_liveness_generic_uses(type_args, uses)
         }
@@ -745,18 +757,19 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
         // closure returns.
         if kind == .ClosureMethod(_, operation, args) && sema_liveness_keyed(operation) {
             loop arg in args {
-                index: checked_expr_type_id(tree.expr_types, arg) ?? next
-                if tree.types.types[index] == .Fn(_, returned, _, _, _, _) && returned == .Val(key) {
+                tid: checked_expr_type_id(tree.expr_types, arg) ?? next
+                fn_ty: if has_delta -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid)
+                if fn_ty == .Fn(_, returned, _, _, _, _) && returned == .Val(key) {
                     sema_liveness_type_names(key, uses.read_types)
                 }
             }
         }
         // Printing a value shows every field it holds, so it reads them.
-        if kind == .Print(value) -> sema_liveness_node_type_names(tree, value, uses.read_types)
+        if kind == .Print(value) -> sema_liveness_node_type_names(interner, type_delta, tree, value, uses.read_types)
         if kind == .StrLit(parts) {
             loop part in parts {
                 if part == .Interpolation(value, _) {
-                    sema_liveness_node_type_names(tree, value, uses.read_types)
+                    sema_liveness_node_type_names(interner, type_delta, tree, value, uses.read_types)
                 }
             }
         }
@@ -767,8 +780,8 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
             sema_liveness_generic_uses(type_args, uses)
             if sema_call_reflection_leaf_name(record.module_name) == "reflect" {
                 loop arg in args {
-                    sema_liveness_node_type_names(tree, arg, uses.read_types)
-                    sema_liveness_node_type_names(tree, arg, uses.built_types)
+                    sema_liveness_node_type_names(interner, type_delta, tree, arg, uses.read_types)
+                    sema_liveness_node_type_names(interner, type_delta, tree, arg, uses.built_types)
                 }
             }
         }
@@ -789,10 +802,22 @@ sema_liveness_member_body_uses: fn(function: FnBody, uses: &SemaLivenessMemberUs
             }
         }
     }
-    loop ty in tree.types.types {
-        if ty == .Map(key, _, _) -> sema_liveness_type_names(key, uses.read_types)
-        if ty == .Apply(name, args) && sema_call_reflection_leaf_name(name) == "Set" {
+    loop param in function.params {
+        if param.ty == .Map(key, _, _) -> sema_liveness_type_names(key, uses.read_types)
+        if param.ty == .Apply(name, args) && sema_call_reflection_leaf_name(name) == "Set" {
             loop arg in args -> sema_liveness_type_names(arg, uses.read_types)
+        }
+    }
+    loop row in tree.expr_types {
+        k: if has_delta -> delta_type_kind(interner, type_delta[0], row.ty) else -> type_kind(interner, row.ty)
+        if k == TypeKind.Map {
+            ty: if has_delta -> delta_type_syntax(interner, type_delta[0], row.ty) else -> type_syntax(interner, row.ty)
+            if ty == .Map(key, _, _) -> sema_liveness_type_names(key, uses.read_types)
+        } else if k == TypeKind.Apply {
+            ty: if has_delta -> delta_type_syntax(interner, type_delta[0], row.ty) else -> type_syntax(interner, row.ty)
+            if ty == .Apply(name, args) && sema_call_reflection_leaf_name(name) == "Set" {
+                loop arg in args -> sema_liveness_type_names(arg, uses.read_types)
+            }
         }
     }
 }
@@ -911,7 +936,7 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
             if function.synthetic && (function.name == "equal" || function.name == "compare") {
                 next
             }
-            sema_liveness_member_body_uses(function, uses)
+            sema_liveness_member_body_uses(graph.interner, function, uses)
             // A failure the entry `run` returns is shown when it escapes.
             if function.name == "run" && module_row.module_identity == graph.entry_module_identity && function.failure_carrier == .Result(_, error) {
                 sema_liveness_type_names(error, uses.read_types)

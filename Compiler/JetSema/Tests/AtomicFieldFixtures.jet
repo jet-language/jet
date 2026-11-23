@@ -30,7 +30,7 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
                 if fields.len() != 1 -> panic("{name}: field order/count changed")
                 field: fields[0]
                 if atomic {
-                    if sema_atomic_field_inner(field.field.ty) == None || body_type(function.tree, field.value) != field.field.ty {
+                    if sema_atomic_field_inner(field.field.ty) == None || body_type(checked.interner, function.tree, field.value) != field.field.ty {
                         panic("{name}: field lost its Atomic carrier")
                     }
                     if body_node(function.tree, field.value).kind == .StaticCall(owner, _, method, _, args) {

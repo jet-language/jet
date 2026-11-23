@@ -47,8 +47,8 @@ use {
     jet_debug.[NATIVE_EVAL_CAPTURES, NativeEval, NativeEvalBinder, NativeEvalPart, NativeEvalRefused, NativeEvaluator, NativeFixEdit, native_eval_name_byte, native_eval_names]
     jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverEvalAsk, JetDriverHeldEval, JetDriverIceRow, JetDriverLoweringInputs, jet_driver_check_failures, jet_driver_checked_declarations, jet_driver_declares_workspace, jet_driver_entry_root_path, jet_driver_held_eval_answer, jet_driver_held_eval_append, jet_driver_held_eval_check, jet_driver_held_eval_open, jet_driver_inline_package, jet_driver_is_project_configuration]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
-    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_failure_name, type_name, type_unqualified_nominals]
-    jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_foundation.[COMMENT_PREFIX, MODULE_CORE_PREFIX, BuildOptions, CompilerThreads, DeclTable, DeepChecks, FnBody, Interner, StmtKind, TTypeDef, Type, body_type, deep_checks_flags, foundation_named_type, name_rows_get_text, type_failure_name, type_name, type_unqualified_nominals]
+    jet_ir.[IRBuildResult, IRModule, IROptOptions, IRProgram, IRTypeKind, ir_build_held_root, ir_cell_drop, ir_eval_place_refusal, ir_held_append, ir_held_program, ir_module_new, ir_module_row_ty, ir_pointer_row, ir_program_new, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_parser.[parse_type_text]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_held_set, sema_eval_probe_function, sema_eval_probe_parse, sema_ownership_type_is_copy]
 }
@@ -979,7 +979,7 @@ jet_cli_debug_eval_held_ir: fn(result: JetDriverCompileResult, checked: &&JetDri
     level: jet_cli_native_level(options)
     checks: jet_cli_native_checks(result, inputs, options, runtime)
     declarations: jet_driver_checked_declarations(inputs)
-    built: ir_program_new(inputs.functions.move(), decls, inputs.symbols.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move())
+    built: ir_program_new(inputs.functions.move(), decls, inputs.symbols.move(), inputs.interner.move(), types.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move())
     program: ir_held_program(built.move(), decls, declarations.foreign.move(), checks, bind: level <= 0)
     JetCLIDebugEvalHeldIR{program: program.move(), level: level, opt: jet_cli_opt_options(level, options), threads: result.compiler_threads}
 }
@@ -1436,8 +1436,9 @@ jet_cli_debug_eval_held_append: fn(held: &JetCLIDebugEvalHeld, running: [String:
     display: jet_cli_debug_eval_held_module(held.eval, source)
     if display == "" -> return false
     loop (at, code) in codes {
-        done := jet_driver_held_eval_append(held.eval, display, held.ir.program.functions, held.ir.program.symbols.move(), held.ir.program.types.move(), code)
+        done := jet_driver_held_eval_append(held.eval, display, held.ir.program.functions, held.ir.program.symbols.move(), held.ir.program.interner.move(), held.ir.program.types.move(), code)
         held.ir.program.symbols = done.symbols.move()
+        held.ir.program.interner = done.interner.move()
         held.ir.program.types = done.types.move()
         appended := done.appended.move() ?? return false
         key: "{appended.function.key}"
@@ -1542,8 +1543,9 @@ jet_cli_debug_eval_held_asked_run: fn(held: &&JetCLIDebugEvalHeld?, path: String
     if display == "" || source == "" || offset < 0 {
         return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
     }
-    asked: jet_driver_held_eval_answer(current.eval, display, offset, text, current.ir.program.symbols.move(), current.ir.program.types.move())
+    asked: jet_driver_held_eval_answer(current.eval, display, offset, text, current.ir.program.symbols.move(), current.ir.program.interner.move(), current.ir.program.types.move())
     current.ir.program.symbols = asked.symbols.move()
+    current.ir.program.interner = asked.interner.move()
     current.ir.program.types = asked.types.move()
     answer: asked.answer.move() ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
     value: answer.value_type ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
@@ -1570,8 +1572,9 @@ jet_cli_debug_eval_held_asked_run: fn(held: &&JetCLIDebugEvalHeld?, path: String
 // can fail; the debugger's refusal of an effect it uses.
 jet_cli_debug_eval_held_build: fn(held: &&JetCLIDebugEvalHeld, display: String, source: String, names: [String], value: Type?, text: String) -[FS, Env, Time, Exec.Args]> JetCLIDebugEvalHeldRun {
     current := held.move()
-    done: jet_driver_held_eval_check(current.eval, display, current.ir.program.functions, current.ir.program.symbols.move(), current.ir.program.types.move(), source)
+    done: jet_driver_held_eval_check(current.eval, display, current.ir.program.functions, current.ir.program.symbols.move(), current.ir.program.interner.move(), current.ir.program.types.move(), source)
     current.ir.program.symbols = done.symbols.move()
+    current.ir.program.interner = done.interner.move()
     current.ir.program.types = done.types.move()
     loop report in done.checked.diagnostics {
         if report.what.starts_with(JET_CLI_DEBUG_EVAL_REFUSAL) {
@@ -1582,7 +1585,7 @@ jet_cli_debug_eval_held_build: fn(held: &&JetCLIDebugEvalHeld, display: String, 
         return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
     }
     function := done.checked.function.move() ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
-    returned: jet_cli_debug_eval_held_returned(function, value) ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
+    returned: jet_cli_debug_eval_held_returned(current.ir.program.interner, function, value) ?? return JetCLIDebugEvalHeldRun{held: Val(current.move()), built: None, refusal: None}
     key: "{function.key}"
     // The open's memory term stands: the held program is already in memory
     // and an evaluation adds one function and what it reaches, so it reads
@@ -1598,14 +1601,14 @@ jet_cli_debug_eval_held_build: fn(held: &&JetCLIDebugEvalHeld, display: String, 
 // `value` it returns, when it can't fail; with none, the value it discards,
 // made its result (jet_cli_debug_eval_returns). None when it can't return
 // either.
-jet_cli_debug_eval_held_returned: fn(function: &FnBody, value: Type?) -> Type? Never! {
+jet_cli_debug_eval_held_returned: fn(interner: Interner, function: &FnBody, value: Type?) -> Type? Never! {
     if value == .Val(given) {
         if function.failure_carrier == {
             .Infallible -> return Val(given)
             .Result(_, _) | .Optional(_) | .Diverges(_) -> return None
         }
     }
-    discarded: jet_cli_debug_eval_held_value(function) ?? return None
+    discarded: jet_cli_debug_eval_held_value(interner, function) ?? return None
     if discarded == .Result(_, _) || !jet_cli_debug_eval_returns(function, discarded) -> return None
     Val(discarded)
 }
@@ -1637,14 +1640,14 @@ jet_cli_debug_eval_held_module: fn(eval: JetDriverHeldEval, path: String) -> Str
 
 // The type of the value the held check's expression function discards
 // (`_ := text`), its last statement; None when that is not the discard.
-jet_cli_debug_eval_held_value: fn(function: FnBody) -> Type? Never! {
+jet_cli_debug_eval_held_value: fn(interner: Interner, function: FnBody) -> Type? Never! {
     if function.body.len() == 0 -> return None
     row: function.body[function.body.len() - 1] - function.tree.stmt_base
     if function.tree.stmts[row] == .Let(_, _, init, _, _, _) {
-        return Val(body_type(function.tree, init))
+        return Val(body_type(interner, function.tree, init))
     }
     if function.tree.stmts[row] == .ExprStmt(discarded, _) {
-        return Val(body_type(function.tree, discarded))
+        return Val(body_type(interner, function.tree, discarded))
     }
     None
 }
@@ -1804,7 +1807,7 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
     // A function the failure solve found can fail returns its carrier,
     // which names the result with its error spelled, `Int ParseError!` or
     // `Int Err!`: as `Int` it would read the carrier's box as the Int.
-    carried: ir_untag(program.types[result_row].ty)
+    carried: ir_untag(ir_module_row_ty(program, result_row))
     shown: if carried == .Result(_, _) -> carried else -> value
     kind: program.types[result_row].kind
     part: NativeEvalPart{name: type_failure_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: kind == IRTypeKind.Aggregate, ty: result_row, word: jet_cli_debug_eval_word(kind)}

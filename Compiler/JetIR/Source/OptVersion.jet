@@ -1491,8 +1491,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     m := ir_module_new()
     exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, Type.List{element: Type.Int}, 24, 8, IRClass.Pointer, false, 64, ""))
-    holder: ir_intern_type(m, "test Holder", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Holder"}, 48, 8, IRClass.Memory, false, 64, ""))
+    list_tid: ir_module_intern_tid(m, Type.List{element: Type.Int})
+    list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
+    holder_tid: ir_module_intern_tid(m, Type.Named{name: "Holder"})
+    holder: ir_intern_type(m, "test Holder", ir_layout(IRTypeKind.Aggregate, holder_tid, 48, 8, IRClass.Memory, false, 64, ""))
     g := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 1)
     h: ir_slot(g, holder, IRSlotKind.Param, ir_intern_name(m, "h"), 1)
     from: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "from"), 1)
@@ -1727,7 +1729,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     byte_ty: Type.IntN{signed: false, bits: 8}
     byte_row: ir_type_row(m, byte_ty) ?? panic("no U8 row")
     word: ir_word_row(m)
-    list: ir_intern_type(m, "test [U8]", ir_layout(IRTypeKind.Aggregate, Type.List{element: byte_ty}, 24, 8, IRClass.Pointer, false, 64, ""))
+    list_tid: ir_module_intern_tid(m, Type.List{element: byte_ty})
+    list: ir_intern_type(m, "test [U8]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
     g := ir_function_new("cond_count", "test:count.jet.cond_count", "", "count.jet", 1)
     xs: ir_slot(g, list, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
     g.result = exact

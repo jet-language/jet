@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -386,32 +386,34 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
             // pointer to its runtime cell, which points at the value's bytes
             // (IRModule.list_elements) from its payload word. The debugger
             // shows the cell, its one unnamed member, as `Shared{value}`.
-            if ir_untag(ty.ty) == .Shared(_) {
+            written: ir_module_row_ty(m, row)
+            if ir_untag(written) == .Shared(_) {
                 value: ir_x64_debug_pointer(tables, m.list_elements.get(row) ?? -1)
                 members: [X64DebugMember]{X64DebugMember{name: "", offset: IR_X64_SHARED_PAYLOAD, ty: value}}
                 cell: ir_x64_debug_add(tables, X64DebugType{name: "Shared", size: IR_X64_SHARED_PAYLOAD + 8, kind: X64DebugTypeKind.Struct{members: members}})
-                return X64DebugType{name: ir_type_name(ty.ty), size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, cell)}}
+                return X64DebugType{name: ir_type_name(written), size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, cell)}}
             }
             // Any other runtime handle (a task's, a channel endpoint's,
             // Bytes, a Clock): named as Jet spells it, a typedef of the
             // runtime state's pointer, which the debugger reads by that name
             // (JetDebug Native.jet native_debug_runtime_handle).
-            if ir_task_element(ty.ty) != None || ir_channel_element(ty.ty, "Sender") != None || ir_channel_element(ty.ty, "Receiver") != None || ir_runtime_handle(ir_nominal_name(ir_untag(ty.ty)) ?? "") != None {
-                return X64DebugType{name: ir_type_name(ty.ty), size: 8, kind: X64DebugTypeKind.Typedef{target: shared.pointer}}
+            if ir_task_element(written) != None || ir_channel_element(written, "Sender") != None || ir_channel_element(written, "Receiver") != None || ir_runtime_handle(ir_nominal_name(ir_untag(written)) ?? "") != None {
+                return X64DebugType{name: ir_type_name(written), size: 8, kind: X64DebugTypeKind.Typedef{target: shared.pointer}}
             }
             X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
         }
         .Aggregate -> {
-            if ir_untag(ty.ty) == .List(_) || ir_untag(ty.ty) == .Map(_, _, _) {
+            written: ir_module_row_ty(m, row)
+            if ir_untag(written) == .List(_) || ir_untag(written) == .Map(_, _, _) {
                 target: m.list_elements.get(row) ?? -1
                 data: ir_x64_debug_pointer(tables, target)
                 members: [X64DebugMember]{X64DebugMember{name: "len", offset: 0, ty: shared.word}, X64DebugMember{name: "cap", offset: 8, ty: shared.word}, X64DebugMember{name: "data", offset: 16, ty: data}}
-                return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
+                return X64DebugType{name: ir_type_name(written), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
             }
             list: m.debug_members.get(row) ?? -1
             if list >= 0 {
                 members: loop field in m.member_lists[list] -> X64DebugMember{name: field.name, offset: field.offset, ty: if field.boxed -> shared.pointer else -> field.ty}
-                return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
+                return X64DebugType{name: ir_type_name(written), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
             }
             X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
         }
@@ -443,7 +445,7 @@ ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64Debug
     list: m.debug_variants.get(row) ?? return None
     if list < 0 -> return None
     described: m.variant_lists[list]
-    name: ir_type_name(ty.ty)
+    name: ir_type_name(ir_module_row_ty(m, row))
     payload_free := described.selector == .Word
     loop variant in described.variants {
         if variant.selector < 0 || variant.members.len() > 0 -> payload_free = false
@@ -903,13 +905,13 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         } else {
             loop row in 0..<m.types.len() {
                 list: m.debug_members.get(row) ?? next
-                identity: ir_type_name(m.types[row].ty)
+                identity: ir_module_row_identity(m, row)
                 loop member in m.member_lists[list] {
                     size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
                     ty: if {
                         member.boxed -> "box"
                         member.ty < 0 -> "-"
-                        else -> ir_type_name(m.types[member.ty].ty)
+                        else -> ir_module_row_identity(m, member.ty)
                     }
                     log.push("field {identity} {member.offset} {size} {member.name} {ty}")
                 }
@@ -1422,7 +1424,7 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
         }
         is_alloc := false
         if m.alloc_types {
-            if ir_box_row(m, row) -> is_alloc = true else if ty.ty == .Apply(aname, _) {
+            if ir_box_row(m, row) -> is_alloc = true else if ir_module_row_ty(m, row) == .Apply(aname, _) {
                 if aname == IR_ALLOC_TYPE -> is_alloc = true
             }
         }
@@ -2336,7 +2338,8 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
     m := ir_module_new()
     int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
     handle: Type.Shared{inner: Type.Int}
-    row: ir_intern_type(m, ir_type_name(handle), ir_owned_layout(IRTypeKind.Pointer, handle, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
+    handle_tid: ir_module_intern_tid(m, handle)
+    row: ir_intern_type(m, ir_type_name(handle), ir_owned_layout(IRTypeKind.Pointer, handle_tid, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
     m.list_elements[row] = int_row
     tables := ir_x64_tables_start(m)
     ir_x64_debug_types(m, tables)
@@ -2360,7 +2363,7 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
 #Test("a type row's debug name does not depend on which spelling reached it first") {
     members: [Type]{Type.Int, Type.String}
     defs := [TTypeDef]{ir_union_def(module_none(), ir_union_key(Type.Union{members: members}), members)}
-    p := ir_program_declared(defs, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p := ir_program_declared(defs, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     spellings: [[Type]]{
         [Type]{Type.Named{name: "FileReader"}, Type.Named{name: "<corelib>/core.files.FileReader"}},
         [Type]{Type.Union{members: [Type]{Type.Int, Type.String}}, Type.Union{members: [Type]{Type.String, Type.Int}}},
@@ -2375,7 +2378,7 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
                 _: ir_value_type(m, p, pair[at]) ?? panic("{ir_type_name(pair[at])} has no row")
             }
         }
-        named: loop ty in m.types -> ir_type_name(ty.ty)
+        named: loop row in 0..<m.types.len() -> ir_type_name(ir_module_row_ty(m, row))
         names.push(named)
         tables := ir_x64_tables_start(m)
         ir_x64_debug_types(m, tables)
@@ -2395,7 +2398,7 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
 // reached it first, keyed or bare, so the debugger's handle types are found
 // by the row, never by its type's name.
 #Test("a precise number's or a Duration's row is described as its handle by either spelling") {
-    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
+    p: ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
     spellings: [Type]{Type.Named{name: "<corelib>/core.math.Fraction"}, Type.Named{name: "Fraction"}, Type.Named{name: "<corelib>/core.math.Decimal"}, Type.Named{name: "Decimal"}, Type.Named{name: "Duration"}}
     shown: [String]{"Fraction", "Fraction", "Decimal", "Decimal", "Duration"}
     runtimes: [String]{"JetFraction", "JetFraction", "JetDecimal", "JetDecimal", "Duration"}

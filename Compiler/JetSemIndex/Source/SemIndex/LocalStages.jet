@@ -12,6 +12,7 @@ use {
     jet_foundation.[
         BodyTree,
         FnBody,
+        Interner,
         Span,
         TComptimeValue,
         TLocal,
@@ -36,8 +37,9 @@ SEMINDEX_LOCAL_STAGE_VALUE_LIMIT: 120
 
 // The stage of every immutable local of `doc_module`'s checked bodies, keyed
 // as semindex_local_types keys its type. `summaries` holds the solved effect
-// rows of the indexed functions (semindex_summaries).
-semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary]) -> [String:SemLocalStage] Never! {
+// rows of the indexed functions (semindex_summaries); `interner` names the
+// TypeIDs of the bodies.
+semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary], interner: Interner) -> [String:SemLocalStage] Never! {
     by_raw_key := [String:Int]{}
     loop (row, summary) in summaries {
         if by_raw_key.get(summary.raw_key) == None -> _ := by_raw_key.add(summary.raw_key, row)
@@ -67,7 +69,7 @@ semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary
                 key: semindex_local_type_key(local.name, local.span)
                 // A generic body's instances share spans and keep the first.
                 if stages.get(key) != None -> next
-                stage: semindex_local_stage(function, local, init, stages, summaries, by_raw_key, doc_module) ?? next
+                stage: semindex_local_stage(function, local, init, stages, summaries, by_raw_key, doc_module, interner) ?? next
                 stages[key] = stage
             }
         }
@@ -88,11 +90,11 @@ semindex_local_stage_start: fn(tree: BodyTree, row: Int) -> Int Never! {
     0
 }
 
-semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String:SemLocalStage], summaries: [SemSummary], by_raw_key: [String:Int], doc_module: JetDriverDocModule) -> SemLocalStage? Never! {
+semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String:SemLocalStage], summaries: [SemSummary], by_raw_key: [String:Int], doc_module: JetDriverDocModule, interner: Interner) -> SemLocalStage? Never! {
     folded := TComptimeValue?{None}
     if doc_module.name_ledger == .Val(storage) {
         permit: storage.guard_read()
-        folded = sema_comptime_fold(function.tree, init, [SemaComptimeItemValue]{}, permit.value.symbols)
+        folded = sema_comptime_fold(interner, function.tree, init, [SemaComptimeItemValue]{}, permit.value.symbols)
     }
     if folded == .Val(value) {
         shown := ""

@@ -33,7 +33,7 @@ use {
         jet_driver_runtime_interface_sources,
     ]
     jet_eval.[JetEvalNativeSession]
-    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, symbol_table]
+    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, interner_empty, symbol_table]
     jet_ir.[IRCoreExport, IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
     jet_sema.[SemaCoreBody, SemaCoreCaptures, sema_core_bodies_bytes, sema_core_bodies_problem, sema_core_seal_bound]
@@ -142,7 +142,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     writing: task jet_cli_core_bodies_file(captures, trace_sink)
     declarations := jet_driver_checked_declarations(inputs)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
+    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), inputs.interner.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, JET_CLI_CORE_LOWERED, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
     loop failure in library.failures {
@@ -168,6 +168,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     bodies: bodies_file.bytes.move()
     inputs.functions = [FnBody]{}
     inputs.symbols = symbol_table()
+    inputs.interner = interner_empty()
     inputs.sources = [String:String]{}
     checked_rest: inputs.move()
     released: task &&checked_rest { checked_rest.modules.len() }

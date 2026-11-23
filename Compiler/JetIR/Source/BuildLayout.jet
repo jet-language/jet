@@ -36,7 +36,7 @@ ir_layout_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     number := ir_expr(m, p, b, value)
     if ir_failed(b) || number < 0 -> return -1
-    if ir_untag(ir_ty(p, b, value)) == .Int {
+    if ir_untag(ir_ty(m, p, b, value)) == .Int {
         float_row: ir_value_type(m, p, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
         converted: ir_runtime(m, b, "jet_int_owned_to_f64", [Int]{number}, float_row)
         ir_release(m, b, number)

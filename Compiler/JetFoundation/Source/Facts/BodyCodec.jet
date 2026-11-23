@@ -2244,7 +2244,6 @@ body_codec_put_bodytree: fn(out: &BodyCodecOut, value: BodyTree) Never! {
     body_codec_put_list_bodynode(out, value.nodes)
     body_codec_put_list_stmtkind(out, value.stmts)
     body_codec_put_list_texprtype(out, value.expr_types)
-    body_codec_put_typetable(out, value.types)
     body_codec_put_int(out, value.node_base)
     body_codec_put_int(out, value.stmt_base)
     body_codec_put_symbollocalkeys(out, value.symbols)
@@ -2254,11 +2253,10 @@ body_codec_get_bodytree: fn(bytes: [U8], input: &BodyCodecIn) -> BodyTree Never!
     f0: body_codec_get_list_bodynode(bytes, input)
     f1: body_codec_get_list_stmtkind(bytes, input)
     f2: body_codec_get_list_texprtype(bytes, input)
-    f3: body_codec_get_typetable(bytes, input)
+    f3: body_codec_get_int(bytes, input)
     f4: body_codec_get_int(bytes, input)
-    f5: body_codec_get_int(bytes, input)
-    f6: body_codec_get_symbollocalkeys(bytes, input)
-    BodyTree{nodes: f0, stmts: f1, expr_types: f2, types: f3, node_base: f4, stmt_base: f5, symbols: f6}
+    f5: body_codec_get_symbollocalkeys(bytes, input)
+    BodyTree{nodes: f0, stmts: f1, expr_types: f2, node_base: f3, stmt_base: f4, symbols: f5}
 }
 
 body_codec_put_bodynode: fn(out: &BodyCodecOut, value: BodyNode) Never! {
@@ -9025,26 +9023,13 @@ body_codec_get_ttransactionsnapshot: fn(bytes: [U8], input: &BodyCodecIn) -> TTr
 
 body_codec_put_texprtype: fn(out: &BodyCodecOut, value: TExprType) Never! {
     body_codec_put_int(out, value.id)
-    body_codec_put_int(out, value.ty)
+    body_codec_put_typeid(out, value.ty)
 }
 
 body_codec_get_texprtype: fn(bytes: [U8], input: &BodyCodecIn) -> TExprType Never! {
     f0: body_codec_get_int(bytes, input)
-    f1: body_codec_get_int(bytes, input)
+    f1: body_codec_get_typeid(bytes, input)
     TExprType{id: f0, ty: f1}
-}
-
-body_codec_put_typetable: fn(out: &BodyCodecOut, value: TypeTable) Never! {
-    body_codec_put_list_type(out, value.types)
-    body_codec_put_list_int(out, value.hashes)
-    body_codec_put_list_int(out, value.slots)
-}
-
-body_codec_get_typetable: fn(bytes: [U8], input: &BodyCodecIn) -> TypeTable Never! {
-    f0: body_codec_get_list_type(bytes, input)
-    f1: body_codec_get_list_int(bytes, input)
-    f2: body_codec_get_list_int(bytes, input)
-    TypeTable{types: f0, hashes: f1, slots: f2}
 }
 
 body_codec_put_symbollocalkeys: fn(out: &BodyCodecOut, value: SymbolLocalKeys) Never! {

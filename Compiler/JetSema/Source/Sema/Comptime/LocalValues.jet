@@ -115,7 +115,7 @@ sema_comptime_local_value_candidate: fn(
         return false
     }
     if sema_scope_inside_impure(scopes) || sema_comptime_local_value_unstorable(ty) -> return false
-    if sema_comptime_local_value_holds_callback_bound(context, node_start) -> return false
+    if sema_comptime_local_value_holds_callback_bound(program, context, node_start) -> return false
     loop index in reference_start..<context.name_references.len() {
         reference: context.name_references[index]
         if reference.kind != Val(SymbolKind.Local) && reference.kind != Val(SymbolKind.Parameter) {
@@ -140,11 +140,13 @@ sema_comptime_local_value_candidate: fn(
 // sema_effect_record_callback_bound), and a landed value replaces the
 // initializer's nodes, so the check would never run: `c: apply(4, noisy)`
 // into `fn(Int) -[!Panic]> Int` would compute `c` and drop the denial.
-sema_comptime_local_value_holds_callback_bound: fn(context: SemaCheckContext, node_start: Int) -> Bool {
+sema_comptime_local_value_holds_callback_bound: fn(program: SemaProgramTables, context: SemaCheckContext, node_start: Int) -> Bool {
     end: if context.arena.tree.nodes.len() < context.arena.tree.expr_types.len() -> context.arena.tree.nodes.len() else -> context.arena.tree.expr_types.len()
     loop index in node_start..<end {
-        if context.arena.tree.nodes[index].kind == .ConstRef(_) && sema_effect_callback_row(context.arena.tree.types.types[context.arena.tree.expr_types[index].ty]) != None {
-            return true
+        if context.arena.tree.nodes[index].kind == .ConstRef(_) {
+            tid: context.arena.tree.expr_types[index].ty
+            ty: if tid.id != 0 -> sema_type_syntax_in(program, context, tid) else -> context.arena.arena_syntax[index]
+            if sema_effect_callback_row(ty) != None -> return true
         }
     }
     false

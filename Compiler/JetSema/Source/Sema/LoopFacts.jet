@@ -19,7 +19,19 @@
 //   written at `i` is read at another position; a variable written each round
 //   (a reduction) carries a value into the next one;
 // - no_aliasing: every list read or written is a local's own value.
-use jet_foundation.[AutoVectorizationFacts, BodyIfCond, BodyTree, StmtKind, Type, body_node, body_stmt, body_type, measure_literal_value]
+use jet_foundation.[
+    AutoVectorizationFacts,
+    BodyIfCond,
+    BodyTree,
+    StmtKind,
+    TYPE_BOOL,
+    TYPE_FLOAT,
+    Type,
+    body_node,
+    body_stmt,
+    body_type_id,
+    measure_literal_value,
+]
 
 // What a scan of one loop body has read so far.
 SemaLoopScan: struct {
@@ -39,7 +51,7 @@ SemaLoopScan: struct {
 
 // Records the facts of every counted loop of `tree` that sema can prove
 // (none in a `#Scalar` function).
-sema_loop_facts: fn(tree: &BodyTree, scalar: Bool) Never! {
+sema_loop_facts: fn(tree: &BodyTree, scalar: Bool, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if scalar {
         return
     }
@@ -47,12 +59,12 @@ sema_loop_facts: fn(tree: &BodyTree, scalar: Bool) Never! {
         if tree.stmts[index] == {
             .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> {
                 if vectorization != None -> next
-                facts: sema_loop_range_facts(tree, local.name, start, end, step, exclusive, body) ?? next
+                facts: sema_loop_range_facts(tree, local.name, start, end, step, exclusive, body, program, context) ?? next
                 tree.stmts[index] = StmtKind.ForRange{label: label, local: local, start: start, end: end, step: step, exclusive: exclusive, body: body, vectorization: Val(facts), span: span}
             }
             .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
                 if vectorization != None || source != None -> next
-                facts: sema_loop_range_facts(tree, variable.name, start, end, step, exclusive, body) ?? next
+                facts: sema_loop_range_facts(tree, variable.name, start, end, step, exclusive, body, program, context) ?? next
                 tree.stmts[index] = StmtKind.Range{label: label, variable: variable, source: source, start: start, end: end, step: step, exclusive: exclusive, vectorization: Val(facts), body: body, span: span}
             }
             .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
@@ -62,14 +74,14 @@ sema_loop_facts: fn(tree: &BodyTree, scalar: Bool) Never! {
 
 // The facts of one counted loop over `local`, or None when its range or body
 // is outside what this pass reads.
-sema_loop_range_facts: fn(tree: BodyTree, local: String, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int]) -> AutoVectorizationFacts? Never! {
+sema_loop_range_facts: fn(tree: BodyTree, local: String, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], program: SemaProgramTables, context: SemaCheckContext) -> AutoVectorizationFacts? Never! {
     if step != None -> return None
     low: sema_loop_int_literal(tree, start) ?? return None
     high: sema_loop_int_literal(tree, end) ?? return None
     if low < 0 || high >= SEMA_LOOP_EXTENT_LIMIT -> return None
     extent: if exclusive -> high else -> high + 1
     scan := SemaLoopScan{local: local, extent: extent, readable: true, early_exit: false, effect_free: true, independent: true, aliasing_free: true, element: None, proven: [Int]{}, written: [String]{}, read_elsewhere: [String]{}}
-    loop row in body -> sema_loop_scan_stmt(tree, row, scan)
+    loop row in body -> sema_loop_scan_stmt(tree, row, scan, program, context)
     if !scan.readable -> return None
     loop name in scan.read_elsewhere {
         if scan.written.contains(name) -> scan.independent = false
@@ -86,40 +98,40 @@ sema_loop_int_literal: fn(tree: BodyTree, id: Int) -> Int? Never! {
     None
 }
 
-sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
+sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     statement: body_stmt(tree, row)
     if statement == {
         .Assign(place, op, value, _, _) -> {
             // A compound write of anything but a Float can overflow or divide by zero.
-            if op != None && body_type(tree, value) != Type.Float -> scan.effect_free = false
+            if op != None && body_type_id(tree, value).id != TYPE_FLOAT.id -> scan.effect_free = false
             if place == {
                 .Local(target) -> {
                     if target.name == scan.local -> scan.readable = false
                     scan.independent = false
                 }
-                .Expr(target) -> sema_loop_scan_write(tree, target, scan)
+                .Expr(target) -> sema_loop_scan_write(tree, target, scan, program, context)
             }
-            sema_loop_scan_expr(tree, value, scan)
+            sema_loop_scan_expr(tree, value, scan, program, context)
         }
         .Let(bound, _, init, _, _, _) -> {
             if bound.name == scan.local -> scan.readable = false
-            sema_loop_scan_expr(tree, init, scan)
+            sema_loop_scan_expr(tree, init, scan, program, context)
         }
-        .ExprStmt(value, _) -> { sema_loop_scan_expr(tree, value, scan) }
+        .ExprStmt(value, _) -> { sema_loop_scan_expr(tree, value, scan, program, context) }
         .If(condition, then_body, else_body, _, _) -> {
-            sema_loop_scan_condition(tree, condition, scan)
-            loop inner in then_body -> sema_loop_scan_stmt(tree, inner, scan)
+            sema_loop_scan_condition(tree, condition, scan, program, context)
+            loop inner in then_body -> sema_loop_scan_stmt(tree, inner, scan, program, context)
             if else_body == .Val(rows) {
-                loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan)
+                loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan, program, context)
             }
         }
         .Return(value, _) -> {
             scan.early_exit = true
-            if value == .Val(returned) -> sema_loop_scan_expr(tree, returned, scan)
+            if value == .Val(returned) -> sema_loop_scan_expr(tree, returned, scan, program, context)
         }
         .Break(_, _) | .Continue(_, _) -> { scan.early_exit = true }
         .Inline(rows, _) -> {
-            loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan)
+            loop inner in rows -> sema_loop_scan_stmt(tree, inner, scan, program, context)
         }
         .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .BreakValue(_, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {
             scan.readable = false
@@ -127,12 +139,12 @@ sema_loop_scan_stmt: fn(tree: BodyTree, row: Int, scan: &SemaLoopScan) Never! {
     }
 }
 
-sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan) Never! {
+sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if condition == {
-        .Plain(value) -> { sema_loop_scan_expr(tree, value, scan) }
+        .Plain(value) -> { sema_loop_scan_expr(tree, value, scan, program, context) }
         .And(left, right) -> {
-            sema_loop_scan_condition(tree, left, scan)
-            sema_loop_scan_condition(tree, right, scan)
+            sema_loop_scan_condition(tree, left, scan, program, context)
+            sema_loop_scan_condition(tree, right, scan, program, context)
         }
         .IfLet(_, _) -> scan.readable = false
     }
@@ -140,28 +152,28 @@ sema_loop_scan_condition: fn(tree: BodyTree, condition: BodyIfCond, scan: &SemaL
 
 // A write through place expression `target`: `xs[i]` of a local list keeps
 // the rounds independent; any other place does not.
-sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan) Never! {
+sema_loop_scan_write: fn(tree: BodyTree, target: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     if body_node(tree, target).kind == .Index(base, index, _, _, _, _) {
-        if scan.element == None -> scan.element = Val(body_type(tree, target))
+        if scan.element == None -> scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, target)))
         name: sema_loop_local_name(tree, base) ?? ""
-        if sema_loop_scan_access(tree, base, index, scan) && name != "" {
+        if sema_loop_scan_access(tree, base, index, scan, program, context) && name != "" {
             if !scan.written.contains(name) -> scan.written.push(name)
         } else { scan.independent = false }
-        sema_loop_scan_expr(tree, index, scan)
+        sema_loop_scan_expr(tree, index, scan, program, context)
         return
     }
     scan.independent = false
-    sema_loop_scan_expr(tree, target, scan)
+    sema_loop_scan_expr(tree, target, scan, program, context)
 }
 
 // One read or write `base[index]`: whether it is at the loop index. An access
 // at the index of a local fixed list the extent covers is proven; any other
 // may stop the round.
-sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopScan) -> Bool Never! {
+sema_loop_scan_access: fn(tree: BodyTree, base: Int, index: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
     name: sema_loop_local_name(tree, base) ?? ""
     if name == "" -> scan.aliasing_free = false
     at_index: (sema_loop_local_name(tree, index) ?? "") == scan.local
-    length: sema_loop_fixed_length(body_type(tree, base)) ?? -1
+    length: sema_loop_fixed_length(sema_type_syntax_in(program, context, body_type_id(tree, base))) ?? -1
     if at_index && name != "" && length >= scan.extent -> scan.proven.push(index) else {
         scan.effect_free = false
     }
@@ -182,43 +194,43 @@ sema_loop_local_name: fn(tree: BodyTree, id: Int) -> String? Never! {
     None
 }
 
-sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan) Never! {
+sema_loop_scan_expr: fn(tree: BodyTree, id: Int, scan: &SemaLoopScan, program: SemaProgramTables, context: SemaCheckContext) Never! {
     node: body_node(tree, id)
     if node.kind == {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .Unit -> {}
         .Binary(_, overflow, _, lhs, rhs) -> {
             // Float arithmetic and comparisons cannot stop; integer
             // arithmetic can overflow or divide by zero.
-            ty: body_type(tree, id)
-            if overflow || (ty != Type.Float && ty != Type.Bool) -> scan.effect_free = false
-            sema_loop_scan_expr(tree, lhs, scan)
-            sema_loop_scan_expr(tree, rhs, scan)
+            tid: body_type_id(tree, id)
+            if overflow || (tid.id != TYPE_FLOAT.id && tid.id != TYPE_BOOL.id) -> scan.effect_free = false
+            sema_loop_scan_expr(tree, lhs, scan, program, context)
+            sema_loop_scan_expr(tree, rhs, scan, program, context)
         }
         .CompareChain(operands, _, _) -> {
-            loop operand in operands -> sema_loop_scan_expr(tree, operand, scan)
+            loop operand in operands -> sema_loop_scan_expr(tree, operand, scan, program, context)
         }
         .Unary(_, operand) -> {
             // An Int negation can overflow; Float and Bool operators cannot stop.
-            ty: body_type(tree, id)
-            if ty != Type.Float && ty != Type.Bool -> scan.effect_free = false
-            sema_loop_scan_expr(tree, operand, scan)
+            tid: body_type_id(tree, id)
+            if tid.id != TYPE_FLOAT.id && tid.id != TYPE_BOOL.id -> scan.effect_free = false
+            sema_loop_scan_expr(tree, operand, scan, program, context)
         }
         .Move(value) | .Clone(value, _) | .ExplicitCopy(value) -> {
-            sema_loop_scan_expr(tree, value, scan)
+            sema_loop_scan_expr(tree, value, scan, program, context)
         }
-        .Field(receiver, _) -> { sema_loop_scan_expr(tree, receiver, scan) }
+        .Field(receiver, _) -> { sema_loop_scan_expr(tree, receiver, scan, program, context) }
         .Index(base, index, _, _, _, _) -> {
-            if scan.element == None -> scan.element = Val(body_type(tree, id))
-            if !sema_loop_scan_access(tree, base, index, scan) {
+            if scan.element == None -> scan.element = Val(sema_type_syntax_in(program, context, body_type_id(tree, id)))
+            if !sema_loop_scan_access(tree, base, index, scan, program, context) {
                 name: sema_loop_local_name(tree, base) ?? ""
                 if name != "" -> scan.read_elsewhere.push(name)
             }
-            sema_loop_scan_expr(tree, base, scan)
-            sema_loop_scan_expr(tree, index, scan)
+            sema_loop_scan_expr(tree, base, scan, program, context)
+            sema_loop_scan_expr(tree, index, scan, program, context)
         }
         .Call(_, _, args) -> {
             scan.effect_free = false
-            loop arg in args -> sema_loop_scan_expr(tree, arg.value, scan)
+            loop arg in args -> sema_loop_scan_expr(tree, arg.value, scan, program, context)
         }
         .StrLit(_) | .InlineBlock(_) | .Uninit | .CtLit(_) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> {
             scan.readable = false

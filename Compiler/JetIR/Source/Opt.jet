@@ -49,7 +49,7 @@
 // Selection reads every operand of an instruction before it writes the
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
-use jet_foundation.[CompilerThreads, NameRows, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_set, name_rows_value]
+use jet_foundation.[CompilerThreads, Interner, NameRows, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_set, name_rows_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -700,7 +700,7 @@ ir_opt_version_body: fn(m: IRModule, f: &IRFunction, options: IROptOptions, lint
 }
 
 // The rows of `m` the passes after the bodies read besides the bodies (the
-// types, type keys, data, names, the name, function and type rows, and the
+// types and their interner, type keys, data, names, the name, function and type rows, and the
 // entry), moved into a module of their own that threads share: each reads
 // exactly what `m` holds. ir_opt_lend_into(m, lent) moves them back.
 ir_opt_lend: fn(m: &IRModule) -> IRModule Never! {
@@ -711,6 +711,7 @@ ir_opt_lend: fn(m: &IRModule) -> IRModule Never! {
 
 ir_opt_lend_into: fn(to: &IRModule, from: &IRModule) Never! {
     compiler_transfer_rows<IRType>(to.types, from.types)
+    compiler_transfer_rows<Interner>(to.interner, from.interner)
     compiler_transfer_rows<String>(to.type_keys, from.type_keys)
     compiler_transfer_rows<[U8]>(to.data, from.data)
     compiler_transfer_rows<String>(to.names, from.names)
@@ -780,7 +781,7 @@ ir_opt_mark_cold: fn(functions: &[IRFunction], calls: OptCalls) Never! {
     }
 }
 
-// The passes read the module's type and data rows, moved out of `m` into a
+// The passes read the module's type, interner and data rows, moved out of `m` into a
 // module of their own (ir_opt_unview moves them back), the ids of the
 // runtime routes they know (ir_opt_routes), the stop, trap and turn polls'
 // (OptRange.jet, OptStops.jet ir_opt_fold_polls), by name, and the
@@ -790,6 +791,7 @@ ir_opt_mark_cold: fn(functions: &[IRFunction], calls: OptCalls) Never! {
 ir_opt_view: fn(m: &IRModule, keys: [String]) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
+    compiler_transfer_rows<Interner>(view.interner, m.interner)
     compiler_transfer_rows<[U8]>(view.data, m.data)
     loop route in ir_opt_routes() {
         id: name_rows_value(m.name_rows, route) ?? -1
@@ -810,9 +812,10 @@ ir_opt_view: fn(m: &IRModule, keys: [String]) -> IRModule Never! {
     view
 }
 
-// The type and data rows ir_opt_view moved out of `m`, back into it.
+// The type, interner and data rows ir_opt_view moved out of `m`, back into it.
 ir_opt_unview: fn(m: &IRModule, view: &IRModule) Never! {
     compiler_transfer_rows<IRType>(m.types, view.types)
+    compiler_transfer_rows<Interner>(m.interner, view.interner)
     compiler_transfer_rows<[U8]>(m.data, view.data)
 }
 
@@ -1041,6 +1044,7 @@ ir_opt_split_module: fn(m: &IRModule, functions: &[IRFunction], threads: Compile
     slots.reverse()
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
+    compiler_transfer_rows<Interner>(view.interner, m.interner)
     types: Shared{IROptTypes{views: [IRModule]{view.move()}}}
     _: ir_opt_splitters(slots, types, 0) ?? panic("the IR splitting threads failed")
     loop slot in slots {
@@ -1051,6 +1055,7 @@ ir_opt_split_module: fn(m: &IRModule, functions: &[IRFunction], threads: Compile
     }
     held := types.guard_edit()
     compiler_transfer_rows<IRType>(m.types, held.value.views[0].types)
+    compiler_transfer_rows<Interner>(m.interner, held.value.views[0].interner)
     split
 }
 

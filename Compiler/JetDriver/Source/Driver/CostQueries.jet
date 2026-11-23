@@ -32,6 +32,7 @@ use {
         body_each_stmt_child,
         body_node,
         body_stmt,
+        Interner,
         body_type,
         checked_builtin_mutates_receiver,
         checked_cost_combine_bounds,
@@ -198,7 +199,7 @@ jet_driver_cost_gap_diagnostic: fn(load: JetDriverLoadResult, caller: FnBody, ca
 // The cost report of the `covered` functions of `functions`: each one's name
 // and sites, in cover order, its stop polls (jet_driver_cost_stop_polls)
 // after its other sites. `callees` are the callee facts the cover read.
-jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered], callees: JetDriverCostCallees) -> TCostReport Never! {
+jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered], callees: JetDriverCostCallees, interner: Interner) -> TCostReport Never! {
     report := TCostReport{}
     nodes: loop row in covered -> jet_driver_cost_nodes(functions[row.position])
     // Each function's direct callers among the covered, by position.
@@ -217,7 +218,7 @@ jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered],
     loop (at, row) in covered {
         depths: jet_driver_cost_loop_depths(functions[row.position].tree)
         report.functions.push(row.name)
-        jet_driver_cost_function_sites(functions[row.position], row.name, nodes[at], depths, report.sites)
+        jet_driver_cost_function_sites(functions[row.position], interner, row.name, nodes[at], depths, report.sites)
         jet_driver_cost_stop_polls(functions[row.position], row.position, row.name, nodes[at], depths, callees, callers, report.sites)
     }
     report
@@ -345,11 +346,11 @@ jet_driver_cost_loop_depth_array: fn(tree: BodyTree) -> [Int] Never! {
 // Whether `tree` has any loop-nested Int assignment that could possibly trigger
 // jet_driver_cost_growth (a `*=`, `<<=`, or `= Mul/Shl/OverflowOpt` on an Int
 // place inside a loop).
-jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, depths: [Int]) -> Bool Never! {
+jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, interner: Interner, depths: [Int]) -> Bool Never! {
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, _) {
             if depths[body_node_index(tree, value)] == 0 -> next
-            if !jet_driver_cost_int_place(tree, place) -> next
+            if !jet_driver_cost_int_place(tree, interner, place) -> next
             if op == .Val(operator) {
                 if operator == TBinaryOp.Mul || operator == TBinaryOp.Shl -> return true
                 next
@@ -367,7 +368,7 @@ jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, depths: [Int]) -> Bool 
 // functions with zero allocations, skips OutcomeConstruction/consumed tracking,
 // computes shared-edits and Int-growth maps lazily only when a loop-nested
 // candidate exists, and pushes only tidy SemanticRemainder sites.
-jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) Never! {
+jet_driver_cost_tidy_function_sites: fn(function: FnBody, interner: Interner, sites: &[TCostSite]) Never! {
     if !jet_driver_cost_reports(function) {
         return
     }
@@ -378,8 +379,8 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
     }
     grown_nodes := [Int:Bool]{}
     grown_updates := [Int:Bool]{}
-    growth_loaded: jet_driver_cost_has_growth_candidate(tree, depths)
-    if growth_loaded -> jet_driver_cost_growth(tree, grown_nodes, grown_updates)
+    growth_loaded: jet_driver_cost_has_growth_candidate(tree, interner, depths)
+    if growth_loaded -> jet_driver_cost_growth(tree, interner, grown_nodes, grown_updates)
     shared_loaded := false
     shared := [Int:Bool]{}
     nodes: jet_driver_cost_nodes(function)
@@ -387,7 +388,7 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
         depth: depths[body_node_index(tree, id)]
         if depth == 0 -> next
         node: body_node(tree, id)
-        fact: body_cost_fact(tree, node) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_nodes, id) else -> None) ?? next
+        fact: body_cost_fact(interner, tree, node) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_nodes, id) else -> None) ?? next
         if fact.state != TCostState.SemanticRemainder -> next
         if fact.kind == TCostKind.OutcomeConstruction -> next
         is_shared := false
@@ -399,7 +400,7 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
             if fact.written -> next
             if fact.kind == TCostKind.CollectionCopyOnWrite {
                 if !shared_loaded {
-                    shared = jet_driver_cost_shared_edits(tree)
+                    shared = jet_driver_cost_shared_edits(tree, interner)
                     shared_loaded = true
                 }
                 if shared.get(id) == None -> next
@@ -411,10 +412,10 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
         span := node.span
         if node.kind == .CoreCall(_, _, source_span, _, _, _) -> span = source_span
         view := ""
-        if node.kind == .MaterializeView(value) -> view = type_name(body_type(tree, value)) else if node.kind == .Clone(value, _) {
-            view = type_name(body_type(tree, value))
+        if node.kind == .MaterializeView(value) -> view = type_name(body_type(interner, tree, value)) else if node.kind == .Clone(value, _) {
+            view = type_name(body_type(interner, tree, value))
         } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
-            view = type_name(body_type(tree, receiver))
+            view = type_name(body_type(interner, tree, receiver))
         }
         sites.push(TCostSite{function: function.name, module_identity: function.module_identity, span: span, loop_depth: depth, kind: fact.kind, state: fact.state, view: view, shared: is_shared, written: fact.written, grows: grows})
     }
@@ -422,7 +423,7 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
         if statement == .Assign(place, op, value, _, span) {
             depth: depths[body_node_index(tree, value)]
             if depth == 0 -> next
-            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_updates, value) else -> None) ?? next
+            fact: jet_driver_cost_assign_fact(tree, interner, place, op, value) ?? (if growth_loaded -> jet_driver_cost_grown_shift(grown_updates, value) else -> None) ?? next
             if fact.state != TCostState.SemanticRemainder -> next
             edited := false
             grows := false
@@ -433,7 +434,7 @@ jet_driver_cost_tidy_function_sites: fn(function: FnBody, sites: &[TCostSite]) N
                 if fact.written -> next
                 if fact.kind == TCostKind.CollectionCopyOnWrite {
                     if !shared_loaded {
-                        shared = jet_driver_cost_shared_edits(tree)
+                        shared = jet_driver_cost_shared_edits(tree, interner)
                         shared_loaded = true
                     }
                     if place == .Expr(expression) -> edited = shared.get(expression) != None
@@ -470,9 +471,9 @@ jet_driver_cost_sites_to_lints: fn(load: JetDriverLoadResult, sites: [TCostSite]
 // (jet_driver_cost_tidy) that a loop of a function the program wrote
 // repeats. A plain check and a program compile (`jet build`) list them
 // without keeping a cost report, and a function without a loop is not walked.
-jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -> [Diagnostic] {
+jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody], interner: Interner) -> [Diagnostic] {
     sites := [TCostSite]{}
-    loop function in functions -> jet_driver_cost_tidy_function_sites(function, sites)
+    loop function in functions -> jet_driver_cost_tidy_function_sites(function, interner, sites)
     jet_driver_cost_sites_to_lints(load, sites)
 }
 
@@ -662,18 +663,18 @@ jet_driver_cost_consumed: fn(tree: BodyTree, consumed: &[Int:Bool], removed: &[I
 // each at its loop depth in `depths` (jet_driver_cost_loop_depths).
 // An Outcome a `??` takes apart is optimizer-removed; one the enclosing code
 // consumes otherwise is no site.
-jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int], depths: [Int:Int], sites: &[TCostSite]) Never! {
+jet_driver_cost_function_sites: fn(function: FnBody, interner: Interner, name: String, nodes: [Int], depths: [Int:Int], sites: &[TCostSite]) Never! {
     tree: function.tree
     consumed := [Int:Bool]{}
     removed := [Int:Bool]{}
     jet_driver_cost_consumed(tree, consumed, removed)
-    shared: jet_driver_cost_shared_edits(tree)
+    shared: jet_driver_cost_shared_edits(tree, interner)
     grown_nodes := [Int:Bool]{}
     grown_updates := [Int:Bool]{}
-    jet_driver_cost_growth(tree, grown_nodes, grown_updates)
+    jet_driver_cost_growth(tree, interner, grown_nodes, grown_updates)
     loop id in nodes {
         node: body_node(tree, id)
-        fact: body_cost_fact(tree, node) ?? jet_driver_cost_grown_shift(grown_nodes, id) ?? next
+        fact: body_cost_fact(interner, tree, node) ?? jet_driver_cost_grown_shift(grown_nodes, id) ?? next
         state := fact.state
         if fact.kind == TCostKind.OutcomeConstruction {
             if removed.get(id) != None -> state = TCostState.OptimizerRemoved else if consumed.get(id) != None {
@@ -683,16 +684,16 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
         span := node.span
         if node.kind == .CoreCall(_, _, source_span, _, _, _) -> span = source_span
         view := ""
-        if node.kind == .MaterializeView(value) -> view = type_name(body_type(tree, value)) else if node.kind == .Clone(value, _) {
-            view = type_name(body_type(tree, value))
+        if node.kind == .MaterializeView(value) -> view = type_name(body_type(interner, tree, value)) else if node.kind == .Clone(value, _) {
+            view = type_name(body_type(interner, tree, value))
         } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
-            view = type_name(body_type(tree, receiver))
+            view = type_name(body_type(interner, tree, receiver))
         }
         sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None, written: fact.written, grows: fact.kind == TCostKind.ExactIntSpill && grown_nodes.get(id) != None})
     }
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, span) {
-            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? jet_driver_cost_grown_shift(grown_updates, value) ?? next
+            fact: jet_driver_cost_assign_fact(tree, interner, place, op, value) ?? jet_driver_cost_grown_shift(grown_updates, value) ?? next
             edited := false
             if place == .Expr(expression) -> edited = shared.get(expression) != None
             sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: "", shared: edited, grows: fact.kind == TCostKind.ExactIntSpill && grown_updates.get(value) != None})
@@ -723,7 +724,7 @@ jet_driver_cost_grown_shift: fn(grown: [Int:Bool], id: Int) -> TCostFact? Never!
 // condition compares the target against any Int (jet_driver_cost_caps)
 // stops below twice that Int, so it spills only if that Int already sits
 // near the rail's end.
-jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bool]) Never! {
+jet_driver_cost_growth: fn(tree: BodyTree, interner: Interner, nodes: &[Int:Bool], updates: &[Int:Bool]) Never! {
     sizes := [Int:Int]{}
     conditions := [Int:Int]{}
     owners := [Int:Int]{}
@@ -759,23 +760,23 @@ jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bo
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, _) {
             owner: owners.get(value) ?? next
-            if !jet_driver_cost_int_place(tree, place) -> next
+            if !jet_driver_cost_int_place(tree, interner, place) -> next
             turn: turns[owner]
             if !jet_driver_cost_carried(tree, place, turn, binds) -> next
             if conditions.get(value) == .Val(capped) && jet_driver_cost_caps(tree, capped, place, turn, binds) {
                 next
             }
             if op == .Val(operator) {
-                if jet_driver_cost_step_grows(tree, operator, value) -> updates[value] = true
+                if jet_driver_cost_step_grows(tree, interner, operator, value) -> updates[value] = true
                 next
             }
             operation: body_node(tree, value).kind
             if operation == .Binary(operator, _, _, left, right) {
-                if jet_driver_cost_operation_grows(tree, place, operator, left, right, turn, binds) {
+                if jet_driver_cost_operation_grows(tree, interner, place, operator, left, right, turn, binds) {
                     nodes[value] = true
                 }
             } else if operation == .OverflowOpt(prefix, name, _, left, right) && body_cost_int_policy_operator(prefix, name) == .Val(operator) {
-                if jet_driver_cost_operation_grows(tree, place, operator, left, right, turn, binds) {
+                if jet_driver_cost_operation_grows(tree, interner, place, operator, left, right, turn, binds) {
                     nodes[value] = true
                 }
             }
@@ -790,14 +791,14 @@ jet_driver_cost_growth: fn(tree: BodyTree, nodes: &[Int:Bool], updates: &[Int:Bo
 // (jet_driver_cost_carries_place); a shift's must read it as it is, so a
 // canonical Huffman code's `code = (code + count) << 1`, which its bit-length
 // loop bounds, is no spill site.
-jet_driver_cost_operation_grows: fn(tree: BodyTree, place: BodyPlace, operator: TBinaryOp, left: Int, right: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+jet_driver_cost_operation_grows: fn(tree: BodyTree, interner: Interner, place: BodyPlace, operator: TBinaryOp, left: Int, right: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     product: operator == TBinaryOp.Mul
     step := Int?{None}
     if jet_driver_cost_carries_place(tree, place, left, product, turn, binds) -> step = Val(right)
     if step == None && product && jet_driver_cost_carries_place(tree, place, right, true, turn, binds) {
         step = Val(left)
     }
-    if step == .Val(by) -> return jet_driver_cost_step_grows(tree, operator, by)
+    if step == .Val(by) -> return jet_driver_cost_step_grows(tree, interner, operator, by)
     false
 }
 
@@ -890,9 +891,9 @@ jet_driver_cost_turn_key: fn(tree: BodyTree, id: Int, turn: [Int:Bool], binds: J
 }
 
 // Whether assignment place `place` of `tree` stores an exact Int.
-jet_driver_cost_int_place: fn(tree: BodyTree, place: BodyPlace) -> Bool Never! {
+jet_driver_cost_int_place: fn(tree: BodyTree, interner: Interner, place: BodyPlace) -> Bool Never! {
     if place == .Local(local) -> return local.ty == Type.Int
-    if place == .Expr(expression) && body_cost_type(tree, expression) == .Val(stored) {
+    if place == .Expr(expression) && body_cost_type(interner, tree, expression) == .Val(stored) {
         return stored == Type.Int
     }
     false
@@ -950,8 +951,8 @@ jet_driver_cost_updates_place: fn(tree: BodyTree, place: BodyPlace, id: Int, tur
 
 // Whether an Int update by `operator` with step node `step` of `tree` grows
 // geometrically (jet_driver_cost_growth).
-jet_driver_cost_step_grows: fn(tree: BodyTree, operator: TBinaryOp, step: Int) -> Bool Never! {
-    bounds: body_cost_integer_bounds(tree, step)
+jet_driver_cost_step_grows: fn(tree: BodyTree, interner: Interner, operator: TBinaryOp, step: Int) -> Bool Never! {
+    bounds: body_cost_integer_bounds(interner, tree, step)
     if operator == TBinaryOp.Mul {
         if bounds == .Val(factor) -> return factor.lo < -1 || factor.hi > 1
         return true
@@ -969,7 +970,7 @@ jet_driver_cost_step_grows: fn(tree: BodyTree, operator: TBinaryOp, step: Int) -
 // it for the next turn, leaves the map's backing store shared when the edit
 // runs, so the edit clones the whole map each turn. A share made before the
 // loop is cloned away by the first edit, at most once.
-jet_driver_cost_shared_edits: fn(tree: BodyTree) -> [Int:Bool] Never! {
+jet_driver_cost_shared_edits: fn(tree: BodyTree, interner: Interner) -> [Int:Bool] Never! {
     edits := [Int:Bool]{}
     loop statement in tree.stmts {
         iterated := [Int]{}
@@ -983,7 +984,7 @@ jet_driver_cost_shared_edits: fn(tree: BodyTree) -> [Int:Bool] Never! {
         }
         if shares.len() == 0 -> next
         loop id in iterated {
-            if body_node(tree, id).kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && body_cost_type(tree, receiver) == .Val(receiver_type) {
+            if body_node(tree, id).kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && body_cost_type(interner, tree, receiver) == .Val(receiver_type) {
                 if receiver_type == .Map(_, _, _) && jet_driver_cost_shares_place(tree, receiver, shares) {
                     edits[id] = true
                 }
@@ -1045,7 +1046,7 @@ jet_driver_cost_place_path: fn(tree: BodyTree, id: Int) -> String? Never! {
 // The cost of assigning `value` to `place` with compound operator `op`: a
 // store into a map entry edits the map's possibly shared backing store, and
 // an Int `+=`, `-=` or `*=` is an exact Int operation.
-jet_driver_cost_assign_fact: fn(tree: BodyTree, place: BodyPlace, op: TBinaryOp?, value: Int) -> TCostFact? Never! {
+jet_driver_cost_assign_fact: fn(tree: BodyTree, interner: Interner, place: BodyPlace, op: TBinaryOp?, value: Int) -> TCostFact? Never! {
     target := TIntegerBounds?{None}
     if place == .Expr(expression) {
         if body_node(tree, expression).kind == .Index(_, _, kind, _, _, _) {
@@ -1053,8 +1054,8 @@ jet_driver_cost_assign_fact: fn(tree: BodyTree, place: BodyPlace, op: TBinaryOp?
                 return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
             }
         }
-        if body_cost_type(tree, expression) != .Val(Type.Int) -> return None
-        target = body_cost_integer_bounds(tree, expression)
+        if body_cost_type(interner, tree, expression) != .Val(Type.Int) -> return None
+        target = body_cost_integer_bounds(interner, tree, expression)
     } else if place == .Local(local) {
         if local.ty != Type.Int -> return None
         target = local.integer_bounds
@@ -1063,7 +1064,7 @@ jet_driver_cost_assign_fact: fn(tree: BodyTree, place: BodyPlace, op: TBinaryOp?
     if operator != TBinaryOp.Add && operator != TBinaryOp.Sub && operator != TBinaryOp.Mul {
         return None
     }
-    operand: body_cost_integer_bounds(tree, value)
+    operand: body_cost_integer_bounds(interner, tree, value)
     result := TIntegerBounds?{None}
     if target == .Val(first) && operand == .Val(second) {
         result = checked_cost_combine_bounds(operator, first, second)

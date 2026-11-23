@@ -29,7 +29,7 @@ IR_MOVE_ENTER_AT: "jet_rt_move_enter_at"
 // served: a String, a box of a box row, a List, and a tuple or struct
 // holding a recursive edge or such a member.
 ir_move_needs: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
-    if ir_move_text(m, row) || ir_box_row(m, row) || ir_move_list(m, row) -> return true
+    if ir_move_text(m, row) || ir_box_row(m, row) || ir_move_list(m, p, row) -> return true
     members: ir_inline_members(m, p, row) ?? return false
     loop member in members {
         if member.boxed || ir_move_needs(m, p, member.ty) -> return true
@@ -37,8 +37,8 @@ ir_move_needs: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     false
 }
 
-ir_move_list: fn(m: IRModule, row: Int) -> Bool Never! {
-    m.types[row].kind == .Aggregate && ir_untag(m.types[row].ty) == .List(_)
+ir_move_list: fn(m: IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    m.types[row].kind == .Aggregate && ir_untag(ir_row_ty(m, p, row)) == .List(_)
 }
 
 ir_move_text: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].kind == .String }
@@ -212,7 +212,7 @@ ir_move_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int N
             moved: ir_runtime(m, a, "jet_rt_string_move", [Int]{value}, row)
             ir_emit(a.f, IROp.Move, value, moved, -1, -1, a.line)
         } else { ir_move_box_body(m, p, a, row, value) }
-    } else if ir_move_list(m, row) { ir_move_list_body(m, p, a, row, value) } else {
+    } else if ir_move_list(m, p, row) { ir_move_list_body(m, p, a, row, value) } else {
         members: ir_inline_members(m, p, row) ?? [IRMember]{}
         loop member in members -> ir_move_part(m, p, a, value, member)
     }
@@ -233,7 +233,7 @@ ir_move_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int N
 // loses one, and the copy's members move in turn. A null box, or one served
 // no younger than the destination, stays: its parts are no younger than it.
 ir_move_box_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, boxed: Int) Never! {
-    shapes: ir_box_shapes(m, p, row) ?? return ir_fail(a, Span{start: 0, end: 0}, "move of {ir_type_name(m.types[row].ty)}")
+    shapes: ir_box_shapes(m, p, row) ?? return ir_fail(a, Span{start: 0, end: 0}, "move of {ir_type_name(ir_row_ty(m, p, row))}")
     null: ir_null_like(m, a, boxed)
     present: ir_bool_op(m, a, IROp.Ne, boxed, null)
     ir_open_if(a.f, present, a.line)
@@ -305,7 +305,7 @@ ir_move_wrapper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
     width: ir_align8(m.types[member.ty].size)
     bytes: ir_word_const(m, b, width)
     align: ir_word_const(m, b, 8)
-    wrapper_row: ir_alloc_row_of(m, pointer_row, member.ty)
+    wrapper_row: ir_alloc_row_of(m, p, pointer_row, member.ty)
     replica: ir_runtime(m, b, "jet_rt_alloc_value", [Int]{bytes, align}, wrapper_row)
     ir_emit(b.f, IROp.CopyBytes, -1, replica, wrapper, width, b.line)
     ir_copy_fixup_at(m, p, b, member.ty, replica, 0)
@@ -322,7 +322,7 @@ ir_move_wrapper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
 // nothing to give up), and the copy's elements move in turn. An empty List
 // holds no buffer after.
 ir_move_list_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, list: Int) Never! {
-    entry: ir_counted_entry(m, p, row) ?? return ir_fail(a, Span{start: 0, end: 0}, "move of {ir_type_name(m.types[row].ty)}")
+    entry: ir_counted_entry(m, p, row) ?? return ir_fail(a, Span{start: 0, end: 0}, "move of {ir_type_name(ir_row_ty(m, p, row))}")
     stride: ir_list_stride(m, entry)
     word_row: ir_word_row(m)
     length: ir_load_word(m, a, list, 0)
@@ -342,7 +342,7 @@ ir_move_list_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, list:
     width: ir_word_const(m, a, stride)
     bytes: ir_word_op(m, a, IROp.Mul, length, width)
     align: ir_word_const(m, a, 8)
-    buffer_row: ir_alloc_row_of(m, word_row, row)
+    buffer_row: ir_alloc_row_of(m, p, word_row, row)
     fresh: ir_runtime(m, a, "jet_rt_alloc_value", [Int]{bytes, align}, buffer_row)
     ir_emit(a.f, IROp.Copy, replica, fresh, -1, -1, a.line)
     _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, data, bytes}, -1)

@@ -120,7 +120,7 @@ jet_cli_solver_row_order: fn(left: JetCLISolverRow, right: JetCLISolverRow) -> O
 jet_cli_solver_rows: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], inputs: JetDriverLoweringInputs, cwd: String) -> [JetCLISolverRow] Never! {
     names := [String:String]{}
     loop function in inputs.functions -> names[function.key] = function.name
-    callees: JetCLISolverCallees{decls: inputs.decls, symbols: inputs.symbols, names: names}
+    callees: JetCLISolverCallees{decls: inputs.decls, symbols: inputs.symbols, interner: inputs.interner, names: names}
     files := [String]{}
     loop function in inputs.functions {
         if !files.contains(function.source_file) -> files.push(function.source_file.copy())

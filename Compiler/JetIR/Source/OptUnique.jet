@@ -713,8 +713,10 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    canvas_row: ir_intern_type(m, "Canvas", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Canvas"}, 56, 8, IRClass.Memory, false, 0, ""))
-    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
+    canvas_tid: ir_module_intern_tid(m, Type.Named{name: "Canvas"})
+    canvas_row: ir_intern_type(m, "Canvas", ir_layout(IRTypeKind.Aggregate, canvas_tid, 56, 8, IRClass.Memory, false, 0, ""))
+    list_tid: ir_module_intern_tid(m, Type.Named{name: "[I64]"})
+    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Memory, false, 0, ""))
     f := ir_function_new("fill", "test:fill.jet.fill", "", "fill.jet", 1)
     canvas: ir_slot(f, canvas_row, IRSlotKind.Param, ir_intern_name(m, "canvas"), 1)
     outside: ir_slot(f, list_row, IRSlotKind.Temp, -1, 1)
@@ -784,7 +786,8 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
 ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
+    list_tid: ir_module_intern_tid(m, Type.Named{name: "[I64]"})
+    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Memory, false, 0, ""))
     main := ir_function_new("main", "test:main.jet.main", "", "main.jet", 1)
     list: ir_slot(main, list_row, IRSlotKind.Temp, -1, 1)
     loop _ in 0..<2 {

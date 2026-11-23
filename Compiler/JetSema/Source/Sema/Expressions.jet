@@ -125,9 +125,7 @@ use {
         IR_RUNTIME_HANDLES,
         ir_runtime_handle_row,
         module_text,
-        TypeID,
         type_id_well_known,
-        type_none,
     ]
 }
 
@@ -145,9 +143,8 @@ sema_tree_node: fn(ty: Type, kind: &&TExprKind, span: Span) -> TExpr Never! {
 sema_node: fn(context: &SemaCheckContext, ty: Type, kind: &&NodeKind, span: Span) -> TExpr Never! {
     context.arena.tree.nodes.push(BodyNode{id: AST_NODE_GENERATED, kind: kind.move(), span: span})
     wk: type_id_well_known(ty)
-    row_type: body_flat_intern_type(context.arena, ty, wk)
+    row_type: body_flat_record_type(context.arena, ty, wk)
     context.arena.tree.expr_types.push(TExprType{id: AST_NODE_GENERATED, ty: row_type})
-    context.arena.type_ids.push(TypeID{id: wk.id})
     // copy: the row keeps its type; the handle carries its own.
     TExpr{ty: ty.copy(), kind: .Flat{index: context.arena.tree.node_base + context.arena.tree.nodes.len() - 1}, span: span, type_id: wk}
 }
@@ -162,10 +159,9 @@ sema_arena_adopt: fn(context: &SemaCheckContext, value: TExpr) -> Int Never! {
 // Appends the arena of a nested check (a snapshot of this context's check,
 // sema_check_context_snapshot) to the context's arena. Its rows continue
 // this arena's, so every index its nodes hold stays valid, and each row
-// moves once: no check copies the arena. The nested arena interned its own
-// types, so each moved type row is interned again here. Its symbol keys
-// started as a copy of this arena's and only grew, so they replace them:
-// every id either check minted stays the same key.
+// moves once: no check copies the arena. Its symbol keys started as a copy
+// of this arena's and only grew, so they replace them: every id either check
+// minted stays the same key.
 sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
     nested := rows.move()
     if nested.tree.node_base != context.arena.tree.node_base + context.arena.tree.nodes.len() || nested.tree.stmt_base != context.arena.tree.stmt_base + context.arena.tree.stmts.len() {
@@ -175,16 +171,8 @@ sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
         panic("sema_arena_take_back: the enclosing check minted symbols while a nested check ran")
     }
     compiler_transfer_rows<BodyNode>(context.arena.tree.nodes, nested.tree.nodes)
-    has_delta: context.type_delta.len() > 0
-    shared_bound: if has_delta -> context.type_delta[0].base.types else -> 0
-    loop (idx, row) in nested.tree.expr_types {
-        raw_tid: if idx < nested.type_ids.len() -> nested.type_ids[idx] else -> type_none()
-        raw_int: Int{raw_tid.id}
-        safe_tid: if !has_delta || raw_int <= 16 || raw_int < shared_bound -> raw_tid else -> type_none()
-        ty: body_flat_intern_type(context.arena, nested.tree.types.types[row.ty], safe_tid)
-        context.arena.tree.expr_types.push(TExprType{id: row.id, ty: ty})
-        context.arena.type_ids.push(safe_tid)
-    }
+    compiler_transfer_rows<TExprType>(context.arena.tree.expr_types, nested.tree.expr_types)
+    compiler_transfer_rows<Type>(context.arena.arena_syntax, nested.arena_syntax)
     compiler_transfer_rows<StmtKind>(context.arena.tree.stmts, nested.tree.stmts)
     context.arena.tree.symbols = nested.tree.symbols.move()
 }

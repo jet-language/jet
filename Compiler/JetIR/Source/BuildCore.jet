@@ -38,7 +38,7 @@
 // image's, or jet_core.o's in a full link (JetCLI Host.jet).
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_index, name_intern, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, name_table_sized, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[Interner, CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_transfer_rows, foundation_byte_text, name_index, name_intern, name_rows_get_text, name_rows_set, name_rows_sorted, name_rows_value, name_table_sized, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -233,8 +233,8 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
 // is Core's or the Prelude's) and outside the Core packages `lowered` names
 // (ir_core_package), and every function they reach, on up to `threads`
 // threads; the other inputs as ir_build_program's.
-ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
-    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants, threads)
+ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
+    p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     p.quiet_points = ir_core_quiet_points(p)
     p.sentries = true
     p.user_values = true
@@ -330,6 +330,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: 
         }
         more := skipped.move()
         compiler_transfer_rows<IRBuildFailure>(more, built.failures)
+        kept.program.interner = built.program.interner.pop() ?? panic("the Core build's module lost the program's interner")
         return ir_core_library_from(kept.program.move(), entry_module, lowered, more, threads)
     }
     m := built.program.move()
@@ -501,7 +502,7 @@ ir_core_open: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
     loop f in m.functions {
         held := false
         loop row in f.slot_type {
-            if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(m.types[row].ty) == .TraitObject(_)) {
+            if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(ir_module_row_ty(m, row)) == .TraitObject(_)) {
                 held = true
                 break
             }

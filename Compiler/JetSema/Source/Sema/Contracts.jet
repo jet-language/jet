@@ -618,6 +618,7 @@ sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_re
     checked_scopes.position_free = true
     checked_state := sema_ownership_state_snapshot(state)
     checked_context := sema_check_context_snapshot(context)
+    sema_check_delta_pass(context.type_delta, checked_context.type_delta)
     call_start: checked_context.call_facts.len()
     view_start: checked_context.call_return_views.len()
     name_start: checked_context.name_references.len()
@@ -645,6 +646,7 @@ sema_contract_check_expr: fn(expr: Expr, expected: Type, kind: String, forbid_re
     if check_purity && !sema_contract_check_pure_delta(call_start, checked_context, kind, environment, program, diagnostics) {
         valid = false
     }
+    sema_check_delta_pass(checked_context.type_delta, context.type_delta)
     sema_contract_merge_context_delta(checked_context, call_start, view_start, name_start, comptime_start, copy_start, context)
     sema_eval_walk_take_back(context, checked_context)
     // The condition's flat nodes are rows of its arena, which continues this one.

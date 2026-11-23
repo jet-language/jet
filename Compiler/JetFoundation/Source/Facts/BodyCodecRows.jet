@@ -39,6 +39,8 @@ BodyCodecOut: struct {
     // is in the table from the start).
     string_names: NameTable{name_table_sized(2)},
     string_at: [Int]{[Int]{-1}},
+    types: [TypeID]{[TypeID]{}},
+    type_at: [U32:Int]{[U32:Int]{}},
 }
 
 body_codec_out: fn() -> BodyCodecOut Never! {
@@ -63,6 +65,7 @@ BodyCodecIn: struct {
     spellings: NameTable{name_table_sized(2)},
     indexed: Bool{false},
     strings: [String]{[String]{}},
+    types: [TypeID]{[TypeID]{}},
 }
 
 body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {
@@ -380,4 +383,32 @@ body_codec_get_moduleid: fn(bytes: [U8], input: &BodyCodecIn) -> ModuleID Never!
         return ModuleID{id: U32{0}}
     }
     input.modules[at - 1]
+}
+
+// A type id: well-known constants (0..=16) inline as `id * 2 + 1`, any other
+// as its position in `out.types` times 2.
+body_codec_put_typeid: fn(out: &BodyCodecOut, value: TypeID) Never! {
+    if value.id <= 16 {
+        body_codec_put_uvarint(out, Int{value.id} * 2 + 1)
+        return
+    }
+    if out.type_at.get(value.id) == .Val(at) {
+        body_codec_put_uvarint(out, at * 2)
+        return
+    }
+    at: out.types.len()
+    out.type_at[value.id] = at
+    out.types.push(TypeID{id: value.id})
+    body_codec_put_uvarint(out, at * 2)
+}
+
+body_codec_get_typeid: fn(bytes: [U8], input: &BodyCodecIn) -> TypeID Never! {
+    value: body_codec_get_uvarint(bytes, input)
+    if value & 1 == 1 -> return TypeID{id: body_codec_get_u32_of(value >> 1, input)}
+    at: value >> 1
+    if at >= input.types.len() {
+        input.failed = true
+        return TypeID{id: U32{0}}
+    }
+    input.types[at]
 }

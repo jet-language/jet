@@ -14,7 +14,7 @@ use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandle
 // canonical Dyn and the operation is one of the tree methods here; None
 // leaves the operation to ir_handle_method.
 ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
-    dyn_row: ir_dyn_def(p, ir_ty(p, b, receiver)) ?? return None
+    dyn_row: ir_dyn_def(p, ir_ty(m, p, b, receiver)) ?? return None
     if operation == {
         .DynGetKey -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, false, span))
         .DynHas -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, true, span))
@@ -143,7 +143,7 @@ ir_dyn_object_layout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int
         return None
     }
     payload: members[0]
-    entry_ty: if ir_untag(m.types[payload.ty].ty) == .List(element) -> element else -> {
+    entry_ty: if ir_untag(ir_row_ty(m, p, payload.ty)) == .List(element) -> element else -> {
         _: ir_fail_slot(b, span, "Dyn.Object payload is not its checked ordered List")
         return None
     }
@@ -214,7 +214,7 @@ ir_dyn_key_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_r
     key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || tree < 0 || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
-        key_ty: ir_ty(p, b, args[0])
+        key_ty: ir_ty(m, p, b, args[0])
         return ir_fail_slot(b, span, "Dyn key lookup by {ir_type_name(key_ty)}")
     }
     hit: ir_dyn_object_find(m, b, layout, tree, key)
@@ -257,7 +257,7 @@ ir_dyn_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
     key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || tree < 0 || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
-        key_ty: ir_ty(p, b, args[0])
+        key_ty: ir_ty(m, p, b, args[0])
         return ir_fail_slot(b, span, "Dyn field lookup by {ir_type_name(key_ty)}")
     }
     hit: ir_dyn_object_find(m, b, layout, tree, key)
@@ -342,7 +342,7 @@ IRDynPlace: struct {
 }
 
 ir_dyn_place_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, span: Span) -> IRDynPlace? Never! {
-    receiver_ty: ir_ty(p, b, receiver)
+    receiver_ty: ir_ty(m, p, b, receiver)
     value_row: ir_value_type(m, p, receiver_ty) ?? {
         _: ir_type_fail(b, span, receiver_ty)
         return None
@@ -380,7 +380,7 @@ ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rec
         return ir_fail_slot(b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     }
     value_expr: args[keys.len()]
-    value_ty: ir_ty(p, b, value_expr)
+    value_ty: ir_ty(m, p, b, value_expr)
     if ir_dyn_def(p, value_ty) == None {
         return ir_fail_slot(b, span, "Dyn path value of type {ir_type_name(value_ty)} is not the canonical Dyn")
     }
@@ -397,7 +397,7 @@ ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rec
         if ir_failed(b) || step < 0 -> return -1
         expected: if key -> IRTypeKind.String else -> IRTypeKind.Int
         if ir_kind_of(m, b, step) != expected {
-            step_ty: ir_ty(p, b, args[index])
+            step_ty: ir_ty(m, p, b, args[index])
             return ir_fail_slot(b, span, "Dyn path step {index} of type {ir_type_name(step_ty)} is neither a String key nor an Int index")
         }
         item: ir_runtime(m, b, if key -> "jet_rt_record_new_dyn_text" else -> "jet_rt_record_new_dyn_int", [Int]{step}, pointer_row)
@@ -443,7 +443,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
     key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
-        key_ty: ir_ty(p, b, args[0])
+        key_ty: ir_ty(m, p, b, args[0])
         return ir_fail_slot(b, span, "Dyn path step 0 of type {ir_type_name(key_ty)} is neither a String key nor an Int index")
     }
     value: ir_expr(m, p, b, args[1])
@@ -452,7 +452,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
     owned: ir_own(m, p, b, value)
     if ir_failed(b) -> return -1
     ir_close_disarm(b, owned)
-    receiver_ty: ir_ty(p, b, receiver)
+    receiver_ty: ir_ty(m, p, b, receiver)
     value_row: ir_value_type(m, p, receiver_ty) ?? return ir_type_fail(b, span, receiver_ty)
     backs := [IRWriteBack]{}
     cell: ir_place_address(m, p, b, receiver, backs, span)
@@ -479,7 +479,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
     ir_emit(b.f, IROp.Store, -1, hit, layout.entry[1].offset, owned, b.line)
     ir_emit(b.f, IROp.Drop, -1, owned_key, -1, -1, b.line)
     ir_else(b.f, b.line)
-    slot: ir_list_slot(m, b, entries, layout.entry_row)
+    slot: ir_list_slot(m, p, b, entries, layout.entry_row)
     ir_emit(b.f, IROp.Store, -1, slot.address, layout.entry[0].offset, owned_key, b.line)
     ir_emit(b.f, IROp.Store, -1, slot.address, layout.entry[1].offset, owned, b.line)
     ir_list_counted(m, b, entries, slot.length)
@@ -524,7 +524,7 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
     key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
-        key_ty: ir_ty(p, b, args[0])
+        key_ty: ir_ty(m, p, b, args[0])
         return ir_fail_slot(b, span, "Dyn.remove by {ir_type_name(key_ty)}")
     }
     place: ir_dyn_place_open(m, p, b, dyn_row, receiver, span) ?? return -1
@@ -565,7 +565,7 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
     if scalar == "string" {
-        if ir_dyn_def(p, ir_ty(p, b, receiver)) == .Val(dyn_row) {
+        if ir_dyn_def(p, ir_ty(m, p, b, receiver)) == .Val(dyn_row) {
             return ir_dyn_text_read(m, p, b, ty, dyn_row, tree, "jet_rt_codec_decode_string", span)
         }
     }
@@ -583,7 +583,7 @@ ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     fixed_row: ir_value_type(m, p, fixed) ?? return ir_type_fail(b, span, fixed)
     key: ir_codec_decode_key(p, "__decode_fixed_list") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: Core/Encoding/Encoding.jet __decode_fixed_list is outside the checked program")
-    length: ir_node(b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
+    length: ir_node(m, p, b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
     listed: ir_call(m, p, b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
     if ir_failed(b) || listed < 0 -> return -1
     if ir_fixed_count(m, fixed_row) == None -> return ir_adapt(m, p, b, listed, result_row, span)
@@ -634,14 +634,14 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         ir_scope_close(m, b)
         return -1
     }
-    tree_ty: ir_ty(p, b, receiver)
+    tree_ty: ir_ty(m, p, b, receiver)
     tree_local: checked_generated_local("decode_union_{tree}", span, tree_ty)
     tree_owned: b.fresh[tree] && ir_has_drop(m, b, tree)
     b.bindings.push(IRBinding{name: tree_local.name.copy(), slot: tree, owned: tree_owned})
     b.fresh[tree] = false
     out: ir_temp(m, b, result_row)
     loop (index, member) in members {
-        tree_node: ir_node(b, tree_ty, NodeKind.Local{local: tree_local.copy()}, span)
+        tree_node: ir_node(m, p, b, tree_ty, NodeKind.Local{local: tree_local.copy()}, span)
         attempt_ty: Type.Result{ok: member.copy(), err: err_ty.copy()}
         attempt: ir_dyn_decode(m, p, b, attempt_ty, tree_node, member, false, [Int]{}, span)
         if ir_failed(b) || attempt < 0 {
@@ -781,7 +781,7 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
 // derived `encode_stored` of a struct with a `#Secret` field; any other value
 // encodes as `value.encode()` does.
 ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, stored: Bool, span: Span) -> Int Never! {
-    concrete: ir_ty(p, b, receiver)
+    concrete: ir_ty(m, p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(m, p, b, receiver)
     method: if stored && ir_codec_impl(p, concrete, "Encode", "encode_stored") != None -> "encode_stored" else -> "encode"
     if ir_codec_impl(p, concrete, "Encode", method) == .Val(found) {
@@ -791,7 +791,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     }
     if ir_dyn_def(p, ty) != None {
         receiver_node: ir_body_node(p, b, receiver)
-        typed: ir_node(b, concrete, receiver_node.kind.copy(), receiver_node.span)
+        typed: ir_node(m, p, b, concrete, receiver_node.kind.copy(), receiver_node.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String {
                 return ir_dyn_object_encode(m, p, b, ty, typed, span)
@@ -860,22 +860,22 @@ ir_dyn_array_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
         ir_scope_close(m, b)
         return -1
     }
-    value_ty: ir_ty(p, b, value)
+    value_ty: ir_ty(m, p, b, value)
     source_local: checked_generated_local("encode_source_{source}", span, value_ty)
     source_owned: b.fresh[source] && ir_has_drop(m, b, source)
     b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
-    output: ir_list_empty(m, b, output_row)
+    output: ir_list_empty(m, p, b, output_row)
     b.fresh[output] = false
     output_local: checked_generated_local("encode_output_{output}", span, output_ty)
     b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
     item_local: checked_user_local("encode_item_{output}", span, element)
-    item_expr: ir_node(b, element, NodeKind.Local{local: item_local}, span)
-    encoded: ir_node(b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
-    output_expr: ir_node(b, output_ty, NodeKind.Local{local: output_local}, span)
-    push: ir_node(b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
-    source_expr: ir_node(b, value_ty, NodeKind.Local{local: source_local}, span)
+    item_expr: ir_node(m, p, b, element, NodeKind.Local{local: item_local}, span)
+    encoded: ir_node(m, p, b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
+    output_expr: ir_node(m, p, b, output_ty, NodeKind.Local{local: output_local}, span)
+    push: ir_node(m, p, b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
+    source_expr: ir_node(m, p, b, value_ty, NodeKind.Local{local: source_local}, span)
     push_stmt: ir_stmt_node(b, StmtKind.ExprStmt{value: push, span: span})
     walk: ir_stmt_node(b, StmtKind.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [Int]{push_stmt}, span: span})
     ir_stmt(m, p, b, walk)
@@ -971,7 +971,7 @@ ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
 ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, stem: String, span: Span) -> Int Never! {
     source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 -> return -1
-    value_ty: ir_ty(p, b, value)
+    value_ty: ir_ty(m, p, b, value)
     local := checked_generated_local("{stem}_{source}", span, value_ty)
     owned: b.fresh[source] && ir_has_drop(m, b, source)
     b.bindings.push(IRBinding{name: local.name.move(), slot: source, owned: owned})
@@ -984,8 +984,8 @@ ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, 
 ir_dyn_encode_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
     local: checked_generated_local(name, span, slot_ty)
     b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
-    item: ir_node(b, slot_ty, NodeKind.Local{local: local}, span)
-    encoded: ir_node(b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
+    item: ir_node(m, p, b, slot_ty, NodeKind.Local{local: local}, span)
+    encoded: ir_node(m, p, b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode{stored: false}, args: [Int]{}}, span)
     ir_expr(m, p, b, encoded)
 }
 

@@ -1291,7 +1291,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
         loop statement in body {
             if tree.stmts[statement] == .Let(local, _, init, _, _, _) {
                 if !local.name.starts_with("__jet_http_mount_value_") -> next
-                row: sema_type_resolve_nominal_row(graph, body_type(tree, init), module_identity) ?? next
+                row: sema_type_resolve_nominal_row(graph, body_type(graph.interner, tree, init), module_identity) ?? next
                 id: graph.modules[row.module_index].nominals[row.row].symbol.id
                 if !mounted.contains(id) -> mounted.push(id.copy())
             }

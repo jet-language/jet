@@ -25,6 +25,9 @@ use jet_foundation.[
     Diagnostic,
     DiagnosticLabel,
     InternerDelta,
+    InternerRemap,
+    delta_has_rows,
+    interner_merge_delta,
     ast_binding,
     ast_func,
     ConstDef,
@@ -118,7 +121,16 @@ use jet_foundation.[
     symbol_none,
     symbol_table,
     symbol_table_key,
+    TypeKind,
+    InternerMarks,
+    Name,
+    body_tree_remap_types,
     checked_expr_type_id,
+    delta_merge_delta,
+    delta_type_syntax,
+    interner_empty,
+    type_kind,
+    type_syntax,
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
@@ -292,6 +304,7 @@ SemaResult: struct {
     copy_events: [SemaCopyEvent],
     diagnostics: [Diagnostic],
     complete: Bool,
+    interner: Interner,
 }
 
 SemaGraphModuleResult: struct {
@@ -359,6 +372,9 @@ SemaGraphModuleResult: struct {
     // sema_core_body_capture); a demand wave appends its own after the
     // body pass's.
     core_bodies: [SemaCoreBody]{[SemaCoreBody]{}},
+    // Worker-local types minted while checking this module's bodies, merged
+    // deterministically into graph.interner when the pass closes.
+    type_delta: [InternerDelta]{[InternerDelta]{}},
 }
 
 // The facts of a checked module that only sema's whole-program passes read:
@@ -606,6 +622,7 @@ SemaComptimeItemCheck: struct {
     // A precheck's literal fold of its call-free request with no landed
     // values (sema_comptime_precheck_fold); None when it did not fold.
     folded: TComptimeValue?{None},
+    type_delta: [InternerDelta]{[InternerDelta]{}},
 }
 
 SemaComptimeFunctionResult: struct {
@@ -651,16 +668,23 @@ SemaComptimeFunctionResult: struct {
     demand_round: Int{0},
     // The answers of the debugger's probes inside the body (EvalProbe.jet).
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+    type_delta: [InternerDelta]{[InternerDelta]{}},
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
-// rows of `arena`, the checking context's.
-sema_publish_expression: fn(value: TExpr, arena: BodyTree) -> BodyExpr Never! {
-    flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
+// rows of `context.arena`.
+sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: &SemaCheckContext) -> BodyExpr Never! {
+    flat := BodyFlat{tree: body_tree_new(), arena: context.arena.tree, into_arena: false}
     root: body_flat_expr(value, flat)
+    // The arena's syntax column lends itself to the resolve only when an
+    // arena row waits on it.
+    lends: flat.out_arena_rows.len() > 0
+    syntax := if lends -> compiler_take_rows<Type>(context.arena.arena_syntax) else -> [Type]{}
+    body_flat_resolve_types(flat, syntax, program, context)
+    if lends -> context.arena.arena_syntax = syntax.move()
     tree := flat.tree.move()
     // The expression's own symbol keys leave with it (body_flat_function).
-    tree.symbols = arena.symbols.copy()
+    tree.symbols = context.arena.tree.symbols.copy()
     body_tree_finish(tree)
     BodyExpr{root: root, tree: tree.move()}
 }
@@ -1774,11 +1798,6 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     scopes.comptime_execution_depth = 0
     if func.is_comptime -> scopes.comptime_execution_depth = 1
     context := sema_check_context_init()
-    if scopes.type_delta.pop() == .Val(delta) {
-        context.type_delta.push(delta)
-    } else if program.registration_graph != None || program.interner != None {
-        context.type_delta.push(sema_program_fork_delta(program))
-    }
     context.host_hooks = host_hooks
     context.number_retypes_known = number_known
     context.generic_params = generic_params
@@ -1918,6 +1937,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             default_context.host_hooks = context.host_hooks
             // The default's node ids are the function's ids.
             default_context.next_expr_id = context.next_expr_id
+            // The default's TypeIDs are the function's: it interns into the
+            // function's type delta.
+            sema_check_delta_pass(context.type_delta, default_context.type_delta)
             // The default's flat nodes are rows of the function's arena: it
             // lends its arena to the default's check and takes it back.
             default_context.arena = context.arena.move()
@@ -1929,6 +1951,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_site_here_default_check(declared_default, diagnostics)
             caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
             checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
+            sema_check_delta_pass(default_context.type_delta, context.type_delta)
             context.arena = default_context.arena.move()
             default_context.arena = BodyFlat{tree: body_tree_new(), arena: body_tree_new(), into_arena: true}
             sema_ownership_fork_rollback(state, default_fork)
@@ -2144,17 +2167,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         return_view_provenance = sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
     }
     if !complete {
-        if context.type_delta.len() > 0 {
-            scopes.type_delta = context.type_delta.move()
-            context.type_delta = [InternerDelta]{}
-        }
         return sema_function_result(None, owner_key, context.move())
     }
     source_line_value: source_line ?? {
-        if context.type_delta.len() > 0 {
-            scopes.type_delta = context.type_delta.move()
-            context.type_delta = [InternerDelta]{}
-        }
         return sema_function_result(None, owner_key, context.move())
     }
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
@@ -2170,7 +2185,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         line: sema_source_line_at(updated.source_segments, unsafe_span) ?? source_line_value
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
-    sema_place_borrow_function(body, params, place_borrow_receiver, context.arena.tree)
+    sema_place_borrow_function(body, params, place_borrow_receiver, program, context)
     memo: sema_function_header_memo_config(func)
     // `#Scalar` keeps every loop of the body on the scalar path: its loops
     // record no loop proof (LoopFacts.jet).
@@ -2246,9 +2261,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.origin_facts = [TOriginProjection]{}
     context.typed_goals = [TTypedGoal]{}
     context.index_proofs = [TIndexProof]{}
-    flat := body_flat_function(built.move(), context.arena.tree.move(), context.arena.type_ids.move())
+    arena_tree := context.arena.tree.move()
+    arena_syntax := context.arena.arena_syntax.move()
     context.arena.tree = body_tree_new()
-    context.arena.type_ids = [TypeID]{}
+    context.arena.arena_syntax = [Type]{}
+    flat := body_flat_function(built.move(), arena_tree.move(), arena_syntax.move(), program, context)
     if sema_footprint_has_receiver(func) {
         if program.registration_graph == .Val(graph) {
             if sema_registration_module_index(graph, flat.module_identity) == .Val(module_index) {
@@ -2256,9 +2273,13 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             }
         }
     }
+    scopes.type_delta = [InternerDelta]{}
     if context.type_delta.len() > 0 {
-        scopes.type_delta = context.type_delta.move()
-        context.type_delta = [InternerDelta]{}
+        if context.type_delta.pop() == .Val(delta) {
+            if delta_has_rows(delta) {
+                scopes.type_delta.push(delta)
+            }
+        }
     }
     if stand_in == None -> return sema_function_result(Val(flat), owner_key, context.move())
     flat.stand_in = true
@@ -2323,6 +2344,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     // are the snapshot's own.
     program := sema_program_tables_init(None, [TTypeDef]{})
     program.symbols = symbols.move()
+    program.interner = Val(interner_empty())
     environment.else_arms = source_program.else_arms
     environment.debug_sites = source_program.debug_sites
     environment.tables = source_program.tables
@@ -2349,7 +2371,17 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
                     }
                     .None -> { complete = false }
                 }
-                checked: sema_function_check(memory_func, symbol_key_text(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
+                checked := sema_function_check(memory_func, symbol_key_text(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
+                if &program.interner == .Val(table) {
+                    loop scopes.type_delta.len() > 0 {
+                        delta := scopes.type_delta.pop() ?? break
+                        if delta_has_rows(delta) {
+                            remap: interner_merge_delta(table, delta.move())
+                            if &checked.value == .Val(body) -> body_tree_remap_types(body.tree, remap)
+                            sema_remap_comptime_requests_from(function_comptime_requests, 0, remap)
+                        }
+                    }
+                }
                 sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
                 comptime_body_sources.extend(checked.comptime_body_sources.move())
                 compute_facts.push(checked.compute_facts)
@@ -2370,7 +2402,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
     // failure-domain obligation is emitted as reported.
     if sema_failure_settle_obligations(diagnostics, name_table_sized(4)) -> complete = false
     sema_attach_diagnostic_source_locations(diagnostics, 0, source_segments)
-    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
+    SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete, interner: program.interner.move() ?? interner_empty()}
 }
 
 // `rows` is sema_comptime_checked_function_rows(functions).
@@ -2660,8 +2692,11 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     // body pass then reuses.
     sema_demand_capture_open(graph)
     module_index: sema_registration_module_index(graph, module_identity) ?? -1
-    loaded: if module_index >= 0 -> sema_core_body_loaded(program, comptime_scopes.host_hooks, module_index, source.symbol.id, diagnostics, call_facts, calls, name_references) else -> None
+    comptime_scopes.slots[comptime_scopes.current].table.type_delta = [InternerDelta]{}
+    loaded: if module_index >= 0 -> sema_core_body_loaded(program, comptime_scopes.host_hooks, module_index, source.symbol.id, comptime_scopes.slots[comptime_scopes.current].table.type_delta, diagnostics, call_facts, calls, name_references) else -> None
     checked := loaded ?? sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, diagnostics, call_facts, calls, name_references)
+    fn_delta := [InternerDelta]{}
+    sema_drain_scope_delta(program, fn_delta, comptime_scopes.slots[comptime_scopes.current].table, checked.value, calls, 0)
     // A propagation site that reaches `Err` from a Core error family member
     // converts through its module's Prelude routine, which a module check
     // injects after its bodies. A compile-time closure runs before that, so
@@ -2678,7 +2713,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         bodies := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
         conversion_requests := [SemaComptimeRequest]{}
         conversion_references := [SemaNameReferenceFact]{}
-        _ := sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
+        _ := sema_inject_prelude_error_conversions(sema_scope_environment_module_text(environment, program), environment, program, comptime_scopes.slots[comptime_scopes.current].table, comptime_scopes.host_hooks, bodies, [Int:[SemaPreludeConversionDemand]]{}, fn_delta, diagnostics, conversion_call_facts, conversion_requests, conversion_references, conversion_reasons, false)
         loop bodies.len() > 1 {
             conversions.push(bodies.pop() ?? panic("an injected conversion was lost"))
         }
@@ -2740,7 +2775,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     }
     if checked.value == .Val(body) {
         if program.registration_graph == .Val(resolved_graph) {
-            sema_comptime_drop_close_keys(resolved_graph, body.tree, module_identity, reachable)
+            sema_comptime_drop_close_keys(resolved_graph, fn_delta, body.tree, module_identity, reachable)
         }
     }
     SemaComptimeFunctionResult{
@@ -2766,6 +2801,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         codec_demand: demand.codecs.move(),
         derive_demand: demand.derived.move(),
         conversions: conversions,
+        type_delta: fn_delta.move(),
     }
 }
 
@@ -4036,15 +4072,23 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                 loop diagnostic in sema_property_param_diagnostics(graph, module_index, test) {
                     module_result.diagnostics.push(diagnostic)
                 }
-                checked_test: sema_check_test_function(test, environment, program, scopes, host_hooks)
+                checked_test := sema_check_test_function(test, environment, program, scopes, host_hooks)
                 loop diagnostic in checked_test.diagnostics {
                     module_result.diagnostics.push(diagnostic)
                 }
                 if !graph.test_mode {
                     if checked_test.function == .Val(function) {
-                        sema_liveness_member_body_uses(function, module_result.test_member_uses)
+                        sema_liveness_member_body_uses(graph.interner, function, module_result.test_member_uses, checked_test.type_delta)
                     }
                     return
+                }
+                loop checked_test.type_delta.len() > 0 {
+                    delta := checked_test.type_delta.pop() ?? break
+                    remap: sema_merge_delta_into(program, module_result.type_delta, delta.move())
+                    if remap.types.len() > 0 {
+                        if &checked_test.function == .Val(fn_body) -> body_tree_remap_types(fn_body.tree, remap)
+                        sema_remap_comptime_requests_from(checked_test.comptime_requests, 0, remap)
+                    }
                 }
                 loop fact in checked_test.call_facts -> module_result.call_facts.push(fact)
                 loop request in checked_test.comptime_requests {
@@ -4142,7 +4186,7 @@ sema_check_registered_top_level_name: fn(module_index: Int, item_index: Int, env
 
 // The caller selects ordinary Jet functions in source order. All graph and
 // plan metadata reads finish before a writable checker or trap is entered.
-sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, return_view_rows: &[U32:Int], ready: &[SemaParallelBody], host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, prelude_demands: &[Int:[SemaPreludeConversionDemand]], scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
+sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, return_view_rows: &[U32:Int], ready: &[SemaParallelBody], ready_deltas: &[InternerDelta?], host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], result: &SemaGraphModuleResult, prelude_demands: &[Int:[SemaPreludeConversionDemand]], scopes_changed: &Bool, keep_going: Bool, pending_obligations: Bool, trace_functions: Bool, trace_sink: CompilerTraceSink?, item_count: Int, count_work: Bool, functions_checked: &Int) {
     job: SemaBodyJob.TopLevel{item_index: item_index}
     function_name: sema_check_registered_top_level_name(module_index, item_index, environment, program)
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
@@ -4164,7 +4208,10 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             if !sema_comptime_append_checked_function(checked_function, result.functions, result.call_facts, result.comptime_requests, result.name_references) {
                 result.complete = false
                 if keep_going {
-                    sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks), "function `{function_name}`", "comptime-checked body is incomplete", result.functions, result.incomplete_reasons)
+                    scopes.type_delta = [InternerDelta]{}
+                    stub := sema_keep_going_registered_stub(job, module_index, memory_plan, None, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks)
+                    if &stub == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
+                    sema_keep_going_push_stub(stub, "function `{function_name}`", "comptime-checked body is incomplete", result.functions, result.incomplete_reasons)
                 } else {
                     result.incomplete_reasons.push("function `{function_name}`: comptime-checked body is incomplete")
                 }
@@ -4208,13 +4255,15 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             check_diagnostic_start: result.diagnostics.len()
             capturing: sema_core_body_capturing(program, module_index)
             if capturing -> sema_core_body_capture_open(program)
-            checked := sema_core_body_loaded(program, host_hooks, module_index, owner_id, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references) ?? sema_check_module_function(ready, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
+            scopes.type_delta = [InternerDelta]{}
+            checked := sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references) ?? sema_check_module_function(ready, ready_deltas, item_index, scopes_changed, job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, result.diagnostics, function_call_facts, function_comptime_requests, function_name_references, count_work, functions_checked)
             if trace_functions {
                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
             }
             if capturing {
-                checked = sema_core_body_capture(program, owner_id, checked, result.diagnostics, check_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, result.core_bodies)
+                checked = sema_core_body_capture(program, owner_id, checked, scopes.type_delta, result.diagnostics, check_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, result.core_bodies)
             }
+            sema_drain_scope_delta(program, result.type_delta, scopes, checked.value, function_comptime_requests, 0)
             sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
             result.comptime_body_sources.extend(checked.comptime_body_sources.move())
             result.compute_facts.push(checked.compute_facts)
@@ -4235,7 +4284,9 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 result.complete = false
                 if keep_going {
                     cause: sema_keep_going_cause(checked.incomplete_reasons, result.diagnostics, function_diagnostic_start)
+                    scopes.type_delta = [InternerDelta]{}
                     trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                    if &trap == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                     result.name_references.extend(function_name_references)
                     sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
                 } else {
@@ -4244,7 +4295,9 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 }
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
                 cause: sema_keep_going_cause([String]{}, result.diagnostics, function_diagnostic_start)
+                scopes.type_delta = [InternerDelta]{}
                 trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                if &trap == .Val(trapped) -> sema_drain_scope_delta(program, result.type_delta, scopes, trapped.value, result.comptime_requests, result.comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
                 result.name_references.extend(function_name_references)
                 sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
                 result.complete = false
@@ -4264,7 +4317,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
     }
 }
 
-sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaParallelBody], ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], eval_answers: &[SemaEvalProbeAnswer], core_bodies: &[SemaCoreBody], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaParallelBody], ready_deltas: &[InternerDelta?], ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], type_delta: &[InternerDelta], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], eval_answers: &[SemaEvalProbeAnswer], core_bodies: &[SemaCoreBody], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     label: sema_check_registered_method_label(job, module_index, environment, program)
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
@@ -4290,7 +4343,10 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
             }
             if keep_going {
                 original_kind: sema_check_registered_original_method_kind(job, module_index, environment, program)
-                sema_keep_going_push_stub(sema_check_registered_method_stub(job, module_index, memory_plan, owner_id, original_kind, raw_protocol_return, environment, program, scopes, host_hooks), label, "comptime-checked body is incomplete", functions, reasons)
+                scopes.type_delta = [InternerDelta]{}
+                stub := sema_check_registered_method_stub(job, module_index, memory_plan, owner_id, original_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+                if &stub == .Val(trapped) -> sema_drain_scope_delta(program, type_delta, scopes, trapped.value, comptime_requests, comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
+                sema_keep_going_push_stub(stub, label, "comptime-checked body is incomplete", functions, reasons)
             } else { reasons.push("{label}: comptime-checked body is incomplete") }
             return false
         }
@@ -4299,9 +4355,13 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     function_diagnostic_start: diagnostics.len()
     capturing: sema_core_body_capturing(program, module_index)
     if capturing -> sema_core_body_capture_open(program)
-    prepared := sema_check_take_body(ready, ordinal)
+    scopes.type_delta = [InternerDelta]{}
+    prepared := sema_check_take_body(ready, ready_deltas, ordinal, scopes.type_delta)
     if prepared == .Val(body) {
-        if body.wanted_hooks -> prepared = None
+        if body.wanted_hooks {
+            prepared = None
+            scopes.type_delta = [InternerDelta]{}
+        }
     }
     input := SemaMethodInput?{None}
     checked_result := SemaFunctionResult?{None}
@@ -4324,7 +4384,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         function_name_references = packet.name_references.move()
     }
     if checked_result == None {
-        checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
+        checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     }
     if input == None {
         memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
@@ -4356,8 +4416,9 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     // A captured method packet's diagnostics hold its preparation's, as a
     // prepared one's do.
     if capturing {
-        checked = sema_core_body_capture(program, owner_id, checked, diagnostics, function_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, core_bodies)
+        checked = sema_core_body_capture(program, owner_id, checked, scopes.type_delta, diagnostics, function_diagnostic_start, function_call_facts, function_comptime_requests, function_name_references, core_bodies)
     }
+    sema_drain_scope_delta(program, type_delta, scopes, checked.value, function_comptime_requests, 0)
     memory_complete: owned_input.memory_complete
     owner_generic_complete: owned_input.owner_generic_complete
     // A failed check under keep-going always lowers as its trap (or records
@@ -4365,7 +4426,9 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     check_failed: keep_going && sema_check_function_failed(diagnostics, function_diagnostic_start, pending_obligations)
     keep_going_stub := SemaFunctionResult?{None}
     if keep_going && (!memory_complete || !owner_generic_complete || !checked.complete || check_failed) {
+        scopes.type_delta = [InternerDelta]{}
         keep_going_stub = sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks))
+        if &keep_going_stub == .Val(trapped) -> sema_drain_scope_delta(program, type_delta, scopes, trapped.value, function_comptime_requests, function_comptime_requests.len()) else -> scopes.type_delta = [InternerDelta]{}
     }
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.move()
@@ -4411,7 +4474,6 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         raw_return: Type.Named{name: "Unit"}
         rewritten.ret = Val(raw_return)
         failure: sema_failure_carrier(Val(raw_return))
-        sema_body_fact_return(rewritten.tree, raw_return, failure)
         rewritten.failure_carrier = failure
         checked.value = Val(rewritten.move())
     }
@@ -4699,6 +4761,7 @@ sema_check_view_summaries: fn(environment: &SemaScopeEnvironment, program: SemaP
         previous_round = round
         summary_round += 1
     }
+    scopes.type_delta = [InternerDelta]{}
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", sema_check_registered_module_item_count(environment, program, module_index), -1)
         sink.progress("counters.{counter_phase}.summary_functions_checked", summary_functions_checked, -1)
@@ -4819,10 +4882,12 @@ SemaParallelBody: struct {
 SemaPreparedBodies: struct {
     scopes: [SemaScopeTable],
     bodies: [SemaParallelBody],
+    body_deltas: [InternerDelta?]{[InternerDelta?]{}},
     // A body stream's checks of the module's parallel method jobs
     // (sema_check_registered_parallel_method_jobs), last first like `bodies`;
     // `methods_prepared` when the stream selected those jobs.
     methods: [SemaParallelBody]{[SemaParallelBody]{}},
+    method_deltas: [InternerDelta?]{[InternerDelta?]{}},
     methods_prepared: Bool{false},
     // The module's declaration and program checks when its pass made them
     // ahead (sema_check_declaration_modules), else None.
@@ -4836,9 +4901,19 @@ sema_check_prepared_none: fn() -> SemaPreparedBodies Never! {
 // Consume a body's prepared check in canonical source order. A wanted host
 // callback or a changed top-level return-view scope requires the same check
 // inline; none of that provisional result's reports or facts are published.
-sema_check_take_body: fn(ready: &[SemaParallelBody], job_index: Int) -> SemaParallelBody? Never! {
-    loop ready.len() > 0 && ready[ready.len() - 1].job_index < job_index -> _ := ready.pop()
-    if ready.len() > 0 && ready[ready.len() - 1].job_index == job_index -> return ready.pop()
+sema_check_take_body: fn(ready: &[SemaParallelBody], ready_deltas: &[InternerDelta?], job_index: Int, out_delta: &[InternerDelta]) -> SemaParallelBody? Never! {
+    loop ready.len() > 0 && ready[ready.len() - 1].job_index < job_index {
+        _ := ready.pop()
+        if ready_deltas.len() > 0 -> _ := ready_deltas.pop()
+    }
+    if ready.len() > 0 && ready[ready.len() - 1].job_index == job_index {
+        if ready_deltas.len() > 0 {
+            if ready_deltas.pop() == .Val(maybe_delta) {
+                if maybe_delta == .Val(delta) -> out_delta.push(delta)
+            }
+        }
+        return ready.pop()
+    }
     None
 }
 
@@ -4866,8 +4941,8 @@ sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallel
     }
 }
 
-sema_check_module_function: fn(ready: &[SemaParallelBody], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
-    prepared := sema_check_take_body(ready, job_index)
+sema_check_module_function: fn(ready: &[SemaParallelBody], ready_deltas: &[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
+    prepared := sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta)
     if prepared != None {
         body := prepared.move() ?? panic("a prepared function packet disappeared")
         prepared = None
@@ -4879,6 +4954,7 @@ sema_check_module_function: fn(ready: &[SemaParallelBody], job_index: Int, scope
             sema_check_body_demand_replay(program, body)
             return sema_check_drain_body(body, diagnostics, call_facts, comptime_requests, name_references)
         }
+        scopes.type_delta = [InternerDelta]{}
     }
     if count_work -> functions_checked += 1
     sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
@@ -4968,6 +5044,7 @@ SemaBodyPart: struct {
     scopes: SemaScopeTable,
     bodies: [SemaParallelBody],
     positions: [Int],
+    deltas: [InternerDelta?]{[InternerDelta?]{}},
 }
 
 // What every thread of a module's parallel body pass reads: the jobs in job
@@ -4999,6 +5076,7 @@ SemaStreamEnvironment: struct {
 SemaStreamOut: struct {
     bodies: [SemaParallelBody],
     positions: [Int],
+    deltas: [InternerDelta?]{[InternerDelta?]{}},
     left: Int,
     ready: Bool,
     failed: Bool,
@@ -5323,18 +5401,26 @@ sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment,
     finish_env := if step.prepared -> sema_check_body_stream_take_environment(cells, stream_module, bodies.scopes) else -> base_environment
     if step.prepared {
         placed := [SemaParallelBody?]{}
-        loop _ in 0..<step.total -> placed.push(None)
-        sema_check_body_stream_place(cells.outs[stream_module], placed)
+        placed_deltas := [InternerDelta?]{}
+        loop _ in 0..<step.total {
+            placed.push(None)
+            placed_deltas.push(None)
+        }
+        sema_check_body_stream_place(cells.outs[stream_module], placed, placed_deltas)
         loop placed.len() > step.tops {
             popped := placed.pop() ?? break
+            delta := placed_deltas.pop() ?? None
             body := popped.move() ?? next
             bodies.methods.push(body)
+            bodies.method_deltas.push(delta)
         }
         bodies.methods_prepared = true
         loop placed.len() > 0 {
             popped := placed.pop() ?? break
+            delta := placed_deltas.pop() ?? None
             body := popped.move() ?? next
             bodies.bodies.push(body)
+            bodies.body_deltas.push(delta)
         }
     }
     bodies.started = sema_check_body_stream_take_started(cells, stream_module)
@@ -5462,8 +5548,10 @@ sema_check_body_stream_publish: fn(out: Shared<SemaStreamOut>, part: &SemaBodyPa
     loop part.bodies.len() > 0 {
         body: part.bodies.pop() ?? break
         position: part.positions.pop() ?? panic("a checked body has no job position")
+        delta: part.deltas.pop() ?? None
         held.value.bodies.push(body)
         held.value.positions.push(position)
+        held.value.deltas.push(delta)
     }
     held.value.left -= count
     if held.value.left > 0 {
@@ -5494,6 +5582,7 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
         apart: graph.core_seal
         if apart -> sema_demand_capture_open(graph)
         packet_at: part.bodies.len()
+        part.scopes.type_delta = [InternerDelta]{}
         if claim.job == {
             .TopLevel(item_index) -> {
                 // The function's span is read through a read parameter:
@@ -5508,15 +5597,18 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
                     checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
                     part.bodies.push(SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true})
                     part.positions.push(claim.position)
+                    part.deltas.push(part.scopes.type_delta.pop())
                 }
             }
             .NominalMethod(ordinal, _, _) -> {
                 part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
                 part.positions.push(claim.position)
+                part.deltas.push(part.scopes.type_delta.pop())
             }
             .ImplMethod(ordinal, _, _) -> {
                 part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
                 part.positions.push(claim.position)
+                part.deltas.push(part.scopes.type_delta.pop())
             }
         }
         if apart {
@@ -5595,7 +5687,7 @@ sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, progr
     panic("a registered Jet method lost its owning graph")
 }
 
-sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaParallelBody], scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], eval_answers: &[SemaEvalProbeAnswer], core_bodies: &[SemaCoreBody], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaParallelBody], ready_deltas: &[InternerDelta?], scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], type_delta: &[InternerDelta], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], eval_answers: &[SemaEvalProbeAnswer], core_bodies: &[SemaCoreBody], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     ordinal: if job == {
         .NominalMethod(position, _, _) -> position
         .ImplMethod(position, _, _) -> position
@@ -5604,19 +5696,19 @@ sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemo
     author_span: sema_check_generated_method_author_span(job, module_index, environment, program)
     if author_span == .Val(span) {
         generated_diagnostics := [Diagnostic]{}
-        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         sema_author_facing_diagnostics(span, generated_diagnostics, diagnostics)
         return complete
     }
     if sema_check_generated_codec_method(job, module_index, program) {
         generated_diagnostics := [Diagnostic]{}
-        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
         loop diagnostic in generated_diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostics.push(diagnostic)
         }
         return complete
     }
-    sema_check_registration_method(job, module_index, memory_plan, ready, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+    sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
 }
 
 // The module scope the body loop of module `module_index` checks against:
@@ -5674,12 +5766,18 @@ sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: In
     restored := sema_check_shared_return_scope(shared)
     prepared.scopes.push(restored)
     placed := [SemaParallelBody?]{}
-    loop _ in 0..<jobs.len() -> placed.push(None)
-    loop slot in slots -> sema_check_body_part_place(slot, placed)
+    placed_deltas := [InternerDelta?]{}
+    loop _ in 0..<jobs.len() {
+        placed.push(None)
+        placed_deltas.push(None)
+    }
+    loop slot in slots -> sema_check_body_part_place(slot, placed, placed_deltas)
     loop placed.len() > 0 {
         taken := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
         body := taken.move() ?? next
         prepared.bodies.push(body)
+        prepared.body_deltas.push(delta)
     }
     prepared.move()
 }
@@ -5724,12 +5822,14 @@ sema_check_body_part_copy_scope: fn(environment: SemaScopeEnvironment, slot: Sha
 }
 
 // Moves a thread's bodies into `placed`, each at its job position.
-sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: &[SemaParallelBody?]) {
+sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: &[SemaParallelBody?], placed_deltas: &[InternerDelta?]) {
     permit: slot.guard_edit()
     loop permit.value.bodies.len() > 0 {
         body: permit.value.bodies.pop() ?? break
         position: permit.value.positions.pop() ?? panic("a checked body has no job position")
+        delta: permit.value.deltas.pop() ?? None
         placed[position] = Val(body)
+        placed_deltas[position] = delta
     }
 }
 
@@ -5934,30 +6034,40 @@ sema_check_body_stream_take: fn(cells: SemaStreamCells, stream_module: Int, tops
     if !prepared -> return bodies.move()
     bodies.scopes.push(sema_check_body_stream_take_scope(cells.environments[stream_module]))
     placed := [SemaParallelBody?]{}
-    loop _ in 0..<total -> placed.push(None)
-    sema_check_body_stream_place(cells.outs[stream_module], placed)
+    placed_deltas := [InternerDelta?]{}
+    loop _ in 0..<total {
+        placed.push(None)
+        placed_deltas.push(None)
+    }
+    sema_check_body_stream_place(cells.outs[stream_module], placed, placed_deltas)
     loop placed.len() > tops {
         popped := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
         body := popped.move() ?? next
         bodies.methods.push(body)
+        bodies.method_deltas.push(delta)
     }
     bodies.methods_prepared = true
     loop placed.len() > 0 {
         popped := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
         body := popped.move() ?? next
         bodies.bodies.push(body)
+        bodies.body_deltas.push(delta)
     }
     bodies.move()
 }
 
 // Moves a stream module's published bodies into `placed`, each at its job
 // position.
-sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: &[SemaParallelBody?]) {
+sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: &[SemaParallelBody?], placed_deltas: &[InternerDelta?]) {
     held: out.guard_edit()
     loop held.value.bodies.len() > 0 {
         body: held.value.bodies.pop() ?? break
         position: held.value.positions.pop() ?? panic("a checked body has no job position")
+        delta: held.value.deltas.pop() ?? None
         placed[position] = Val(body)
+        placed_deltas[position] = delta
     }
 }
 
@@ -6118,7 +6228,7 @@ sema_check_registration_module_head: fn(environment: &SemaScopeEnvironment, prog
             }
             if sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) {
                 if !sema_check_registered_item_deferred(environment, program, module_index, item_index) {
-                    sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready.bodies, host_hooks, comptime_functions, comptime_rows, module_result, prelude_demands, scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, functions_checked)
+                    sema_check_registration_top_level(module_index, item_index, memory_plan, environment, program, scopes, return_view_rows, ready.bodies, ready.body_deltas, host_hooks, comptime_functions, comptime_rows, module_result, prelude_demands, scopes_changed, keep_going, pending_obligations, trace_functions, trace_sink, item_count, count_work, functions_checked)
                 }
             } else {
                 sema_check_registration_module_test(environment, program, module_index, item_index, scopes, host_hooks, module_result)
@@ -6130,7 +6240,9 @@ sema_check_registration_module_head: fn(environment: &SemaScopeEnvironment, prog
             // The body stream checked the module's parallel method jobs against
             // the post-summary scope, which the top-level checks left as it was.
             method_ready.bodies = ready.methods.move()
+            method_ready.body_deltas = ready.method_deltas.move()
             ready.methods = [SemaParallelBody]{}
+            ready.method_deltas = [InternerDelta?]{}
         } else if threads == .Val(pool) {
             weights := [Int]{}
             jobs := sema_check_registered_parallel_method_jobs(environment, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
@@ -6187,7 +6299,7 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
             generated: sema_check_generated_method_author_span(job, module_index, environment, program) != None || sema_check_generated_codec_method(job, module_index, program)
             references_from: module_result.name_references.len()
             calls_from: module_result.call_facts.len()
-            if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready.bodies, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, module_result.diagnostics, module_result.functions, prelude_demands, module_result.call_facts, module_result.hardware_use, module_result.comptime_requests, module_result.name_references, module_result.comptime_body_sources, module_result.compute_facts, module_result.failure_facts, module_result.exact_int_reachable, module_result.copy_events, module_result.eval_answers, module_result.core_bodies, module_result.incomplete_reasons, run.keep_going, pending_obligations) {
+            if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready.bodies, method_ready.body_deltas, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, module_result.diagnostics, module_result.functions, prelude_demands, module_result.type_delta, module_result.call_facts, module_result.hardware_use, module_result.comptime_requests, module_result.name_references, module_result.comptime_body_sources, module_result.compute_facts, module_result.failure_facts, module_result.exact_int_reachable, module_result.copy_events, module_result.eval_answers, module_result.core_bodies, module_result.incomplete_reasons, run.keep_going, pending_obligations) {
                 module_result.complete = false
             }
             if generated {
@@ -6198,7 +6310,7 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
         injected_from := module_result.functions.len()
         references_from: module_result.name_references.len()
         calls_from: module_result.call_facts.len()
-        if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, run.module_identity), environment, program, scopes, host_hooks, module_result.functions, prelude_demands, module_result.diagnostics, module_result.call_facts, module_result.comptime_requests, module_result.name_references, module_result.incomplete_reasons, run.keep_going) {
+        if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, run.module_identity), environment, program, scopes, host_hooks, module_result.functions, prelude_demands, module_result.type_delta, module_result.diagnostics, module_result.call_facts, module_result.comptime_requests, module_result.name_references, module_result.incomplete_reasons, run.keep_going) {
             module_result.complete = false
         }
         generated_references.push(Span{start: references_from, end: module_result.name_references.len()})
@@ -8488,7 +8600,7 @@ sema_comptime_precheck_fold: fn(program: SemaProgramTables, check: SemaComptimeI
     }
     if check.request == .Val(request) {
         if request.calls.len() == 0 {
-            return sema_comptime_fold_in(program, request.expression.tree, request.expression.root, [SemaComptimeItemValue]{})
+            return sema_comptime_fold_in(program, request.expression.tree, request.expression.root, [SemaComptimeItemValue]{}, check.type_delta)
         }
     }
     None
@@ -9242,7 +9354,7 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
 // its fields and payloads that closes (ir_close_glue). A compile-time
 // closure checks each like a callee, so their call sites count toward the
 // evaluation's purity: a local value whose drops print runs with the program.
-sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID, keys: &[String]) {
+sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, type_delta: [InternerDelta], tree: BodyTree, module_identity: ModuleID, keys: &[String]) {
     dropped := [Int]{}
     loop node in tree.nodes {
         made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .CoreCall(_, _, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
@@ -9252,15 +9364,16 @@ sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, tree: BodyTree, 
         if statement == .Assign(_, _, value, _, _) -> dropped.push(value)
     }
     // A type's walk is the same at each of its drops, and one walk adds
-    // every key it can, so each of the tree's types is walked once.
+    // every key it can, so each of the tree's TypeIDs is walked once.
     seen := [String:Bool]{}
-    walked := [Bool]{}
-    loop _ in tree.types.types -> walked.push(false)
+    walked := [U32:Bool]{}
+    has_delta: type_delta.len() > 0
     loop id in dropped {
-        type_id: checked_expr_type_id(tree.expr_types, id) ?? next
-        if walked[type_id] -> next
-        walked[type_id] = true
-        sema_comptime_close_methods_add(graph, tree.types.types[type_id], module_identity, seen, keys)
+        tid: checked_expr_type_id(tree.expr_types, id) ?? next
+        if walked.has_key(tid.id) -> next
+        walked[tid.id] = true
+        ty: if has_delta -> delta_type_syntax(graph.interner, type_delta[0], tid) else -> type_syntax(graph.interner, tid)
+        sema_comptime_close_methods_add(graph, ty, module_identity, seen, keys)
     }
 }
 
@@ -10875,9 +10988,9 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             required: checked_expected ?? expression.ty
             if expression.ty != required -> checked_expected = None
         }
-        published: sema_publish_expression(expression, context.arena.tree)
+        published: sema_publish_expression(expression, program, context)
         reachable := sema_comptime_reachable_function_keys(resolved_graph, context.call_facts)
-        sema_comptime_drop_close_keys(resolved_graph, published.tree, source.module_identity, reachable)
+        sema_comptime_drop_close_keys(resolved_graph, context.type_delta, published.tree, source.module_identity, reachable)
         request := SemaComptimeItemRequest{
             module_identity: source.module_identity,
             key: source.key,
@@ -10894,7 +11007,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             call_facts: if source.module_value || source.runtime_check -> context.call_facts else -> [SemaCallSiteFact]{},
             effect_call: sema_effect_comptime_call_name(context.call_facts, program, context),
         }
-        return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+        return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0), type_delta: context.type_delta.move()}
     }
     SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
 }
@@ -11597,7 +11710,81 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
     comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
     checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, selected, kind, pending_obligations, host_hooks, threads, phase, trace_sink, modules)
     if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
-    sema_finalize_pass_close(shared_state, phase, trace_sink, carried)
+    out_graph := sema_finalize_pass_close(shared_state, phase, trace_sink, carried)
+    sema_merge_module_type_deltas(out_graph, modules)
+    out_graph.move()
+}
+
+// Deterministically merges every checked module's worker-local InternerDelta
+// into `graph.interner` in module index order and remaps any local TypeIDs.
+sema_merge_module_type_deltas: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) Never! {
+    loop i in 0..<modules.len() {
+        if modules[i].type_delta.len() == 0 -> next
+        if modules[i].type_delta.len() > 1 {
+            panic("internal compiler error: module {i} carried {modules[i].type_delta.len()} interner deltas")
+        }
+        if modules[i].type_delta.pop() == .Val(delta) {
+            mut_delta := delta
+            if delta_has_rows(mut_delta) {
+                remap: interner_merge_delta(graph.interner, mut_delta)
+                sema_remap_module_types(modules[i], remap)
+            }
+        }
+    }
+}
+
+sema_remap_comptime_requests_from: fn(requests: &[SemaComptimeRequest], from: Int, remap: InternerRemap) Never! {
+    if remap.types.len() == 0 -> return
+    loop i in from..<requests.len() {
+        if &requests[i].checked_text == .Val(eval) {
+            body_tree_remap_types(eval.expression.tree, remap)
+        }
+    }
+}
+
+// Renumbers a comptime item request's worker-local TypeIDs through `remap`:
+// its expression and the checked-text requests its check published (a
+// checked literal inside the item's expression).
+sema_remap_comptime_item_request: fn(request: &SemaComptimeItemRequest, remap: InternerRemap) Never! {
+    body_tree_remap_types(request.expression.tree, remap)
+    sema_remap_comptime_requests_from(request.calls, 0, remap)
+}
+
+sema_interner_remap_empty: fn() -> InternerRemap Never! {
+    InternerRemap{marks: InternerMarks{names: 0, types: 0, key_spans: 0, measures: 0, ranges: 0, tags: 0, dimensions: 0, functions: 0}, names: [Name]{}, types: [TypeID]{}}
+}
+
+sema_merge_delta_into: fn(program: SemaProgramTables, target: &[InternerDelta], incoming: &&InternerDelta) -> InternerRemap Never! {
+    delta := incoming.move()
+    if !delta_has_rows(delta) -> return sema_interner_remap_empty()
+    if target.len() == 0 {
+        target.push(delta.move())
+        return sema_interner_remap_empty()
+    }
+    if program.registration_graph == .Val(graph) -> return delta_merge_delta(graph.interner, target[0], delta)
+    if program.interner == .Val(fallback) -> return delta_merge_delta(fallback, target[0], delta)
+    sema_interner_remap_empty()
+}
+
+sema_drain_scope_delta: fn(program: SemaProgramTables, target: &[InternerDelta], scopes: &SemaScopeTable, fn_body: &FnBody?, requests: &[SemaComptimeRequest], req_from: Int) Never! {
+    if scopes.type_delta.len() == 0 -> return
+    if scopes.type_delta.len() > 1 {
+        panic("internal compiler error: scope carried {scopes.type_delta.len()} interner deltas")
+    }
+    delta := scopes.type_delta.pop() ?? return
+    remap: sema_merge_delta_into(program, target, delta.move())
+    if remap.types.len() > 0 {
+        if &fn_body == .Val(body) -> body_tree_remap_types(body.tree, remap)
+        sema_remap_comptime_requests_from(requests, req_from, remap)
+    }
+}
+
+sema_remap_module_types: fn(module_result: &SemaGraphModuleResult, remap: InternerRemap) Never! {
+    if remap.types.len() == 0 -> return
+    loop i in 0..<module_result.functions.len() {
+        body_tree_remap_types(module_result.functions[i].tree, remap)
+    }
+    sema_remap_comptime_requests_from(module_result.comptime_requests, 0, remap)
 }
 
 // The shared state of one body pass over `graph`, which moves into the
@@ -12696,7 +12883,6 @@ sema_failure_reconcile_function: fn(function: &FnBody) Never! {
         ret: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
         function.ret = Val(ret)
         failure: sema_failure_carrier(Val(ret))
-        sema_body_fact_return(function.tree, ret, failure)
         function.failure_carrier = failure
     }
 }
@@ -13359,24 +13545,26 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`. It borrows the run's symbol table and hands
     // it back; the walk's graph holds an empty one meanwhile.
-    effects := SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move()}
+    effects := SemaEffectGraphResult{diagnostics: [Diagnostic]{}, complete: true, symbols: final_graph.symbols.move(), interner: final_graph.interner.move()}
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
+    final_graph.interner = interner_empty()
     if {
         walk_inputs.beside -> {
             task.group sema_finalize_effect_walks {
                 walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-                effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+                effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
                 if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
                 walked = walking.join() ?? panic(compiler_threads_failure_text(err))
             }
         }
         else -> {
-            effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
+            effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed)
             if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
             walked = sema_finalize_walk_all(final_graph, walk_inputs)
         }
     }
     final_graph.symbols = effects.symbols.move()
+    final_graph.interner = effects.interner.move()
     core_seal: if final_graph.core_seal -> sema_core_seal_lines(final_graph, seal_failure, effects.core_seal) else -> [String]{}
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -13459,7 +13647,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if trace_sink == .Val(sink) -> sink.begin("sema.walks", "", -1, -1)
     loop found in walked.found -> sema_taint_join_reports(taint_reports, diagnostics, found)
     loop module_index in 0..<walked.masked.len() {
-        sema_mark_masked_branches(modules[module_index].functions, walked.masked[module_index], walked.fixed[module_index])
+        sema_mark_masked_branches(final_graph.interner, modules[module_index].functions, walked.masked[module_index], walked.fixed[module_index])
     }
     core_usage: sema_core_combine_module_usage(core_modules)
     if trace_sink == .Val(sink) -> sink.end("sema.walks", core_modules.len())
@@ -13728,8 +13916,8 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
 // graph's rows: the root package's denials, its modules' caps and the
 // policies of `package_policies`. It borrows `symbols`, the run's symbol
 // table, and hands it back in its result.
-sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: NameTable, threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
-    sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries)
+sema_finalize_effect_pass: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, symbols: &&SymbolTable, interner: &&Interner, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], prep_functions: NameTable, threads: CompilerThreads, organization_denials: [String], organization_source: String, package_policies: [SemaRegistrationPackagePolicy], expert_modules: [Int], heap_free: String, heap_entries: [String], closed: Bool) -> SemaEffectGraphResult {
+    sema_effects_check_modules(modules, inputs, prepared.move(), package_denials, denial_modules, file_caps, trait_caps, graph.decls, symbols.move(), interner.move(), graph.module_table, prep_functions, threads, closed, organization_denials, organization_source, graph.core_seal, package_policies, expert_modules, graph.package_identity, heap_free: heap_free, entries: heap_entries)
 }
 
 // Walks every function, method, test and conversion body of each module
@@ -13766,7 +13954,7 @@ SemaFinalizeWalked: struct {
 // FnBody.masked of every function whose source holds it, and each function
 // one of whose checked types carries a fixed tag of the module
 // (`fixed_tags`) gets them as FnBody.fixed_tags.
-sema_mark_masked_branches: fn(functions: &[FnBody], masked: [Span], fixed_tags: [String]) Never! {
+sema_mark_masked_branches: fn(interner: Interner, functions: &[FnBody], masked: [Span], fixed_tags: [String]) Never! {
     loop span in masked {
         loop index in 0..<functions.len() {
             source: functions[index].source_span
@@ -13777,17 +13965,30 @@ sema_mark_masked_branches: fn(functions: &[FnBody], masked: [Span], fixed_tags: 
     }
     if fixed_tags.len() == 0 -> return
     loop index in 0..<functions.len() {
-        if sema_fixed_types(functions[index].tree.types.types, fixed_tags) {
+        if sema_fixed_types(interner, functions[index], fixed_tags) {
             functions[index].fixed_tags = fixed_tags.copy()
         }
     }
 }
 
-// Whether one of `types` carries a tag of `fixed_tags` on its own value or
-// on a list's elements.
-sema_fixed_types: fn(types: [Type], fixed_tags: [String]) -> Bool Never! {
-    loop ty in types {
-        if sema_fixed_type(ty, fixed_tags) -> return true
+// Whether one of `function`'s checked types carries a tag of `fixed_tags` on
+// its own value or on a list's elements.
+sema_fixed_types: fn(interner: Interner, function: FnBody, fixed_tags: [String]) -> Bool Never! {
+    loop param in function.params {
+        if sema_fixed_type(param.ty, fixed_tags) -> return true
+    }
+    if function.ret == .Val(ret) {
+        if sema_fixed_type(ret, fixed_tags) -> return true
+    }
+    seen := [U32:Bool]{}
+    loop row in function.tree.expr_types {
+        tid: row.ty
+        if seen.has_key(tid.id) -> next
+        seen[tid.id] = true
+        k: type_kind(interner, tid)
+        if k == TypeKind.Tagged || k == TypeKind.List || k == TypeKind.FixedList {
+            if sema_fixed_type(type_syntax(interner, tid), fixed_tags) -> return true
+        }
     }
     false
 }
