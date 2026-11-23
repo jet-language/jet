@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113319,
+    "rev": 113325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52460,6 +52460,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Decision (c2): JetWasm Text.jet's 14 WAT name maps move to NameTable through a new path dependency jet_wasm -> jet_foundation. c2 requires zero String-keyed maps in compiler data from one interner per id space; a wasm-local interner would be a second mechanism. c2i staged for the next landing batch."
+        },
+        {
           "at": "2026-11-22",
           "by": "Orchestrator",
           "text": "Wave 3B (dev ead79f56ba): adopted true columnar Rows<T> across X64Select.jet (eliminated last 2 .copy() calls, deleting X64Select.jet from copy_ratchet ceilings.tsv!), Image/Object.jet (zero-copy .offset/.size/.weight columns), and Driver/ForeignDeps.jet."
@@ -52573,7 +52578,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-22T19:53:04.979Z",
+      "updated": "2026-11-23T17:47:24.793Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -52595,6 +52600,21 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Decision: S5 (parallel comptime batches) dropped. All comptime evaluation in jet-bare is about 0.76 s over 394 items; lane spawn and per-lane loading cost 0.2-0.55 s per batch against 0.05-0.10 s serially, so the best case is about -0.3 s; fixing its 6 case failures means removing the speculation it relies on. The atomics case's out-of-memory under the case cap is attributed to its lane children. The patch stays in the orchestrator's land directory as 6794-s5.dropped. Next for this lane: S3 rebased, B1, E1; B2 after a seed with B1; then parallel sema.finalize (3.88 s) and ir.build (1.87 s)."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Correction to the batch-3 entry: the 2.19 s load delay was the runtime step's load, measured across processes by mistake. On jet-bare's own process, S3 shortens load by about 0.21 s (1.28 -> 1.07 s), and S5 lengthens comptime by about 1.5 s (3.25 -> 4.80 s) plus about 0.6 s in the build-step generator. S5 is the regression; S3 is resubmitted rebased; S3b is dropped."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Landed on dev 776eabec7a (S1r2 sharded allocator, S2 compiler threads shared with the runtime build, det fix) and ce4e8bb137 (S3a linear inline-always check, effect spans, TaskGraph). -O0 Compiler jet-bare byte-identical at threads 1/8/32 (dev before: 1 vs 16 differed). Batch 3 (S3 loader streaming, S5 parallel comptime, S3b Core-seal walk) not landed. Throughput O0 at 32 threads: wall 52.7 -> 55.5 s, CPU 120.8 -> 128.6 s. The load window ends 2.19 s later (S3); S5 adds 2.34 s of comptime CPU and fails 6 comptime cases (one ICE); S3b changes nothing measurable. Returned to the worker with the trace."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52670,7 +52690,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-23T16:47:21.238Z",
+      "updated": "2026-11-23T17:42:08.545Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -52692,6 +52712,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Census on de08daf13a with a dev-built seed: check, build, runtime, selfcheck and core-tests clean. Landed c90bca2d19 (Jetpack sources.list gains TypeIDs, TypeIDOps and Chunks, which fixed the assembly pass and the drift in all 16 Jetpack areas; unsafe baseline line shift; seven compiler-data rows lowered), 6910a725bc (Executor JET_BUILD_THREADS through ENV_JET_BUILD_THREADS, the guard shard 4 failure) and the guard shard memory cap 4G -> 6G (measured peak 4.8G; the rc=143 kills). Still open for the receipt: the closed_lists and copy_ratchet guards (from S2 and S1, with the #6794 lane), and the Jetpack areas unit check, which already failed at c4b26: 152 UseAfterMove in the assembled unit that package checks don't report, with the #6794 lane; plus the TYPE_STRING duplicate (TypeID slice 3a), with the #6793 lane."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
+          "text": "Census on dev de08daf13a: the build pass fails because core-embed reports 'cache entry exceeds its byte limit'. Root cause: the admitted seed a0.0.46 bounds every kept build output at 512 MiB (BUILD_MAX_ACTION_FILE_BYTES) even with no artifact store. Its own jet is 505 MB, and dev's -O1 jet has now grown past 536,870,912 bytes. Dev's executor already drops the bound when no store is open (bounded: reuse != None), so the fix is a seed bump. The builder is a compiler built from dev, because the a0.0.46 seed can no longer build dev at -O1. Also blocking the receipt: guard closed_lists (BuildExecute.jet JetCLIBuildDone, from #6794 S2) and copy_ratchet (Parser/Entry.jet 21 copies over 11, from #6796 S1), both sent to the #6794 lane; guard shard 4 was killed at the 4G cap (being measured)."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -52765,7 +52795,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-23T16:16:18.533Z",
+      "updated": "2026-11-23T18:02:41.286Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -134891,6 +134921,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T18:02:41.286Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T17:47:24.793Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T17:45:21.496Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T17:42:08.545Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T17:40:50.760Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T17:36:40.355Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-23T16:55:45.493Z",
       "by": "Orchestrator",
