@@ -39,7 +39,7 @@
 // as a plain word, so the parser meets it as any other word there. A local
 // `fn name` in a body stays a local function.
 use {
-    jet_foundation.[Span, name_empty, name_index]
+    jet_foundation.[Span, name_empty, name_find, name_index]
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
@@ -154,40 +154,44 @@ PARSER_COLON_MARKER_TEMPLATE: 2
 // The marker part of the head at `head`: `impl Marker {` opens a marker's
 // settings block and `impl Name.Derive {` a derive's, and a `fn expand` head
 // is the template when such a block holds it.
-parser_colon_marker_head: fn(tokens: [Token], tables: TokenTables, head: Int) -> Int Never! {
-    if head >= tokens.len() -> return PARSER_COLON_MARKER_NONE
+parser_colon_marker_head: fn(tokens: [Token], head: Int, head_kind: Int, marker_id: Int, derive_id: Int, expand_id: Int) -> Int Never! {
+    if head_kind != TOKEN_KW_IMPL && head_kind != TOKEN_KW_FN -> return PARSER_COLON_MARKER_NONE
+    if head_kind == TOKEN_KW_FN {
+        if expand_id < 0 -> return PARSER_COLON_MARKER_NONE
+        name: parser_colon_code_at(tokens, head + 1)
+        if name < tokens.len() && tokens[name].kind == TOKEN_IDENT && name_index(tokens[name].decoded) == expand_id {
+            return PARSER_COLON_MARKER_TEMPLATE
+        }
+        return PARSER_COLON_MARKER_NONE
+    }
+    if marker_id < 0 && derive_id < 0 -> return PARSER_COLON_MARKER_NONE
     name: parser_colon_code_at(tokens, head + 1)
     if name >= tokens.len() || tokens[name].kind != TOKEN_IDENT -> return PARSER_COLON_MARKER_NONE
-    if tokens[head].kind == TOKEN_KW_IMPL {
-        open := parser_colon_code_at(tokens, name + 1)
-        if token_decoded(tables, tokens[name]) != "Marker" {
-            word: parser_colon_code_at(tokens, open + 1)
-            if open >= tokens.len() || tokens[open].kind != TOKEN_DOT || word >= tokens.len() || tokens[word].kind != TOKEN_IDENT || token_decoded(tables, tokens[word]) != "Derive" {
-                return PARSER_COLON_MARKER_NONE
-            }
-            open = parser_colon_code_at(tokens, word + 1)
+    open := parser_colon_code_at(tokens, name + 1)
+    if marker_id < 0 || name_index(tokens[name].decoded) != marker_id {
+        if derive_id < 0 -> return PARSER_COLON_MARKER_NONE
+        word: parser_colon_code_at(tokens, open + 1)
+        if open >= tokens.len() || tokens[open].kind != TOKEN_DOT || word >= tokens.len() || tokens[word].kind != TOKEN_IDENT || name_index(tokens[word].decoded) != derive_id {
+            return PARSER_COLON_MARKER_NONE
         }
-        if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE {
-            return PARSER_COLON_MARKER_IMPL
-        }
+        open = parser_colon_code_at(tokens, word + 1)
     }
-    if tokens[head].kind == TOKEN_KW_FN && token_decoded(tables, tokens[name]) == "expand" {
-        return PARSER_COLON_MARKER_TEMPLATE
+    if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE {
+        return PARSER_COLON_MARKER_IMPL
     }
     PARSER_COLON_MARKER_NONE
 }
 
 // Whether the group opening at `open` holds the arguments of a `.generate(…)`
 // call, whose trailing brace is an item block.
-parser_colon_generate_call: fn(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
-    name: open - 1
-    name >= 1 && tokens[name].kind == TOKEN_IDENT && tokens[name - 1].kind == TOKEN_DOT && token_decoded(tables, tokens[name]) == "generate"
+parser_colon_generate_call: fn(tokens: [Token], open: Int, generate_id: Int) -> Bool Never! {
+    generate_id >= 0 && open >= 2 && tokens[open - 1].kind == TOKEN_IDENT && tokens[open - 2].kind == TOKEN_DOT && name_index(tokens[open - 1].decoded) == generate_id
 }
 
 // Whether `word` is the `code` of a `#code` value (no space after `#`), whose
 // brace is an item block.
-parser_colon_code_value: fn(tokens: [Token], tables: TokenTables, word: Int) -> Bool Never! {
-    word >= 1 && tokens[word].kind == TOKEN_IDENT && tokens[word - 1].kind == TOKEN_HASH && tokens[word - 1].span.end == tokens[word].span.start && token_decoded(tables, tokens[word]) == "code"
+parser_colon_code_value: fn(tokens: [Token], word: Int, code_id: Int) -> Bool Never! {
+    code_id >= 0 && word >= 1 && tokens[word].kind == TOKEN_IDENT && tokens[word - 1].kind == TOKEN_HASH && tokens[word - 1].span.end == tokens[word].span.start && name_index(tokens[word].decoded) == code_id
 }
 
 // One past a balanced `(…)` or `[…]` group opening at `open`.
@@ -411,8 +415,11 @@ parser_colon_declared_name: fn(tokens: [Token], head: Int) -> Int Never! {
 // Writes `module` in front of each binding that names a module (see the file
 // comment). A binding naming an instance is one too, so the choice runs to a
 // fixed point over the file's candidates.
-parser_colon_mark_instances: fn(tokens: &&[Token], candidates: [ParserColonInstance], declared_modules: [Int:Bool], others: [Int:Bool]) -> [Token] Never! {
-    modules := declared_modules
+parser_colon_mark_instances: fn(tokens: &&[Token], candidates: [ParserColonInstance], declared_module_names: [Int], declared_other_names: [Int]) -> [Token] Never! {
+    modules := [Int:Bool]{}
+    loop id in declared_module_names -> modules[id] = true
+    others := [Int:Bool]{}
+    loop id in declared_other_names -> others[id] = true
     chosen := [Bool]{}
     loop _ in candidates -> chosen.push(false)
     any := false
@@ -494,8 +501,8 @@ parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Boo
 
 // Whether the `{` at `open` begins the value of a prepared binding
 // `name: #run { … }`.
-parser_colon_prepared_value_open: fn(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
-    open >= 2 && tokens[open - 1].kind == TOKEN_PREP && tokens[open - 2].kind == TOKEN_COLON && token_text(tables, tokens[open - 1]) == "#run"
+parser_colon_prepared_value_open: fn(tokens: [Token], open: Int, run_id: Int) -> Bool Never! {
+    run_id >= 0 && open >= 2 && tokens[open - 1].kind == TOKEN_PREP && tokens[open - 2].kind == TOKEN_COLON && name_index(tokens[open - 1].text) == run_id
 }
 
 // Whether a prepared binding `name: #run { … }` or `name: #run value` starts
@@ -503,28 +510,45 @@ parser_colon_prepared_value_open: fn(tokens: [Token], tables: TokenTables, open:
 // parser reads such a binding inside a prepared value's braces as the end of
 // a value whose `}` is missing (parser_parse_value_lines); this pass ends
 // that value's frame there too.
-parser_colon_prepared_binding_at: fn(tokens: [Token], tables: TokenTables, index: Int) -> Bool Never! {
+parser_colon_prepared_binding_at: fn(tokens: [Token], index: Int, run_id: Int) -> Bool Never! {
     if tokens[index].kind != TOKEN_IDENT -> return false
     colon: parser_colon_code_at(tokens, index + 1)
     if colon >= tokens.len() || tokens[colon].kind != TOKEN_COLON -> return false
     prep: parser_colon_code_at(tokens, colon + 1)
     if prep >= tokens.len() || tokens[prep].kind != TOKEN_PREP -> return false
     after: parser_colon_code_at(tokens, prep + 1)
-    (after < tokens.len() && tokens[after].kind == TOKEN_LBRACE) || token_text(tables, tokens[prep]) == "#run"
+    (after < tokens.len() && tokens[after].kind == TOKEN_LBRACE) || (run_id >= 0 && name_index(tokens[prep].text) == run_id)
+}
+
+// Per open delimiter: its frame, open token index, whether it is an
+// `impl Marker` body, and the enclosing statement's head kind, its marker
+// part, whether that statement had opened its body, and its open `<` count.
+ParserColonSaved: struct {
+    frame: Int,
+    open: Int,
+    head_kind: Int,
+    head_marker: Int,
+    angles: Int,
+    marker_body: Bool,
+    opened: Bool,
+}
+
+parser_colon_find_name: fn(tables: TokenTables, text: String) -> Int Never! {
+    if name_find(tables.names, text) == .Val(id) -> name_index(id) else -> -1
 }
 
 // `tables` spells the tokens' names.
 parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
     tokens := input.move()
-    // Per open delimiter: its frame, whether it is an `impl Marker` body,
-    // and the enclosing statement's head kind, its marker part and whether
-    // that statement had opened its body.
-    frames := [Int]{}
-    saved_marker_bodies := [Bool]{}
-    saved_heads := [Int]{}
-    saved_marker_heads := [Int]{}
-    saved_opened := [Bool]{}
-    saved_angles := [Int]{}
+    marker_id: parser_colon_find_name(tables, "Marker")
+    derive_id: parser_colon_find_name(tables, "Derive")
+    expand_id: parser_colon_find_name(tables, "expand")
+    generate_id: parser_colon_find_name(tables, "generate")
+    code_id: parser_colon_find_name(tables, "code")
+    run_id: parser_colon_find_name(tables, "#run")
+    has_marker_words: marker_id >= 0 || derive_id >= 0 || expand_id >= 0
+    saved := [ParserColonSaved]{}
+    saved.try_reserve(16) ?? panic("reserve failed")
     frame := PARSER_COLON_FRAME_MODULE
     // Whether the current frame is an `impl Marker` body.
     marker_body := false
@@ -540,8 +564,8 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
     // Module instance candidates, and the names this file declares as
     // modules and as anything else.
     candidates := [ParserColonInstance]{}
-    modules := [Int:Bool]{}
-    others := [Int:Bool]{}
+    declared_modules := [Int]{}
+    declared_others := [Int]{}
     index := 0
     // The last code token before `index`, or -1.
     previous := -1
@@ -549,11 +573,12 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
     // there, which is no new member. A marker's arguments hold heads of
     // their own before it, so this only grows.
     head_end := -1
-    // The open delimiters' indices, and that of the group closed last.
-    opens := [Int]{}
+    // The open delimiter index of the group closed last.
     closed := -1
-    loop index < tokens.len() {
-        if parser_colon_is_trivia(tokens[index].kind) {
+    count: tokens.len()
+    loop index < count {
+        current: tokens[index].kind
+        if parser_colon_is_trivia(current) {
             index += 1
             next
         }
@@ -562,14 +587,15 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
         }
         // A prepared binding inside a prepared value's braces ends that value,
         // as if its `}` came first.
-        if at_start && frame == PARSER_COLON_FRAME_CODE && opens.len() > 0 && parser_colon_prepared_value_open(tokens, tables, opens[opens.len() - 1]) && parser_colon_prepared_binding_at(tokens, tables, index) {
-            frame = frames.pop() ?? PARSER_COLON_FRAME_MODULE
-            marker_body = saved_marker_bodies.pop() ?? false
-            head_kind = saved_heads.pop() ?? -1
-            head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
-            opened = saved_opened.pop() ?? false
-            angles = saved_angles.pop() ?? 0
-            closed = opens.pop() ?? -1
+        if at_start && run_id >= 0 && frame == PARSER_COLON_FRAME_CODE && saved.len() > 0 && parser_colon_prepared_value_open(tokens, saved[saved.len() - 1].open, run_id) && parser_colon_prepared_binding_at(tokens, index, run_id) {
+            top: saved.pop() ?? ParserColonSaved{frame: PARSER_COLON_FRAME_MODULE, open: -1, head_kind: -1, head_marker: PARSER_COLON_MARKER_NONE, angles: 0, marker_body: false, opened: false}
+            frame = top.frame
+            marker_body = top.marker_body
+            head_kind = top.head_kind
+            head_marker = top.head_marker
+            opened = top.opened
+            angles = top.angles
+            closed = top.open
         }
         if at_start && frame != PARSER_COLON_FRAME_GROUP {
             at_start = false
@@ -597,45 +623,41 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                     }
                 }
             }
-            declared: parser_colon_declared_name(tokens, head)
-            if declared >= 0 {
-                if tokens[head].kind == TOKEN_KW_MODULE -> modules[declared] = true else {
-                    others[declared] = true
+            head_kind = if head < count -> tokens[head].kind else -> -1
+            if parser_colon_head_keyword(head_kind) {
+                declared: parser_colon_declared_name(tokens, head)
+                if declared >= 0 {
+                    if head_kind == TOKEN_KW_MODULE -> declared_modules.push(declared) else {
+                        declared_others.push(declared)
+                    }
                 }
             }
-            head_kind = if head < tokens.len() -> tokens[head].kind else -> -1
             if head_kind == TOKEN_KW_LOOP || head_kind == TOKEN_KW_IF {
                 loop at in index..<head {
                     if tokens[at].kind == TOKEN_PREP -> head_kind = PARSER_COLON_HEAD_COMPTIME_BLOCK
                 }
             }
-            head_marker = parser_colon_marker_head(tokens, tables, head)
+            head_marker = if has_marker_words -> parser_colon_marker_head(tokens, head, head_kind, marker_id, derive_id, expand_id) else -> PARSER_COLON_MARKER_NONE
             opened = false
         }
-        current: tokens[index].kind
-        if current == TOKEN_LPAREN || current == TOKEN_LBRACKET || current == TOKEN_LBRACE {
-            frames.push(frame)
-            saved_marker_bodies.push(marker_body)
-            opens.push(index)
-            saved_heads.push(head_kind)
-            saved_marker_heads.push(head_marker)
-            saved_opened.push(opened)
-            saved_angles.push(angles)
+        kind: tokens[index].kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
+            next_saved_opened: if kind == TOKEN_LBRACE -> true else -> opened
+            saved.push(ParserColonSaved{frame: frame, open: index, head_kind: head_kind, head_marker: head_marker, angles: angles, marker_body: marker_body, opened: next_saved_opened})
             angles = 0
-            if current == TOKEN_LBRACE {
+            if kind == TOKEN_LBRACE {
                 body: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
                 if body && marker_body && head_marker == PARSER_COLON_MARKER_TEMPLATE {
                     frame = PARSER_COLON_FRAME_CONTAINER
                 }
-                if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) {
+                if generate_id >= 0 && previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, closed, generate_id) {
                     frame = PARSER_COLON_FRAME_MODULE
                 }
-                if previous >= 0 && parser_colon_code_value(tokens, tables, previous) {
+                if code_id >= 0 && previous >= 0 && parser_colon_code_value(tokens, previous, code_id) {
                     frame = PARSER_COLON_FRAME_MODULE
                 }
                 marker_body = body && head_marker == PARSER_COLON_MARKER_IMPL
-                saved_opened[saved_opened.len() - 1] = true
                 at_start = true
             } else {
                 frame = PARSER_COLON_FRAME_GROUP
@@ -644,39 +666,42 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             head_kind = -1
             head_marker = PARSER_COLON_MARKER_NONE
             opened = false
-        } else if current == TOKEN_RPAREN || current == TOKEN_RBRACKET || current == TOKEN_RBRACE {
-            if frames.len() > 0 {
-                frame = frames.pop() ?? PARSER_COLON_FRAME_MODULE
-                marker_body = saved_marker_bodies.pop() ?? false
-                head_kind = saved_heads.pop() ?? -1
-                head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
-                opened = saved_opened.pop() ?? false
-                angles = saved_angles.pop() ?? 0
+        } else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            if saved.len() > 0 {
+                top: saved.pop() ?? ParserColonSaved{frame: PARSER_COLON_FRAME_MODULE, open: -1, head_kind: -1, head_marker: PARSER_COLON_MARKER_NONE, angles: 0, marker_body: false, opened: false}
+                frame = top.frame
+                marker_body = top.marker_body
+                head_kind = top.head_kind
+                head_marker = top.head_marker
+                opened = top.opened
+                angles = top.angles
+                closed = top.open
+            } else {
+                closed = -1
             }
-            closed = opens.pop() ?? -1
             // A member's body brace ends the member, so a one-line body's
             // next member (`{ get: fn(self) -> Int { 1 } put: fn… }`) starts
             // here; an `else` goes on with a `#if`.
-            if current == TOKEN_RBRACE && parser_colon_member_frame(frame) {
+            if kind == TOKEN_RBRACE && parser_colon_member_frame(frame) {
                 after: parser_colon_code_at(tokens, index + 1)
-                if after >= tokens.len() || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true
+                if after >= count || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true
             }
-        } else if (current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP) || (current == TOKEN_COMMA && angles == 0 && (frame == PARSER_COLON_FRAME_SHAPE || frame == PARSER_COLON_FRAME_CONTAINER)) {
+        } else if (kind == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP) || (kind == TOKEN_COMMA && angles == 0 && (frame == PARSER_COLON_FRAME_SHAPE || frame == PARSER_COLON_FRAME_CONTAINER)) {
             // A line break ends a statement, and the comma after a data
             // member of a type or trait body ends that member.
             at_start = true
             head_kind = -1
             head_marker = PARSER_COLON_MARKER_NONE
             opened = false
-        } else if current == TOKEN_LT || current == TOKEN_GT || current == TOKEN_SHR {
+        } else if kind == TOKEN_LT || kind == TOKEN_GT || kind == TOKEN_SHR {
             // A member's head holds no comparison, so `<` and `>` there only
             // open and close type arguments.
-            change: if current == TOKEN_LT -> 1 else if current == TOKEN_GT -> -1 else -> -2
+            change: if kind == TOKEN_LT -> 1 else if kind == TOKEN_GT -> -1 else -> -2
             angles = if angles + change > 0 -> angles + change else -> 0
         }
         previous = index
         index += 1
     }
     if candidates.len() == 0 -> return tokens.move()
-    parser_colon_mark_instances(tokens, candidates, modules, others)
+    parser_colon_mark_instances(tokens, candidates, declared_modules, declared_others)
 }

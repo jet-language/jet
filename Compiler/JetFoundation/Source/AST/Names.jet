@@ -94,9 +94,8 @@ name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     Int{final & I64{0x3fffffff}}
 }
 
-// Whether id `id` spells `bytes[start..<end]`, whose `name_hash` is `hash`.
-name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
-    if table.hashes[id] != hash -> return false
+// Whether id `id` spells `bytes[start..<end]` (caller already matched 30-bit hash).
+name_bytes_match: fn(table: NameTable, id: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
     first: name_start(table, id)
     len: end - start
     if table.ends[id] - first != len -> return false
@@ -106,6 +105,12 @@ name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: I
         if table.bytes[first + offset] != bytes[start + offset] -> return false
     }
     true
+}
+
+// Whether id `id` spells `bytes[start..<end]`, whose `name_hash` is `hash`.
+name_bytes_equal: fn(table: NameTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    if table.hashes[id] != hash -> return false
+    name_bytes_match(table, id, bytes, start, end)
 }
 
 // The slot of `bytes[start..<end]` (whose `name_hash` is `hash`) in
@@ -121,7 +126,7 @@ name_slot: fn(table: NameTable, hash: Int, bytes: [U8], start: Int, end: Int) ->
         if entry == 0 -> break
         if (entry >> 32) == hash_tag {
             id: (entry & 0xffffffff) - 1
-            if name_bytes_equal(table, id, hash, bytes, start, end) -> return slot
+            if name_bytes_match(table, id, bytes, start, end) -> return slot
         }
         slot = (slot + 1) & mask
     }

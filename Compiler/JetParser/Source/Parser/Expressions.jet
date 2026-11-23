@@ -991,8 +991,7 @@ parser_shared_cell: fn(state: &JetParserState, operand: Expr, operand_span: Span
 parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     token: parser_current(state)
     kind: token.kind
-    word: if kind == TOKEN_IDENT -> parser_value(state, token) else -> ""
-    if kind == TOKEN_IDENT && word == "task" && parser_task_surface_ahead(state) {
+    if kind == TOKEN_IDENT && parser_token_decoded_is_id(token, state.words.id_task) && parser_task_surface_ahead(state) {
         return parser_parse_task_surface(state, depth + 1)
     }
     // `#run { … }` in value position. The block's final
@@ -1017,23 +1016,26 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         return parser_make_link_expr(state, token.span, operand)
     }
-    if kind == TOKEN_IDENT && word.starts_with("@") && word.len() > 1 && !(word == "@Unsafe" && parser_kind_at(state, 1) == TOKEN_LPAREN) {
-        parser_bump(state)
-        inner_name: String.from_bytes(word.bytes()[1..<word.bytes().len()]) ?? ""
-        at_span: Span{start: token.span.start, end: token.span.start + 1}
-        inner_span: Span{start: token.span.start + 1, end: token.span.end}
-        base := if {
-            allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LBRACE -> {
-                parser_parse_typed_literal_body(state, Val(foundation_named_type(inner_name)), inner_span, depth + 1)
+    if kind == TOKEN_IDENT && parser_decoded_first_byte(state, token) == 64 && parser_decoded_byte_len(state, token) > 1 {
+        word: parser_value(state, token)
+        if !(word == "@Unsafe" && parser_kind_at(state, 1) == TOKEN_LPAREN) {
+            parser_bump(state)
+            inner_name: String.from_bytes(word.bytes()[1..<word.bytes().len()]) ?? ""
+            at_span: Span{start: token.span.start, end: token.span.start + 1}
+            inner_span: Span{start: token.span.start + 1, end: token.span.end}
+            base := if {
+                allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LBRACE -> {
+                    parser_parse_typed_literal_body(state, Val(foundation_named_type(inner_name)), inner_span, depth + 1)
+                }
+                allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LT && parser_turbofish_ahead(state, TOKEN_LBRACE) -> {
+                    type_args: parser_parse_call_type_args(state, depth + 1)
+                    parser_parse_typed_literal_body(state, Val(Type.Apply{name: inner_name, args: type_args}), inner_span, depth + 1)
+                }
+                else -> ParsedExpr{expr: Expr.Ident{name: inner_name, span: inner_span, id: parser_node_id(state)}, span: inner_span}
             }
-            allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LT && parser_turbofish_ahead(state, TOKEN_LBRACE) -> {
-                type_args: parser_parse_call_type_args(state, depth + 1)
-                parser_parse_typed_literal_body(state, Val(Type.Apply{name: inner_name, args: type_args}), inner_span, depth + 1)
-            }
-            else -> ParsedExpr{expr: Expr.Ident{name: inner_name, span: inner_span, id: parser_node_id(state)}, span: inner_span}
+            operand: parser_parse_postfix(state, base.move(), depth + 1, allow_struct_lit, false)
+            return parser_make_link_expr(state, at_span, operand)
         }
-        operand: parser_parse_postfix(state, base.move(), depth + 1, allow_struct_lit, false)
-        return parser_make_link_expr(state, at_span, operand)
     }
     if allow_struct_lit && parser_typed_literal_head_ahead(state) {
         typed: parser_try_parse_typed_literal(state, depth + 1)
@@ -1064,7 +1066,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         parser_report_arrow_habit(state, token, arrow.span, body.span)
         return body
     }
-    if kind == TOKEN_IDENT && word == "not" && parser_not_habit_ahead(state) {
+    if kind == TOKEN_IDENT && parser_token_decoded_is_id(token, state.words.id_not) && parser_not_habit_ahead(state) {
         parser_bump(state)
         parser_report_not_habit(state, token)
         operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
@@ -1097,7 +1099,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     }
     // This rule a=A: `.new(...)` leaves only the static receiver implicit; sema
     // fills the empty receiver name from the expected type.
-    if kind == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "new" {
+    if kind == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT && parser_token_decoded_is_id(parser_lookahead(state, 1), state.words.id_new) {
         parser_bump(state)
         method: parser_bump(state)
         if parser_current_kind(state) != TOKEN_LPAREN {
@@ -1113,8 +1115,8 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // A lower-case `.member` is the implicit-receiver
     // member shorthand; the postfix loop reads the rest of `.member.m(x)`.
     if kind == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT {
-        first_byte: parser_value_at(state, 1).bytes()[0]
-        if (Int{first_byte}) >= 97 && (Int{first_byte}) <= 122 {
+        first_byte: parser_decoded_first_byte(state, parser_lookahead(state, 1))
+        if first_byte >= 97 && first_byte <= 122 {
             parser_bump(state)
             member: parser_bump(state)
             // The field node is spanned at its member name, as in the
@@ -1169,7 +1171,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // Optional constructors keep the contextual EnumLit shape used by Rust;
     // sema supplies the payload type from the expected optional type.
     // `Val` without `(` is still an ordinary identifier.
-    if kind == TOKEN_IDENT && word == "Val" && parser_kind_at(state, 1) == TOKEN_LPAREN {
+    if kind == TOKEN_IDENT && parser_token_decoded_is_id(token, state.words.id_val) && parser_kind_at(state, 1) == TOKEN_LPAREN {
         parser_bump(state)
         parser_expect(state, TOKEN_LPAREN, "after `Val`")
         inner: parser_parse_expression(state, 0, depth + 1)
@@ -1183,14 +1185,15 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // The lexer reads `$NAME` as one identifier. Only a config surface reads
     // it as an environment read; in ordinary source, a template included, a
     // `$` word is no name.
-    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads {
+    if kind == TOKEN_IDENT && !state.allow_environment_reads && parser_decoded_first_byte(state, token) == 36 {
+        word: parser_value(state, token)
         parser_bump(state)
         parser_report_unknown_fact_root(state, word, token.span)
         return ParsedExpr{expr: Expr.Ident{name: word, span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(state)
-        return ParsedExpr{expr: Expr.Ident{name: if kind == TOKEN_IDENT -> word else -> parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
+        return ParsedExpr{expr: Expr.Ident{name: parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     if kind == TOKEN_TRUE || kind == TOKEN_FALSE {
         parser_bump(state)

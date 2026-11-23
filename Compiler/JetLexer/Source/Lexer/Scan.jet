@@ -127,8 +127,19 @@ previous_is_identifier: fn(source: [U8], index: Int) -> Bool {
     previous >= 0 && is_identifier_continue(source, previous)
 }
 
-// ASCII identifier bytes are tested inline; only a non-ASCII byte takes the
-// scalar path (`is_identifier_continue`, `utf8_width`).
+scan_ident_cont_table: fn() -> [U8] Never! {
+    table := [U8]{}
+    loop i in 0..<256 {
+        ok: i == 95 || (i >= 97 && i <= 122) || (i >= 65 && i <= 90) || (i >= 48 && i <= 57)
+        table.push(if ok -> U8{1} else -> U8{0})
+    }
+    table
+}
+
+SCAN_IDENT_CONT: #run scan_ident_cont_table()
+
+// ASCII identifier bytes are tested via one table load; only a non-ASCII byte
+// takes the scalar path (`is_identifier_continue`, `utf8_width`).
 scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     if start < 0 -> return start
     i := start
@@ -136,7 +147,7 @@ scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     loop i < count {
         value: Int{source[i]}
         if value < 128 {
-            if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) || (value >= 48 && value <= 57) {
+            if SCAN_IDENT_CONT[value] != (U8{0}) {
                 i += 1
                 next
             }
@@ -531,6 +542,7 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
 
 raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
+    if source.len() > 16 -> facts.try_reserve(source.len() * 3 /% 4 + 8) ?? panic("reserve failed")
     _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     facts
 }
@@ -543,6 +555,7 @@ raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
 RawScanStop: struct {
     stop: Int,
     bodies_local: Bool,
+    has_paste: Bool{false},
 }
 
 // Scans `source[from..<to]` appending its facts to `facts`. A token that
@@ -552,27 +565,41 @@ RawScanStop: struct {
 // read at byte 0 only, and the EOF fact is emitted when the range reaches
 // the end of the source.
 raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: &[Int]) -> RawScanStop {
+    if facts.len() <= 4 && to - from > 16 -> facts.try_reserve((to - from) * 3 /% 4 + 8) ?? panic("reserve failed")
     last_code := previous_code
     fn_in_range := false
     bodies_local := true
+    has_paste := false
     i := from
-    if i == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
-        loop i < source.len() && byte_at(source, i) != 10 -> i += 1
-        if i < source.len() -> i += 1
-    }
     count: source.len()
+    if i == 0 && count >= 3 && source[0] == (U8{35}) && source[1] == (U8{33}) && source[2] == (U8{47}) {
+        loop i < count && source[i] != (U8{10}) -> i += 1
+        if i < count -> i += 1
+    }
     loop i < to {
-        // ASCII whitespace and identifier starts (most bytes and tokens) are
-        // tested inline before the punctuation chain; a non-ASCII byte keeps
-        // the scalar whitespace and identifier tests below.
-        value: Int{source[i]}
-        if value == 32 || (value >= 9 && value <= 13) {
+        // Fast-skip ASCII whitespace runs (including 4-space indentation blocks).
+        b0 := source[i]
+        if b0 == (U8{32}) || (b0 >= (U8{9}) && b0 <= (U8{13})) {
             i += 1
-            next
+            loop i + 4 <= to && source[i] == (U8{32}) && source[i + 1] == (U8{32}) && source[i + 2] == (U8{32}) && source[i + 3] == (U8{32}) {
+                i += 4
+            }
+            loop i < to {
+                bw: source[i]
+                if bw == (U8{32}) || (bw >= (U8{9}) && bw <= (U8{13})) {
+                    i += 1
+                    next
+                }
+                break
+            }
+            if i >= to -> break
+            b0 = source[i]
         }
+        value: Int{b0}
         if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) {
             word_end: scan_identifier_end(source, i)
-            end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
+            end: if word_end < count && source[word_end] == (U8{35}) -> scan_glued_paste_end(source, word_end) else -> word_end
+            if end != word_end -> has_paste = true
             kind: word_kind(source, i, end, last_code)
             if kind == TOKEN_KW_FN -> fn_in_range = true
             case_name: kind == TOKEN_IDENT && ((value <= 90 && value >= 65) || (value == 95 && case_name_start(source, i, end)))
@@ -580,561 +607,529 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             i = end
             next
         }
-        if value >= 128 && is_whitespace_at(source, i) {
-            i += utf8_width(source, i)
-            next
-        }
-        start := i
-        next1: byte_at(source, i + 1)
-        next2: byte_at(source, i + 2)
-        if value == 35 && next1 == 33 && next2 == 47 {
-            loop i < source.len() && byte_at(source, i) != 10 -> i += 1
-            if i < source.len() -> i += 1
-            next
-        }
-        if value == LINE_COMMENT_FIRST && next1 == LINE_COMMENT_SECOND {
-            if config_surface && byte_at(source, i - 1) == 58 {
-                last_code = push_code(facts, TOKEN_SLASH, i, i + 1, false)
-                last_code = push_code(facts, TOKEN_SLASH, i + 1, i + 2, false)
-                i += 2
-                next
-            }
-            loop i < count && source[i] != 10 -> i += 1
-            emit(facts, TOKEN_LINE_COMMENT, start, i, false)
-            next
-        }
-        if value == BLOCK_OPEN_FIRST && next1 == BLOCK_OPEN_SECOND {
-            end: scan_block_comment_end(source, start)
-            i = if end < 0 -> -end - 1 else -> end
-            emit(facts, TOKEN_BLOCK_COMMENT, start, i, false)
-            next
-        }
-        if value == 40 {
-            last_code = push_code(facts, TOKEN_LPAREN, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 41 {
-            last_code = push_code(facts, TOKEN_RPAREN, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 123 {
-            last_code = push_code(facts, TOKEN_LBRACE, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 125 {
-            last_code = push_code(facts, TOKEN_RBRACE, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 91 {
-            last_code = push_code(facts, TOKEN_LBRACKET, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 93 {
-            last_code = push_code(facts, TOKEN_RBRACKET, start, start + 1, false)
-            i += 1
-            next
-        }
-        // `:>` closes a fence (longest match before `::`/`:=`).
-        if value == 58 {
-            if {
-                next1 == 62 -> {
-                    last_code = push_code(facts, TOKEN_FENCE_CLOSE, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 58 -> {
-                    last_code = push_code(facts, TOKEN_COLON_COLON, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_COLON_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_COLON, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 44 {
-            last_code = push_code(facts, TOKEN_COMMA, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 59 {
-            last_code = push_code(facts, TOKEN_SEMI, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 64 {
-            if {
-                is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
-                    end: scan_identifier_end(source, i + 1)
-                    marker_kind: word_kind(source, i + 1, end, 0)
-                    if {
-                        marker_kind == TOKEN_IDENT -> {
-                            last_code = push_code(facts, TOKEN_IDENT, start, end, false)
-                            i = end
-                        }
-                        else -> {
-                            last_code = push_code(facts, TOKEN_AT, start, start + 1, false)
-                            i += 1
-                        }
-                    }
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_AT, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 35 {
-            // A template paste `#{name}` is one word: the name a derive or
-            // marker template splices in for its binding `name`. So is
-            // `#{f.body}`, which pastes the body of the function a
-            // `meta.rewrite_body` replaces into its new body.
-            if next1 == 123 && is_identifier_start(source, i + 2) {
-                paste_end := scan_identifier_end(source, i + 2)
-                if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 {
-                    paste_end += 5
-                }
-                if byte_at(source, paste_end) == 125 {
-                    glued: scan_glued_paste_end(source, paste_end + 1)
-                    last_code = push_code(facts, TOKEN_IDENT, start, glued, false)
-                    i = glued
-                    next
-                }
-            }
-            // `#run`, `#if` and `#loop` ask the compiler to do the work while
-            // building. Each is the one prep token: `#run` is the whole
-            // token, and `#if` and `#loop` keep their keyword after it.
-            if is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) {
-                word_end: scan_identifier_end(source, i + 1)
-                if word_end - i == 4 && next1 == 114 && next2 == 117 && byte_at(source, i + 3) == 110 {
-                    last_code = push_code(facts, TOKEN_PREP, start, word_end, false)
-                    i = word_end
-                    next
-                }
-                word: word_kind(source, i + 1, word_end, 0)
-                if word == TOKEN_KW_IF || word == TOKEN_KW_LOOP {
-                    last_code = push_code(facts, TOKEN_PREP, start, start + 1, false)
-                    i += 1
-                    next
-                }
-            }
-            last_code = push_code(facts, TOKEN_HASH, start, start + 1, false)
-            i += 1
-            next
-        }
-        if value == 36 {
-            // Prefix `$name` is one word (`#here`, `#caller`); config
-            // surfaces read the same word as a `$NAME` environment read. A
-            // lone `$` keeps its token.
-            if {
-                is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
-                    end: scan_identifier_end(source, i + 1)
-                    last_code = push_code(facts, TOKEN_IDENT, start, end, false)
-                    i = end
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_DOLLAR, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 63 {
-            if {
-                next1 == 63 -> {
-                    last_code = push_code(facts, TOKEN_QUESTION_QUESTION, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 46 -> {
-                    last_code = push_code(facts, TOKEN_QUESTION_DOT, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_QUESTION, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 46 {
-            if {
-                next1 == 46 && next2 == 46 -> {
-                    last_code = push_code(facts, TOKEN_DOT_DOT_DOT, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 46 && next2 == 60 -> {
-                    last_code = push_code(facts, TOKEN_DOT_DOT_LT, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 46 -> {
-                    last_code = push_code(facts, TOKEN_DOT_DOT, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_DOT, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 61 {
-            if {
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_EQ_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_EQ, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 33 {
-            if {
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_NOT_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_BANG, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 43 {
-            if {
-                next1 == 43 -> {
-                    last_code = push_code(facts, TOKEN_PLUS_PLUS, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_PLUS_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_PLUS, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 45 {
-            if {
-                next1 == 62 -> {
-                    last_code = push_code(facts, TOKEN_UNIFIED_ARROW, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 45 -> {
-                    last_code = push_code(facts, TOKEN_MINUS_MINUS, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_MINUS_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_MINUS, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 42 {
-            if {
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_STAR_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_STAR, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 47 {
-            if {
-                next1 == 37 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_SLASH_PERCENT_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 37 -> {
-                    last_code = push_code(facts, TOKEN_SLASH_PERCENT, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_SLASH_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_SLASH, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 37 {
-            if {
-                next1 == 37 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_PERCENT_PERCENT_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 37 -> {
-                    last_code = push_code(facts, TOKEN_PERCENT_PERCENT, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_PERCENT_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_PERCENT, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 38 {
-            if {
-                next1 == 38 -> {
-                    last_code = push_code(facts, TOKEN_AND_AND, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_AMP_EQ, start, start + 2, false)
-                    i += 2
-                }
-                // `&~` clears bits: `a &~ b` is `a & ~b`.
-                next1 == 126 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_AMP_TILDE_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 126 -> {
-                    last_code = push_code(facts, TOKEN_AMP_TILDE, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_AMP, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 124 {
-            if {
-                next1 == 124 -> {
-                    last_code = push_code(facts, TOKEN_OR_OR, start, start + 2, false)
-                    i += 2
-                }
-                // `|>` starts a pipe step.
-                next1 == 62 -> {
-                    last_code = push_code(facts, TOKEN_PIPE_GT, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_PIPE_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_PIPE, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 94 {
-            if {
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 126 {
-            if {
-                next1 == 126 -> {
-                    last_code = push_code(facts, TOKEN_TILDE_TILDE, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 124 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_TILDE_PIPE_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 124 -> {
-                    last_code = push_code(facts, TOKEN_TILDE_PIPE, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_TILDE_EQ, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_TILDE, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 60 {
-            if {
-                next1 == 60 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_SHL_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 60 -> {
-                    last_code = push_code(facts, TOKEN_SHL, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 && next2 == 62 -> {
-                    last_code = push_code(facts, TOKEN_COMPARE, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_LE, start, start + 2, false)
-                    i += 2
-                }
-                // `<>` is the value a pipe step receives, one
-                // longest-match token as the fence tokens are.
-                next1 == 62 -> {
-                    last_code = push_code(facts, TOKEN_LT_GT, start, start + 2, false)
-                    i += 2
-                }
-                // `<:` opens a statement-expansion fence.
-                next1 == 58 -> {
-                    last_code = push_code(facts, TOKEN_FENCE_OPEN, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_LT, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 62 {
-            if {
-                next1 == 62 && next2 == 61 -> {
-                    last_code = push_code(facts, TOKEN_SHR_EQ, start, start + 3, false)
-                    i += 3
-                }
-                next1 == 62 -> {
-                    last_code = push_code(facts, TOKEN_SHR, start, start + 2, false)
-                    i += 2
-                }
-                next1 == 61 -> {
-                    last_code = push_code(facts, TOKEN_GE, start, start + 2, false)
-                    i += 2
-                }
-                else -> {
-                    last_code = push_code(facts, TOKEN_GT, start, start + 1, false)
-                    i += 1
-                }
-            }
-            next
-        }
-        if value == 34 {
-            if {
-                next1 == 34 && next2 == 34 -> {
-                    if !fn_in_range -> bodies_local = false
-                    end := if {
-                        raw_foreign_body_at(source, facts, facts.len() /% 4) -> scan_raw_foreign_string_end(source, start)
-                        else -> {
-                            modes: string_head_modes(source, facts, facts.len() /% 4)
-                            scan_triple_string_end(source, start, modes.raw_head)
-                        }
-                    }
-                    if {
-                        end < 0 -> { i = -end - 1 }
-                        else -> {
-                            last_code = push_code(facts, TOKEN_STRING, start, end, false)
-                            i = end
-                        }
-                    }
-                }
-                else -> {
-                    modes: string_head_modes(source, facts, facts.len() /% 4)
-                    end: scan_plain_string_end(source, start, modes.raw_head)
-                    if {
-                        end < 0 -> { i = -end - 1 }
-                        else -> {
-                            last_code = push_code(facts, TOKEN_STRING, start, end, false)
-                            i = end
-                        }
-                    }
-                }
-            }
-            next
-        }
-        if value == 96 {
-            end: scan_raw_fence_end(source, start)
-            if {
-                end < 0 -> { i = -end - 1 }
-                else -> {
-                    last_code = push_code(facts, TOKEN_RAW_STRING, start, end, false)
-                    i = end
-                }
-            }
-            next
-        }
-        if value == 39 {
-            end: scan_char_end(source, start)
-            if {
-                end < 0 -> { i = source.len() }
-                else -> {
-                    last_code = push_code(facts, TOKEN_CHAR, start, end, false)
-                    i = end
-                }
-            }
-            next
-        }
-        if ascii_digit(value) {
+        if value >= 48 && value <= 57 {
+            start: i
             numeric_end: scan_numeric_end(source, start)
-            end: scan_number_end(source, start)
+            is_base: value == 48 && base_number_end(source, start) >= 0
+            after: byte_at(source, numeric_end)
+            end: if !is_base && (ascii_alpha(after) || after == 95) -> scan_unit_suffix_end(source, numeric_end) else -> numeric_end
             kind: if {
-                end != numeric_end && (numeric_is_float(source, start) || decimal_digits_fit_int(source, start, numeric_end)) -> TOKEN_UNIT_NUMBER
-                // Rust `number`: a unit candidate whose digits overflow the
-                // i64 fast path falls back to an Int token over the whole
-                // spelling, suffix included.
-                end != numeric_end -> TOKEN_INT
-                numeric_is_float(source, start) -> TOKEN_FLOAT
+                end != numeric_end -> if numeric_is_float(source, start) || decimal_digits_fit_int(source, start, numeric_end) -> TOKEN_UNIT_NUMBER else -> TOKEN_INT
+                !is_base && numeric_is_float(source, start) -> TOKEN_FLOAT
                 else -> TOKEN_INT
             }
             last_code = push_code(facts, kind, start, end, false)
             i = end
             next
         }
-        if is_identifier_start(source, i) {
-            word_end: scan_identifier_end(source, i)
-            end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
-            kind: word_kind(source, i, end, last_code)
-            if kind == TOKEN_KW_FN -> fn_in_range = true
-            case_name := false
-            if kind == TOKEN_IDENT -> case_name = case_name_start(source, i, end)
-            last_code = push_code(facts, kind, i, end, case_name)
-            i = end
+        if value >= 128 {
+            if is_whitespace_at(source, i) {
+                i += utf8_width(source, i)
+                next
+            }
+            if is_identifier_start(source, i) {
+                word_end: scan_identifier_end(source, i)
+                end: if word_end < count && source[word_end] == (U8{35}) -> scan_glued_paste_end(source, word_end) else -> word_end
+                if end != word_end -> has_paste = true
+                kind: word_kind(source, i, end, last_code)
+                if kind == TOKEN_KW_FN -> fn_in_range = true
+                case_name := false
+                if kind == TOKEN_IDENT -> case_name = case_name_start(source, i, end)
+                last_code = push_code(facts, kind, i, end, case_name)
+                i = end
+                next
+            }
+            i += utf8_width(source, i)
             next
         }
-        i += utf8_width(source, i)
+        start: i
+        if value == {
+            40 -> {
+                last_code = push_code(facts, TOKEN_LPAREN, start, start + 1, false)
+                i += 1
+            }
+            41 -> {
+                last_code = push_code(facts, TOKEN_RPAREN, start, start + 1, false)
+                i += 1
+            }
+            123 -> {
+                last_code = push_code(facts, TOKEN_LBRACE, start, start + 1, false)
+                i += 1
+            }
+            125 -> {
+                last_code = push_code(facts, TOKEN_RBRACE, start, start + 1, false)
+                i += 1
+            }
+            91 -> {
+                last_code = push_code(facts, TOKEN_LBRACKET, start, start + 1, false)
+                i += 1
+            }
+            93 -> {
+                last_code = push_code(facts, TOKEN_RBRACKET, start, start + 1, false)
+                i += 1
+            }
+            44 -> {
+                last_code = push_code(facts, TOKEN_COMMA, start, start + 1, false)
+                i += 1
+            }
+            59 -> {
+                last_code = push_code(facts, TOKEN_SEMI, start, start + 1, false)
+                i += 1
+            }
+            58 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 62 -> {
+                        last_code = push_code(facts, TOKEN_FENCE_CLOSE, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 58 -> {
+                        last_code = push_code(facts, TOKEN_COLON_COLON, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_COLON_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_COLON, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            46 -> {
+                next1: byte_at(source, i + 1)
+                if next1 == 46 {
+                    next2: byte_at(source, i + 2)
+                    if {
+                        next2 == 46 -> {
+                            last_code = push_code(facts, TOKEN_DOT_DOT_DOT, start, start + 3, false)
+                            i += 3
+                        }
+                        next2 == 60 -> {
+                            last_code = push_code(facts, TOKEN_DOT_DOT_LT, start, start + 3, false)
+                            i += 3
+                        }
+                        else -> {
+                            last_code = push_code(facts, TOKEN_DOT_DOT, start, start + 2, false)
+                            i += 2
+                        }
+                    }
+                } else {
+                    last_code = push_code(facts, TOKEN_DOT, start, start + 1, false)
+                    i += 1
+                }
+            }
+            34 -> {
+                next1: byte_at(source, i + 1)
+                next2: byte_at(source, i + 2)
+                if {
+                    next1 == 34 && next2 == 34 -> {
+                        if !fn_in_range -> bodies_local = false
+                        end := if {
+                            raw_foreign_body_at(source, facts, facts.len() /% 4) -> scan_raw_foreign_string_end(source, start)
+                            else -> {
+                                modes: string_head_modes(source, facts, facts.len() /% 4)
+                                scan_triple_string_end(source, start, modes.raw_head)
+                            }
+                        }
+                        if {
+                            end < 0 -> { i = -end - 1 }
+                            else -> {
+                                last_code = push_code(facts, TOKEN_STRING, start, end, false)
+                                i = end
+                            }
+                        }
+                    }
+                    else -> {
+                        modes: string_head_modes(source, facts, facts.len() /% 4)
+                        end: scan_plain_string_end(source, start, modes.raw_head)
+                        if {
+                            end < 0 -> { i = -end - 1 }
+                            else -> {
+                                last_code = push_code(facts, TOKEN_STRING, start, end, false)
+                                i = end
+                            }
+                        }
+                    }
+                }
+            }
+            47 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    value == LINE_COMMENT_FIRST && next1 == LINE_COMMENT_SECOND -> {
+                        if config_surface && byte_at(source, i - 1) == 58 {
+                            last_code = push_code(facts, TOKEN_SLASH, i, i + 1, false)
+                            last_code = push_code(facts, TOKEN_SLASH, i + 1, i + 2, false)
+                            i += 2
+                        } else {
+                            i += 2
+                            loop i < count && source[i] != (U8{10}) -> i += 1
+                            emit(facts, TOKEN_LINE_COMMENT, start, i, false)
+                        }
+                    }
+                    value == BLOCK_OPEN_FIRST && next1 == BLOCK_OPEN_SECOND -> {
+                        end: scan_block_comment_end(source, start)
+                        i = if end < 0 -> -end - 1 else -> end
+                        emit(facts, TOKEN_BLOCK_COMMENT, start, i, false)
+                    }
+                    next1 == 37 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_SLASH_PERCENT_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 37 -> {
+                        last_code = push_code(facts, TOKEN_SLASH_PERCENT, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_SLASH_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_SLASH, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            61 -> {
+                if byte_at(source, i + 1) == 61 {
+                    last_code = push_code(facts, TOKEN_EQ_EQ, start, start + 2, false)
+                    i += 2
+                } else {
+                    last_code = push_code(facts, TOKEN_EQ, start, start + 1, false)
+                    i += 1
+                }
+            }
+            45 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 62 -> {
+                        last_code = push_code(facts, TOKEN_UNIFIED_ARROW, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 45 -> {
+                        last_code = push_code(facts, TOKEN_MINUS_MINUS, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_MINUS_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_MINUS, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            43 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 43 -> {
+                        last_code = push_code(facts, TOKEN_PLUS_PLUS, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_PLUS_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_PLUS, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            33 -> {
+                if byte_at(source, i + 1) == 61 {
+                    last_code = push_code(facts, TOKEN_NOT_EQ, start, start + 2, false)
+                    i += 2
+                } else {
+                    last_code = push_code(facts, TOKEN_BANG, start, start + 1, false)
+                    i += 1
+                }
+            }
+            63 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 63 -> {
+                        last_code = push_code(facts, TOKEN_QUESTION_QUESTION, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 46 -> {
+                        last_code = push_code(facts, TOKEN_QUESTION_DOT, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_QUESTION, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            38 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 38 -> {
+                        last_code = push_code(facts, TOKEN_AND_AND, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_AMP_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 126 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_AMP_TILDE_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 126 -> {
+                        last_code = push_code(facts, TOKEN_AMP_TILDE, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_AMP, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            124 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 124 -> {
+                        last_code = push_code(facts, TOKEN_OR_OR, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 62 -> {
+                        last_code = push_code(facts, TOKEN_PIPE_GT, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_PIPE_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_PIPE, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            60 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 60 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_SHL_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 60 -> {
+                        last_code = push_code(facts, TOKEN_SHL, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 && byte_at(source, i + 2) == 62 -> {
+                        last_code = push_code(facts, TOKEN_COMPARE, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_LE, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 62 -> {
+                        last_code = push_code(facts, TOKEN_LT_GT, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 58 -> {
+                        last_code = push_code(facts, TOKEN_FENCE_OPEN, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_LT, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            62 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 62 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_SHR_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 62 -> {
+                        last_code = push_code(facts, TOKEN_SHR, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_GE, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_GT, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            42 -> {
+                if byte_at(source, i + 1) == 61 {
+                    last_code = push_code(facts, TOKEN_STAR_EQ, start, start + 2, false)
+                    i += 2
+                } else {
+                    last_code = push_code(facts, TOKEN_STAR, start, start + 1, false)
+                    i += 1
+                }
+            }
+            37 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 37 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_PERCENT_PERCENT_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 37 -> {
+                        last_code = push_code(facts, TOKEN_PERCENT_PERCENT, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_PERCENT_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_PERCENT, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            35 -> {
+                next1: byte_at(source, i + 1)
+                next2: byte_at(source, i + 2)
+                if next1 == 33 && next2 == 47 {
+                    loop i < count && source[i] != (U8{10}) -> i += 1
+                    if i < count -> i += 1
+                } else if next1 == 123 && is_identifier_start(source, i + 2) {
+                    paste_end := scan_identifier_end(source, i + 2)
+                    if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 {
+                        paste_end += 5
+                    }
+                    if byte_at(source, paste_end) == 125 {
+                        glued: scan_glued_paste_end(source, paste_end + 1)
+                        has_paste = true
+                        last_code = push_code(facts, TOKEN_IDENT, start, glued, false)
+                        i = glued
+                    } else {
+                        last_code = push_code(facts, TOKEN_HASH, start, start + 1, false)
+                        i += 1
+                    }
+                } else if is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) {
+                    word_end: scan_identifier_end(source, i + 1)
+                    if word_end - i == 4 && next1 == 114 && next2 == 117 && byte_at(source, i + 3) == 110 {
+                        last_code = push_code(facts, TOKEN_PREP, start, word_end, false)
+                        i = word_end
+                    } else {
+                        word: word_kind(source, i + 1, word_end, 0)
+                        if word == TOKEN_KW_IF || word == TOKEN_KW_LOOP {
+                            last_code = push_code(facts, TOKEN_PREP, start, start + 1, false)
+                            i += 1
+                        } else {
+                            last_code = push_code(facts, TOKEN_HASH, start, start + 1, false)
+                            i += 1
+                        }
+                    }
+                } else {
+                    last_code = push_code(facts, TOKEN_HASH, start, start + 1, false)
+                    i += 1
+                }
+            }
+            64 -> {
+                if {
+                    is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
+                        end: scan_identifier_end(source, i + 1)
+                        marker_kind: word_kind(source, i + 1, end, 0)
+                        if {
+                            marker_kind == TOKEN_IDENT -> {
+                                last_code = push_code(facts, TOKEN_IDENT, start, end, false)
+                                i = end
+                            }
+                            else -> {
+                                last_code = push_code(facts, TOKEN_AT, start, start + 1, false)
+                                i += 1
+                            }
+                        }
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_AT, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            36 -> {
+                if {
+                    is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
+                        end: scan_identifier_end(source, i + 1)
+                        last_code = push_code(facts, TOKEN_IDENT, start, end, false)
+                        i = end
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_DOLLAR, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            94 -> {
+                if byte_at(source, i + 1) == 61 {
+                    last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
+                    i += 2
+                } else {
+                    last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
+                    i += 1
+                }
+            }
+            126 -> {
+                next1: byte_at(source, i + 1)
+                if {
+                    next1 == 126 -> {
+                        last_code = push_code(facts, TOKEN_TILDE_TILDE, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 124 && byte_at(source, i + 2) == 61 -> {
+                        last_code = push_code(facts, TOKEN_TILDE_PIPE_EQ, start, start + 3, false)
+                        i += 3
+                    }
+                    next1 == 124 -> {
+                        last_code = push_code(facts, TOKEN_TILDE_PIPE, start, start + 2, false)
+                        i += 2
+                    }
+                    next1 == 61 -> {
+                        last_code = push_code(facts, TOKEN_TILDE_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_TILDE, start, start + 1, false)
+                        i += 1
+                    }
+                }
+            }
+            96 -> {
+                end: scan_raw_fence_end(source, start)
+                if {
+                    end < 0 -> { i = -end - 1 }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_RAW_STRING, start, end, false)
+                        i = end
+                    }
+                }
+            }
+            39 -> {
+                end: scan_char_end(source, start)
+                if {
+                    end < 0 -> { i = count }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_CHAR, start, end, false)
+                        i = end
+                    }
+                }
+            }
+            else -> {
+                i += 1
+            }
+        }
     }
-    if to >= source.len() -> emit(facts, TOKEN_EOF, source.len(), source.len(), false)
-    RawScanStop{stop: i, bodies_local: bodies_local}
+    if to >= count -> emit(facts, TOKEN_EOF, count, count, false)
+    RawScanStop{stop: i, bodies_local: bodies_local, has_paste: has_paste}
 }
 
 terminator_events_scanned: fn(source: [U8], config_surface: Bool) -> [Int] {

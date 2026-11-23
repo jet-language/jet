@@ -144,6 +144,9 @@ parser_prepare_tokens: fn(input: &&[Token], tables: &TokenTables) -> ParserFence
 // comment-free tokens, so a comment never splits or joins a fence entry.
 parser_prepare_declared: fn(input: &&[Token], tables: &TokenTables) -> ParserFenceExpansion {
     tokens := input.move()
+    if !tables.has_fences {
+        return ParserFenceExpansion{tokens: tokens.move(), fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    }
     has_fences := false
     loop index in 0..<tokens.len() {
         kind: tokens[index].kind

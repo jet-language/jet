@@ -463,7 +463,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
         }
         slot: declaring_slot[module_index]
         id: row.symbol.id.id
-        symbols[id] = row.symbol
+        symbols[id] = Symbol{id: row.symbol.id, kind: row.symbol.kind, name: row.symbol.name, module_identity: row.symbol.module_identity, owner: row.symbol.owner, span: row.symbol.span, ty: Val(row.signature), visibility: row.symbol.visibility}
         slot_keys[slot][id] = true
         slot_names[slot][updated.name] = id
         items[id] = Item.Func{value: updated.move()}
@@ -498,6 +498,9 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             graph.modules[module_index].program.items[index] = item
         }
         loop index in 0..<graph.modules[module_index].exports.len() {
+            if graph.modules[module_index].exports[index].target_symbol_row >= 0 {
+                next
+            }
             if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.id) == None {
                 next
             }

@@ -120,9 +120,10 @@ parser_report_colon_block: fn(state: &JetParserState, keyword: String, colon: To
 // line at the cursor is no such habit.
 parser_report_habit_line: fn(state: &JetParserState) -> Bool {
     word_token: parser_current(state)
-    word: parser_text(state, word_token)
-    if word == "while" || word == "for" {
-        what: if word == "while" -> "`while` is spelled `loop` in Jet" else -> "`for` is spelled `loop` in Jet"
+    is_while: parser_token_text_is_id(word_token, state.words.id_while)
+    is_for: !is_while && parser_token_text_is_id(word_token, state.words.id_for)
+    if is_while || is_for {
+        what: if is_while -> "`while` is spelled `loop` in Jet" else -> "`for` is spelled `loop` in Jet"
         why: "Jet has one loop keyword: `loop condition {{ … }}` repeats while the condition holds, and `loop item in items {{ … }}` walks a collection"
         colon: parser_header_colon_index(state, state.position)
         more: if colon < 0 -> [TextEdit]{} else -> parser_colon_block_edits(state, state.tokens[colon].span)
@@ -132,7 +133,7 @@ parser_report_habit_line: fn(state: &JetParserState) -> Bool {
         parser_habit_abort(state)
         return true
     }
-    if word == "elif" && parser_header_colon_index(state, state.position) < 0 {
+    if parser_token_text_is_id(word_token, state.words.id_elif) && parser_header_colon_index(state, state.position) < 0 {
         parser_bump(state)
         parser_add_habit(state, word_token.span, "`elif` is spelled `else if` in Jet", "Jet chains a branch with `else if condition {{ … }}`", "write `else if`", TextEdit{span: word_token.span, new_text: "else if"}, [TextEdit]{})
         parser_habit_abort(state)
@@ -145,7 +146,7 @@ parser_report_habit_line: fn(state: &JetParserState) -> Bool {
 // False when the line at the cursor is no such import.
 parser_report_import_habit: fn(state: &JetParserState) -> Bool {
     word_token: parser_current(state)
-    if parser_text(state, word_token) != "import" || parser_kind_at(state, 1) != TOKEN_IDENT {
+    if !parser_token_text_is_id(word_token, state.words.id_import) || parser_kind_at(state, 1) != TOKEN_IDENT {
         return false
     }
     if parser_kind_at(state, 2) != TOKEN_SEMI && parser_kind_at(state, 2) != TOKEN_EOF {
@@ -165,12 +166,14 @@ parser_report_import_habit: fn(state: &JetParserState) -> Bool {
 // cursor is no such header, or ends in a Python `:`.
 parser_report_function_word_habit: fn(state: &JetParserState) -> Bool {
     word_token: parser_current(state)
-    word: parser_text(state, word_token)
-    if word != "def" && word != "function" -> return false
+    is_def: parser_token_text_is_id(word_token, state.words.id_def)
+    is_function: !is_def && parser_token_text_is_id(word_token, state.words.id_function)
+    if !is_def && !is_function -> return false
     if parser_kind_at(state, 1) != TOKEN_IDENT || parser_kind_at(state, 2) != TOKEN_LPAREN {
         return false
     }
     if parser_header_colon_index(state, state.position) >= 0 -> return false
+    word: if is_def -> "def" else -> "function"
     name_token: parser_lookahead(state, 1)
     name: parser_text(state, name_token)
     parser_bump(state)
@@ -249,8 +252,9 @@ parser_report_hash_comment: fn(state: &JetParserState) -> Bool {
 // Python's `f"…"`: every Jet string interpolates `{name}`, so the `f` goes.
 // True when the cursor holds an `f` touching a string.
 parser_text_prefix_ahead: fn(state: &JetParserState) -> Bool Never! {
+    if state.words.id_f < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || parser_text(state, token) != "f" -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_f) -> return false
     next: parser_lookahead(state, 1)
     next.kind == TOKEN_STRING && next.span.start == token.span.end
 }
@@ -278,8 +282,9 @@ parser_report_arrow_habit: fn(state: &JetParserState, name: Token, arrow: Span, 
 // Python's `pass` alone on its line: an empty block is just `{ }`, so the
 // line goes. False for any other line.
 parser_report_pass_habit: fn(state: &JetParserState) -> Bool {
+    if state.words.id_pass < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || parser_text(state, token) != "pass" -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_pass) -> return false
     next: parser_kind_at(state, 1)
     if next != TOKEN_SEMI && next != TOKEN_RBRACE && next != TOKEN_EOF -> return false
     line_start: parser_line_start_of(state, token.span.start)
@@ -311,18 +316,22 @@ parser_report_step_habit: fn(state: &JetParserState) -> Bool {
 // `or`, `is`, `is not`, `===` and `!==`. The Jet operator's token kind, or 0
 // when the cursor holds no such habit.
 parser_operator_habit_kind: fn(state: &JetParserState, operator: Int) -> Int Never! {
-    token: parser_current(state)
     if operator == TOKEN_IDENT {
-        if !parser_habit_operand_ahead(state, 1) -> return 0
-        word: parser_text(state, token)
-        if word == {
-            "and" -> return TOKEN_AND_AND
-            "or" -> return TOKEN_OR_OR
-            "is" -> return if parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "not" -> TOKEN_NOT_EQ else -> TOKEN_EQ_EQ
-            else -> return 0
+        if state.words.id_and < 0 && state.words.id_or < 0 && state.words.id_is < 0 -> return 0
+        token: parser_current(state)
+        if parser_token_text_is_id(token, state.words.id_and) {
+            return if parser_habit_operand_ahead(state, 1) -> TOKEN_AND_AND else -> 0
         }
+        if parser_token_text_is_id(token, state.words.id_or) {
+            return if parser_habit_operand_ahead(state, 1) -> TOKEN_OR_OR else -> 0
+        }
+        if parser_token_text_is_id(token, state.words.id_is) {
+            if !parser_habit_operand_ahead(state, 1) -> return 0
+            return if parser_kind_at(state, 1) == TOKEN_IDENT && parser_token_decoded_is_id(parser_lookahead(state, 1), state.words.id_not) -> TOKEN_NOT_EQ else -> TOKEN_EQ_EQ
+        }
+        return 0
     }
-    if (operator == TOKEN_EQ_EQ || operator == TOKEN_NOT_EQ) && parser_kind_at(state, 1) == TOKEN_EQ && parser_lookahead(state, 1).span.start == token.span.end {
+    if (operator == TOKEN_EQ_EQ || operator == TOKEN_NOT_EQ) && parser_kind_at(state, 1) == TOKEN_EQ && parser_lookahead(state, 1).span.start == parser_current(state).span.end {
         return operator
     }
     0
@@ -378,8 +387,9 @@ parser_report_power_habit: fn(state: &JetParserState, base: Expr, base_span: Spa
 
 // Python's `not` before a value is Jet's `!`. True when the cursor holds it.
 parser_not_habit_ahead: fn(state: &JetParserState) -> Bool Never! {
+    if state.words.id_not < 0 -> return false
     token: parser_current(state)
-    if token.kind != TOKEN_IDENT || parser_text(state, token) != "not" -> return false
+    if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_not) -> return false
     next: parser_lookahead(state, 1)
     if next.kind == TOKEN_LPAREN && next.span.start == token.span.end -> return false
     parser_habit_operand_ahead(state, 1)

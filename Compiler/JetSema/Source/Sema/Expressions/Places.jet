@@ -1248,7 +1248,7 @@ sema_expression_core_nested_constant: fn(alias: String, nested: String, member: 
             diagnostics.push(sema_expression_core_member_unknown(graph.modules[module_index], member, member_span))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        resolved: SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: export.symbol}, source_module_identity: export.source_module_identity, target_module_identity: module_identity, visibility: export.visibility}
+        resolved: SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, export)}, source_module_identity: export.source_module_identity, target_module_identity: module_identity, visibility: export.visibility}
         return sema_expression_module_constant_read(graph, resolved, "{alias}.{nested}.{member}", span, expected, environment, program, context, diagnostics)
     }
     unhandled

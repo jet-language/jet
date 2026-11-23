@@ -35,7 +35,9 @@ sema_pure_root_diagnostic: fn(root: String, call: String, path: [String], span: 
 
 sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, expression: Int, shallow: Bool, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
     node: body_node(owner.tree, expression)
-    if sema_effect_is_call(node.kind) {
+    pure_builtin := false
+    if node.kind == .BuiltinMethod(_, op, _) -> pure_builtin = !sema_effect_builtin_may_have_effect(op)
+    if !pure_builtin && sema_effect_is_call(node.kind) {
         module_index: positions[owner.key].module_index
         // The call fact is read in place from its module (the call index
         // keeps positions in the same order as `call_facts`).

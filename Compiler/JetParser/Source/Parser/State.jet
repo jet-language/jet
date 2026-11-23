@@ -19,7 +19,10 @@ use {
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
         diagnostic_with_label,
+        name_find,
+        name_index,
         name_intern,
+        name_start,
         name_text,
     ]
     jet_lexer.[
@@ -172,6 +175,77 @@ JetParserState: struct {
     // A loop header's step is being read: an update operator such as `~=`
     // after its target is the step's own, not a mistyped comparison.
     reading_loop_step: Bool{false},
+    // Pre-resolved Name IDs (-1 when absent from `tables[0].names`) for hot
+    // keyword/habit checks without allocating temporary Strings.
+    words: ParserWordIds{ParserWordIds{}},
+}
+
+ParserWordIds: struct {
+    id_pass: Int{-1},
+    id_not: Int{-1},
+    id_f: Int{-1},
+    id_and: Int{-1},
+    id_or: Int{-1},
+    id_is: Int{-1},
+    id_while: Int{-1},
+    id_for: Int{-1},
+    id_elif: Int{-1},
+    id_import: Int{-1},
+    id_def: Int{-1},
+    id_function: Int{-1},
+    id_task: Int{-1},
+    id_val: Int{-1},
+    id_new: Int{-1},
+    id_run: Int{-1},
+    id_next: Int{-1},
+    id_after: Int{-1},
+    id_group: Int{-1},
+}
+
+parser_word_id_of: fn(tables: TokenTables, text: String) -> Int Never! {
+    if name_find(tables.names, text) == .Val(id) -> name_index(id) else -> -1
+}
+
+parser_word_ids_for: fn(tables: TokenTables) -> ParserWordIds Never! {
+    ParserWordIds{
+        id_pass: parser_word_id_of(tables, "pass"),
+        id_not: parser_word_id_of(tables, "not"),
+        id_f: parser_word_id_of(tables, "f"),
+        id_and: parser_word_id_of(tables, "and"),
+        id_or: parser_word_id_of(tables, "or"),
+        id_is: parser_word_id_of(tables, "is"),
+        id_while: parser_word_id_of(tables, "while"),
+        id_for: parser_word_id_of(tables, "for"),
+        id_elif: parser_word_id_of(tables, "elif"),
+        id_import: parser_word_id_of(tables, "import"),
+        id_def: parser_word_id_of(tables, "def"),
+        id_function: parser_word_id_of(tables, "function"),
+        id_task: parser_word_id_of(tables, "task"),
+        id_val: parser_word_id_of(tables, "Val"),
+        id_new: parser_word_id_of(tables, "new"),
+        id_run: parser_word_id_of(tables, "#run"),
+        id_next: parser_word_id_of(tables, "next"),
+        id_after: parser_word_id_of(tables, "after"),
+        id_group: parser_word_id_of(tables, "group"),
+    }
+}
+
+// First UTF-8 byte of `token.decoded`, or -1 when empty, without allocating.
+parser_decoded_first_byte: fn(state: JetParserState, token: Token) -> Int Never! {
+    id: name_index(token.decoded)
+    if id <= 0 || state.tables.len() == 0 -> return -1
+    names: state.tables[0].names
+    start: name_start(names, id)
+    if start >= names.ends[id] -> return -1
+    Int{names.bytes[start]}
+}
+
+// Length in bytes of `token.decoded`, without allocating.
+parser_decoded_byte_len: fn(state: JetParserState, token: Token) -> Int Never! {
+    id: name_index(token.decoded)
+    if id <= 0 || state.tables.len() == 0 -> return 0
+    names: state.tables[0].names
+    names.ends[id] - name_start(names, id)
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
@@ -279,12 +353,21 @@ parser_mark_head_body: fn(state: &JetParserState) -> Int Never! {
     saved
 }
 
+parser_token_text_is_id: fn(token: Token, id: Int) -> Bool Never! {
+    id >= 0 && name_index(token.text) == id
+}
+
+parser_token_decoded_is_id: fn(token: Token, id: Int) -> Bool Never! {
+    id >= 0 && name_index(token.decoded) == id
+}
+
 // A nested state parses with its parent's tables and numbers its nodes on
 // from the parent's count; it must hand both back with
 // `parser_return_tables` before the parent reads a token again.
 parser_lend_tables: fn(state: &JetParserState, nested: &JetParserState) Never! {
     nested.node_base = state.node_base
     nested.next_node = state.next_node
+    nested.words = state.words
     tables: state.tables.pop() ?? return
     nested.tables.push(tables)
 }
@@ -446,6 +529,21 @@ parser_current_kind: fn(state: &JetParserState) -> Int Never! {
 
 parser_kind_at: fn(state: &JetParserState, offset: Int) -> Int Never! {
     if offset == 0 -> return parser_current_kind(state)
+    if offset == 1 && !state.pending_type_gt {
+        len: state.tokens.len()
+        pos := state.position
+        loop pos >= 0 && pos < len && parser_is_trivia(state.tokens[pos].kind) {
+            pos += 1
+        }
+        state.position = pos
+        idx := pos + 1
+        loop idx < len {
+            kind: state.tokens[idx].kind
+            if kind != TOKEN_LINE_COMMENT && kind != TOKEN_BLOCK_COMMENT -> return kind
+            idx += 1
+        }
+        return TOKEN_EOF
+    }
     seek_offset := offset
     if state.pending_type_gt {
         if seek_offset > 0 {
@@ -479,10 +577,12 @@ parser_bump: fn(state: &JetParserState) -> Token Never! {
     if token.kind == TOKEN_SEMI && token.span.start < token.span.end && !state.explicit_semicolon_reported {
         parser_report_explicit_semicolon(state, token.span)
     }
-    if token.kind == TOKEN_IDENT && parser_glued_paste(state, token) {
-        parser_report_glued_paste(state, token)
-    } else if token.kind == TOKEN_IDENT && state.derive_template_depth == 0 && parser_template_paste(state, token) {
-        parser_report_paste_outside_template(state, token)
+    if token.kind == TOKEN_IDENT && state.tables.len() > 0 && state.tables[0].has_paste {
+        if parser_glued_paste(state, token) {
+            parser_report_glued_paste(state, token)
+        } else if state.derive_template_depth == 0 && parser_template_paste(state, token) {
+            parser_report_paste_outside_template(state, token)
+        }
     }
     if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
     token

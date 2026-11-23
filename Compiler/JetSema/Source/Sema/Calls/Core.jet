@@ -343,7 +343,7 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
             return None
         }
         row: sema_call_export_function_row(environment, program, export) ?? {
-            diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
+            diagnostics.push(sema_call_not_callable(member, sema_registration_export_ty(graph, export) ?? Type.Named{name: "Unknown"}, span))
             return None
         }
         sema_call_export_function_target(environment, program, export, row, type_args, span, diagnostics)

@@ -291,9 +291,21 @@ parser_parse_expansion_threads: fn(input: &&ParserFenceExpansion, tables_input: 
 }
 
 parser_line_starts: fn(source: [U8]) -> [Int] Never! {
-    starts := [Int]{0}
-    loop index in 0..<source.len() {
+    count: source.len()
+    starts := [Int]{}
+    if count > 0 -> starts.try_reserve(count /% 32 + 2) ?? panic("reserve failed")
+    starts.push(0)
+    index := 0
+    loop index + 4 <= count {
         if source[index] == (U8{10}) -> starts.push(index + 1)
+        if source[index + 1] == (U8{10}) -> starts.push(index + 2)
+        if source[index + 2] == (U8{10}) -> starts.push(index + 3)
+        if source[index + 3] == (U8{10}) -> starts.push(index + 4)
+        index += 4
+    }
+    loop index < count {
+        if source[index] == (U8{10}) -> starts.push(index + 1)
+        index += 1
     }
     starts
 }
@@ -323,7 +335,8 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
     }
     tokens := prepared.tokens.move()
     prepared.tokens = [Token]{}
-    state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
+    word_ids: parser_word_ids_for(tables)
+    state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads, words: word_ids}
     state.marker_scopes = parser_marker_scopes(state.tokens, state.tables[0])
     program := parser_parse_program(state)
     program.has_scope_member = state.has_scope_member
@@ -735,7 +748,7 @@ parser_parse_chunk_part: fn(inputs: Shared<ParserChunkShared>, part: Shared<Pars
     reads: inputs.guard_read()
     tokens := reads.value.tokens[0].slice(permit.value.start, permit.value.end)
     source_end: reads.value.source_end
-    state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{reads.value.tables[0]}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: reads.value.line_starts, sources: [[U8]]{reads.value.source}, allow_environment_reads: reads.value.allow_environment_reads}
+    state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{reads.value.tables[0]}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: reads.value.line_starts, sources: [[U8]]{reads.value.source}, allow_environment_reads: reads.value.allow_environment_reads, words: parser_word_ids_for(reads.value.tables[0])}
     state.marker_scopes = reads.value.marker_scopes.copy()
     program := parser_parse_program(state)
     permit.value.outputs.push(ParserChunkOutput{program: program.move(), diagnostics: state.diagnostics.move(), block_spans: state.block_spans.move(), else_arms: state.else_arms.move(), block_policy_declarations: state.block_policy_declarations.move(), statement_rules: state.statement_rules.move(), has_scope_member: state.has_scope_member, has_task_spawn: state.has_task_spawn})
@@ -844,7 +857,14 @@ parser_collect_core_mem_gate_names: fn(imports: [ImportDecl], used: &[String]) N
 // `FFI(asm)` marker.
 // Rust: none (Jet-only pass)
 parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
-    loop index in 0..<tokens.len() {
+    uninit_id: if name_find(tables.names, "uninit") == .Val(id) -> name_index(id) else -> -1
+    ptr_id: if name_find(tables.names, "Ptr") == .Val(id) -> name_index(id) else -> -1
+    asm_id: if name_find(tables.names, "asm") == .Val(id) -> name_index(id) else -> -1
+    ffi_id: if name_find(tables.names, "FFI") == .Val(id) -> name_index(id) else -> -1
+    has_asm_ffi: asm_id >= 0 && ffi_id >= 0
+    has_idents: uninit_id >= 0 || ptr_id >= 0 || has_asm_ffi
+    count: tokens.len()
+    loop index in 0..<count {
         kind: tokens[index].kind
         if kind == TOKEN_STAR {
             if index == 0 -> return true
@@ -853,10 +873,10 @@ parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool 
             if !value_end -> return true
             next
         }
-        if kind != TOKEN_IDENT -> next
-        name: token_decoded(tables, tokens[index])
-        if name == "uninit" || name == "Ptr" -> return true
-        if name == "asm" && index >= 2 && tokens[index - 1].kind == TOKEN_LPAREN && tokens[index - 2].kind == TOKEN_IDENT && token_decoded(tables, tokens[index - 2]) == "FFI" {
+        if !has_idents || kind != TOKEN_IDENT -> next
+        id: name_index(tokens[index].decoded)
+        if id == uninit_id || id == ptr_id -> return true
+        if has_asm_ffi && id == asm_id && index >= 2 && tokens[index - 1].kind == TOKEN_LPAREN && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == ffi_id {
             return true
         }
     }
@@ -986,17 +1006,9 @@ parser_debug_trace_sites: fn(tokens: [Token], tables: TokenTables, source: [U8])
 
 // Rust: none (Jet-only pass)
 parser_collect_debug_trace_sites: fn(tokens: [Token], tables: TokenTables, debug: Name, source: [U8], sites: &[DebugTraceSite]) Never! {
-    closes := [Int]{}
-    opens := [Int]{}
-    loop index in 0..<tokens.len() {
-        closes.push(-1)
-        if tokens[index].kind == TOKEN_LPAREN -> opens.push(index)
-        if tokens[index].kind == TOKEN_RPAREN && opens.len() > 0 {
-            open: opens.pop() ?? -1
-            closes[open] = index
-        }
-    }
-    loop index in 0..<tokens.len() {
+    has_call := false
+    count: tokens.len()
+    loop index in 0..<count {
         token: tokens[index]
         if token.literal >= 0 {
             loop part in tables.literals[token.literal].string_parts {
@@ -1005,7 +1017,25 @@ parser_collect_debug_trace_sites: fn(tokens: [Token], tables: TokenTables, debug
                 }
             }
         }
-        if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN {
+        if token.kind == TOKEN_IDENT && token.decoded == debug && index + 1 < count && tokens[index + 1].kind == TOKEN_LPAREN {
+            has_call = true
+        }
+    }
+    if !has_call -> return
+    closes := [Int]{}
+    closes.try_reserve(count) ?? panic("reserve failed")
+    opens := [Int]{}
+    loop index in 0..<count {
+        closes.push(-1)
+        if tokens[index].kind == TOKEN_LPAREN -> opens.push(index)
+        if tokens[index].kind == TOKEN_RPAREN && opens.len() > 0 {
+            open: opens.pop() ?? -1
+            closes[open] = index
+        }
+    }
+    loop index in 0..<count {
+        token: tokens[index]
+        if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= count || tokens[index + 1].kind != TOKEN_LPAREN {
             next
         }
         open: index + 1

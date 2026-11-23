@@ -88,13 +88,18 @@ arrow: fn(kind: Int) -> Bool Never! {
 }
 
 newline_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
-    if start < 0 || start > end || end > source.len() -> return false
+    if start < 0 || start >= end || end > source.len() -> return false
+    if end - start == 1 -> return source[start] == (U8{10})
     cursor := start
+    loop cursor + 4 <= end {
+        if source[cursor] == (U8{10}) || source[cursor + 1] == (U8{10}) || source[cursor + 2] == (U8{10}) || source[cursor + 3] == (U8{10}) -> return true
+        cursor += 4
+    }
     loop cursor < end {
-        if source[cursor] == 10 -> return true
+        if source[cursor] == (U8{10}) -> return true
         cursor += 1
     }
-    return false
+    false
 }
 
 scope_member_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
@@ -351,68 +356,60 @@ ends_statement_at: fn(facts: [Int], index: Int) -> Bool Never! {
 }
 
 terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
+    facts_len: facts.len()
     events := [Int]{}
+    if facts_len > 64 -> events.try_reserve(facts_len /% 8) ?? panic("reserve failed")
     last_code := -1
     index := 0
-    loop index * 4 < facts.len() {
-        kind: kind_at(facts, index)
-        is_comment: if kind == {
-            TOKEN_LINE_COMMENT -> true
-            TOKEN_BLOCK_COMMENT -> true
-            else -> false
+    loop index * 4 < facts_len {
+        kind: facts[index * 4]
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
+            index += 1
+            next
         }
-        if is_comment -> index += 1 else {
-            if {
-                kind == TOKEN_EOF -> {
-                    if last_code >= 0 {
-                        previous: kind_at(facts, last_code)
-                        if ends_statement_at(facts, last_code) && previous != TOKEN_RBRACE {
+        if kind == TOKEN_EOF {
+            if last_code >= 0 {
+                previous: facts[last_code * 4]
+                if previous != TOKEN_RBRACE && ends_statement_at(facts, last_code) {
+                    events.push(1)
+                    events.push(index)
+                    events.push(facts[last_code * 4 + 2])
+                }
+            }
+            index += 1
+            next
+        }
+        if last_code >= 0 {
+            end: facts[last_code * 4 + 2]
+            start: facts[index * 4 + 1]
+            if start > end && ends_statement_at(facts, last_code) && newline_between(source, end, start) {
+                previous: facts[last_code * 4]
+                split: kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LBRACE
+                if {
+                    kind == TOKEN_LBRACE && (tuple_rename_starts_at(facts, index) || (previous != TOKEN_RBRACE && record_value_starts_at(facts, index))) -> {
+                        events.push(1)
+                        events.push(index)
+                        events.push(end)
+                    }
+                    split && previous == TOKEN_RPAREN -> {
+                        events.push(2)
+                        events.push(index)
+                        events.push(start)
+                    }
+                    else -> {
+                        if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET {
                             events.push(1)
                             events.push(index)
-                            events.push(facts[last_code * 4 + 2])
+                            events.push(end)
                         }
                     }
-                    index += 1
-                }
-                else -> {
-                    if last_code >= 0 {
-                        previous: kind_at(facts, last_code)
-                        end: facts[last_code * 4 + 2]
-                        start: facts[index * 4 + 1]
-                        if newline_between(source, end, start) && ends_statement_at(facts, last_code) {
-                            split: if kind == {
-                                TOKEN_UNIFIED_ARROW -> true
-                                TOKEN_LBRACE -> true
-                                else -> false
-                            }
-                            if {
-                                kind == TOKEN_LBRACE && (tuple_rename_starts_at(facts, index) || (previous != TOKEN_RBRACE && record_value_starts_at(facts, index))) -> {
-                                    events.push(1)
-                                    events.push(index)
-                                    events.push(end)
-                                }
-                                split && previous == TOKEN_RPAREN -> {
-                                    events.push(2)
-                                    events.push(index)
-                                    events.push(start)
-                                }
-                                else -> {
-                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != TOKEN_RPAREN && kind != TOKEN_RBRACKET {
-                                        events.push(1)
-                                        events.push(index)
-                                        events.push(end)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    last_code = index
-                    index += 1
                 }
             }
         }
+        last_code = index
+        index += 1
     }
-    return events
+    events
 }
 
 split_spelling: fn(kind: Int) -> String Never! {
@@ -457,7 +454,10 @@ terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_i
 
 lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
     tables := token_tables()
-    facts: raw_token_facts(source, config_surface)
+    facts := [Int]{}
+    if source.len() > 16 -> facts.try_reserve(source.len()) ?? panic("reserve failed")
+    scanned: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
+    tables.has_paste = scanned.has_paste
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
     lexed := lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), tables, terminator_diagnostics)
