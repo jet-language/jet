@@ -1,0 +1,35 @@
+# Claim: a build that can't write one of its generated modules leaves none of
+# them behind. The place `second` is staged is a folder, so its write fails
+# after `first` was written: the build reports Jet.BuildPlanFailed at the
+# `b.generate("second")` call, removes `first`, leaves no staged file and
+# compiles nothing. Once the folder is gone, the same build writes both
+# modules whole. A step that would write Jet source outside the project is
+# refused at its `.writes` call before any module is written.
+fixture: Fixtures/GenerateRefusalsLeaveNoPartialModule
+env: NO_COLOR=1
+mkdir: .jet/generated/materialize/second.jet.writing
+step blocked: jet build materialize.jet
+exit: 1
+stderr: ~ "Jet.BuildPlanFailed" # the registered materialization refusal
+stderr: ~ "`b.generate(\"second\")` couldn't be written to `.jet/generated/materialize/second.jet`" # names the module and its path
+stderr: ~ "materialize.jet:8:7" # at the `b.generate("second")` call
+file: .jet/generated/materialize/first.jet absent # the module written before the failure is removed
+file: .jet/generated/materialize/first.jet.writing absent # and left no staged file
+file: .jet/generated/materialize/second.jet absent
+file: .jet/build/app absent # nothing was compiled
+remove: .jet/generated/materialize/second.jet.writing
+step clean: jet build materialize.jet
+exit: 0
+file: .jet/generated/materialize/first.jet = "first_value: fn() -> Int { 40 }\n"
+file: .jet/generated/materialize/second.jet = "second_value: fn() -> Int { first_value() + 2 }\n"
+file: .jet/generated/materialize/first.jet.writing absent
+file: .jet/generated/materialize/second.jet.writing absent
+step launch: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"
+step outside: jet build outside.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "Jet.BuildPlanFailed" # a write outside the project
+stderr: ~ "build path `../models.jet` must be relative and stay inside the project" # names the path
+stderr: ~ "outside.jet:11:14" # at the `.writes` call
+file: .jet/generated/outside absent # no module was written

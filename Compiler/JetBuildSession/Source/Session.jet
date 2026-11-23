@@ -1312,6 +1312,12 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
 build_session_error_diag: fn(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
     projection: build_session_error_projection(error)
     diagnostic := build_session_diag(state, projection.text)
+    // A path that leaves the project: a step that wrote or read it would
+    // reach past what the build owns, so nothing of the plan runs.
+    if error == .InvalidPath(_) {
+        diagnostic.why = "a build reads and writes only inside its own project, so it never touches another project's files and builds the same wherever the project is"
+        diagnostic.fix = "name the path relative to the package folder, with no leading `/` and no `..`"
+    }
     diagnostic.error = Val(error)
     diagnostic
 }

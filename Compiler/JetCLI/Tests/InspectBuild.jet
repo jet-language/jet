@@ -30,9 +30,12 @@ use {
         jet_cli_build_report,
         jet_cli_driver_request,
         jet_cli_core_sources,
+        jet_cli_generated_write,
         jet_cli_native_session_at,
     ]
     jet_build_session.[
+        BuildPlanExecution,
+        BuildSessionGeneratedModule,
         BuildSessionPolicy,
         BuildSessionValue,
         build_plan_graph,
@@ -44,6 +47,7 @@ use {
     build_math: core.math
     build_sys: core.sys
     build_process: core.process
+    inspect_files: core.files
 }
 
 inspect_build_require: fn(ok: Bool, message: String) Never! {
@@ -355,6 +359,38 @@ inspect_build_runtime_dir: fn() -> String {
             "E0102|Nothing named `nowhere` exists here|-",
         },
     )
+}
+
+// The place `third` is staged is a folder, so its write fails after `first`
+// and `second` were written. The write is refused as E3502 naming the module
+// and its path from the package folder, and puts each module back as it
+// was: `first` to the bytes an earlier build left, `second` to absent, with
+// no staged file left. Once the folder is gone, every module is written whole.
+#Test("inspect_build a generated module that can't be written puts back every module the write wrote") {
+    root: "{build_sys.temp_dir()}/jet-generated-write-{build_process.current_pid()}"
+    inspect_files.remove_all(root).drop("a scratch an earlier run left")
+    folder: "{root}/.jet/generated/main"
+    inspect_files.create_dir_all("{folder}/third.jet.writing") ?? panic("blocked staging folder")
+    inspect_files.write("{folder}/first.jet", "first_value: fn() -> Int {{ 1 }}\n") ?? panic("an earlier build's module")
+    modules: [BuildSessionGeneratedModule]{
+        {name: "first", path: ".jet/generated/main/first.jet", source: "first_value: fn() -> Int {{ 2 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+        {name: "second", path: ".jet/generated/main/second.jet", source: "second_value: fn() -> Int {{ 3 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+        {name: "third", path: ".jet/generated/main/third.jet", source: "third_value: fn() -> Int {{ 4 }}\n", source_digest: "", plugin: None, start: 0, end: 0},
+    }
+    graph: BuildPlanExecution{toolchains: [], signing: [], probes: [], plugins: [], actions: [], targets: [], files: [], default: -1}
+    refused: jet_cli_generated_write("{root}/build.jet", root, modules, graph, true, false) ?? panic("a module that can't be written was not refused")
+    inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stderr.contains("Jet.BuildPlanFailed") && refused.stderr.contains("`b.generate(\"third\")` couldn't be written to `.jet/generated/main/third.jet`: "), "the refusal names the module and its path")
+    inspect_build_require(refused.stderr.contains("during write `.jet/generated/main/third.jet.writing`"), "the refusal names the staged path from the package folder")
+    inspect_build_require((inspect_files.read("{folder}/first.jet") ?? "") == "first_value: fn() -> Int {{ 1 }}\n", "a module an earlier build left is put back as it was")
+    inspect_build_require(!inspect_files.exists("{folder}/second.jet"), "a module the write added is removed")
+    inspect_build_require(!inspect_files.exists("{folder}/first.jet.writing") && !inspect_files.exists("{folder}/second.jet.writing"), "no staged file is left")
+    inspect_files.remove_all("{folder}/third.jet.writing") ?? panic("clear the staging folder")
+    inspect_build_require(jet_cli_generated_write("{root}/build.jet", root, modules, graph, true, false) == None, "a clear write succeeds")
+    loop made in modules {
+        inspect_build_require((inspect_files.read("{root}/{made.path}") ?? "") == made.source, "every module is written whole")
+        inspect_build_require(!inspect_files.exists("{root}/{made.path}.writing"), "and no staged file stays")
+    }
+    inspect_files.remove_all(root).drop("test scratch")
 }
 
 // A program with no `build: fn` that marks a function `#Perf.Profiled` plans

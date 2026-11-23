@@ -1,0 +1,20 @@
+// @programmable_build
+// @cli_build
+// `.jet/generated/run/second.jet.writing`, where the module `second` is
+// staged before it is renamed into place, is a folder here (the staged
+// `state/` tree), so `second` can't be written. The build stops with E3502
+// at its `b.generate` call and removes `first`, which it had just written:
+// a failed write leaves no module behind.
+build: fn(b: Build) {
+    b.write_generated(.On)
+    b.generate("first") {
+        first_value: fn() -> Int { 1 }
+    }
+    b.generate("second") {
+        second_value: fn() -> Int { 2 }
+    }
+    app: b.add_executable("app", ["run.jet"], [])
+    b.default(app)
+}
+
+run: fn() {}
