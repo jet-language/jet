@@ -716,6 +716,13 @@ IRPatchEmitter: struct {
     has_stream: Bool,
     in_stub: Bool,
     at: Int,
+    has_drop_plan: Bool,
+    has_drop_kill: Bool,
+    drop_head: [Int],
+    drop_chain: [Int],
+    drop_slots: [Int],
+    drop_lines: [Int],
+    drop_kill: [Bool],
 }
 
 ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
@@ -792,6 +799,13 @@ ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
         has_stream: false,
         in_stub: false,
         at: -1,
+        has_drop_plan: false,
+        has_drop_kill: false,
+        drop_head: [Int]{},
+        drop_chain: [Int]{},
+        drop_slots: [Int]{},
+        drop_lines: [Int]{},
+        drop_kill: [Bool]{},
     }
 }
 
@@ -883,6 +897,8 @@ patch_emitter_reset: fn(p: &IRPatchEmitter, op_count: Int, slot_count: Int) Neve
     p.routed_at = -2
     p.skip_to = -1
     p.in_stop_edge = false
+    p.has_drop_plan = false
+    p.has_drop_kill = false
     p.below = 0
     p.dynamic = false
     p.has_stream = false
@@ -902,7 +918,7 @@ patch_add_use: fn(p: &IRPatchEmitter, kind: &&IRX64UseKind, data: Int, text: &&S
     id
 }
 
-patch_use_len: fn(p: IRPatchEmitter, local_id: Int) -> Int Never! {
+patch_use_len: fn(p: &IRPatchEmitter, local_id: Int) -> Int Never! {
     p.use_lengths[local_id - IR_X64_LOCAL_DATA]
 }
 
@@ -1295,7 +1311,7 @@ patch_call_out: fn(p: &IRPatchEmitter, f: IRFunction, target: X64RelocTarget, in
 // Whether comparison/not `at`'s Bool result is consumed only by the immediately
 // following If/BrIf (or a Not feeding that If/BrIf) after `after_at`, so it can
 // stay in CPU flags.
-patch_fusable_after: fn(f: IRFunction, p: IRPatchEmitter, at: Int, after_at: Int) -> Bool Never! {
+patch_fusable_after: fn(f: IRFunction, p: &IRPatchEmitter, at: Int, after_at: Int) -> Bool Never! {
     next_at: after_at + 1
     if next_at >= f.op.len() -> return false
     dst: f.dst[at]
@@ -1306,7 +1322,7 @@ patch_fusable_after: fn(f: IRFunction, p: IRPatchEmitter, at: Int, after_at: Int
     f.op[next_at] == .Not && patch_fusable_after(f, p, next_at, next_at)
 }
 
-patch_fusable: fn(f: IRFunction, p: IRPatchEmitter, at: Int) -> Bool Never! {
+patch_fusable: fn(f: IRFunction, p: &IRPatchEmitter, at: Int) -> Bool Never! {
     patch_fusable_after(f, p, at, at)
 }
 
@@ -1333,10 +1349,10 @@ patch_operand_drops: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int)
     {d0: d0, d1: d1, end_at: end_at}
 }
 
-patch_located_stops: fn(p: IRPatchEmitter, f: IRFunction, cold: IRPatchCold) -> Bool Never! {
-    if cold.at < 0 || cold.right < 0 || !p.is_const[cold.right] -> return true
-    op: f.op[cold.at]
-    if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && p.const_val[cold.right] != 0 {
+patch_located_stops: fn(p: &IRPatchEmitter, f: IRFunction, cold_at: Int, cold_right: Int) -> Bool Never! {
+    if cold_at < 0 || cold_right < 0 || !p.is_const[cold_right] -> return true
+    op: f.op[cold_at]
+    if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && p.const_val[cold_right] != 0 {
         return false
     }
     true
@@ -2509,11 +2525,15 @@ patch_transfer: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int) Neve
 
 patch_drop: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int) Never! {
     slot: f.a[at]
-    ty: m.types[f.slot_type[slot]]
     if f.op[at] == .Close {
         patch_call(p, m, f, X64RelocTarget.Runtime{symbol: m.names[f.b[at]]}, -1, [Int]{slot}, 0, 1, -1, -1)
         return
     }
+    patch_drop_slot(p, m, f, slot, at)
+}
+
+patch_drop_slot: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, slot: Int, at: Int) Never! {
+    ty: m.types[f.slot_type[slot]]
     drop: ty.drop
     if drop == "" {
         return
@@ -3306,8 +3326,17 @@ patch_emit_op: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int) Never
 // ---------------------------------------------------------------------------
 // Out-of-line stop points & O(N) suffix-trie stop-edge sharing.
 
-patch_stop_edge_is_bare_return: fn(f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
-    end_idx == branch + 2 && f.op[branch + 1] == .Return && f.a[branch + 1] < 0 && f.b[branch + 1] != IR_TAIL_JUMP
+patch_stop_edge_is_bare_return: fn(p: &IRPatchEmitter, f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
+    if end_idx <= branch + 1 -> return false
+    last: end_idx - 1
+    if f.op[last] != .Return || f.a[last] >= 0 || f.b[last] == IR_TAIL_JUMP -> return false
+    if end_idx == branch + 2 -> return true
+    if !p.has_drop_kill -> return false
+    loop k in (branch + 1)..<last {
+        if f.op[k] == .Nop || p.drop_kill[k] -> next
+        return false
+    }
+    true
 }
 
 patch_stop_edge_is_drop_chain: fn(f: IRFunction, branch: Int, end_idx: Int) -> Bool Never! {
@@ -3322,7 +3351,7 @@ patch_stop_edge_is_drop_chain: fn(f: IRFunction, branch: Int, end_idx: Int) -> B
     true
 }
 
-patch_in_loop: fn(p: IRPatchEmitter, f: IRFunction) -> Bool Never! {
+patch_in_loop: fn(p: &IRPatchEmitter, f: IRFunction) -> Bool Never! {
     loop opener in p.ctrl_open {
         if f.op[opener] == .Loop -> return true
     }
@@ -3399,12 +3428,14 @@ patch_stop_point: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int, po
         return -1
     }
     end_idx: f.c[branch]
-    bare_ret: patch_stop_edge_is_bare_return(f, branch, end_idx)
+    bare_ret: patch_stop_edge_is_bare_return(p, f, branch, end_idx)
     if f.a[at] == trap {
         has_trap := false
         loop idx in traps..<p.colds.len() {
             k: p.colds[idx].kind
-            if k == .Stop || k == .ShiftStop || (k == .LocatedRoute && patch_located_stops(p, f, p.colds[idx])) {
+            ca: p.colds[idx].at
+            cr: p.colds[idx].right
+            if k == .Stop || k == .ShiftStop || (k == .LocatedRoute && patch_located_stops(p, f, ca, cr)) {
                 has_trap = true
                 break
             }
@@ -3414,7 +3445,9 @@ patch_stop_point: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int, po
         edge_id: p.stop_edges.len()
         loop idx in traps..<p.colds.len() {
             k: p.colds[idx].kind
-            if k == .Stop || k == .ShiftStop || (k == .LocatedRoute && patch_located_stops(p, f, p.colds[idx])) {
+            ca: p.colds[idx].at
+            cr: p.colds[idx].right
+            if k == .Stop || k == .ShiftStop || (k == .LocatedRoute && patch_located_stops(p, f, ca, cr)) {
                 p.colds[idx].pad = edge_id
             }
         }
@@ -3481,15 +3514,19 @@ patch_stop_point: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, at: Int, po
     end_idx
 }
 
-patch_cleanup_edge: fn(p: IRPatchEmitter, m: IRModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
+patch_cleanup_edge: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, branch: Int, end_idx: Int) -> {ok: Bool, first: Int, leave: Int, token: Int} Never! {
     none: {ok: false, first: -1, leave: -1, token: -1}
     last: end_idx - 1
     if last <= branch + 2 -> return none
     if f.op[last] != .Return || f.a[last] >= 0 || f.b[last] == IR_TAIL_JUMP -> return none
     first := branch + 1
-    loop first < last && f.op[first] == .Nop -> first += 1
+    loop first < last && (f.op[first] == .Nop || (p.has_drop_kill && p.drop_kill[first])) {
+        first += 1
+    }
     leave := last - 1
-    loop leave > first && f.op[leave] == .Nop -> leave -= 1
+    loop leave > first && (f.op[leave] == .Nop || (p.has_drop_kill && p.drop_kill[leave])) {
+        leave -= 1
+    }
     if leave <= first -> return none
     if f.op[first] != .CallRuntime || f.op[leave] != .CallRuntime -> return none
     if m.names[f.a[first]] != "jet_rt_cleanup_enter" || m.names[f.a[leave]] != "jet_rt_cleanup_leave" {
@@ -3520,7 +3557,7 @@ patch_cleanup_edge: fn(p: IRPatchEmitter, m: IRModule, f: IRFunction, branch: In
     {ok: true, first: first, leave: leave, token: token}
 }
 
-patch_group_slot_eq: fn(p: IRPatchEmitter, s1: Int, e1: Int, s2: Int, e2: Int, a: Int, b: Int) -> Bool Never! {
+patch_group_slot_eq: fn(p: &IRPatchEmitter, s1: Int, e1: Int, s2: Int, e2: Int, a: Int, b: Int) -> Bool Never! {
     if a == b -> return true
     if a < 0 || b < 0 -> return false
     // Two internal temps written at the same relative op inside their group with the same frame home.
@@ -3535,7 +3572,7 @@ patch_group_slot_eq: fn(p: IRPatchEmitter, s1: Int, e1: Int, s2: Int, e2: Int, a
     false
 }
 
-patch_group_eq: fn(p: IRPatchEmitter, f: IRFunction, s1: Int, e1: Int, s2: Int, e2: Int) -> Bool Never! {
+patch_group_eq: fn(p: &IRPatchEmitter, f: IRFunction, s1: Int, e1: Int, s2: Int, e2: Int) -> Bool Never! {
     len: e1 - s1
     if len != e2 - s2 -> return false
     if len == 1 && f.op[s1] == .Drop && f.op[s2] == .Drop -> return f.a[s1] == f.a[s2]
@@ -3622,7 +3659,7 @@ patch_group_hash: fn(f: IRFunction, s: Int, e: Int) -> Int Never! {
     h
 }
 
-patch_suffix_find: fn(p: IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
+patch_suffix_find: fn(p: &IRPatchEmitter, slot: Int, next_off: Int) -> Int Never! {
     loop i in 0..<p.suffix_slot.len() {
         if p.suffix_slot[i] == slot && p.suffix_next[i] == next_off -> return p.suffix_off[i]
     }
@@ -3668,7 +3705,7 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: 
             ge := [Int]{}
             k := info.first + 1
             loop k < info.leave {
-                if f.op[k] == .Nop {
+                if f.op[k] == .Nop || (p.has_drop_kill && p.drop_kill[k]) {
                     k += 1
                     next
                 }
@@ -3766,6 +3803,7 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: 
                     p.fused_slot = -1
                     p.fused_cc = -1
                     loop u in gs[pos]..<ge[pos] {
+                        if p.has_drop_kill && p.drop_kill[u] -> next
                         ir_x64_debug_line(p.lines, p.code.len(), ir_code_line_source(f.code_line[u]))
                         patch_emit_op(p, m, f, u)
                     }
@@ -3792,7 +3830,7 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: 
         if patch_stop_edge_is_drop_chain(f, branch, end_idx) {
             drops := [Int]{}
             loop k in (branch + 1)..<(end_idx - 1) {
-                if f.op[k] == .Drop -> drops.push(k)
+                if f.op[k] == .Drop && !(p.has_drop_kill && p.drop_kill[k]) -> drops.push(k)
             }
             tail_off := exit
             prefix_len := drops.len()
@@ -3850,6 +3888,7 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: 
         p.fused_cc = -1
         patch_ctrl_open(p, branch, -1, -1)
         loop k in (branch + 1)..<end_idx {
+            if p.has_drop_kill && p.drop_kill[k] -> next
             ir_x64_debug_line(p.lines, p.code.len(), ir_code_line_source(f.code_line[k]))
             patch_emit_op(p, m, f, k)
         }
@@ -3867,7 +3906,7 @@ patch_emit_stop_edges: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: 
 // ---------------------------------------------------------------------------
 // Cold slow paths & stack-grow path.
 
-patch_cold_target: fn(p: IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
+patch_cold_target: fn(p: &IRPatchEmitter, pad: Int, exit: Int) -> Int Never! {
     if pad >= 0 && pad < p.stop_edges.len() && p.stop_edges[pad].offset >= 0 {
         return p.stop_edges[pad].offset
     }
@@ -3916,7 +3955,7 @@ patch_emit_colds: fn(p: &IRPatchEmitter, m: IRModule, f: IRFunction, exit: Int) 
                 patch_mov_ri(p, 1, path_len)
                 patch_mov_ri(p, 8, cold.line)
                 patch_call_out(p, f, X64RelocTarget.Runtime{symbol: cold.symbol}, false, -1)
-                if m.stop_points && patch_located_stops(p, f, cold) {
+                if m.stop_points && patch_located_stops(p, f, cold.at, cold.right) {
                     if 16 > p.below -> p.below = 16
                     p.code.push(U8{0x50})
                     p.code.push(U8{0x50})
@@ -4243,12 +4282,20 @@ ir_x64_patch_function_in: fn(m: IRModule, row: Int, poll: Int, trap: Int, turn: 
         p.writes[slot] = 0
         p.last_write[slot] = -1
     }
+    has_string_drop := false
+    need_drop_early: !m.dropped_early
     loop at in 0..<op_count {
         op: f.op[at]
         if op == .Loop {
             p.loop_starts.push(at)
             p.loop_ends.push(f.a[at])
-        } else if op == .StreamStore { p.has_stream = true }
+        } else if op == .StreamStore { p.has_stream = true } else if need_drop_early && !has_string_drop && op == .Drop {
+            ds: f.a[at]
+            if ds >= 0 && ds < slot_count {
+                dty: f.slot_type[ds]
+                if m.types[dty].kind == .String && m.types[dty].drop != "" -> has_string_drop = true
+            }
+        }
         form: ir_x64_read_form(op)
         if form != IR_X64_READS_NONE {
             a: f.a[at]
@@ -4302,6 +4349,28 @@ ir_x64_patch_function_in: fn(m: IRModule, row: Int, poll: Int, trap: Int, turn: 
             if at > p.ends[written] -> p.ends[written] = at
             p.writes[written] = p.writes[written] + 1
             p.last_write[written] = at
+        }
+    }
+    if has_string_drop {
+        plan := ir_drop_plan(m, f, poll, trap, turn)
+        if plan.slots.len() > 0 {
+            p.has_drop_plan = true
+            p.has_drop_kill = true
+            if p.drop_head.len() < op_count {
+                p.drop_head.try_reserve(op_count) ?? panic("reserve failed")
+                loop p.drop_head.len() < op_count -> p.drop_head.push(-1)
+            }
+            loop i in 0..<op_count -> p.drop_head[i] = -1
+            p.drop_slots = plan.slots.move()
+            p.drop_lines = plan.lines.move()
+            p.drop_kill = plan.kill.move()
+            p.drop_chain = [Int]{}
+            p.drop_chain.try_reserve(plan.to.len()) ?? panic("reserve failed")
+            loop k in 0..<plan.to.len() {
+                target: plan.to[k]
+                p.drop_chain.push(p.drop_head[target])
+                p.drop_head[target] = k
+            }
         }
     }
     has_addressed := false
@@ -4510,7 +4579,19 @@ ir_x64_patch_function_in: fn(m: IRModule, row: Int, poll: Int, trap: Int, turn: 
     traps := 0
     at := 0
     loop at < op_count {
-        if at <= p.skip_to {
+        if p.has_drop_plan {
+            dk := p.drop_head[at]
+            if dk >= 0 {
+                p.fused_slot = -1
+                p.fused_cc = -1
+                loop dk >= 0 {
+                    ir_x64_debug_line(p.lines, p.code.len(), ir_code_line_source(p.drop_lines[dk]))
+                    patch_drop_slot(p, m, f, p.drop_slots[dk], -1)
+                    dk = p.drop_chain[dk]
+                }
+            }
+        }
+        if at <= p.skip_to || (p.has_drop_kill && p.drop_kill[at]) {
             at += 1
             next
         }

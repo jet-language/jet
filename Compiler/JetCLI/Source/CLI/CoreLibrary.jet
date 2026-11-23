@@ -197,6 +197,19 @@ jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITra
     JetCLICoreBodiesFile{bytes: bytes, problem: problem}
 }
 
+// The Core library end-to-end on its background task: check, IR build, O2
+// optimize, lint, then once the runtime's thread receipt arrives on
+// `threads_arrival`, compile machine code (`ir.x64`, `ir.object`) and write
+// all Core artifacts in parallel with the runtime's web partition.
+jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: String, threads_arrival: Receiver<[String]?>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+    built := jet_cli_core_library_ir(native, compiler_threads, trace_sink)
+    if built == .Stopped(_) {
+        return jet_cli_core_library_made(built, prefix, [String]{}, trace_sink)
+    }
+    runtime_threads: threads_arrival.receive() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: ""}
+    jet_cli_core_library_made(built, prefix, runtime_threads, trace_sink)
+}
+
 // The Core library's machine code (jet_cli_core_library) from its IR
 // `built`, as the `runtime.core.object` span, at `prefix`, once the
 // runtime's thread receipt `runtime_threads` is known (Request.jet
