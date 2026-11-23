@@ -109,7 +109,8 @@ Compiler/JetBackend/Tests/X64Decode.jet	7
 Compiler/JetBuildSession/Source/Declarations.jet	14
 Compiler/JetBuildSession/Source/Graph.jet	25
 Compiler/JetBuildSession/Source/Keys.jet	1
-Compiler/JetBuildSession/Source/Session.jet	17
+# Raised by three: the session keeps the running compiler's and the build tree's source keys (#6794 B1); the host keeps the key it passes, and `b.source_key()` reads the kept one back out of the shared session.
+Compiler/JetBuildSession/Source/Session.jet	20
 Compiler/JetBuildSession/Tests/BuildGraphRules.jet	14
 Compiler/JetCanvas/Source/Host/CanvasEdit.jet	10
 Compiler/JetCanvas/Source/Host/CanvasHost.jet	10
@@ -130,7 +131,8 @@ Compiler/JetCLI/Source/CLI/BudgetMeasure.jet	39
 Compiler/JetCLI/Source/CLI/BudgetProviders.jet	2
 Compiler/JetCLI/Source/CLI/BudgetStore.jet	22
 Compiler/JetCLI/Source/CLI/BudgetView.jet	10
-Compiler/JetCLI/Source/CLI/BuildExecute.jet	37
+# Raised by one: a step passed `b.jet()` runs with the path of the compiler running the build in its argv (#6794 B1, jet_cli_build_jet_argv); the graph's action keeps its own argv.
+Compiler/JetCLI/Source/CLI/BuildExecute.jet	38
 Compiler/JetCLI/Source/CLI/BuildFactExplain.jet	7
 Compiler/JetCLI/Source/CLI/BuildWeb.jet	6
 Compiler/JetCLI/Source/CLI/CHeaderBind.jet	5
@@ -343,7 +345,8 @@ Compiler/JetDriver/Source/Driver/ForeignProviders.jet	12
 Compiler/JetDriver/Source/Driver/GateProjection.jet	3
 Compiler/JetDriver/Source/Driver/Identity.jet	5
 # Raised to the file's count: the hidden-copy sweep spells each copy the compiler already made as `.copy()`; cost-neutral.
-Compiler/JetDriver/Source/Driver/Loader.jet	51
+# Raised by four: each parse thread of the streamed load holds its own ends of the load's job and answer channels (#6794 S3), and its guard keeps the answer end to report a stopped parse; the selected entry's name, copied into each matching package, is spelled.
+Compiler/JetDriver/Source/Driver/Loader.jet	55
 # Raised to the file's count: the hidden-copy sweep spells each copy the compiler already made as `.copy()`; cost-neutral.
 Compiler/JetDriver/Source/Driver/MarkerGroups.jet	8
 # Raised to the file's count: the hidden-copy sweep spells each copy the compiler already made as `.copy()`; cost-neutral.
@@ -571,7 +574,8 @@ Compiler/JetParser/Source/Parser/Declarations/Policies.jet	3
 Compiler/JetParser/Source/Parser/Declarations/StateMarkers.jet	12
 Compiler/JetParser/Source/Parser/Declarations/States.jet	1
 Compiler/JetParser/Source/Parser/Declarations/Types.jet	1
-Compiler/JetParser/Source/Parser/Entry.jet	11
+# Raised by two: the parallel parse (#6796 S1) gives each chunk's compact token tables a literal's deferred diagnostics and escapes (parser_chunk_remap_literal); every chunk task reads the whole-file tables at once and the one-thread fallback parses them after, so neither list can move.
+Compiler/JetParser/Source/Parser/Entry.jet	13
 Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet	2
 Compiler/JetParser/Source/Parser/Expressions.jet	10
 Compiler/JetParser/Source/Parser/FencedNames.jet	6

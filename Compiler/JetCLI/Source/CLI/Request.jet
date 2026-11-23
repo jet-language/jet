@@ -6,6 +6,7 @@
 // directory at or above the entry that holds `package.jet`, or the entry's own
 // directory for a loose file.
 use {
+    cli_crypto: core.crypto
     cli_files: core.files
     cli_sys: core.sys
     cli_tasks: core.tasks
@@ -110,7 +111,7 @@ use {
     ]
     jet_backend.[X64ExecutableResult, X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_image_objects, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
     jet_ir.[IREvalUnit, IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_eval_link_receipt, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object_into]
-    jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
+    jet_pkg_model.[BuildStamp, DepSpec, JET_VERSION, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read, sema_unsafe_unit_map]
     jet_web.[web_runtime_partition]
 }
@@ -220,7 +221,11 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // machine code and object are made here (jet_cli_runtime_object) and the
 // pack links from that object (jet_cli_runtime_pack_linked), the pack is
 // prelinked at the run base in memory and handed to the check, whose first
-// compile-time run waits for it (JetCLICoreImageReader). Core's machine code
+// compile-time run waits for it (JetCLICoreImageReader). A jet that carries
+// the pack of the sources it lowers, as on a same-source build
+// (jet_cli_core_image_carried), hands the check that pack and its thread
+// receipt instead, so the Core build waits for none of the runtime until
+// the pack links them. Core's machine code
 // waits for the runtime's thread receipt, since Core starts threads through
 // the runtime, and compiles once the Core IR is joined
 // (jet_cli_core_library_made). The compiler's identity, which both compiles
@@ -263,21 +268,29 @@ jet_cli_runtime_with_core: fn(request: &&JetDriverCompileRequest, prefix: String
     // The runtime image the Core check's compile-time code runs on arrives
     // once (None: there is none); the check's request holds the session.
     // The runtime's thread receipt arrives as soon as runtime IR finishes,
-    // so Core's ir.x64 and ir.object overlap with runtime.web.
+    // so Core's ir.x64 and ir.object overlap with runtime.web. A jet that
+    // carries this very pack (`carried`) hands the check both at once: the
+    // check prelinks the pack itself, the receipt is the one it carries, and
+    // the runtime build links no image and sends no receipt for it.
     { sender: image, receiver: arrival }: channel<X64ImageFile?>()
     { sender: runtime_threads, receiver: threads_arrival }: channel<[String]?>()
-    building: task jet_cli_core_library_built(jet_eval_native_session(JET_CLI_RUNTIME_IMAGE_FILE, JetCLICoreImageReader{arrival: arrival}), core_prefix, threads_arrival, core_threads, trace_sink)
+    carried: jet_cli_core_image_carried()
+    image_carried: carried != None
+    if image_carried {
+        jet_cli_core_threads_send(runtime_threads, Val(jet_cli_runtime_threads_carried())).drop("a Core check that stopped reads no thread receipt")
+    }
+    building: task jet_cli_core_library_built(jet_eval_native_session(JET_CLI_RUNTIME_IMAGE_FILE, JetCLICoreImageReader{arrival: arrival, carried: carried, threads: core_threads}), core_prefix, threads_arrival, core_threads, trace_sink)
     checked := X64ImageFile?{None}
     compiler_threads_join()
     runtime_ir := jet_cli_runtime_ir(jet_cli_lowering_inputs(request, trace_sink), prefix, lifecycle, compiler_threads, trace_sink)
     made := if runtime_ir.move() == {
         .Stopped(result) -> {
-            jet_cli_core_threads_send(runtime_threads, None).drop("a Core check that stopped reads no thread receipt")
+            if !image_carried -> jet_cli_core_threads_send(runtime_threads, None).drop("a Core check that stopped reads no thread receipt")
             JetCLIRuntimeMade.Stopped{result: result}
         }
         .Built(result, library, interface_text, threads, receipt) -> {
-            jet_cli_core_threads_send(runtime_threads, Val(receipt.move())).drop("a Core check that stopped reads no thread receipt")
-            jet_cli_runtime_made_built(result, library, interface_text, threads, prefix, checked, trace_sink)
+            if !image_carried -> jet_cli_core_threads_send(runtime_threads, Val(receipt.move())).drop("a Core check that stopped reads no thread receipt")
+            jet_cli_runtime_made_built(result, library, interface_text, threads, prefix, checked, trace_sink, carried: image_carried)
         }
     }
     compiler_threads_leave()
@@ -336,10 +349,11 @@ JetCLIRuntimeMade: enum {
 
 // The runtime library's object and pack (JetCLIRuntimeMade), and in
 // `checked` the image the Core library's check runs its compile-time code on
-// (jet_cli_core_check_image). The image links from the pack's bytes, so a
-// pack that links is written to its file first, before the Core object is
-// made, and marked `written`.
-jet_cli_runtime_made_built: fn(result: &&JetDriverCompileResult, library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, checked: &X64ImageFile?, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeMade {
+// (jet_cli_core_check_image), unless the check took the pack this jet
+// carries (`carried`, jet_cli_core_image_carried). The image links from the
+// pack's bytes, so a pack that links is written to its file first, before
+// the Core object is made, and marked `written`.
+jet_cli_runtime_made_built: fn(result: &&JetDriverCompileResult, library: &&IRLibraryResult, interface_text: String, threads: CompilerThreads, prefix: String, checked: &X64ImageFile?, trace_sink: JetCLITraceSink?, carried: Bool{false}) -> JetCLIRuntimeMade {
     object := jet_cli_runtime_object_emit(library, interface_text, threads, prefix, trace_sink)
     if object.problem != "" {
         return JetCLIRuntimeMade.Made{result: result.move(), object_problem: object.problem, pack: None, deferred: None}
@@ -351,7 +365,7 @@ jet_cli_runtime_made_built: fn(result: &&JetDriverCompileResult, library: &&IRLi
         pack.written = true
         image: pack.linked.bytes.move()
         pack.linked.bytes = [U8]{}
-        checked = jet_cli_core_check_image(pack.path, image.move(), threads, trace_sink)
+        if !carried -> checked = jet_cli_core_check_image(pack.path, image.move(), threads, trace_sink)
     }
     JetCLIRuntimeMade.Made{result: result.move(), object_problem: "", pack: Val(pack.move()), deferred: deferred}
 }
@@ -689,6 +703,27 @@ jet_cli_compiler_identity: fn() -> String? Never! {
     Val(identity)
 }
 
+// The source key the running compiler was built from: its runtime pack's
+// IDENTITY part names the compiler that lowered the runtime as
+// `jet@<version>#<source key>`, and the compiler build packs a runtime only
+// for the jet built from the same sources (Compiler/build.jet). None for
+// jet-bare, which carries no runtime, and for an IDENTITY of another version
+// or form.
+jet_cli_compiler_source: fn() -[Env]> String? Never! {
+    size: jet_cli_runtime_part_size(JET_CLI_IDENTITY_FILE)
+    if size == 0 -> return None
+    bytes: jet_cli_runtime_part_range(JET_CLI_IDENTITY_FILE, 0, size) ?? return None
+    packer: foundation_byte_text(bytes, 0, bytes.len()).trim()
+    prefix: "jet@{JET_VERSION}#"
+    if !packer.starts_with(prefix) -> return None
+    key: packer.removeprefix(prefix)
+    if key.len() != 64 -> return None
+    loop byte in key.bytes() {
+        if !((byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102})) -> return None
+    }
+    Val(key)
+}
+
 // The refusal when this compiler has no identity, naming both places it looks.
 jet_cli_identity_missing: fn() -> {what: String, fix: String} Never! {
     file: jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)
@@ -759,6 +794,105 @@ jet_cli_named_toolchain: fn(input: String) -> String? Never! {
         index -= 1
     }
     None
+}
+
+// The trees the source key names, under the toolchain root.
+JET_CLI_SOURCE_KEY_FOLDERS: [String]{"Compiler", "Core", "Jetpack"}
+
+// The parts the source key hashes its files in, each on a task of its own.
+JET_CLI_SOURCE_KEY_PARTS: 16
+
+// The source key of the toolchain tree that holds `directory`, an absolute
+// path: the nearest directory above a `Compiler`, `Core` or `Jetpack`
+// component of it that holds `Core/` and `Compiler/Prelude/`. The key is the
+// sha256 of `jet-source/v1` and one `<path>\t<sha256>` line per file of its
+// Compiler/, Core/ and Jetpack/ folders, by path, the names that start with
+// `.` left out. A compiler built from that tree is named by it
+// (Compiler/build.jet), so the key changes with any source, generator or
+// build file the compiler is built from. A symlink, or any entry that is
+// neither a file nor a folder, is refused: the key would not name what it
+// reaches.
+jet_cli_source_key: fn(directory: String) -[FS.Read]> String JetCLIReadError! {
+    root: jet_cli_source_tree(directory) ?? return Err(jet_cli_read_error("`{directory}` is in no Jet toolchain tree, a directory holding `Core/` and `Compiler/Prelude/`"))
+    paths := [String]{}
+    loop folder in JET_CLI_SOURCE_KEY_FOLDERS {
+        if jet_cli_source_key_walk(root, folder, paths) == .Val(problem) -> return Err(jet_cli_read_error(problem))
+    }
+    paths.sort()
+    bounds := [Int]{}
+    loop at in 0..<(JET_CLI_SOURCE_KEY_PARTS + 1) -> bounds.push(paths.len() * at /% JET_CLI_SOURCE_KEY_PARTS)
+    rows := "jet-source/v1\n".bytes()
+    loop part in jet_cli_source_key_parts(root, paths, bounds, 0) {
+        if part.problem == .Val(problem) -> return Err(jet_cli_read_error(problem))
+        loop row in part.rows -> rows.extend(row.bytes())
+    }
+    Ok(cli_crypto.sha256(rows).hex())
+}
+
+jet_cli_source_tree: fn(directory: String) -[FS.Read]> String? Never! {
+    if !directory.starts_with("/") -> return None
+    parts: directory.split("/").to_list()
+    index := parts.len() - 1
+    loop index > 0 {
+        if JET_CLI_SOURCE_KEY_FOLDERS.contains(parts[index]) {
+            root: if index == 1 -> "/" else -> jet_cli_prefix(parts, index).join("/")
+            if jet_cli_is_toolchain(root) -> return Val(root)
+        }
+        index -= 1
+    }
+    None
+}
+
+// The files under `root`/`relative` into `paths`; why one can't be named,
+// if one can't.
+jet_cli_source_key_walk: fn(root: String, relative: String, paths: &[String]) -[FS.Read]> String? Never! {
+    folder: jet_cli_authority_path(root, relative)
+    listed: cli_files.list_dir(folder) ?? return Val("can't list `{folder}`: {jet_cli_io_error_text(err)}")
+    loop entry in listed {
+        if entry.name.starts_with(".") -> next
+        path: "{relative}/{entry.name}"
+        info: cli_files.stat(jet_cli_authority_path(root, path)) ?? return Val("can't read `{path}`: {jet_cli_io_error_text(err)}")
+        if info.is_symlink || (!info.is_dir && !info.is_file) {
+            return Val("`{path}` is not a file or a folder, so the source key can't name it")
+        }
+        if !info.is_dir {
+            paths.push(path)
+            next
+        }
+        if jet_cli_source_key_walk(root, path, paths) == .Val(problem) -> return Val(problem)
+    }
+    None
+}
+
+// One part's `<path>\t<sha256>` lines, or why a file of it didn't read.
+JetCLISourceKeyPart: struct {
+    rows: [String],
+    problem: String?,
+}
+
+jet_cli_source_key_part: fn(root: String, paths: [String], start: Int, end: Int) -[FS.Read]> JetCLISourceKeyPart Never! {
+    rows := [String]{}
+    loop index in start..<end {
+        path: paths[index]
+        bytes: cli_files.read_bytes(jet_cli_authority_path(root, path)) ?? return {rows: rows, problem: Val("can't read `{path}`: {jet_cli_io_error_text(err)}")}
+        rows.push("{path}\t{cli_crypto.sha256(bytes).hex()}\n")
+    }
+    {rows: rows, problem: None}
+}
+
+// Parts `at..` of `paths` cut at `bounds`, one task each, in order.
+jet_cli_source_key_parts: fn(root: String, paths: [String], bounds: [Int], at: Int) -[FS.Read]> [JetCLISourceKeyPart] Never! {
+    last: bounds.len() - 2
+    if at > last -> return [JetCLISourceKeyPart]{}
+    if at == last -> return [JetCLISourceKeyPart]{jet_cli_source_key_part(root, paths, bounds[at], bounds[at + 1])}
+    done := [JetCLISourceKeyPart]{}
+    task.group jet_cli_source_key_threads {
+        head: task jet_cli_source_key_part(root, paths, bounds[at], bounds[at + 1])
+        rest: jet_cli_source_key_parts(root, paths, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
 }
 
 JET_CLI_MAX_TREE_DEPTH: 256
@@ -1903,7 +2037,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         authorized_sources: snapshot,
         canonical_effects: JET_CLI_EFFECT_MODULE,
         core_sources: core_sources,
-        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
+        host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity(), compiler_source: jet_cli_compiler_source()},
         eval_config: jet_cli_eval_config(),
         record_store: None,
         core_interface: Val(jet_cli_core_interface()),
@@ -1995,12 +2129,17 @@ JetCLINativeImageReader: struct {
 // image over on `arrival`, once. None when there is none, or the runtime
 // build is gone. While it waits the check leaves the compiler threads it
 // shares with the runtime build (compiler_threads_leave), whose phases then
-// take the whole cap.
+// take the whole cap. With `carried`, the pack's path, the check waits for
+// nothing: it prelinks the pack this jet carries on `threads`
+// (jet_cli_core_image_carried).
 JetCLICoreImageReader: struct {
     arrival: Receiver<X64ImageFile?>,
+    carried: String?,
+    threads: CompilerThreads,
 
     impl JetEvalNativeImageReader {
         read: fn(self, _file: String) -[FS.Read, Env, FFI.Asm, Time.Wait]> X64ImageFile? {
+            if self.carried == .Val(path) -> return jet_cli_core_image_carried_link(path, self.threads)
             compiler_threads_leave()
             arrived: jet_cli_core_image_received(self.arrival)
             compiler_threads_join()
@@ -2018,6 +2157,41 @@ JetCLICoreImageReader: struct {
 jet_cli_core_image_received: fn(arrival: Receiver<X64ImageFile?>) -[Time.Wait]> X64ImageFile? {
     image: arrival.receive() ?? return None
     Val(image)
+}
+
+// The path the runtime's pack goes to (JET_FRONT_RUNTIME_PACK_OUTPUT) when
+// this jet carries that very pack. A same-source build (Compiler/build.jet
+// b.jet_built_from) lowers the runtime with the jet built from the sources
+// it lowers: that jet's runtime IDENTITY part names the identity the build
+// gives this runtime (JET_COMPILER_IDENTITY, Toolchain/RuntimePack.jet), and
+// its pack is the lowering of those sources, the pack this build links
+// (the s2 == s3 fixed point). None for jet-bare, which carries no part, and
+// for a jet of other sources.
+jet_cli_core_image_carried: fn() -[Env]> String? Never! {
+    path: cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) ?? return None
+    source: jet_cli_compiler_source() ?? return None
+    identity: cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) ?? return None
+    if identity != "jet@{JET_VERSION}#{source}" || jet_cli_runtime_part_size(JET_CLI_RUNTIME_PACK_FILE) == 0 -> return None
+    Val(path)
+}
+
+// The Core check's image prelinked from the pack this jet carries, named
+// `path` as the pack it equals, so the image's bytes are those
+// jet_cli_core_check_image links from the pack the runtime build makes;
+// None when it doesn't link.
+jet_cli_core_image_carried_link: fn(path: String, threads: CompilerThreads) -[Env]> X64ImageFile? {
+    pack: jet_cli_runtime_part(JET_CLI_RUNTIME_PACK_FILE)
+    linked: x64_link_runtime_image(path, pack.move(), threads)
+    if linked.errors.len() > 0 -> return None
+    Val(X64ImageFile{bytes: linked.bytes.move(), at: 0, stamp: [Int]{}, gap_at: 0, gap: 0, failure: ""})
+}
+
+// The runtime's thread receipt this jet carries (JET_CLI_RUNTIME_THREADS_FILE),
+// as the list jet_cli_runtime_ir writes it from, one export a line.
+jet_cli_runtime_threads_carried: fn() -[Env]> [String] Never! {
+    text: String.from_bytes(jet_cli_runtime_part(JET_CLI_RUNTIME_THREADS_FILE)) ?? panic("the runtime part `{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_THREADS_FILE}` is not UTF-8")
+    if text == "" -> return [String]{}
+    text.split("\n").to_list()
 }
 
 // ENV_JET_PERF_CODE (`jet perf attach`, Perf/Outside.jet): the functions
@@ -2093,6 +2267,11 @@ JetCLIBuildInputs: struct {
         read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
             bytes: jet_cli_build_read_rooted(root, relative, limit) ?? return Err(JetDriverBuildInputError{message: err.message})
             Ok(bytes)
+        }
+
+        source_key: fn(self, directory: String) -[FS.Read]> String JetDriverBuildInputError! {
+            key: jet_cli_source_key(directory) ?? return Err(JetDriverBuildInputError{message: err.message})
+            Ok(key)
         }
     }
 }

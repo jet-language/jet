@@ -118,20 +118,56 @@ BUILD_SESSION_IMAGE_DIR: ".jet/build/image"
 build_session_host: fn(state: &BuildSessionState, args: [BuildSessionValue], image: Bool) -> BuildSessionReply {
     call: if image -> "b.image" else -> "b.host"
     if args.len() != 1 -> return build_session_fail(state, "`{call}` takes one target")
-    target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
+    build_session_target_built(state, args[0], image: image)
+}
+
+// build_session_host for the target handle `value`.
+build_session_target_built: fn(state: &BuildSessionState, value: BuildSessionValue, image: Bool{false}) -> BuildSessionReply {
+    call: if image -> "b.image" else -> "b.host"
+    target: build_session_handle(state, value, "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
     row: state.targets[target]
-    if row.kind != "executable" || row.sources.len() == 0 {
-        return build_session_fail(state, "`{call}` builds an executable target from its source, and `{row.name}` is a {row.kind} target{if row.sources.len() == 0 -> " with no source" else -> ""}")
-    }
+    if build_session_executable_refusal(row, call) == .Val(refusal) -> return build_session_fail(state, refusal)
     kind: if image -> "image" else -> "host"
     folder: if image -> BUILD_SESSION_IMAGE_DIR else -> BUILD_SESSION_HOST_DIR
     build_session_new_file(state, BuildSessionFile{kind: kind, path: "{folder}/{row.name}", probe: None, action: None, target: Val(target)})
+}
+
+// Why `call` can't build `row`, if it can't: only an executable target with
+// a source has a host build or an image.
+build_session_executable_refusal: fn(row: BuildSessionTarget, call: String) -> String? Never! {
+    if row.kind == "executable" && row.sources.len() > 0 -> return None
+    Val("`{call}` builds an executable target from its source, and `{row.name}` is a {row.kind} target{if row.sources.len() == 0 -> " with no source" else -> ""}")
 }
 
 // `b.jet()`: the compiler running the build, as a tool.
 build_session_jet: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 0 -> return build_session_fail(state, "`b.jet` takes no arguments")
     build_session_new_file(state, BuildSessionFile{kind: "jet", path: "jet", probe: None, action: None})
+}
+
+// `b.jet_built_from(target)` (args: the target, then the source key of the
+// toolchain tree that holds this build, which the host hashes): the
+// compiler running the build when it was built from the sources that tree
+// holds now, its runtime pack naming that source key, so it is the compiler
+// `target` would build; else `b.host(target)`. A step it is passed to then
+// doesn't wait for `target` to compile.
+build_session_jet_built_from: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 2 -> return build_session_fail(state, "`b.jet_built_from` takes one target")
+    tree: build_session_text(args, 1) ?? return build_session_fail(state, "`b.jet_built_from` lost the source key of its toolchain tree")
+    target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "the target does not belong to this build")
+    if build_session_executable_refusal(state.targets[target], "b.jet_built_from") == .Val(refusal) -> return build_session_fail(state, refusal)
+    if state.jet_source == "" || state.jet_source != tree -> return build_session_target_built(state, args[0])
+    build_session_new_file(state, BuildSessionFile{kind: "jet", path: "jet", probe: None, action: None})
+}
+
+// `b.source_key()` (args: the key the host hashed): the source key of the
+// toolchain tree that holds this build, the sha256 that names each file of
+// its Compiler/, Core/ and Jetpack/ folders (JetCLI Request.jet
+// jet_cli_source_key).
+build_session_source_key: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() != 1 -> return build_session_fail(state, "`b.source_key` takes no arguments")
+    key: build_session_text(args, 0) ?? return build_session_fail(state, "`b.source_key` lost the source key of its toolchain tree")
+    BuildSessionReply.Value{value: BuildSessionValue.Text{value: key}}
 }
 
 // Where a step finds the files of the packages package.jet lists, copied
@@ -226,7 +262,7 @@ build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]
         return build_session_fail(state, "found program `{file.path}` has no path until the build runs; pass it to a step, as its tool or with `.file(found)`")
     }
     if file.kind == "jet" {
-        return build_session_fail(state, "`b.jet()` has no path until the build runs; pass it to a step as its tool")
+        return build_session_fail(state, "`b.jet()` has no path until the build runs; pass it to a step, as its tool or with `.file(b.jet())`")
     }
     path: if file.kind == "package" -> "{BUILD_SESSION_DEPS_DIR}/{file.path}" else -> file.path.copy()
     BuildSessionReply.Value{value: BuildSessionValue.Text{value: path}}
@@ -296,7 +332,15 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
                 return unit
             }
             if file.kind == "jet" {
-                return build_session_fail(state, "`b.jet()` runs as a step's tool, not as an argument; write `b.run(name, b.jet(), caps)`")
+                // The argument is the path the compiler runs at in the
+                // step's sandbox, its folder mounted read-only there.
+                if step.toolchain != 0 {
+                    return build_session_fail(state, "step `{step.name}` is passed `b.jet()`, which runs on the toolchain it was built with")
+                }
+                step.argv.push("{flag}{file.path}")
+                step.jets.push(BuildSessionJetArg{at: step.argv.len() - 1, flag: flag.move()})
+                state.actions[id] = step
+                return unit
             }
             if (file.action ?? -1) == id {
                 return build_session_fail(state, "step `{step.name}` makes `{file.path}`, so it can't also read it")
@@ -344,8 +388,8 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
             return unit
         }
         "toolchain" -> {
-            if state.files[step.tool].kind == "jet" {
-                return build_session_fail(state, "step `{step.name}` runs `b.jet()`, which runs on the toolchain it was built with")
+            if state.files[step.tool].kind == "jet" || step.jets.len() > 0 {
+                return build_session_fail(state, "step `{step.name}` runs or is passed `b.jet()`, which runs on the toolchain it was built with")
             }
             step.toolchain = build_session_handle(state, args[1], "BuildToolchain") ?? return build_session_fail(state, "the step's toolchain does not belong to this build")
             state.actions[id] = step

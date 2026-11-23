@@ -1118,11 +1118,13 @@ jet_cli_build_refusal: fn(code: String, what: String, why: String, detail: Strin
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports, notice: ""})}
 }
 
-// Where a `b.jet()` step finds the running compiler's folder, and the
-// toolchain it runs on, named so no `b.toolchain` name can collide.
+// Where a step run or passed `b.jet()` finds the running compiler's folder,
+// and the toolchains it runs on, named so no `b.toolchain` name can collide.
 JET_CLI_BUILD_JET_MOUNT: "/jet/compiler"
 
 JET_CLI_BUILD_JET_TOOLCHAIN: "(jet)"
+
+JET_CLI_BUILD_JET_FILE_TOOLCHAIN: "(jet-file)"
 
 // The executor's graph of the session plan: every declared toolchain, signing
 // identity, probe, action and target in declaration order, so each session
@@ -1131,8 +1133,11 @@ JET_CLI_BUILD_JET_TOOLCHAIN: "(jet)"
 // toolchain: the running compiler's folder (with its runtime pack and
 // IDENTITY) mounted read-only, its one tool `jet`. That jet is this compiler,
 // so the step gets this compiler's identity in `JET_COMPILER_IDENTITY`: an
-// unpublished compiler has no IDENTITY file beside it. `last_kept` is the
-// digest each kept output had when the last build left it.
+// unpublished compiler has no IDENTITY file beside it. A step that runs
+// another tool and is passed `b.jet()` (`.file`) runs on the host toolchain
+// with that folder mounted the same way, and its argument names the
+// compiler at its mount. `last_kept` is the digest each kept output had when
+// the last build left it.
 jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: Int, last_kept: [String:String]) -> HermeticBuildPlan HermeticBuildError! {
     build := HermeticBuildContext.new()
     provenance: BuildProvenance.user_declared("fn build", None)
@@ -1146,14 +1151,24 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
             break true
         }
     } ?? false
+    passes_jet: loop action in graph.actions {
+        if action.jets.len() > 0 {
+            break true
+        }
+    } ?? false
     jet_identity := ""
-    if runs_jet {
+    jet_path := ""
+    jet_toolchain := build.default_host_toolchain()
+    jet_file_toolchain := build.default_host_toolchain()
+    if runs_jet || passes_jet {
         compiler: cli_sys.executable()
         // A compiler without a named identity is known by its bytes; one it
         // can't read can't run the step either.
         jet_identity = jet_cli_compiler_identity() ?? build_crypto.sha256(cli_files.read_bytes(compiler) ?? [U8]{}).hex()
-        spec: ToolchainSpec.host("host", provenance).with_read_only_mount_identity(jet_cli_executable_dir(), JET_CLI_BUILD_JET_MOUNT, jet_identity).with_tool("jet", "{JET_CLI_BUILD_JET_MOUNT}/{cli_files.basename(compiler)}").declared_only()
-        toolchains.push(build.toolchain(JET_CLI_BUILD_JET_TOOLCHAIN, spec))
+        jet_path = "{JET_CLI_BUILD_JET_MOUNT}/{cli_files.basename(compiler)}"
+        mounted: ToolchainSpec.host("host", provenance).with_read_only_mount_identity(jet_cli_executable_dir(), JET_CLI_BUILD_JET_MOUNT, jet_identity)
+        if runs_jet -> jet_toolchain = build.toolchain(JET_CLI_BUILD_JET_TOOLCHAIN, mounted.with_tool("jet", jet_path).declared_only())
+        if passes_jet -> jet_file_toolchain = build.toolchain(JET_CLI_BUILD_JET_FILE_TOOLCHAIN, mounted)
     }
     signing := [SigningIdentityHandle]{}
     loop identity in graph.signing {
@@ -1173,8 +1188,13 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
     actions := [HermeticActionHandle]{}
     loop action in graph.actions {
         runs_this_jet: graph.files[action.tool].kind == "jet"
-        toolchain: if runs_this_jet -> toolchains[toolchains.len() - 1] else -> toolchains[action.toolchain]
-        spec := jet_cli_build_action_spec(action, graph.files, toolchain, probes, signing, action_timeout_ms, last_kept)
+        toolchain: if {
+            runs_this_jet -> jet_toolchain
+            action.jets.len() > 0 -> jet_file_toolchain
+            else -> toolchains[action.toolchain]
+        }
+        // A step passed `b.jet()` gets the path of the compiler running the build.
+        spec := if action.jets.len() > 0 -> jet_cli_build_action_spec(action, jet_cli_build_jet_argv(action, jet_path), graph.files, toolchain, probes, signing, action_timeout_ms, last_kept) else -> jet_cli_build_action_spec(action, action.argv, graph.files, toolchain, probes, signing, action_timeout_ms, last_kept)
         if runs_this_jet -> spec = spec.with_env(JET_CLI_COMPILER_IDENTITY_ENV, jet_identity)
         actions.push(build.action(action.name, spec))
     }
@@ -1210,8 +1230,18 @@ jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: Bu
     spec
 }
 
-jet_cli_build_action_spec: fn(action: BuildSessionAction, files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String:String]) -> ActionSpec Never! {
-    spec := ActionSpec.new(action.argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
+// `action`'s argv with the path of the compiler running the build at each
+// argument `b.jet()` passes.
+jet_cli_build_jet_argv: fn(action: BuildSessionAction, jet_path: String) -> [String] Never! {
+    // copy: the graph's action keeps its argv for the plan's other reads.
+    argv := action.argv.copy()
+    loop passed in action.jets -> argv[passed.at] = "{passed.flag}{jet_path}"
+    argv
+}
+
+// `action`'s spec, its command line `argv`.
+jet_cli_build_action_spec: fn(action: BuildSessionAction, argv: [String], files: [BuildSessionFile], toolchain: ToolchainHandle, probes: [ProbeHandle], signing: [SigningIdentityHandle], action_timeout_ms: Int, last_kept: [String:String]) -> ActionSpec Never! {
+    spec := ActionSpec.new(argv).with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchain).with_timeout_ms(action.timeout_ms ?? action_timeout_ms)
     loop path in action.kept -> spec = spec.with_kept(path, last_kept.get(path))
     loop id in action.folders {
         file: files[id]

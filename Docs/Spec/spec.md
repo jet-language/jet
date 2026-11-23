@@ -7392,7 +7392,19 @@ elsewhere it is refused before anything runs. Example:
 [`Tests/Cases/BuildEntry/run_steps_read_an_image.case`](../../Tests/Cases/BuildEntry/run_steps_read_an_image.case).
 `b.jet()` is the compiler running the build; its step
 runs it from its own folder, mounted read-only, so a step can check, run or
-build Jet code. `b.dependency(name)` is the folder of the package package.jet
+build Jet code. `.file(b.jet())` passes it to a step that runs another tool:
+the step gets the path the compiler runs at in its sandbox, its folder
+mounted read-only the same way, and its cache key covers the compiler.
+`b.source_key()` is the source key of the Jet toolchain tree that holds the
+build, the sha256 of one `<path>\t<sha256>` line per file of its
+`Compiler/`, `Core/` and `Jetpack/` folders (the names that start with `.`
+left out, a symlink in them refused, E3502), and
+`b.jet_built_from(target)` is `b.jet()` when the running compiler was built
+from those sources, its runtime pack naming that key, else
+`b.host(target)`: a step it is passed to doesn't wait for `target` to compile
+when the compiler running the build is the one it would build. Only an
+executable target with a source can be named (E3502); a build outside a
+toolchain tree has no source key (E3502). `b.dependency(name)` is the folder of the package package.jet
 lists as `name` (an unlisted name is E3502), and `.file(path)` on it is a
 file there: before any step runs, the build copies it to
 `.jet/deps/<name>/<path>`, the path the step gets, so a step reads another
@@ -7465,8 +7477,9 @@ An input a step reads reaches its sandbox runnable when its owner may run it,
 so a step can run a host build it is passed. Example:
 [`Tests/Cases/BuildEntry/run_steps_pass_a_runnable_input.case`](../../Tests/Cases/BuildEntry/run_steps_pass_a_runnable_input.case).
 `.toolchain(t)` and
-`.sign(identity)` add toolchain and signing identity; a `b.jet()` step runs on
-the toolchain its compiler was built with, so `.toolchain` on it is refused. A
+`.sign(identity)` add toolchain and signing identity; a step that runs or is
+passed `b.jet()` runs on the toolchain its compiler was built with, so
+`.toolchain` on it is refused. A
 step's result is cached. A step that
 declares no output is refused at its `b.run` call (E3502), since only declared
 outputs leave its sandbox, and `.arg` text that names a package file is

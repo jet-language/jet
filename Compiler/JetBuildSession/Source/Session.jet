@@ -152,9 +152,10 @@ BuildSessionPlugin: struct {
 // A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
 // reads and makes (`kept` the outputs that stay in git), the folders it reads
 // whole (`folders`, "folder" BuildFile ids), the found programs it is passed
-// (`programs`), its own time limit in milliseconds (None: the
-// `action_timeout` option's), and the span of its `b.run` call, where a step
-// that declares no output is reported.
+// (`programs`), the arguments that pass the running compiler (`jets`), its
+// own time limit in milliseconds (None: the `action_timeout` option's), and
+// the span of its `b.run` call, where a step that declares no output is
+// reported.
 BuildSessionAction: struct {
     name: String,
     inputs: [String],
@@ -168,9 +169,19 @@ BuildSessionAction: struct {
     probes: [Int],
     signing: Int?,
     tool: Int,
+    jets: [BuildSessionJetArg]{[BuildSessionJetArg]{}},
     timeout_ms: Int?{None},
     start: Int{0},
     end: Int{0},
+}
+
+// The running compiler passed to a step (`.file(b.jet_built_from(t))` when
+// it resolves to that compiler): argument `at` of the step is `flag`
+// followed by the path the compiler runs at in the step's sandbox, which
+// only the executor knows.
+BuildSessionJetArg: struct {
+    at: Int,
+    flag: String,
 }
 
 // A found program passed to a step (`.file(b.found(probe))`): argument `at`
@@ -273,6 +284,12 @@ BuildSessionState: struct {
     default_target: Int,
     // The words after `--` on `jet build`, which `b.args()` returns.
     args: [String],
+    // The source key the running compiler was built from (its runtime pack's
+    // IDENTITY, `jet@<version>#<key>`), "" when it names none; and the
+    // source key of the toolchain tree that holds this build, "" until
+    // `b.source_key()` or `b.jet_built_from(t)` first asks for it.
+    jet_source: String{""},
+    tree_source: String{""},
     // The folder of each package package.jet lists, by its name
     // (`b.dependency(name)`).
     dependencies: [String:String]{[String:String]{}},
@@ -355,6 +372,25 @@ build_session_at: fn(session: &BuildSession, file: String) Never! {
 build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.args = args.copy()
+}
+
+// The source key the running compiler was built from, "" for none
+// (`b.jet_built_from`).
+build_session_set_jet_source: fn(session: &BuildSession, key: String) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.jet_source = key.copy()
+}
+
+// The source key of the toolchain tree that holds this build, once the host
+// has hashed it; "" before.
+build_session_tree_source: fn(session: BuildSession) -> String Never! {
+    permit: session.storage.guard_read()
+    permit.value.tree_source.copy()
+}
+
+build_session_set_tree_source: fn(session: &BuildSession, key: String) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.tree_source = key.copy()
 }
 
 // The folders of the packages the build's package.jet lists, by name.
@@ -514,6 +550,8 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     if method == "host" -> return build_session_host(state, args, false)
     if method == "image" -> return build_session_host(state, args, true)
     if method == "jet" -> return build_session_jet(state, args)
+    if method == "jet_built_from" -> return build_session_jet_built_from(state, args)
+    if method == "source_key" -> return build_session_source_key(state, args)
     if method == "dependency" -> return build_session_dependency(state, args)
     if method == "folder" -> return build_session_folder(state, args)
     if method.starts_with("action.") {

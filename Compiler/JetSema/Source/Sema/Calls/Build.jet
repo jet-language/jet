@@ -53,6 +53,13 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             result = Type.Named{name: "BuildFile"}
         }
         method == "jet" && arity == 0 -> result = Type.Named{name: "BuildFile"}
+        // `b.jet()` when it was built from the sources of the toolchain tree
+        // that holds the build, else `b.host(target)`.
+        method == "jet_built_from" && arity == 1 -> {
+            parameters = [Type]{target}
+            result = Type.Named{name: "BuildFile"}
+        }
+        method == "source_key" && arity == 0 -> result = Type.String
         (method == "dependency" || method == "folder") && arity == 1 -> {
             parameters = [Type]{Type.String}
             result = Type.Named{name: "BuildFile"}
@@ -109,11 +116,11 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "compiler" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" || method == "action" {
+    if method == "default" || method == "compiler" || method == "found" || method == "host" || method == "image" || method == "jet_built_from" || method == "dependency" || method == "folder" || method == "action" {
         return "1"
     }
     if method == "run" -> return "3"
-    if method == "args" || method == "jet" -> return "0"
+    if method == "args" || method == "jet" || method == "source_key" -> return "0"
     if method == "error" -> return "5"
     "2"
 }

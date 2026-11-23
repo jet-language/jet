@@ -21,6 +21,8 @@ use {
         build_session_graph,
         build_session_made_structs,
         build_session_refuse,
+        build_session_set_tree_source,
+        build_session_tree_source,
     ]
 }
 
@@ -140,6 +142,18 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
             spliced = spliced.replace("{marker}", literal)
         }
         generated = Val(spliced)
+    }
+    // `b.source_key()` and `b.jet_built_from(t)` take the source key of the
+    // toolchain tree that holds the build file, which the host hashes once
+    // per build.
+    if method == "source_key" || method == "jet_built_from" {
+        tree := build_session_tree_source(session)
+        if tree == "" {
+            host: inputs ?? return Val(jet_driver_build_host_failure(session, span, "`b.{method}` hashes the toolchain tree that holds the build, and this build has no file host"))
+            tree = host.source_key(base_dir) ?? return Val(jet_driver_build_host_failure(session, span, "`b.{method}` can't hash the toolchain tree that holds `{base_dir}`: {err.message}"))
+            build_session_set_tree_source(session, tree)
+        }
+        values.push(BuildSessionValue.Text{value: tree})
     }
     // An option the call sets names its site in `file`, a dependency's
     // function's as well as the build file's.
