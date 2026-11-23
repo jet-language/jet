@@ -204,6 +204,7 @@ use {
         IRModule,
         IR_PLUGIN_GUEST_PREFIX,
         IRProgram,
+        IRSourceTexts,
         IRTestCase,
         IRTestHarness,
         ir_build_program,
@@ -663,7 +664,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     entry_key: checked.entry_key ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry"))
     declarations := jet_driver_checked_declarations(checked)
     // copy: the builder consumes its own type rows; the evaluator reads the value back by them.
-    layouts := ir_program_new([FnBody]{}, DeclTable{}, symbol_table(), interner_empty(), declarations.type_defs.copy(), [TImplDef]{}, [String:String]{}, [TConstantDef]{})
+    layouts := ir_program_new([FnBody]{}, DeclTable{}, symbol_table(), interner_empty(), declarations.type_defs.copy(), [TImplDef]{}, IRSourceTexts{}, [TConstantDef]{})
     // A failure the evaluator reports points at `run`.
     span := Span{start: 0, end: 0}
     loop function in checked.functions {

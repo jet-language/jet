@@ -328,7 +328,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_function_rows_get, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic]
+    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_function_rows_get, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -5414,7 +5414,8 @@ JetDriverLoweringInputs: struct {
     symbols: SymbolTable,
     // The run's unified type and name interner.
     interner: Interner,
-    sources: [String:String],
+    // The checked source files' text (ir_source_texts).
+    sources: IRSourceTexts,
     entry_module_identity: ModuleID,
     // The canonical effect module every compile registers and checks afresh
     // (jet_driver_canonical_effect_module): `modules` leaves it out.
@@ -6905,10 +6906,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // detached task while the host builds IR, as a build's does.
         if capture.stop_before_lowering {
             jet_driver_trace_step_begin(request.trace_sink, "driver.check.capture")
-            sources := [String:String]{}
-            loop file in load.source_files {
-                if sources.get(file.path) == None -> sources[file.path] = file.source
-            }
+            sources := ir_source_texts(load.source_files)
             decls := registration_graph.decls.move()
             registration_graph.decls = DeclTable{}
             symbols := registration_graph.symbols.move()
@@ -7146,10 +7144,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     doc_interner := Interner?{None}
     if capture.stop_before_lowering {
         jet_driver_trace_step_begin(request.trace_sink, "driver.result.capture")
-        sources := [String:String]{}
-        loop file in load.source_files {
-            if sources.get(file.path) == None -> sources[file.path] = file.source
-        }
+        sources := ir_source_texts(load.source_files)
         capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.move(), jobs: job_rows.move(), deep_checks: deep_kept.selected.copy()})
         jet_driver_trace_step_end(request.trace_sink, "driver.result.capture", -1)
     } else if request.mode == JetDriverCompileMode.Doc {
@@ -7285,10 +7280,7 @@ jet_driver_held_eval_open: fn(held: &&JetDriverHeldState, threads: CompilerThrea
     probe.program.registration_graph = Val(graph.move())
     types := probe.program.checked_types.move()
     probe.program.checked_types = [TTypeDef]{}
-    sources := [String:String]{}
-    loop file in taken.load.source_files {
-        if sources.get(file.path) == None -> sources[file.path] = file.source
-    }
+    sources := ir_source_texts(taken.load.source_files)
     rows: sema_eval_held_rows(taken.functions)
     inputs := JetDriverLoweringInputs{functions: taken.functions.move(), modules: taken.modules.move(), decls: DeclTable{}, symbols: symbols.move(), interner: interner.move(), sources: sources.move(), entry_module_identity: taken.load.entry_module_identity, canonical_effect_module_identity: taken.canonical_effect_module_identity, module_table: taken.load.module_table.move(), entry_key: None}
     Val(JetDriverHeldOpened{eval: JetDriverHeldEval{probe: probe.move(), rows: rows.move(), modules: modules.move(), plan: plan.move()}, inputs: inputs.move(), types: types.move()})

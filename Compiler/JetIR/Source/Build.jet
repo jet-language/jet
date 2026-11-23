@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_POINTER, TypeID, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -694,7 +694,32 @@ IREmptyImpl: struct {
     owner: Type,
 }
 
-// The checked source files (`path` -> text) as rows of bytes and line starts:
+// The checked source files' text by path, each path once: `texts[id]` holds
+// the text of the path at id `id` of `keys` (id 0, the empty path, holds "").
+// The driver gathers them (ir_source_texts); ir_program_new indexes them.
+IRSourceTexts: struct {
+    keys: NameTable{name_column_table()},
+    texts: [String]{[String]{""}},
+}
+
+// The texts of `files`, the first file's of each path.
+ir_source_texts: fn(files: [SourceFile]) -> IRSourceTexts Never! {
+    sources := IRSourceTexts{keys: name_column_table(files.len()), texts: [String]{""}}
+    loop file in files {
+        if name_find(sources.keys, file.path) != None -> next
+        _ := name_intern(sources.keys, file.path)
+        sources.texts.push(file.source)
+    }
+    sources
+}
+
+// The text of checked source `path`, if `sources` holds it.
+ir_source_text: fn(sources: IRSourceTexts, path: String) -> String? Never! {
+    found: name_find(sources.keys, path) ?? return None
+    Val(sources.texts[name_index(found)])
+}
+
+// The checked source files as rows of bytes and line starts:
 // IRProgram's `source_bytes`, `source_lines`, `source_rows_keys` and
 // `source_rows`.
 IRSourceIndex: struct {
@@ -709,11 +734,12 @@ IRSourceIndex: struct {
 // the driver keeps on its thread below JET_DRIVER_INLINE_SCAN_MIN_BYTES.
 IR_SOURCE_INDEX_MIN_BYTES: 262144
 
-ir_source_index: fn(sources: [String:String]) -> IRSourceIndex Never! {
-    index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, keys: name_column_table(sources.len()), rows: name_column(sources.len())}
-    loop (path, text) in sources {
-        bytes := text.bytes()
-        name_column_set(index.keys, index.rows, path, index.bytes.len())
+ir_source_index: fn(sources: IRSourceTexts) -> IRSourceIndex Never! {
+    count: sources.texts.len()
+    index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, keys: name_column_table(count), rows: name_column(count)}
+    loop id in 1..<count {
+        bytes := sources.texts[id].bytes()
+        name_column_set(index.keys, index.rows, sources.keys.texts[id], index.bytes.len())
         index.lines.push(ir_source_line_starts(bytes))
         index.bytes.push(bytes)
     }
@@ -834,13 +860,13 @@ ir_program_standalone: fn() -> IRProgram Never! {
     ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table(), interner_empty())
 }
 
-ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef], threads: CompilerThreads{compiler_threads_single()}) -> IRProgram Never! {
+ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&IRSourceTexts, constant_defs: &&[TConstantDef], threads: CompilerThreads{compiler_threads_single()}) -> IRProgram Never! {
     owned_sources: sources.move()
     programs := [IRProgram]{}
     // Past IR_SOURCE_INDEX_MIN_BYTES the sources are indexed on their own
     // thread while the declarations bind; fewer are indexed here first.
     total := 0
-    loop (_, text) in owned_sources -> total += text.count_bytes()
+    loop text in owned_sources.texts -> total += text.count_bytes()
     if total < IR_SOURCE_INDEX_MIN_BYTES {
         index := ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
@@ -1966,7 +1992,7 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // Builds the entry `entry_key` and every function it reaches, on up to
 // `threads` threads (BuildWaves.jet). `type_defs`, `impls` and `constants`
 // are the checked modules' type, implementation and constant declarations,
-// in module order; `sources` the checked source files' text by path (the
+// in module order; `sources` the checked source files' text (the
 // source locations of journeys and contract reports); `foreign` the checked
 // foreign functions; `checks` the runtime checks the program's functions
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
@@ -1981,7 +2007,7 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // spans inside the host's `ir.build`: `ir.build.program` (the checked
 // program's tables), the steps of ir_build_waves_parted, and
 // `ir.build.core_cells`.
-ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
+ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> IRBuildResult Never! {
     if trace_sink == .Val(sink) -> sink.begin("ir.build.program", "", -1, -1)
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     p.checks = checks
@@ -2482,7 +2508,7 @@ ir_entry_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: I
 // Builds every checked non-generic function (a library or a coverage
 // census) on up to `threads` threads; generic functions are built per
 // instance their callers reach.
-ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
+ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     ir_foreign_index(p, foreign, decls)
     roots := [IRWaveJob]{}
