@@ -1133,19 +1133,30 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
         i = candidate.end
     }
     loop slot in 0..<return_closes.len() {
-        close: return_closes[slot]
+        close := return_closes[slot]
         // A call an interpolation ends with displays what it returns.
         if token(tokens, close + 1) == INTERPOLATION_END {
             shown: table.by_id.get("{return_types[slot]}.display") ?? -1
             if shown >= 0 -> calls.push(Call{index: shown, offset: tokens[close].offset})
             next
         }
-        if token(tokens, close + 1) != "." -> next
-        member: token(tokens, close + 2)
-        at: after_generics(tokens, close + 3)
-        row: table.by_id.get("{return_types[slot]}.{member}") ?? -1
-        if row >= 0 && token(tokens, at) == "(" {
+        // Each method chained on the result (`args.spec().flag(…).repeat(…)`)
+        // is a method of the type the call before it returns.
+        current := return_types[slot].copy()
+        loop token(tokens, close + 1) == "." {
+            member: token(tokens, close + 2)
+            at: after_generics(tokens, close + 3)
+            row: table.by_id.get("{current}.{member}") ?? break
+            if token(tokens, at) != "(" -> break
             calls.push(Call{index: row, offset: tokens[close + 2].offset})
+            close = at + 1
+            depth := 1
+            loop close < tokens.len() && depth > 0 {
+                depth += paren_step(tokens[close].value)
+                close += 1
+            }
+            close -= 1
+            current = bound_type(table, row)
         }
     }
     calls
@@ -1946,7 +1957,11 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
         if id == "core.mem.Region.claim" -> claimed += 1
     }
     assert_eq(addressed, 2)
-    assert_eq(claimed, 1)
+    assert_eq(claimed, 2)
+}
+
+#Test("every method of a chain is credited to the type the call before it returns") {
+    assert_eq(ids("use mem: core.mem\n    run: fn() {{\n      mem.reserve()\n        .next()\n        .next()\n        .last()\n        .address()\n      mem.reserve().next().unknown().last()\n    }}", ""), [String]{"core.mem.reserve", "core.mem.reserve", "core.mem.Region.next", "core.mem.Region.next", "core.mem.Region.last", "core.mem.Block.address", "core.mem.Region.next"})
 }
 
 #Test("an interpolation that ends in a typed value calls its display") {

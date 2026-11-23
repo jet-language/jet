@@ -2,7 +2,6 @@
 // builds.
 use {
     jet_foundation.[
-        BodyHandleOp,
         BodyLambda,
         BodyNode,
         BodyStrPart,
@@ -119,46 +118,6 @@ ir_codec_decode_source: fn(core: Bool, source_file: String, kind: TFuncKind, nam
     false
 }
 
-// The Core/Args/Args.jet helper a checked `ArgsSpec` / `ParsedArgs` method
-// calls by name (BuildExpr.jet ir_args_method), or None for another
-// operation.
-ir_args_helper: fn(operation: BodyHandleOp) -> String? Never! {
-    if operation == {
-        .ArgsSpecFlag -> Val("__args_flag")
-        .ArgsSpecFlagShort -> Val("__args_flag_short")
-        .ArgsSpecOption -> Val("__args_option")
-        .ArgsSpecOptionShort -> Val("__args_option_short")
-        .ArgsSpecOptionDefault -> Val("__args_option_default")
-        .ArgsSpecOptionEnv -> Val("__args_option_env")
-        .ArgsSpecOptionInt -> Val("__args_option_int")
-        .ArgsSpecOptionFloat -> Val("__args_option_float")
-        .ArgsSpecOptionChoice -> Val("__args_option_choice")
-        .ArgsSpecRepeat -> Val("__args_repeat")
-        .ArgsSpecRequiredOption -> Val("__args_required_option")
-        .ArgsSpecPositional -> Val("__args_positional")
-        .ArgsSpecDescription -> Val("__args_description")
-        .ArgsSpecSubcommand -> Val("__args_subcommand")
-        .ArgsSpecVersion -> Val("__args_version")
-        .ArgsSpecCompletion -> Val("__args_completion")
-        .ArgsSpecHelp -> Val("__args_help")
-        .ArgsSpecParse -> Val("__args_parse")
-        .ArgsSpecParseOrExit -> Val("__args_parse_or_exit")
-        .ParsedArgsFlag -> Val("__parsed_flag")
-        .ParsedArgsOption -> Val("__parsed_option")
-        .ParsedArgsOptionInt -> Val("__parsed_option_int")
-        .ParsedArgsOptionFloat -> Val("__parsed_option_float")
-        .ParsedArgsOptions -> Val("__parsed_options")
-        .ParsedArgsPositional -> Val("__parsed_positional")
-        .ParsedArgsSubcommand -> Val("__parsed_subcommand")
-        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> None
-    }
-}
-
-// Whether a function with these header fields is one of those helpers.
-ir_args_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    core && ir_core_source_path(source_file, "Core/Args/Args.jet") && ir_core_reach_is_top_level(kind) && (name.starts_with("__args_") || name.starts_with("__parsed_"))
-}
-
 ir_precise_source_family: fn(name: String, owner: String, prefix: String) -> Bool Never! {
     if !name.starts_with(prefix) -> return false
     helper: ir_precise_source_helper(owner, name.slice(prefix.len(), name.len())) ?? return false
@@ -207,14 +166,14 @@ ir_precise_source_function: fn(core: Bool, source_file: String, name: String) ->
 
 // Whether a top-level Core function with these header fields is one lowering
 // keeps by name, with no keyed call in a kept caller's checked body: a
-// Fmt.jet selector helper, an Encoding.jet decode helper, an Args.jet
-// helper, a core.term print-style helper, a precise-operation source helper
-// or a core.process line reader (ir_process_line_reader). A compile that
+// Fmt.jet selector helper, an Encoding.jet decode helper, a core.term
+// print-style helper, a precise-operation source helper or a core.process
+// line reader (ir_process_line_reader). A compile that
 // lowers checks each up front under Core demand (driver
 // jet_driver_core_lowering_roots), since no checked body names it.
 ir_core_lowered_by_name: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
     top: TFuncKind.TopLevel
-    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_args_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) {
+    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) {
         return true
     }
     ir_core_process_source(core, source_file) && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
@@ -457,8 +416,7 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
         }
         // `tree.decode<T>()` of a container and `FieldError.under` call their
         // Core decode helper by name; a helper's own `decode<Item>` reaches
-        // the others, so a decode site roots them all. An `ArgsSpec` /
-        // `ParsedArgs` method calls its Core/Args/Args.jet helper by name.
+        // the others, so a decode site roots them all.
         // The ambient `input` (LinesIter) reads each line with its receiver's
         // Core `read_line` (__InputLines).
         .HandleMethod(receiver, operation, _) -> {
@@ -469,9 +427,6 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
             }
             if operation == .LinesIter {
                 ir_core_reach_add(keys, ir_line_reader_key(functions, body_type(interner, tree, receiver)))
-            }
-            if ir_args_helper(operation) == .Val(helper) {
-                ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, helper) ?? "")
             }
         }
         .DecodeUnder(_, _) -> {
@@ -860,8 +815,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     // Each row's source bytes, a wave's weight per row.
     sizes := [Int]{}
     // The Core source helpers a lowering calls by name, with no keyed call:
-    // Fmt.jet selector helpers, Encoding.jet decode helpers and the Args.jet
-    // `ArgsSpec` / `ParsedArgs` method helpers.
+    // Fmt.jet selector helpers and Encoding.jet decode helpers.
     source_keys := IRReachSources{names: name_table_sized(64), keys: [String]{""}}
     // A declaration's first candidate row by DeclID row (-1: none).
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
@@ -880,7 +834,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
             }
             core: module_is_core(function.module_identity)
-            if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) {
+            if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
                 ir_core_reach_source_set(source_keys, function.name, function.key)
             }
             rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
@@ -903,7 +857,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 candidate_count += 1
                 name_column_set_first(by_key.keys, by_key.rows, function.key, index)
                 core: module_is_core(function.module_identity)
-                if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) {
+                if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
                     ir_core_reach_source_set(source_keys, function.name, function.key)
                 }
                 rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)

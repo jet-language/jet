@@ -472,7 +472,7 @@ wants_help: fn(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "
 // help text of every level as text; the entry hands both to `__cli_spec`
 // and parses the process argument vector with `__cli_parse` (`__cli_parse_float` when an
 // input is a Float). Help, usage and error texts are the args builder's
-// (`__args_help`, `args_parse_level`).
+// (`ArgsSpec.help`, `args_parse_level`).
 
 // Value kinds of a non-flag input.
 CLI_TEXT: 0
@@ -1154,9 +1154,8 @@ __cli_missing: fn(names: [String]) -> String Never! {
 
 // The `args.spec()` builder (Rust `JetArgsSpec`). A spec keeps its
 // nested command specs in one list of levels: level 0 is the spec itself and
-// a command entry names the level of its own spec. The compiler lowers each
-// checked `ArgsSpec` / `ParsedArgs` method to the `__args_*` / `__parsed_*`
-// helper of the same name (JetIR CoreReach.jet ir_args_helper).
+// a command entry names the level of its own spec. `ArgsSpec` and
+// `ParsedArgs` declare their methods here; a call is an ordinary Core call.
 
 // Entry kinds of one spec level.
 ARG_FLAG: 0
@@ -1197,15 +1196,197 @@ ArgsLevel: struct {
 
 ArgsSpec: struct {
     levels: [ArgsLevel],
+
+    description: fn(&&self, description: String) -> ArgsSpec Never! {
+        out := self.move()
+        out.levels[0].description = Val(description.copy())
+        out
+    }
+
+    version: fn(&&self, version: String) -> ArgsSpec Never! {
+        out := self.move()
+        out.levels[0].version = Val(version.copy())
+        out
+    }
+
+    flag: fn(&&self, name: String, help: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_FLAG, name, None, help, "", None, None, false, false, CLI_TEXT))
+    }
+
+    flag_short: fn(&&self, name: String, short: String, help: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_FLAG, name, Val(short.copy()), help, "", None, None, false, false, CLI_TEXT))
+    }
+
+    option: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_option_entry(name, help, meta, CLI_TEXT))
+    }
+
+    option_short: fn(&&self, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_OPTION, name, Val(short.copy()), help, meta, None, None, false, false, CLI_TEXT))
+    }
+
+    option_default: fn(&&self, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_OPTION, name, None, help, meta, Val(default.copy()), None, false, false, CLI_TEXT))
+    }
+
+    option_env: fn(&&self, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, Val(env.copy()), false, false, CLI_TEXT))
+    }
+
+    option_int: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_option_entry(name, help, meta, CLI_INT))
+    }
+
+    option_float: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_option_entry(name, help, meta, CLI_FLOAT))
+    }
+
+    // `choices` is a comma list; each choice is trimmed and an empty one dropped.
+    option_choice: fn(&&self, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
+        entry := args_option_entry(name, help, meta, CLI_CHOICE)
+        loop part in choices.split(",") {
+            choice: part.trim()
+            if choice.bytes().len() > 0 -> entry.choices.push(choice.copy())
+        }
+        args_with(self, entry)
+    }
+
+    repeat: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, None, false, true, CLI_TEXT))
+    }
+
+    required_option: fn(&&self, name: String, help: String, meta: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_OPTION, name, None, help, meta, None, None, true, false, CLI_TEXT))
+    }
+
+    positional: fn(&&self, name: String, help: String) -> ArgsSpec Never! {
+        args_with(self, args_entry(ARG_POSITIONAL, name, None, help, "", None, None, false, false, CLI_TEXT))
+    }
+
+    // The command inherits every parent input; its
+    // own input of the same name gives way to the inherited one. Its levels move
+    // after the parent's, so each nested level index shifts by the parent count.
+    subcommand: fn(&&self, name: String, help: String, command: &&ArgsSpec) -> ArgsSpec Never! {
+        out := self.move()
+        nested := command.move()
+        inherited := out.levels[0].inherited.copy()
+        loop entry in out.levels[0].entries {
+            if entry.kind != ARG_COMMAND -> inherited.push(entry.copy())
+        }
+        kept := [ArgEntry]{}
+        loop entry in nested.levels[0].entries {
+            shadowed := false
+            loop parent in inherited {
+                if args_same_input(parent, entry) -> shadowed = true
+            }
+            if !shadowed -> kept.push(entry.copy())
+        }
+        nested.levels[0].entries = kept.move()
+        loop entry in inherited {
+            present := false
+            loop parent in nested.levels[0].inherited {
+                if args_same_input(parent, entry) -> present = true
+            }
+            if !present -> nested.levels[0].inherited.push(entry.copy())
+        }
+        nested.levels[0].inherited_version = nested.levels[0].inherited_version || out.levels[0].inherited_version || out.levels[0].version != None
+        if nested.levels[0].inherited_version -> nested.levels[0].version = None
+        offset: out.levels.len()
+        loop level in nested.levels {
+            moved := level.copy()
+            loop index in 0..<moved.entries.len() {
+                if moved.entries[index].kind == ARG_COMMAND {
+                    moved.entries[index].nested = moved.entries[index].nested + offset
+                }
+            }
+            out.levels.push(moved)
+        }
+        entry := args_entry(ARG_COMMAND, name, None, help, "", None, None, false, false, CLI_TEXT)
+        entry.nested = offset
+        out.levels[0].entries.push(entry)
+        out
+    }
+
+    help: fn(self) -[Exec.Args]> String Never! { args_help(self, 0) }
+
+    // The words a shell completes, in declaration
+    // order.
+    completion: fn(self, shell: String) -> String Never! {
+        words := [String]{"--help"}
+        if self.levels[0].version != None -> words.push("--version")
+        loop entry in self.levels[0].entries {
+            if entry.kind == ARG_FLAG || entry.kind == ARG_OPTION {
+                words.push("--{entry.name}")
+                if entry.short == .Val(short) -> words.push("-{short}")
+            } else { words.push(entry.name.copy()) }
+        }
+        "{shell} completion: {words.join(" ")}"
+    }
+
+    // Parses the user's words (`process.args()`, no program name); a refusal
+    // is the Err's message.
+    parse: fn(self, args: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
+        out := args_parsed()
+        refusal: args_parse_level(self, 0, args, 0, out)
+        if refusal.bytes().len() > 0 -> return Err(refusal)
+        Ok(out)
+    }
+
+    // `--help` prints the help and exits 0; a
+    // refusal goes to stderr and exits 2.
+    parse_or_exit: fn(self, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
+        out := args_parsed()
+        refusal: args_parse_level(self, 0, args, 0, out)
+        if refusal.bytes().len() > 0 -> core.process.fail(2, refusal)
+        if out.flags.get("help") ?? false {
+            print(args_help(self, 0))
+            core.process.exit(0)
+        }
+        out
+    }
 }
 
+// A parse's result: each option's values (`option_values`) and the command
+// word (`command`) it took, if any.
 ParsedArgs: struct {
     flags: [String:Bool],
-    options: [String:[String]],
+    option_values: [String:[String]],
     positionals: [String],
-    subcommand: String?,
+    command: String?,
     explicit_flags: [String:Bool],
     explicit_options: [String:Bool],
+
+    flag: fn(self, name: String) -> Bool Never! { self.flags.get(name) ?? false }
+
+    // The last value given, so a repeated plain option reads its final word.
+    option: fn(self, name: String) -> String? Never! {
+        values: self.option_values.get(name) ?? return None
+        if values.len() == 0 -> return None
+        Val(values[values.len() - 1].copy())
+    }
+
+    option_int: fn(self, name: String) -> Int? Never! {
+        text: self.option(name) ?? return None
+        value: Int.parse(text) ?? return None
+        Val(value)
+    }
+
+    option_float: fn(self, name: String) -> Float? Never! {
+        text: self.option(name) ?? return None
+        value: Float.parse(text) ?? return None
+        Val(value)
+    }
+
+    options: fn(self, name: String) -> [String] Never! {
+        (self.option_values.get(name) ?? [String]{}).copy()
+    }
+
+    positional: fn(self, index: Int) -> String? Never! {
+        if index < 0 || index >= self.positionals.len() -> return None
+        Val(self.positionals[index].copy())
+    }
+
+    subcommand: fn(self) -> String? Never! { self.command.copy() }
 }
 
 spec: fn() -> ArgsSpec Never! {
@@ -1226,118 +1407,8 @@ args_with: fn(spec: &&ArgsSpec, entry: &&ArgEntry) -> ArgsSpec Never! {
     out
 }
 
-__args_description: fn(spec: &&ArgsSpec, description: String) -> ArgsSpec Never! {
-    out := spec.move()
-    out.levels[0].description = Val(description.copy())
-    out
-}
-
-__args_version: fn(spec: &&ArgsSpec, version: String) -> ArgsSpec Never! {
-    out := spec.move()
-    out.levels[0].version = Val(version.copy())
-    out
-}
-
-__args_flag: fn(spec: &&ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_FLAG, name, None, help, "", None, None, false, false, CLI_TEXT))
-}
-
-__args_flag_short: fn(spec: &&ArgsSpec, name: String, short: String, help: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_FLAG, name, Val(short.copy()), help, "", None, None, false, false, CLI_TEXT))
-}
-
-__args_option: fn(spec: &&ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_option_entry(name, help, meta, CLI_TEXT))
-}
-
-__args_option_short: fn(spec: &&ArgsSpec, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_OPTION, name, Val(short.copy()), help, meta, None, None, false, false, CLI_TEXT))
-}
-
-__args_option_default: fn(spec: &&ArgsSpec, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, Val(default.copy()), None, false, false, CLI_TEXT))
-}
-
-__args_option_env: fn(spec: &&ArgsSpec, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, Val(env.copy()), false, false, CLI_TEXT))
-}
-
-__args_option_int: fn(spec: &&ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_option_entry(name, help, meta, CLI_INT))
-}
-
-__args_option_float: fn(spec: &&ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_option_entry(name, help, meta, CLI_FLOAT))
-}
-
-// `choices` is a comma list; each choice is trimmed and an empty one dropped.
-__args_option_choice: fn(spec: &&ArgsSpec, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
-    entry := args_option_entry(name, help, meta, CLI_CHOICE)
-    loop part in choices.split(",") {
-        choice: part.trim()
-        if choice.bytes().len() > 0 -> entry.choices.push(choice.copy())
-    }
-    args_with(spec, entry)
-}
-
-__args_repeat: fn(spec: &&ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, false, true, CLI_TEXT))
-}
-
-__args_required_option: fn(spec: &&ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, true, false, CLI_TEXT))
-}
-
-__args_positional: fn(spec: &&ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
-    args_with(spec, args_entry(ARG_POSITIONAL, name, None, help, "", None, None, false, false, CLI_TEXT))
-}
-
 args_same_input: fn(left: ArgEntry, right: ArgEntry) -> Bool Never! {
     left.kind == right.kind && left.kind != ARG_COMMAND && left.name == right.name
-}
-
-// The command inherits every parent input; its
-// own input of the same name gives way to the inherited one. Its levels move
-// after the parent's, so each nested level index shifts by the parent count.
-__args_subcommand: fn(spec: &&ArgsSpec, name: String, help: String, command: &&ArgsSpec) -> ArgsSpec Never! {
-    out := spec.move()
-    nested := command.move()
-    inherited := out.levels[0].inherited.copy()
-    loop entry in out.levels[0].entries {
-        if entry.kind != ARG_COMMAND -> inherited.push(entry.copy())
-    }
-    kept := [ArgEntry]{}
-    loop entry in nested.levels[0].entries {
-        shadowed := false
-        loop parent in inherited {
-            if args_same_input(parent, entry) -> shadowed = true
-        }
-        if !shadowed -> kept.push(entry.copy())
-    }
-    nested.levels[0].entries = kept.move()
-    loop entry in inherited {
-        present := false
-        loop parent in nested.levels[0].inherited {
-            if args_same_input(parent, entry) -> present = true
-        }
-        if !present -> nested.levels[0].inherited.push(entry.copy())
-    }
-    nested.levels[0].inherited_version = nested.levels[0].inherited_version || out.levels[0].inherited_version || out.levels[0].version != None
-    if nested.levels[0].inherited_version -> nested.levels[0].version = None
-    offset: out.levels.len()
-    loop level in nested.levels {
-        moved := level.copy()
-        loop index in 0..<moved.entries.len() {
-            if moved.entries[index].kind == ARG_COMMAND {
-                moved.entries[index].nested = moved.entries[index].nested + offset
-            }
-        }
-        out.levels.push(moved)
-    }
-    entry := args_entry(ARG_COMMAND, name, None, help, "", None, None, false, false, CLI_TEXT)
-    entry.nested = offset
-    out.levels[0].entries.push(entry)
-    out
 }
 
 args_label: fn(entry: ArgEntry) -> String Never! {
@@ -1386,22 +1457,6 @@ args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
     s = "{s}  {cli_pad("--help", 24)} show this help\n"
     if spec.levels[at].version != None -> s = "{s}  {cli_pad("--version", 24)} show version\n"
     s
-}
-
-__args_help: fn(spec: ArgsSpec) -[Exec.Args]> String Never! { args_help(spec, 0) }
-
-// The words a shell completes, in declaration
-// order.
-__args_completion: fn(spec: ArgsSpec, shell: String) -> String Never! {
-    words := [String]{"--help"}
-    if spec.levels[0].version != None -> words.push("--version")
-    loop entry in spec.levels[0].entries {
-        if entry.kind == ARG_FLAG || entry.kind == ARG_OPTION {
-            words.push("--{entry.name}")
-            if entry.short == .Val(short) -> words.push("-{short}")
-        } else { words.push(entry.name.copy()) }
-    }
-    "{shell} completion: {words.join(" ")}"
 }
 
 // The inherited inputs, then the level's own.
@@ -1459,7 +1514,7 @@ args_unknown: fn(name: String, all: [ArgEntry], help: String) -> String Never! {
 }
 
 args_parsed: fn() -> ParsedArgs Never! {
-    ParsedArgs{flags: [String:Bool]{}, options: [String:[String]]{}, positionals: [String]{}, subcommand: None, explicit_flags: [String:Bool]{}, explicit_options: [String:Bool]{}}
+    ParsedArgs{flags: [String:Bool]{}, option_values: [String:[String]]{}, positionals: [String]{}, command: None, explicit_flags: [String:Bool]{}, explicit_options: [String:Bool]{}}
 }
 
 // Level `at`'s parse over argv[start..] into `out`:
@@ -1512,7 +1567,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 value: slice_str(rest, eq + 1, rest.bytes().len())
                 option: args_find(all, ARG_OPTION, name)
                 if option >= 0 {
-                    refusal: args_store(out.options, all[option], value)
+                    refusal: args_store(out.option_values, all[option], value)
                     if refusal.bytes().len() > 0 -> return refusal
                     out.explicit_options[name.copy()] = true
                 } else if args_find(all, ARG_FLAG, name) >= 0 {
@@ -1526,7 +1581,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 if option < 0 -> return args_unknown(rest, all, args_help(spec, at))
                 i += 1
                 if i >= argv.len() -> return "`--{rest}` requires a value\n\n{args_help(spec, at)}"
-                refusal: args_store(out.options, all[option], argv[i])
+                refusal: args_store(out.option_values, all[option], argv[i])
                 if refusal.bytes().len() > 0 -> return refusal
                 out.explicit_options[rest.copy()] = true
             }
@@ -1556,7 +1611,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                     }
                     value = argv[i].copy()
                 }
-                refusal: args_store(out.options, all[found], value)
+                refusal: args_store(out.option_values, all[found], value)
                 if refusal.bytes().len() > 0 -> return refusal
                 out.explicit_options[all[found].name.copy()] = true
                 break
@@ -1564,7 +1619,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
             i += 1
             next
         }
-        if out.subcommand == None {
+        if out.command == None {
             command := -1
             loop entry in spec.levels[at].entries {
                 if entry.kind == ARG_COMMAND && entry.name == arg {
@@ -1581,9 +1636,9 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                         out.flags[name.copy()] = value
                     }
                 }
-                loop (name, values) in nested.options {
-                    if nested.explicit_options.get(name) != None || out.options.get(name) == None {
-                        out.options[name.copy()] = values.copy()
+                loop (name, values) in nested.option_values {
+                    if nested.explicit_options.get(name) != None || out.option_values.get(name) == None {
+                        out.option_values[name.copy()] = values.copy()
                     }
                 }
                 loop value in nested.positionals -> out.positionals.push(value.copy())
@@ -1593,7 +1648,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 loop (name, value) in nested.explicit_options {
                     out.explicit_options[name.copy()] = value
                 }
-                out.subcommand = Val(arg.copy())
+                out.command = Val(arg.copy())
                 break
             }
             if has_commands -> return "unknown command `{arg}`\n\n{args_help(spec, at)}"
@@ -1607,7 +1662,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
     missing := [String]{}
     loop entry in all {
         if entry.kind != ARG_POSITIONAL -> next
-        if out.options.get(entry.name) != None {
+        if out.option_values.get(entry.name) != None {
             if bare < out.positionals.len() -> bare += 1
             next
         }
@@ -1615,22 +1670,22 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
             value: out.positionals[bare].copy()
             option: args_find(all, ARG_OPTION, entry.name)
             if option >= 0 {
-                refusal: args_store(out.options, all[option], value)
+                refusal: args_store(out.option_values, all[option], value)
                 if refusal.bytes().len() > 0 -> return refusal
-            } else { out.options[entry.name.copy()] = [String]{value.copy()} }
+            } else { out.option_values[entry.name.copy()] = [String]{value.copy()} }
             bare += 1
         } else if fallbacks.get(entry.name) == .Val(value) {
-            out.options[entry.name.copy()] = [String]{value.copy()}
+            out.option_values[entry.name.copy()] = [String]{value.copy()}
         } else { missing.push(entry.name.copy()) }
     }
-    if out.subcommand == None && bare < out.positionals.len() {
+    if out.command == None && bare < out.positionals.len() {
         surplus := [String]{}
         loop index in bare..<out.positionals.len() -> surplus.push("`{out.positionals[index]}`")
         plural: if surplus.len() == 1 -> "" else -> "s"
         return "unexpected argument{plural}: {surplus.join(", ")}\n\n{args_help(spec, at)}"
     }
     loop (name, value) in fallbacks {
-        if out.options.get(name) == None -> out.options[name.copy()] = [String]{value.copy()}
+        if out.option_values.get(name) == None -> out.option_values[name.copy()] = [String]{value.copy()}
     }
     asked_help: out.flags.get("help") ?? false
     if missing.len() > 0 && !root_help && !asked_help {
@@ -1638,65 +1693,9 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
         return "missing required argument{plural}: {missing.join(", ")}\n\n{args_help(spec, at)}"
     }
     loop entry in all {
-        if entry.kind == ARG_OPTION && entry.required && out.options.get(entry.name) == None && !root_help && !asked_help {
+        if entry.kind == ARG_OPTION && entry.required && out.option_values.get(entry.name) == None && !root_help && !asked_help {
             return "missing required option `--{entry.name}`\n\n{args_help(spec, at)}"
         }
     }
     ""
 }
-
-// Parses the user's words (`process.args()`, no program name); a refusal
-// is the Err's message.
-__args_parse: fn(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
-    out := args_parsed()
-    refusal: args_parse_level(spec, 0, args, 0, out)
-    if refusal.bytes().len() > 0 -> return Err(refusal)
-    Ok(out)
-}
-
-// `--help` prints the help and exits 0; a
-// refusal goes to stderr and exits 2.
-__args_parse_or_exit: fn(spec: ArgsSpec, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
-    out := args_parsed()
-    refusal: args_parse_level(spec, 0, args, 0, out)
-    if refusal.bytes().len() > 0 -> core.process.fail(2, refusal)
-    if out.flags.get("help") ?? false {
-        print(args_help(spec, 0))
-        core.process.exit(0)
-    }
-    out
-}
-
-__parsed_flag: fn(parsed: ParsedArgs, name: String) -> Bool Never! {
-    parsed.flags.get(name) ?? false
-}
-
-// The last value given, so a repeated plain option reads its final word.
-__parsed_option: fn(parsed: ParsedArgs, name: String) -> String? Never! {
-    values: parsed.options.get(name) ?? return None
-    if values.len() == 0 -> return None
-    Val(values[values.len() - 1].copy())
-}
-
-__parsed_option_int: fn(parsed: ParsedArgs, name: String) -> Int? Never! {
-    text: __parsed_option(parsed, name) ?? return None
-    value: Int.parse(text) ?? return None
-    Val(value)
-}
-
-__parsed_option_float: fn(parsed: ParsedArgs, name: String) -> Float? Never! {
-    text: __parsed_option(parsed, name) ?? return None
-    value: Float.parse(text) ?? return None
-    Val(value)
-}
-
-__parsed_options: fn(parsed: ParsedArgs, name: String) -> [String] Never! {
-    (parsed.options.get(name) ?? [String]{}).copy()
-}
-
-__parsed_positional: fn(parsed: ParsedArgs, index: Int) -> String? Never! {
-    if index < 0 || index >= parsed.positionals.len() -> return None
-    Val(parsed.positionals[index].copy())
-}
-
-__parsed_subcommand: fn(parsed: ParsedArgs) -> String? Never! { parsed.subcommand.copy() }

@@ -1,0 +1,18 @@
+use args: core.args
+
+run: fn() {
+    spec: args.spec()
+        .description("builder surface")
+        .option_short("output", "o", "write to FILE", "FILE")
+        .option_float("ratio", "scale ratio", "R")
+        .required_option("name", "user name", "NAME")
+    parsed: spec.parse(["-o", "out.txt", "--ratio", "1.5", "--name", "ada"]) ?? panic("parse failed: {err}")
+    print(parsed.option("output") ?? "")
+    print(parsed.option_float("ratio") ?? 0.0)
+    print(parsed.option("name") ?? "")
+    print(spec.help().contains("builder surface"))
+    if spec.parse(["--ratio", "2"]) == {
+        .Ok(_) -> { print("unexpected") }
+        .Err(e) -> { print(e.message) }
+    }
+}
