@@ -26,21 +26,26 @@ ir_opt_builders: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     if count < 4 -> return 0
     rt_new: ir_builder_route(m, "jet_rt_string_builder_new")
     rt_val: ir_builder_route(m, "jet_rt_string_builder_value")
-    rt_push_static: ir_builder_route(m, "jet_rt_string_builder_push_static")
-    rt_push: ir_builder_route(m, "jet_rt_string_builder_push")
+    if rt_new < 0 && rt_val < 0 -> return 0
     rt_finish: ir_builder_route(m, "jet_rt_string_builder_finish")
+    if rt_finish < 0 -> return 0
     rt_char_len: ir_builder_route(m, "jet_char_len")
-    if (rt_new < 0 && rt_val < 0) || rt_finish < 0 || rt_char_len < 0 -> return 0
+    if rt_char_len < 0 -> return 0
 
-    // Fast check: does `f` contain any builder creation at all?
+    // Fast check: does `f` contain both a builder creation and a jet_char_len call?
     has_builder := false
+    has_char_len := false
     loop at in 0..<count {
-        if f.op[at] == .CallRuntime && (f.a[at] == rt_new || f.a[at] == rt_val) {
-            has_builder = true
-            break
+        if f.op[at] == .CallRuntime {
+            sym: f.a[at]
+            if sym == rt_new || sym == rt_val -> has_builder = true
+            if sym == rt_char_len -> has_char_len = true
+            if has_builder && has_char_len -> break
         }
     }
-    if !has_builder -> return 0
+    if !has_builder || !has_char_len -> return 0
+    rt_push_static: ir_builder_route(m, "jet_rt_string_builder_push_static")
+    rt_push: ir_builder_route(m, "jet_rt_string_builder_push")
 
     slots: f.slot_type.len()
     writes := loop _ in 0..<slots -> 0
@@ -237,9 +242,7 @@ ir_opt_builders: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             line: f.code_line[at]
             base_c: len_const[at]
             parts: len_parts.get(at) ?? [Int]{}
-            if parts.len() == 0 {
-                ir_opt_code_put(code, IROp.Const, len_dst, base_c, -1, -1, line)
-            } else if parts.len() == 1 && base_c == 0 {
+            if parts.len() == 0 -> ir_opt_code_put(code, IROp.Const, len_dst, base_c, -1, -1, line) else if parts.len() == 1 && base_c == 0 {
                 ir_opt_code_put(code, IROp.Move, len_dst, parts[0], -1, -1, line)
             } else {
                 acc := parts[0]

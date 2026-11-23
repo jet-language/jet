@@ -144,9 +144,7 @@ ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
     open := [I64]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
-        if op == .Block || op == .Loop || op == .If {
-            open.push(I64{at})
-        } else if op == .Else {
+        if op == .Block || op == .Loop || op == .If -> open.push(I64{at}) else if op == .Else {
             els[Int{open[open.len() - 1]}] = at
         } else if op == .End {
             opener: Int{open.pop() ?? panic("ir_opt_nesting: End without an open construct")}
@@ -1295,10 +1293,26 @@ ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> In
 // Instructions are visited last first: a move shifts only instructions after
 // the one moved. `keys` are the module's function keys by id.
 ir_opt_sink_addresses: fn(m: IRModule, keys: [String], f: &IRFunction) -> Int Never! {
+    count: f.op.len()
+    if count < 3 -> return 0
+    first_cand := -1
+    has_access := false
+    loop at in 0..<count {
+        op: f.op[at]
+        if first_cand < 0 && (op == .Copy || ((op == .Add || op == .Mul) && f.c[at] == IR_OVERFLOW_WRAP)) {
+            first_cand = at
+        } else if first_cand >= 0 && at >= first_cand + 2 {
+            if op == .Load || op == .Store || op == .StreamStore || (op == .Call && f.c[at] >= 1 && ir_opt_template_call(keys, f, at)) {
+                has_access = true
+                break
+            }
+        }
+    }
+    if !has_access -> return 0
     facts: ir_opt_facts(f)
     changed := 0
     reads := [Int]{}
-    at := f.op.len() - 1
+    at := count - 1
     loop at >= 0 {
         to: ir_opt_sink_target(m, keys, f, facts, at, reads)
         if to > at + 1 {

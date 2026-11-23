@@ -34,7 +34,7 @@ use {
     ]
     jet_eval.[JetEvalNativeSession]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, symbol_table]
-    jet_ir.[IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IRCoreExport, IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
     jet_sema.[SemaCoreBody, SemaCoreCaptures, sema_core_bodies_bytes, sema_core_bodies_problem, sema_core_seal_bound]
 }
@@ -100,9 +100,17 @@ JetCLICoreLibrary: struct {
 // the check's seal lines (`{prefix}.seal`) and Core bodies file
 // (`{prefix}.bodies`), and the threads its machine code compiles on. Else
 // the problem that stopped the Core check.
-JetCLICoreLibraryIR: enum {
-    Stopped(problem: String),
-    Built(library: IRCoreLibrary, issues: [String], seal: String, bodies: [U8], threads: CompilerThreads),
+JetCLICoreLibraryIR: struct {
+    stopped: String?,
+    library: [IRCoreLibrary],
+    issues: [String],
+    seal: String,
+    bodies: [U8],
+    threads: CompilerThreads,
+}
+
+jet_cli_core_library_stopped: fn(problem: String, threads: CompilerThreads) -> JetCLICoreLibraryIR Never! {
+    JetCLICoreLibraryIR{stopped: Val(problem), library: [IRCoreLibrary]{}, issues: [String]{}, seal: "", bodies: [U8]{}, threads: threads}
 }
 
 // The Core library's check, IR build, lint and O2 optimizer, as the
@@ -122,7 +130,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     checked := jet_cli_core_checked(native, trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> {
-            return JetCLICoreLibraryIR.Stopped{problem: "The Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
+            return jet_cli_core_library_stopped("The Core check of the Core library stopped:\n{output.stderr}{output.stdout}", compiler_threads)
         }
         .Checked(found) -> found.move()
     }
@@ -153,7 +161,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
     // it by key with no Core facts beside it.
     seal: sema_core_seal_bound(inputs.core_seal.move(), jet_cli_core_facts(ir_core_facts_text(library.facts).bytes()).sealed).join("\n")
     inputs.core_seal = [String]{}
-    bodies_file := writing.join() ?? return JetCLICoreLibraryIR.Stopped{problem: "the Core bodies file stopped: {compiler_threads_failure_text(err)}"}
+    bodies_file := writing.join() ?? return jet_cli_core_library_stopped("the Core bodies file stopped: {compiler_threads_failure_text(err)}", threads)
     if bodies_file.problem == .Val(problem) {
         issues.push("the Core bodies file does not read back: {problem}")
     }
@@ -174,7 +182,7 @@ jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_
         }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
-    JetCLICoreLibraryIR.Built{library: library, issues: issues, seal: seal, bodies: bodies, threads: threads}
+    JetCLICoreLibraryIR{stopped: None, library: [IRCoreLibrary]{library.move()}, issues: issues.move(), seal: seal, bodies: bodies.move(), threads: threads}
 }
 
 // The Core bodies file (`{prefix}.bodies`) of the Core check's captures, and
@@ -203,7 +211,7 @@ jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITra
 // all Core artifacts in parallel with the runtime's web partition.
 jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: String, threads_arrival: Receiver<[String]?>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     built := jet_cli_core_library_ir(native, compiler_threads, trace_sink)
-    if built == .Stopped(_) {
+    if built.stopped != None {
         return jet_cli_core_library_made(built, prefix, [String]{}, trace_sink)
     }
     runtime_threads: threads_arrival.receive() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: ""}
@@ -215,22 +223,21 @@ jet_cli_core_library_built: fn(native: Shared<JetEvalNativeSession>, prefix: Str
 // runtime's thread receipt `runtime_threads` is known (Request.jet
 // jet_cli_runtime_with_core). A Core check that stopped is the problem.
 jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
-    if built.move() == {
-        .Stopped(problem) -> JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
-        .Built(library, issues, seal, bodies, threads) -> {
-            if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
-            made: jet_cli_core_library(prefix, library, issues, seal, bodies, runtime_threads, threads, trace_sink)
-            if trace_sink == .Val(sink) -> sink.end("runtime.core.object", made.bytes.len())
-            made
-        }
-    }
+    owned := built.move()
+    if owned.stopped == .Val(problem) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
+    library := owned.library.pop() ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core library IR was lost"}
+    if trace_sink == .Val(sink) -> sink.begin("runtime.core.object", "", -1, -1)
+    made: jet_cli_core_library(prefix, library, owned.issues.move(), owned.seal, owned.bodies.move(), runtime_threads, owned.threads, trace_sink)
+    if trace_sink == .Val(sink) -> sink.end("runtime.core.object", made.bytes.len())
+    made
 }
 
 // The Core library's machine code, from its IR `library`, the issue rows
 // `found` its build and lint left, the Core check's `seal` lines and its
 // Core bodies file `bodies`, once the runtime's thread receipt
 // `runtime_threads` is known.
-jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[String], seal: String, bodies: [U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[String], seal: String, bodies_in: &&[U8], runtime_threads: [String], threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+    bodies := bodies_in.move()
     issues := found.move()
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
@@ -245,20 +252,82 @@ jet_cli_core_library: fn(prefix: String, library: &&IRCoreLibrary, found: &&[Str
         object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
         if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
-            core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
-            core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
-            core_library_files.write("{prefix}.facts", ir_core_facts_text(library.facts)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core facts: {err}"}
-            core_library_files.write("{prefix}.seal", seal) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core seal: {err}"}
-            core_library_files.write_bytes("{prefix}.bodies", bodies) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core bodies: {err}"}
-            core_library_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core thread receipt: {err}"}
-            skipped: loop failure in library.skipped -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
-            core_library_files.write("{prefix}.skipped", skipped.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the skipped Core roots: {err}"}
-            return JetCLICoreLibrary{bytes: object.bytes.move(), problem: ""}
+            o_bytes := object.bytes.move()
+            rows := library.rows.move()
+            facts := library.facts.move()
+            skipped_rows := library.skipped.move()
+            drop_exports := library.exports.move()
+            drop_data := library.data.move()
+            rel_exports: task &&drop_exports { drop_exports.len() }
+            rel_exports.detach()
+            rel_data: task &&drop_data { drop_data.len() }
+            rel_data.detach()
+            skipped: loop failure in skipped_rows -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
+            p_obj: "{prefix}.o"
+            p_exports: "{prefix}.exports"
+            p_facts: "{prefix}.facts"
+            p_seal: "{prefix}.seal"
+            p_bodies: "{prefix}.bodies"
+            p_threads: "{prefix}.threads"
+            p_skipped: "{prefix}.skipped"
+            skipped_text: skipped.join("\n")
+            write_err := ""
+            task.group write_core_files {
+                t_obj: task jet_cli_core_write_bytes(p_obj, o_bytes, "cannot write the Core object")
+                t_exports: task jet_cli_core_write_exports(p_exports, rows)
+                t_facts: task jet_cli_core_write_facts(p_facts, facts)
+                t_seal: task jet_cli_core_write_text(p_seal, seal, "cannot write the Core seal")
+                t_bodies: task jet_cli_core_write_bytes(p_bodies, bodies, "cannot write the Core bodies")
+                t_threads: task jet_cli_core_write_text(p_threads, thread_exports.join("\n"), "cannot write the Core thread receipt")
+                t_skipped: task jet_cli_core_write_text(p_skipped, skipped_text, "cannot write the skipped Core roots")
+                write_errs: [String]{
+                    t_obj.join() ?? "cannot write the Core object",
+                    t_exports.join() ?? "cannot write the Core exports",
+                    t_facts.join() ?? "cannot write the Core facts",
+                    t_seal.join() ?? "cannot write the Core seal",
+                    t_bodies.join() ?? "cannot write the Core bodies",
+                    t_threads.join() ?? "cannot write the Core thread receipt",
+                    t_skipped.join() ?? "cannot write the skipped Core roots",
+                }
+                loop msg in write_errs {
+                    if msg != "" && write_err == "" -> write_err = msg
+                }
+            }
+            rel_rows: task &&rows { rows.len() }
+            rel_rows.detach()
+            rel_facts: task &&facts { facts.len() }
+            rel_facts.detach()
+            rel_skipped: task &&skipped_rows { skipped_rows.len() }
+            rel_skipped.detach()
+            rel_bodies: task &&bodies { bodies.len() }
+            rel_bodies.detach()
+            if write_err != "" -> return JetCLICoreLibrary{bytes: [U8]{}, problem: write_err}
+            return JetCLICoreLibrary{bytes: o_bytes.move(), problem: ""}
         }
         compiler_transfer_rows<String>(issues, object.errors)
     }
     core_library_files.write("{prefix}.issues", issues.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core library findings: {err}"}
     JetCLICoreLibrary{bytes: [U8]{}, problem: "Core library lowering failed; see {prefix}.issues"}
+}
+
+jet_cli_core_write_bytes: fn(path: String, bytes: [U8], label: String) -> String {
+    core_library_files.write_bytes(path, bytes) ?? return "{label}: {err}"
+    ""
+}
+
+jet_cli_core_write_text: fn(path: String, text: String, label: String) -> String {
+    core_library_files.write(path, text) ?? return "{label}: {err}"
+    ""
+}
+
+jet_cli_core_write_exports: fn(path: String, rows: [IRCoreExport]) -> String {
+    core_library_files.write(path, ir_core_exports_text(rows)) ?? return "cannot write the Core exports: {err}"
+    ""
+}
+
+jet_cli_core_write_facts: fn(path: String, facts: [String]) -> String {
+    core_library_files.write(path, ir_core_facts_text(facts)) ?? return "cannot write the Core facts: {err}"
+    ""
 }
 
 // The Core interface (JetDriver CoreInterface.jet) of each unit of the Core

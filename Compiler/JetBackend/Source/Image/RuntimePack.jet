@@ -50,11 +50,32 @@ LinkPack: struct {
 }
 
 link_pack_rust_symbol: fn(name: String) -> Bool Never! {
+    if name.len() < 3 || !name.starts_with("_") -> return false
     if name.starts_with("__rust_") || name.starts_with("__rdl_") -> return true
     bytes: name.bytes()
     if name.starts_with("_R") && bytes.len() > 2 -> return bytes[2] >= U8{65} && bytes[2] <= U8{90}
     if name.starts_with("_ZN") && bytes.len() > 3 -> return bytes[3] >= U8{48} && bytes[3] <= U8{57}
     false
+}
+
+// Whether the NUL-terminated symbol name at `bufs[b][at..]` is a plain C
+// identifier and not a Rust-mangled name (`_R...` or `_ZN...`).
+link_pack_c_abi_bytes: fn(bufs: [[U8]], b: Int, at: Int) -> Bool Never! {
+    row: bufs[b]
+    len: row.len()
+    if at >= len || row[at] == 0 -> return false
+    if row[at] == 95 && at + 1 < len {
+        if row[at + 1] == 82 -> return false
+        if row[at + 1] == 90 && at + 2 < len && row[at + 2] == 78 -> return false
+    }
+    pos := at
+    loop pos < len && row[pos] != 0 {
+        code: Int{row[pos]}
+        letter: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        if !letter && (pos == at || code < 48 || code > 57) -> return false
+        pos += 1
+    }
+    true
 }
 
 // Whether `name` is a plain C identifier and not a Rust-mangled name (v0
@@ -438,9 +459,13 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     shnum: shstrtab_index + 1
     // Symbols: the null symbol, one section symbol per kept section, the
     // named locals, then the globals.
+    sym_count: 1 + p.sec_out.len() + p.l_name.len() + p.gl_id.len()
     symtab := [U8]{}
+    symtab.try_reserve(sym_count * 24) ?? panic("reserve failed")
     xindex := [U8]{}
+    if extended -> xindex.try_reserve(sym_count * 4) ?? panic("reserve failed")
     strtab := [U8]{U8{0}}
+    strtab.try_reserve(1 + (p.l_name.len() + p.gl_id.len()) * 32) ?? panic("reserve failed")
     link_pack_sym(symtab, xindex, 0, 0, 0, 0, 0)
     loop out in p.sec_out -> link_pack_sym(symtab, xindex, 0, 3, out, 0, 0)
     loop (j, name) in p.l_name {
@@ -466,7 +491,15 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         }
     }
     // The file: header, contents, section headers.
+    bytes_est := LINK_EHDR_SIZE + symtab.len() + xindex.len() + strtab.len() + eh.len() + p.r_off.len() * 24 + shnum * 64 + 65536
+    loop row in p.ord_row {
+        s: c.live_secs[row]
+        obj: link_obj_of(c, s)
+        if link_sec_type(c, obj, s) != LINK_SHT_NOBITS -> bytes_est += link_sec_size(c, obj, s) + 16
+    }
+    loop s in lines -> bytes_est += link_sec_size(c, link_obj_of(c, s), s) + 16
     bytes := [U8]{}
+    bytes.try_reserve(bytes_est) ?? panic("reserve failed")
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> bytes.push(U8{byte})
     elf64_u16(bytes, 1)
@@ -691,6 +724,89 @@ link_image_failure: fn(c: LinkContext) -> X64ExecutableResult Never! {
     X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
 }
 
+link_runtime_image_finish: fn(c_in: &&LinkContext, name: String, entry_g: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
+    c := c_in.move()
+    // No zone-site part note: a program bound to the image writes its own
+    // (MemoryLink.jet link_bind_write), and a library in the pack registers
+    // its sites from its constructor.
+    layout: link_layout(c, false, false, false)
+    startup: link_has_startup(c)
+    link_define_names(c, layout, startup)
+    program_base: link_align(layout.mem_end, LINK_PAGE)
+    main_g: link_global_named(c, "main")
+    if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_NONE {
+        link_error(c, "{name}: the runtime pack's startup does not import `main`")
+        return link_image_failure(c)
+    }
+    main_final: link_final(c, main_g)
+    c.g_kind[main_final] = LINK_G_LINKER
+    c.g_addr[main_final] = program_base
+    obj_has_main := [Bool]{}
+    obj_has_main.try_reserve(c.obj_name.len()) ?? panic("reserve failed")
+    loop obj in 0..<c.obj_name.len() {
+        has := false
+        loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
+            g: link_global_of(c, obj, k)
+            if g >= 0 && link_final(c, g) == main_final {
+                has = true
+                break
+            }
+        }
+        obj_has_main.push(has)
+    }
+    sites := [U8]{}
+    count := 0
+    loop row in 0..<c.live_secs.len() {
+        if c.live_class[row] < 0 -> next
+        s: c.live_secs[row].copy()
+        obj: link_obj_of(c, s)
+        if !obj_has_main[obj] -> next
+        b: c.obj_buffer[obj].copy()
+        table: link_rel_table(c, obj, s)
+        loop k in 0..<link_rel_count(c, obj, s) {
+            at: table + 24 * k
+            g: link_global_of(c, obj, link_u32(c.bufs, b, at + 12))
+            if g < 0 || link_final(c, g) != main_final -> next
+            kind: link_u32(c.bufs, b, at + 8)
+            off: link_u64(c.bufs, b, at)
+            if kind != LINK_R_PC32 && kind != LINK_R_PLT32 && kind != LINK_R_64 {
+                link_reloc_error(c, s, off, "runtime image: relocation type {kind} against `main` cannot be bound")
+                next
+            }
+            elf64_u64(sites, c.live_addr[row] + off)
+            elf64_u64(sites, kind)
+            elf64_u64(sites, link_s64(c.bufs, b, at + 16))
+            count += 1
+        }
+    }
+    if count == 0 -> link_error(c, "{name}: nothing in the runtime pack calls `main`")
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    entry: link_global_addr(c, entry_g)
+    debug: link_debug_sections(c, true)
+    emitted := link_emit_pieces(c, link_emitted_rows(layout, debug), threads)
+    c = emitted.context.move()
+    pieces := emitted.pieces.move()
+    image := link_write(c, layout, entry, pieces)
+    if c.live_secs.len() > 256 {
+        debug_est := 0
+        loop sz in debug.sizes -> debug_est += sz
+        sym_est := 1 + c.g_name.len()
+        loop obj in 0..<c.obj_name.len() -> sym_est += c.obj_first_global[obj]
+        image.try_reserve(image.len() + debug_est + sym_est * 72 + 1048576) ?? panic("reserve failed")
+    }
+    link_write_sections(c, image, layout, debug, pieces, false, threads)
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    bind := [U8]{}
+    elf64_u64(bind, LINK_IMAGE_BIND_MAGIC)
+    elf64_u64(bind, program_base)
+    elf64_u64(bind, count)
+    bind.extend(sites)
+    link_image_add_section(image, LINK_IMAGE_BIND_SECTION, bind)
+    exports: link_image_export_index(image)
+    link_image_add_section(image, LINK_IMAGE_EXPORTS_SECTION, exports)
+    X64ExecutableResult{bytes: image, errors: [String]{}}
+}
+
 // Link the runtime pack `pack` (named `name` in reports) into the runtime
 // image, its sections relocated on the threads `threads` admits
 // (StaticLink.jet link_emit_pieces): the bytes are the same for any count.
@@ -718,64 +834,68 @@ x64_link_runtime_image: fn(name: String, pack: &&[U8], threads: CompilerThreads)
     imports.push("main")
     link_collect(c, sections, imports, [Int]{})
     if c.errors.len() > 0 -> return link_image_failure(c)
-    // No zone-site part note: a program bound to the image writes its own
-    // (MemoryLink.jet link_bind_write), and a library in the pack registers
-    // its sites from its constructor.
-    layout: link_layout(c, false, false, false)
-    startup: link_has_startup(c)
-    link_define_names(c, layout, startup)
-    program_base: link_align(layout.mem_end, LINK_PAGE)
-    main_g: link_global_named(c, "main")
-    if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_NONE {
-        link_error(c, "{name}: the runtime pack's startup does not import `main`")
-        return link_image_failure(c)
+    link_runtime_image_finish(c, name, entry_g, threads)
+}
+
+// Link standalone runtime and Core objects directly into the prelinked
+// runtime image without first building an intermediate combined pack object.
+x64_link_runtime_image_objects: fn(names: [String], bufs: &&[[U8]], threads: CompilerThreads) -> X64ExecutableResult Never! {
+    c := link_context(bufs, LINK_RUN_BASE)
+    link_load_inputs(c, names)
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    if c.obj_name.len() == 0 {
+        return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
     }
-    main_final: link_final(c, main_g)
-    c.g_kind[main_final] = LINK_G_LINKER
-    c.g_addr[main_final] = program_base
-    sites := [U8]{}
-    count := 0
-    loop row in 0..<c.live_secs.len() {
-        if c.live_class[row] < 0 -> next
-        s: c.live_secs[row].copy()
-        obj: link_obj_of(c, s)
-        b: c.obj_buffer[obj].copy()
-        table: link_rel_table(c, obj, s)
-        loop k in 0..<link_rel_count(c, obj, s) {
-            at: table + 24 * k
-            g: link_global_of(c, obj, link_u32(c.bufs, b, at + 12))
-            if g < 0 || link_final(c, g) != main_final -> next
-            kind: link_u32(c.bufs, b, at + 8)
-            off: link_u64(c.bufs, b, at)
-            if kind != LINK_R_PC32 && kind != LINK_R_PLT32 && kind != LINK_R_64 {
-                link_reloc_error(c, s, off, "runtime image: relocation type {kind} against `main` cannot be bound")
-                next
+    root_globals := [Int]{}
+    seen_global := [Bool]{}
+    seen_global.try_reserve(c.g_name.len()) ?? panic("reserve failed")
+    loop _ in 0..<c.g_name.len() -> seen_global.push(false)
+    loop obj in 0..<c.obj_name.len() {
+        b: c.obj_buffer[obj]
+        strtab_buf: c.obj_strtab_buf[obj]
+        strtab: c.obj_strtab[obj]
+        loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
+            at: link_sym_at(c, obj, k)
+            bind: link_u8(c.bufs, b, at + 4) >> 4
+            visibility: link_u8(c.bufs, b, at + 5) & 3
+            if (bind != 1 && bind != 2) || (visibility != 0 && visibility != 3) -> next
+            if link_sym_shndx(c, obj, k) == LINK_UNDEF -> next
+            g: link_global_of(c, obj, k)
+            if g < 0 || seen_global[g] -> next
+            name_at: strtab + link_u32(c.bufs, b, at)
+            if link_pack_c_abi_bytes(c.bufs, strtab_buf, name_at) && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) {
+                seen_global[g] = true
+                root_globals.push(g)
+                link_reference(c, g, false)
             }
-            elf64_u64(sites, c.live_addr[row] + off)
-            elf64_u64(sites, kind)
-            elf64_u64(sites, link_s64(c.bufs, b, at + 16))
-            count += 1
         }
     }
-    if count == 0 -> link_error(c, "{name}: nothing in the runtime pack calls `main`")
+    entry_g: link_resolve_program(c)
+    entry_section: link_entry_section(c, entry_g)
+    if entry_section < 0 -> return link_image_failure(c)
+    sections := [Int]{entry_section}
+    sections.try_reserve(1 + root_globals.len() + 3) ?? panic("reserve failed")
+    loop g in root_globals {
+        f: link_final(c, g)
+        if c.g_kind[f] == LINK_G_FILE && c.g_section[f] >= 0 -> sections.push(c.g_section[f])
+    }
+    optional: [String]{"__jet_link_main", "__tls_get_addr", "__register_frame_info"}
+    loop opt_name in optional {
+        og: link_global_named(c, opt_name)
+        if og < 0 -> next
+        of: link_final(c, og)
+        if c.g_kind[of] == LINK_G_FILE && c.g_section[of] >= 0 -> sections.push(c.g_section[of])
+    }
+    imports := link_linker_names()
+    imports.push("main")
+    link_collect(c, sections, imports, [Int]{})
+    loop name in c.g_name {
+        if link_pack_rust_symbol(name) {
+            link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
+        }
+    }
     if c.errors.len() > 0 -> return link_image_failure(c)
-    entry: link_global_addr(c, entry_g)
-    debug: link_debug_sections(c, true)
-    emitted := link_emit_pieces(c, link_emitted_rows(layout, debug), threads)
-    c = emitted.context.move()
-    pieces := emitted.pieces.move()
-    image := link_write(c, layout, entry, pieces)
-    link_write_sections(c, image, layout, debug, pieces, false)
-    if c.errors.len() > 0 -> return link_image_failure(c)
-    bind := [U8]{}
-    elf64_u64(bind, LINK_IMAGE_BIND_MAGIC)
-    elf64_u64(bind, program_base)
-    elf64_u64(bind, count)
-    bind.extend(sites)
-    link_image_add_section(image, LINK_IMAGE_BIND_SECTION, bind)
-    exports: link_image_export_index(image)
-    link_image_add_section(image, LINK_IMAGE_EXPORTS_SECTION, exports)
-    X64ExecutableResult{bytes: image, errors: [String]{}}
+    link_runtime_image_finish(c, names[0], entry_g, threads)
 }
 
 // Add section `name` holding `payload` to the whole executable `image`
@@ -846,6 +966,12 @@ link_image_export_hash: fn(bytes: [U8]) -> Int Never! {
     Int{hash}
 }
 
+link_image_export_hash_range: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    hash := U32{0x811c9dc5}
+    loop at in start..<end -> hash = wrapping((hash ~ U32{bytes[at]}) * U32{0x01000193})
+    Int{hash}
+}
+
 // The `.jet.exports` payload of the executable `image`: LINK_IMAGE_EXPORTS_MAGIC,
 // the slot count (a power of two, at least twice the defined globals), then
 // per slot the `.symtab` index of a defined global (0: empty), four bytes,
@@ -866,23 +992,28 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
         strtab_at = link_image_i64(image, shoff + 64 * link_image_u32(image, h + 40) + 24)
     }
     defined := [Int]{}
+    if symtab_count > first_global {
+        defined.try_reserve(symtab_count - first_global) ?? panic("reserve failed")
+    }
     loop k in first_global..<symtab_count {
         if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> defined.push(k)
     }
     slots := 1
     loop slots < 2 * defined.len() -> slots *= 2
     table := [Int]{}
+    table.try_reserve(slots) ?? panic("reserve failed")
     loop _ in 0..<slots -> table.push(0)
     mask: slots - 1
     loop k in defined {
         at := strtab_at + link_image_u32(image, symtab_at + 24 * k)
         start: at
         loop at < image.len() && (Int{image[at]}) != 0 -> at += 1
-        slot := link_image_export_hash(image[start..<at]) & mask
+        slot := link_image_export_hash_range(image, start, at) & mask
         loop table[slot] != 0 -> slot = (slot + 1) & mask
         table[slot] = k
     }
     out := [U8]{}
+    out.try_reserve(16 + slots * 4) ?? panic("reserve failed")
     elf64_u64(out, LINK_IMAGE_EXPORTS_MAGIC)
     elf64_u64(out, slots)
     loop k in table -> elf64_u32(out, k)

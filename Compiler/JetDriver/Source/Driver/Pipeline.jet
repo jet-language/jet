@@ -7931,7 +7931,9 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     // (jet_driver_required_effects): those Core calls are not the package's
     // own code, so only the user functions they dispatch to are charged.
     cli := (loop _ in functions -> false)
+    has_cli := false
     if functions[entry_row].name.starts_with("__jet_cli_run") {
+        has_cli = true
         cli[entry_row] = true
         parse_name: functions[entry_row].name.replace("__jet_cli_run", "__jet_cli_parse")
         loop (index, function) in functions {
@@ -7994,7 +7996,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     }
     effect_total: name_count(effect_table) - 1
     bit_count: if effect_total > 62 -> 62 else -> effect_total
-    is_core := (loop f in functions -> f.module_name.starts_with("core."))
+    is_core := if has_cli -> (loop f in functions -> f.module_name.starts_with("core.")) else -> [Bool]{}
     if !overflow {
         changed := true
         loop changed {
@@ -8006,7 +8008,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
                 before := local_bits[index]
                 bits := before
-                is_cli: cli[index]
+                is_cli: has_cli && cli[index]
                 loop callee in callees[index] {
                     if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
                     if is_cli && is_core[callee] -> next
@@ -8039,7 +8041,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 owner: if rows[index] < 0 -> "" else -> owners[rows[index]]
                 loop callee in callees[index] {
                     if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
-                    if cli[index] && is_core[callee] -> next
+                    if has_cli && cli[index] && is_core[callee] -> next
                     reached_effects: local[callee].copy()
                     loop effect_name in reached_effects {
                         if local[index].contains(effect_name) -> next
@@ -8058,6 +8060,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     sites := (loop _ in functions -> "")
     effect_keys := (loop _ in functions -> "")
     sited := [Int]{}
+    sited.try_reserve(order.len()) ?? panic("reserve failed")
     loop (index, function) in functions {
         if !reached[index] -> next
         row: rows[index]
@@ -8072,35 +8075,80 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     sited.sort_by(fn(left: Int, right: Int) { (site_keys[left] <=> site_keys[right]).then(left <=> right) })
     summaries := [String:PackageEffectSummary]{}
     solved := [String:[String]]{}
-    loop index in sited {
-        function: functions[index]
-        row: rows[index]
-        // A witness is the function's name; a function registration does not
-        // name (a lambda, a generated body) is its declaration.
-        program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
-        // A same-package edge names its callee's site, and one to a callee
-        // with no site leaves, built from the already-resolved BFS edges.
-        kept_edges := [String]{}
-        loop callee in callees[index] {
-            if site_keys[callee] != "" -> kept_edges.push(site_keys[callee].copy())
+    if threads.cap != Val(1) && sited.len() >= 1024 && !overflow {
+        task.group driver_budget_maps {
+            t_summaries: task {
+                out_s := summaries.move()
+                loop index in sited {
+                    function: functions[index]
+                    kept_edges := [String]{}
+                    loop callee in callees[index] {
+                        if site_keys[callee] != "" -> kept_edges.push(site_keys[callee].copy())
+                    }
+                    loop edge_idx in extra_edges[index] {
+                        text: if edge_idx >= 0 -> function.effects.call_edges[edge_idx] else -> function.effects.value_edges[-(edge_idx + 1)]
+                        kept_edges.push(text.copy())
+                    }
+                    out_s[site_keys[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: kept_edges.move(), maximal: false}
+                }
+                out_s.move()
+            }
+            t_solved: task {
+                out_v := solved.move()
+                loop index in sited {
+                    effects := [String]{}
+                    bits: local_bits[index]
+                    if bits != 0 {
+                        loop k in 0..<bit_count {
+                            if (bits & (1 << k)) != 0 {
+                                effects.push(name_text(effect_table, Name{id: U32{k + 1}}))
+                            }
+                        }
+                    }
+                    out_v[site_keys[index]] = effects.move()
+                }
+                out_v.move()
+            }
+            loop index in sited {
+                function: functions[index]
+                row: rows[index]
+                program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
+            }
+            summaries = t_summaries.join() ?? panic(compiler_threads_failure_text(err))
+            solved = t_solved.join() ?? panic(compiler_threads_failure_text(err))
         }
-        loop edge_idx in extra_edges[index] {
-            text: if edge_idx >= 0 -> function.effects.call_edges[edge_idx] else -> function.effects.value_edges[-(edge_idx + 1)]
-            kept_edges.push(text.copy())
-        }
-        summaries[site_keys[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: kept_edges.move(), maximal: false}
-        if !overflow {
-            effects := [String]{}
-            bits: local_bits[index]
-            if bits != 0 {
-                loop k in 0..<bit_count {
-                    if (bits & (1 << k)) != 0 {
-                        effects.push(name_text(effect_table, Name{id: U32{k + 1}}))
+    } else {
+        loop index in sited {
+            function: functions[index]
+            row: rows[index]
+            // A witness is the function's name; a function registration does not
+            // name (a lambda, a generated body) is its declaration.
+            program.modules[row].function_spans[effect_keys[index]] = name_spans.get(function.key) ?? function.source_span
+            // A same-package edge names its callee's site, and one to a callee
+            // with no site leaves, built from the already-resolved BFS edges.
+            kept_edges := [String]{}
+            loop callee in callees[index] {
+                if site_keys[callee] != "" -> kept_edges.push("{site_keys[callee]}")
+            }
+            loop edge_idx in extra_edges[index] {
+                text: if edge_idx >= 0 -> function.effects.call_edges[edge_idx] else -> function.effects.value_edges[-(edge_idx + 1)]
+                kept_edges.push("{text}")
+            }
+            direct_rows := loop eff in function.effects.direct -> "{eff}"
+            summaries[site_keys[index]] = PackageEffectSummary{direct: direct_rows.move(), edges: kept_edges.move(), maximal: false}
+            if !overflow {
+                effects := [String]{}
+                bits: local_bits[index]
+                if bits != 0 {
+                    loop k in 0..<bit_count {
+                        if (bits & (1 << k)) != 0 {
+                            effects.push(name_text(effect_table, Name{id: U32{k + 1}}))
+                        }
                     }
                 }
-            }
-            solved[site_keys[index]] = effects.move()
-        } else { solved[site_keys[index]] = compiler_take_rows<String>(local[index]) }
+                solved[site_keys[index]] = effects.move()
+            } else { solved[site_keys[index]] = compiler_take_rows<String>(local[index]) }
+        }
     }
     entry_module: module_rows.get(load.entry_module_identity.id) ?? rows[entry_row]
     program.entry = entry_module

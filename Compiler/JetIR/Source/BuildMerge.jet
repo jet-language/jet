@@ -614,6 +614,7 @@ ir_merge_grouped: fn(runs: &&[[{key: String, local: Int}]], later: &&[[{key: Str
 
 ir_merge_unset: fn(count: Int) -> [Int] Never! {
     rows := [Int]{}
+    if count > 0 -> rows.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count -> rows.push(-1)
     rows
 }
@@ -625,12 +626,64 @@ ir_merge_unset: fn(count: Int) -> [Int] Never! {
 // it (IR.jet ir_intern_*, BuildStatic), so no data row has a text key and a
 // constant key.
 ir_merge_group: fn(runs: [[{key: String, local: Int}]], groups: &[[Int]], keys: &[String]) Never! {
-    heads := ir_merge_unset(runs.len())
-    loop part in 0..<runs.len() -> heads[part] = 0
+    nparts: runs.len()
+    heads := ir_merge_unset(nparts)
+    active := [Int]{}
+    max_run := 0
+    loop part in 0..<nparts {
+        heads[part] = 0
+        rlen: runs[part].len()
+        if rlen > 0 {
+            active.push(part)
+            if rlen > max_run -> max_run = rlen
+        }
+    }
+    if max_run > 0 -> keys.try_reserve(keys.len() + max_run) ?? panic("reserve failed")
+    if nparts <= 62 {
+        loop active.len() > 0 {
+            least := active[0]
+            ties := 1 << least
+            loop idx in 1..<active.len() {
+                part: active[idx]
+                cmp: runs[part][heads[part]].key <=> runs[least][heads[least]].key
+                if cmp == .Less {
+                    least = part
+                    ties = 1 << part
+                } else if cmp == .Equal { ties = ties | (1 << part) }
+            }
+            group: keys.len()
+            keys.push(runs[least][heads[least]].key.copy())
+            i := 0
+            loop i < active.len() {
+                part: active[i]
+                if (ties & (1 << part)) == 0 {
+                    i += 1
+                    next
+                }
+                h := heads[part]
+                rlen: runs[part].len()
+                loop h < rlen {
+                    if h > heads[part] && runs[part][h].key != keys[group] -> break
+                    local: runs[part][h].local
+                    if groups[part][local] >= 0 {
+                        panic("build part {part} row {local} has two sharing keys")
+                    }
+                    groups[part][local] = group
+                    h += 1
+                }
+                heads[part] = h
+                if h >= rlen {
+                    last_part: active.pop() ?? break
+                    if i < active.len() -> active[i] = last_part
+                } else { i += 1 }
+            }
+        }
+        return
+    }
     loop {
         // The first part whose next key is the least; parts before it are past that key.
         least := -1
-        loop part in 0..<runs.len() {
+        loop part in 0..<nparts {
             if heads[part] >= runs[part].len() -> next
             if least < 0 || runs[part][heads[part]].key < runs[least][heads[least]].key {
                 least = part
@@ -638,8 +691,8 @@ ir_merge_group: fn(runs: [[{key: String, local: Int}]], groups: &[[Int]], keys: 
         }
         if least < 0 -> break
         group: keys.len()
-        keys.push(runs[least][heads[least]].key.copy())
-        loop part in least..<runs.len() {
+        keys.push(runs[least][heads[least]].key)
+        loop part in least..<nparts {
             loop heads[part] < runs[part].len() && runs[part][heads[part]].key == keys[group] {
                 local: runs[part][heads[part]].local
                 if groups[part][local] >= 0 {

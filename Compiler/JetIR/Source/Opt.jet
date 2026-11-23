@@ -505,7 +505,7 @@ ir_opt_bodies: fn(view: IRModule, functions: &[IRFunction], work: IROptBodyWork,
         }
         return
     }
-    if options.level == 0 {
+    if options.level == 0 || !options.verify {
         ir_opt_bodies_partitioned(view, functions, weights, workers, work, options, lint, pass, report, found)
         return
     }
@@ -1480,11 +1480,11 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
     count: reads.value.cells.len()
     once: reads.value.options.level >= 2 && ir_opt_enabled(reads.value.options, "once")
     callees := [[IRFunction]]{}
+    callees.try_reserve(count) ?? panic("reserve failed")
     loop _ in 0..<count -> callees.push([IRFunction]{})
     ready := [Int]{}
-    loop {
-        id: ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
-        if id < 0 -> break
+    id := ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
+    loop id >= 0 {
         first: reads.value.callee_start[id]
         last: reads.value.callee_start[id + 1]
         loop k in first..<last {
@@ -1503,7 +1503,7 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
             caller: reads.value.callers[k]
             if reads.value.pending[caller].value.add(-1) == 1 -> ready.push(caller)
         }
-        ir_opt_ready(reads.value.queue, reads.value.changed, reads.value.ranks, ready)
+        id = ir_opt_ready_and_claim(reads.value.queue, reads.value.changed, reads.value.ranks, ready)
     }
     report
 }
@@ -1522,16 +1522,24 @@ ir_opt_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int]) ->
     id
 }
 
-// Puts the functions in `ready` on the queue (emptying it) and wakes a
-// waiting thread for each.
-ir_opt_ready: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int], ready: &[Int]) {
-    if ready.len() == 0 {
-        return
-    }
+// Pushes any newly ready functions onto the queue and immediately claims the
+// next highest-rank function under one lock acquisition, waking waiting
+// threads only when extra work remains or all functions are claimed.
+ir_opt_ready_and_claim: fn(queue: Shared<IROptQueue>, changed: Condition, ranks: [Int], ready: &[Int]) -> Int {
     held := queue.guard_edit()
-    loop id in ready -> ir_opt_heap_push(held.value.heap, ranks, id)
-    if ready.len() == 1 -> changed.notify_one() else -> changed.notify_all()
-    ready.clear()
+    added: ready.len()
+    if added > 0 {
+        loop rid in ready -> ir_opt_heap_push(held.value.heap, ranks, rid)
+        ready.clear()
+    }
+    held.wait(changed, fn(value) { value.heap.len() > 0 || value.claimed == value.count || value.failed }) ?? return -1
+    if held.value.failed || held.value.heap.len() == 0 -> return -1
+    id: ir_opt_heap_pop(held.value.heap, ranks)
+    held.value.claimed += 1
+    if held.value.claimed == held.value.count -> changed.notify_all() else if added > 1 && held.value.heap.len() > 0 {
+        if added == 2 -> changed.notify_one() else -> changed.notify_all()
+    }
+    id
 }
 
 // A thread's exit: when functions remain unclaimed it stopped early, so the

@@ -926,13 +926,13 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         }
     }
     constant_keys := [{key: String, at: Int, row: Int}]{}
+    constant_keys.try_reserve(defs.len() * 2) ?? panic("reserve failed")
     loop (index, definition) in defs {
         constant_keys.push({key: definition.key.copy(), at: 2 * index, row: index})
         if definition.symbol_key != "" {
             constant_keys.push({key: definition.symbol_key.copy(), at: 2 * index + 1, row: index})
         }
     }
-    constants: ir_first_rows(constant_keys)
     // The Display, Printable, Close and KeyBy implementations of the host
     // target, and the user Comparable ones (a derived Comparable orders
     // structurally). Every trait implementation's type, with the first
@@ -945,42 +945,48 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     impl_methods := [IRImplMethod]{}
     implementers := [{identity: String, first: Int}]{}
     empty_impls := [IREmptyImpl]{}
-    loop implementation in impls.move() {
-        trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
-        if trait_name == "" -> next
-        identity := ir_type_identity(type_rows, types, implementation.self_type)
-        first: ir_trait_key_hash(identity, 0)
-        implementers.push({identity: identity.move(), first: first})
-        if implementation.target_os == .Val(os) {
-            if os != .Linux -> next
-        }
-        trait_short: ir_short_name(trait_name)
-        owner_key: ir_render_type_key(type_rows, types, implementation.self_type)
-        loop key in implementation.methods {
-            slot_key: "{implementation.module_identity.id}|{owner_key}|{ir_impl_method_leaf(key)}"
-            slot := name_rows_value(impl_slots, slot_key) ?? -1
-            if slot < 0 {
-                slot = impl_traits.len()
-                name_rows_set(impl_slots, slot_key, slot)
-                impl_traits.push([String]{})
+    programs := [IRProgram]{}
+    task.group ir_program_declared_tasks {
+        t_consts: task &&constant_keys { ir_first_rows(constant_keys) }
+        loop implementation in impls.move() {
+            trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
+            if trait_name == "" -> next
+            identity := ir_type_identity(type_rows, types, implementation.self_type)
+            first: ir_trait_key_hash(identity, 0)
+            implementers.push({identity: identity.move(), first: first})
+            if implementation.target_os == .Val(os) {
+                if os != .Linux -> next
             }
-            impl_traits[slot].push(trait_short.copy())
+            trait_short: ir_short_name(trait_name)
+            owner_key: ir_render_type_key(type_rows, types, implementation.self_type)
+            loop key in implementation.methods {
+                slot_key: "{implementation.module_identity.id}|{owner_key}|{ir_impl_method_leaf(key)}"
+                slot := name_rows_value(impl_slots, slot_key) ?? -1
+                if slot < 0 {
+                    slot = impl_traits.len()
+                    name_rows_set(impl_slots, slot_key, slot)
+                    impl_traits.push([String]{})
+                }
+                impl_traits[slot].push(trait_short.copy())
+            }
+            if implementation.methods.len() == 0 {
+                empty_impls.push(IREmptyImpl{trait_short: ir_short_name(trait_name), owner: implementation.self_type.move()})
+            }
+            method: if trait_short == {
+                "Display" -> "display"
+                "Printable" -> "show"
+                "Close" -> "close"
+                "Comparable" -> if implementation.compiler_generated -> "" else -> "compare"
+                "KeyBy" -> "key"
+                else -> ""
+            }
+            if method == "" -> next
+            impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
         }
-        if implementation.methods.len() == 0 {
-            empty_impls.push(IREmptyImpl{trait_short: ir_short_name(trait_name), owner: implementation.self_type.move()})
-        }
-        method: if trait_short == {
-            "Display" -> "display"
-            "Printable" -> "show"
-            "Close" -> "close"
-            "Comparable" -> if implementation.compiler_generated -> "" else -> "compare"
-            "KeyBy" -> "key"
-            else -> ""
-        }
-        if method == "" -> next
-        impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
+        constants: t_consts.join() ?? panic(compiler_threads_failure_text(err))
+        programs.push(IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: name_rows(), close_methods: name_rows(), trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: name_rows(), close_methods: name_rows(), trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, trait_keys: ir_trait_key_table(implementers), empty_impls: empty_impls, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    programs.pop() ?? panic("the declared program was lost")
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -1092,8 +1098,15 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, thre
     if workers > 1 {
         scanned := ir_program_bind_parallel(p, owned, decls, workers, threads) ?? panic("the IR program bind threads failed")
         p.functions = owned.move()
-        p.quiet_points = ir_quiet_points(p)
-        p.decode_helpers = ir_codec_decode_rows(p)
+        quiet := [Int:Bool]{}
+        decode := [Int]{}
+        task.group ir_program_post_bind {
+            t_quiet: task ir_quiet_points(p)
+            decode = ir_codec_decode_rows(p)
+            quiet = t_quiet.join() ?? panic(compiler_threads_failure_text(err))
+        }
+        p.quiet_points = quiet.move()
+        p.decode_helpers = decode.move()
         ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed)
         return
     }

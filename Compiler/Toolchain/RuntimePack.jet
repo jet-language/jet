@@ -230,14 +230,75 @@ symbol_names: fn(b: [U8], what: String, names: &[String]) -> String {
     elf_symbol_names(b, 0, b.len(), what, names)
 }
 
+// Whether the NUL-terminated symbol name starting at `at` (before `end`)
+// matches `^(?:_R[A-Z]|_ZN[0-9]|__rust_|__rdl_)`.
+is_rust_symbol_bytes: fn(b: [U8], at: Int, end: Int) -> Bool {
+    if at >= end || b[at] != 95 -> return false
+    if at + 2 < end && b[at + 1] == 82 {
+        c: b[at + 2]
+        return c >= 65 && c <= 90
+    }
+    if at + 3 < end && b[at + 1] == 90 && b[at + 2] == 78 {
+        c: b[at + 3]
+        return c >= 48 && c <= 57
+    }
+    if at + 5 < end && b[at + 1] == 95 && b[at + 2] == 114 {
+        if b[at + 3] == 100 && b[at + 4] == 108 && b[at + 5] == 95 -> return true
+        if at + 6 < end && b[at + 3] == 117 && b[at + 4] == 115 && b[at + 5] == 116 && b[at + 6] == 95 {
+            return true
+        }
+    }
+    false
+}
+
 // The Rust symbols among the symbol names of `bytes` (the file `what`), or
 // why they can't be read, else "".
 rust_symbols: fn(bytes: [U8], what: String) -> String {
-    names := [String]{}
-    problem: symbol_names(bytes, what, names)
-    if problem != "" -> return problem
-    rust: Regex{"^(?:_R[A-Z]|_ZN\d|__rust_|__rdl_)"}
-    forbidden: loop name in names if re.is_match(rust, name) -> name.copy()
+    size: bytes.len()
+    if size < 64 || le(bytes, 0, 4) != 1179403647 || le(bytes, 4, 2) != 258 {
+        return "{what} is not a 64-bit little-endian ELF object"
+    }
+    shoff: le(bytes, 40, 8)
+    shentsize: le(bytes, 58, 2)
+    shnum := le(bytes, 60, 2)
+    if shoff == 0 -> return ""
+    if shentsize < 64 || shoff < 0 || shoff + shentsize > size {
+        return "{what} has a malformed section header table"
+    }
+    if shnum == 0 -> shnum = le(bytes, shoff + 32, 8)
+    if shnum < 0 || shoff + shnum * shentsize > size {
+        return "{what} has a malformed section header table"
+    }
+    forbidden := [String]{}
+    loop i in 0..<shnum {
+        header: shoff + i * shentsize
+        kind: le(bytes, header + 4, 4)
+        if kind != 2 && kind != 11 -> next
+        table: le(bytes, header + 24, 8)
+        table_size: le(bytes, header + 32, 8)
+        link: le(bytes, header + 40, 4)
+        entry: le(bytes, header + 56, 8)
+        if entry < 24 || link >= shnum || table < 0 || table_size < 0 || table + table_size > size {
+            return "{what} has a malformed symbol table"
+        }
+        strings: le(bytes, shoff + link * shentsize + 24, 8)
+        strings_size: le(bytes, shoff + link * shentsize + 32, 8)
+        if strings < 0 || strings_size < 0 || strings + strings_size > size {
+            return "{what} has a malformed string table"
+        }
+        strings_end: strings + strings_size
+        table_end: table + table_size
+        at := table
+        loop at + entry <= table_end {
+            name: Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
+            if name >= strings_size -> return "{what} has a symbol name outside its string table"
+            if is_rust_symbol_bytes(bytes, strings + name, strings_end) {
+                text: c_string(bytes, strings + name, strings_end)
+                if text != "" -> forbidden.push(text.copy())
+            }
+            at += entry
+        }
+    }
     if forbidden.len() > 0 -> return "Rust symbols in {what}:\n{forbidden.join("\n")}"
     ""
 }
@@ -435,52 +496,38 @@ pack: fn(args: [String]) {
     if (info.mode /% 64) % 2 == 0 {
         files.set_mode(jet, 493) ?? fail("cannot make `{jet}` executable: {err}")
     }
-    inputs: pack_inputs(root, flags, jet)
-    tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{inputs.sources.version}", out: absolute(flag(flags, "out"))}
-    source: inputs.sources.source
-    backend: inputs.sources.backend
-    lifecycle: inputs.sources.lifecycle
-    compiler_sha256: digest_of(inputs.compiler)
-    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256)
     // The step's folder, not /tmp: the runtime build's files outgrow a small
     // temporary file system.
     work: files.join(root, ".runtime-pack")
     files.remove_all(work) ?? ()
     files.create_dir_all(work) ?? fail("cannot create `{work}`: {err}")
-    build(tool, work, source, backend, lifecycle, compiler_sha256, recipe)
+    library: files.join(work, "library")
+    compiler_digests := [FileDigest]{}
+    versions := [String]{}
+    task.group prep {
+        t_hash: task file_digest(jet)
+        t_ver: task built_version(jet)
+        _ := compose_unit(root, library, [String]{})
+        compiler_digests.push(t_hash.join() ?? FileDigest{sha256: "", problem: "hashing `{jet}` stopped"})
+        versions.push(t_ver.join() ?? fail("reading version of `{jet}` stopped"))
+    }
+    compiler_sha256: digest_of(compiler_digests.pop() ?? fail("the compiler digest was not read"))
+    version: versions.pop() ?? fail("the compiler version was not read")
+    tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{version}", out: absolute(flag(flags, "out"))}
+    build(tool, work, library, flags, compiler_sha256)
     files.remove_all(work) ?? ()
     files.write(identity, "{tool.version}#{compiler_sha256}\n") ?? fail("cannot write `{identity}`: {err}")
 }
 
-// What the pack is made from (pack_sources) and the digest of the jet at
-// `jet`, which is hashed on a task while its version is asked and the
-// inventories are read.
-PackInputs: struct {
-    sources: PackSources,
-    compiler: FileDigest,
-}
-
-pack_inputs: fn(root: String, flags: Flags, jet: String) -> PackInputs {
-    found := [PackInputs]{}
-    task.group compiler_hash {
-        hashing: task file_digest(jet)
-        sources: pack_sources(root, flags, jet)
-        found.push(PackInputs{sources: sources, compiler: hashing.join() ?? FileDigest{sha256: "", problem: "hashing `{jet}` stopped"}})
-    }
-    found.pop() ?? fail("the pack's inputs were not read")
-}
-
-// The release of the jet at `jet` and the inventories of the runtime's
-// sources, the trees `flags` name and the lifecycle hooks.
-PackSources: struct {
-    version: String,
+// The inventories of the runtime's sources, the trees `flags` name and the
+// lifecycle hooks.
+PackInventories: struct {
     source: Inventory,
     backend: Inventory,
     lifecycle: Inventory,
 }
 
-pack_sources: fn(root: String, flags: Flags, jet: String) -> PackSources {
-    version: built_version(jet)
+pack_inventories: fn(root: String, flags: Flags) -> PackInventories {
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources := runtime_sources(manifest)
     // Each source's package.jet names its memory kernel, which the unit's
@@ -500,7 +547,7 @@ pack_sources: fn(root: String, flags: Flags, jet: String) -> PackSources {
     }
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
-    PackSources{version: version, source: source, backend: backend, lifecycle: lifecycle}
+    PackInventories{source: source, backend: backend, lifecycle: lifecycle}
 }
 
 // The JET_VERSION the jet at `jet` was built at: the `release` of its
@@ -551,9 +598,7 @@ print_issues: fn(path: String) {
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.
-build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, compiler_sha256: String, recipe: String) {
-    library: files.join(work, "library")
-    _ := compose_unit(tool.root, library, [String]{})
+build: fn(tool: Toolchain, work: String, library: String, flags: Flags, compiler_sha256: String) {
     prefix: files.join(work, "jet_runtime_jet")
     // The Core code library (JetCLI CoreLibrary.jet): every non-generic Core
     // function as a global symbol, which the image links beside the runtime.
@@ -586,64 +631,81 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         .env("JET_FRONT_RUNTIME_IMAGE_OUTPUT", image)
         .env("JET_FRONT_RUNTIME_WEB_OUTPUT", web)
         .env("JET_FRONT_CORE_OBJECT_OUTPUT", core)
-    if doc.run() == {
-        .Ok(receipt) -> {
-            if receipt.code != 0 || receipt.signal != None {
-                files.create_dir_all(tool.out) ?? ()
-                keep_issues(work, tool.out)
-                fail("Jet runtime production failed ({receipt.code})")
+    inventories := [PackInventories]{}
+    task.group run_doc {
+        t_inv: task pack_inventories(tool.root, flags)
+        if doc.run() == {
+            .Ok(receipt) -> {
+                if receipt.code != 0 || receipt.signal != None {
+                    files.create_dir_all(tool.out) ?? ()
+                    keep_issues(work, tool.out)
+                    fail("Jet runtime production failed ({receipt.code})")
+                }
+            }
+            .Err(error) -> fail("Jet runtime production could not start: {error}")
+        }
+        inventories.push(t_inv.join() ?? fail("the pack's input inventories stopped"))
+    }
+    inv: inventories.pop() ?? fail("the pack's input inventories were not read")
+    source: inv.source
+    backend: inv.backend
+    lifecycle: inv.lifecycle
+    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, compiler_sha256)
+    // Every output the provenance names is read once and hashed on tasks while
+    // the text receipts and interface are checked on the main thread; each
+    // built object is read once for its Rust check and its digest too.
+    hashed := [FileDigest]{}
+    abi_sha256 := ""
+    threads_sha256 := ""
+    stops_sha256 := ""
+    task.group verify_and_hash {
+        t_hash: task digests([String]{"{prefix}.o", pack, image, "{core}.o"}, [String]{"{core}.exports", "{core}.facts", "{core}.seal", "{core}.threads", "{core}.interface", "{core}.bodies", "{web}.wasm"})
+        abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
+        symbols: abi_symbols(abi_text)
+        if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
+        exports: export_names(files.read("{prefix}.exports") ?? fail("cannot read the runtime exports: {err}"))
+        if symbols != exports -> fail("runtime ABI and checked exports disagree")
+        abi_sha256 = crypto.sha256(abi_text.bytes()).hex()
+        // The stops receipt (Request.jet ir_stop_exports): the exports whose
+        // call can publish a stop. The runtime's scheduler always has some, so an
+        // empty one means the stop publisher it is read from was renamed away.
+        stops: files.read("{prefix}.stops") ?? fail("cannot read the runtime stops receipt: {err}")
+        if stops.trim() == "" {
+            fail("the runtime stops receipt is empty: no export reaches the stop publisher (JetIR BuildLibrary.jet IR_STOP_PUBLISH)")
+        }
+        loop name in stops.split("\n") {
+            if name != "" && !exports.contains(name) {
+                fail("runtime stops receipt names a symbol the checked exports lack")
             }
         }
-        .Err(error) -> fail("Jet runtime production could not start: {error}")
+        // The thread receipt (Request.jet ir_thread_exports): the exports that can
+        // start a second thread, or `*` when a lifecycle hook can.
+        threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
+        thread_rows: threads.split("\n").to_list()
+        thread_names: loop name in thread_rows.move() if name != "" -> name
+        if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) {
+            fail("runtime thread receipt names a symbol the checked exports lack")
+        }
+        check_core_library(core, tool.out)
+        // The jet.runtime interface the runtime source renders (Request.jet
+        // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
+        // the pack with the rendered file beside the outputs.
+        rendered: files.read("{prefix}.interface.jet") ?? fail("cannot read the rendered runtime interface: {err}")
+        embedded: files.read(at(tool.root, RUNTIME_INTERFACE)) ?? fail("cannot read `{RUNTIME_INTERFACE}`: {err}")
+        if rendered != embedded {
+            files.create_dir_all(tool.out) ?? ()
+            stale: files.join(tool.out, "runtime.interface.jet")
+            copy_into("{prefix}.interface.jet", stale)
+            fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
+        }
+        threads_sha256 = crypto.sha256(threads.bytes()).hex()
+        stops_sha256 = crypto.sha256(stops.bytes()).hex()
+        hashed = t_hash.join() ?? fail("hashing runtime outputs stopped")
     }
-    // Every output the provenance names is read once and hashed, all on
-    // tasks at once (digests); each built object is read once for its Rust
-    // check and its digest too.
-    hashed: digests([String]{"{prefix}.o", pack, image, "{core}.o"}, [String]{"{core}.exports", "{core}.facts", "{core}.seal", "{core}.threads", "{core}.interface", "{core}.bodies", "{web}.wasm"})
     object_sha256: digest_of(hashed[0])
     pack_sha256: digest_of(hashed[1])
     image_sha256: digest_of(hashed[2])
     core_object_sha256: digest_of(hashed[3])
-    abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
-    symbols: abi_symbols(abi_text)
-    if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
-    exports: export_names(files.read("{prefix}.exports") ?? fail("cannot read the runtime exports: {err}"))
-    if symbols != exports -> fail("runtime ABI and checked exports disagree")
-    abi_sha256 := sha256_file("{prefix}.abi.json")
-    // The stops receipt (Request.jet ir_stop_exports): the exports whose
-    // call can publish a stop. The runtime's scheduler always has some, so an
-    // empty one means the stop publisher it is read from was renamed away.
-    stops: files.read("{prefix}.stops") ?? fail("cannot read the runtime stops receipt: {err}")
-    if stops.trim() == "" {
-        fail("the runtime stops receipt is empty: no export reaches the stop publisher (JetIR BuildLibrary.jet IR_STOP_PUBLISH)")
-    }
-    loop name in stops.split("\n") {
-        if name != "" && !exports.contains(name) {
-            fail("runtime stops receipt names a symbol the checked exports lack")
-        }
-    }
-    // The thread receipt (Request.jet ir_thread_exports): the exports that can
-    // start a second thread, or `*` when a lifecycle hook can.
-    threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
-    thread_rows: threads.split("\n").to_list()
-    thread_names: loop name in thread_rows.move() if name != "" -> name
-    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) {
-        fail("runtime thread receipt names a symbol the checked exports lack")
-    }
-    check_core_library(core, tool.out)
-    // The jet.runtime interface the runtime source renders (Request.jet
-    // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
-    // the pack with the rendered file beside the outputs.
-    rendered: files.read("{prefix}.interface.jet") ?? fail("cannot read the rendered runtime interface: {err}")
-    embedded: files.read(at(tool.root, RUNTIME_INTERFACE)) ?? fail("cannot read `{RUNTIME_INTERFACE}`: {err}")
-    if rendered != embedded {
-        files.create_dir_all(tool.out) ?? ()
-        stale: files.join(tool.out, "runtime.interface.jet")
-        copy_into("{prefix}.interface.jet", stale)
-        fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
-    }
-    threads_sha256 := sha256_file("{prefix}.threads")
-    stops_sha256 := sha256_file("{prefix}.stops")
     core_exports_sha256: digest_of(hashed[4])
     core_facts_sha256: digest_of(hashed[5])
     core_seal_sha256: digest_of(hashed[6])
