@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_column_set, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
@@ -910,7 +910,8 @@ ir_host_literal: fn(m: &IRModule, b: &IRBuilder, row: Int, value: TComptimeValue
     string_row: ir_string_row(m)
     key_text: ir_temp(m, b, string_row)
     key: "{b.f.key}#{key_text}"
-    m.host_literals[key.copy()] = value.copy()
+    name_column_set(m.host_literals_keys, m.host_literals, key, m.host_literal_values.len())
+    m.host_literal_values.push(value.copy())
     ir_emit(b.f, IROp.ConstText, key_text, ir_intern_text(m, key), -1, -1, b.line)
     ir_host_route(m, b, 6, row, [Int]{key_text})
 }
@@ -4103,19 +4104,21 @@ ir_add_compiler_owned_types: fn(types: &[TTypeDef]) Never! {
         return
     }
     module_identity: types[0].module_identity.copy()
-    declared := [String:Bool]{}
-    core_enums := [String:Int]{}
+    declared := name_column_table(types.len() + IR_COMPILER_OWNED_TYPE_ROWS.len())
+    core_enum_keys := name_column_table()
+    core_enums := name_column()
     loop definition in types {
-        declared[definition.key] = true
+        _ := name_intern(declared, definition.key)
         if module_is_core(definition.module_identity) && definition.kind == .Enum(_, _) {
-            core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
+            count: name_column_get(core_enum_keys, core_enums, definition.name) ?? 0
+            name_column_set(core_enum_keys, core_enums, definition.name, count + 1)
         }
     }
     loop row in IR_COMPILER_OWNED_TYPE_ROWS {
         name: row.definition.name
-        if declared.get(name) != None -> next
-        if row.class == .CoreEnum && (core_enums.get(name) ?? 0) == 1 -> next
-        declared[name] = true
+        if name_find(declared, name) != None -> next
+        if row.class == .CoreEnum && (name_column_get(core_enum_keys, core_enums, name) ?? 0) == 1 -> next
+        _ := name_intern(declared, name)
         definition := row.definition
         definition.module_identity = module_identity
         types.push(definition)

@@ -26,7 +26,7 @@
 // steps through those short lists instead of every function's instructions;
 // a row's second use in a function finds its number already given, so the
 // numbering is the same.
-use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_column_set, name_column_sorted, name_column_value, type_id_remap]
+use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_column_get, name_column_set, name_column_sorted, name_column_value, type_id_remap]
 
 // A function the walk starts from: function `local` of part `part`.
 IRMergeRoot: struct {
@@ -346,8 +346,11 @@ ir_merge_rows: fn(out: &IRModule, parts: &[IRModule], g: IRMerge, roots: [IRMerg
     // A host literal's key names its function and a slot of its body, so the
     // parts that built one function hold the one value under it.
     loop part in 0..<parts.len() {
-        loop (key, value) in parts[part].host_literals {
-            if out.host_literals.get(key) == None -> out.host_literals[key.copy()] = value.copy()
+        loop key in parts[part].host_literals_keys.texts {
+            row: name_column_get(parts[part].host_literals_keys, parts[part].host_literals, key) ?? next
+            if name_column_get(out.host_literals_keys, out.host_literals, key) != None -> next
+            name_column_set(out.host_literals_keys, out.host_literals, key, out.host_literal_values.len())
+            out.host_literal_values.push(parts[part].host_literal_values[row].copy())
         }
     }
 }

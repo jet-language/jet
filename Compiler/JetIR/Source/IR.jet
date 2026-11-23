@@ -100,7 +100,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 use {
-    jet_foundation.[Interner, InternerDelta, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_column, name_column_get_hashed, name_column_set, name_column_set_hashed, name_column_table, name_column_value, name_table_sized, name_text_hash, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
+    jet_foundation.[Interner, InternerDelta, NameTable, TComptimeValue, Type, TypeID, TypeKind, delta_has_rows, interner, interner_merge_delta, name_column, name_column_get, name_column_get_hashed, name_column_set, name_column_set_hashed, name_column_table, name_column_value, name_table_sized, name_text_hash, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id, type_id_carrier_identity, type_id_name, type_id_remap, type_id_well_known_kind, type_id_well_known_syntax, type_intern_syntax, type_kind, type_name, type_syntax]
     jet_backend.[X64DebugSource]
 }
 
@@ -612,8 +612,9 @@ IRDataReloc: struct {
 // `debug_directory`: the compilation directory the image's DWARF records
 // ("": the working directory), which relative source paths (a fault
 // report's) resolve from. `host_literals`: the compile-time literals that are
-// compiler values (BuildTypes.jet ir_host_literal), by the key their host
-// route names, which the compiler answers from the built module.
+// compiler values (BuildTypes.jet ir_host_literal), rows of
+// `host_literal_values` at the ids in `host_literals_keys` of the keys their
+// host route names, which the compiler answers from the built module.
 // `struct_fields`: the merged module's struct members, one
 // `field <identity> <offset> <size> <member> <type>` line per stored member
 // of each struct the program reached (BuildMerge.jet ir_merge), for the
@@ -734,7 +735,9 @@ IRModule: struct {
     // (JetBackend Image/Dwarf.jet dwarf_sources) for a debugger to prove
     // the code it binds to is theirs.
     debug_sources: [X64DebugSource]{[X64DebugSource]{}},
-    host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}},
+    host_literals_keys: NameTable{name_column_table()},
+    host_literals: [Int]{name_column()},
+    host_literal_values: [TComptimeValue]{[TComptimeValue]{}},
     struct_fields: [String]{[String]{}},
     debug_members: [Int:Int]{[Int:Int]{}},
     // Per IRModule.types row: 0 unknown, 1 cloneable, -1 not cloneable (BuildLazy.jet).
@@ -751,6 +754,10 @@ IRModule: struct {
     // row's own copy (X64Select.jet DataAddress).
     core_cells: [Int:String]{[Int:String]{}},
 }
+
+// The `host_literal_values` row of compile-time literal `key`, if `m` holds
+// it (ir_host_literal).
+ir_host_literal_row: fn(m: IRModule, key: String) -> Int? Never! { name_column_get(m.host_literals_keys, m.host_literals, key) }
 
 ir_module_new: fn() -> IRModule Never! {
     IRModule{types: [IRType]{}, type_keys: [String]{}, key_lists: [[Int]]{}, names: [String]{}, data: [[U8]]{}, data_relocs: [Int:[IRDataReloc]]{}, functions: [IRFunction]{}, entry: -1, layout_low: 0, member_lists: [[IRMember]]{}, close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, helper_messages: [String]{}}
