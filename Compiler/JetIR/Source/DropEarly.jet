@@ -29,7 +29,7 @@
 //   - a result that is not a plain value (a raw address, String data, a view).
 // So a String whose address `mem.address_of` or a string-data leaf takes
 // lives until its block ends.
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
 
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
@@ -365,4 +365,229 @@ ir_drop_build_code: fn(f: IRFunction, plan: IRDropPlan) -> IROptCode Never! {
         }
     }
     code
+}
+
+// Reusable per-worker scratch for zero-allocation O0 early-drop planning.
+IRDropScratch: struct {
+    stop: [Int],
+    eligible: [Bool],
+    dropped: [Bool],
+    last_ref: [Int],
+    reads: [Int],
+    blocked: [Bool],
+    open: [Int],
+    kill: [Bool],
+    slots: [Int],
+    to: [Int],
+    lines: [Int],
+    head: [Int],
+    chain: [Int],
+    has_moves: Bool,
+    // Upper bound on the frame bytes O0 emission adds past the slot homes:
+    // StackAddress storage and aggregate call results (ir_drop_frame_bytes).
+    frame_bytes: Int,
+}
+
+ir_drop_scratch_new: fn() -> IRDropScratch Never! {
+    IRDropScratch{
+        stop: [Int]{},
+        eligible: [Bool]{},
+        dropped: [Bool]{},
+        last_ref: [Int]{},
+        reads: [Int]{},
+        blocked: [Bool]{},
+        open: [Int]{},
+        kill: [Bool]{},
+        slots: [Int]{},
+        to: [Int]{},
+        lines: [Int]{},
+        head: [Int]{},
+        chain: [Int]{},
+        has_moves: false,
+        frame_bytes: 0,
+    }
+}
+
+// The most frame bytes O0 emission (X64Patch.jet) adds at instruction `at`
+// past the slot homes: a StackAddress's aligned storage, or the aligned
+// result storage of a call whose result is an aggregate.
+#Inline(Always) ir_drop_frame_bytes: fn(fast: IRX64FastModule, f: IRFunction, at: Int, op: IROp) -> Int Never! {
+    if op == .StackAddress -> return ir_x64_storage_size(f, at) + 16
+    if op != .Call && op != .CallIndirect && op != .CallRuntime -> return 0
+    dst: f.dst[at]
+    if dst < 0 -> return 0
+    row: f.slot_type[dst]
+    if fast.type_kind[row] != O0_KIND_AGGREGATE -> return 0
+    fast.type_size[row] + 24
+}
+
+// Zero-allocation early-drop planner using flat reusable worker scratch `s`.
+// Produces bit-for-bit identical move lists (`slots`, `to`, `lines`, `kill`)
+// to `ir_drop_plan`, and also accumulates `s.frame_bytes` during its
+// initial O(N) scan so O0 codegen needs no separate pre-pass for stack checks.
+ir_drop_plan_into: fn(s: &IRDropScratch, m: IRModule, fast: IRX64FastModule, f: IRFunction, poll: Int, trap: Int, turn: Int) Never! {
+    n: f.op.len()
+    count: f.slot_type.len()
+    s.has_moves = false
+    s.frame_bytes = 0
+    has_string_drop := false
+    loop at in 0..<n {
+        op: f.op[at]
+        if op == .Drop {
+            slot: f.a[at]
+            if slot >= 0 && slot < count && fast.type_is_str_drop[f.slot_type[slot]] {
+                has_string_drop = true
+            }
+        } else {
+            s.frame_bytes += ir_drop_frame_bytes(fast, f, at, op)
+        }
+    }
+    if !has_string_drop -> return
+    if s.stop.len() < n {
+        s.stop.try_reserve(n) ?? panic("reserve failed")
+        s.blocked.try_reserve(n) ?? panic("reserve failed")
+        s.kill.try_reserve(n) ?? panic("reserve failed")
+        s.head.try_reserve(n) ?? panic("reserve failed")
+        loop s.stop.len() < n {
+            s.stop.push(-1)
+            s.blocked.push(false)
+            s.kill.push(false)
+            s.head.push(-1)
+        }
+    }
+    if s.eligible.len() < count {
+        s.eligible.try_reserve(count) ?? panic("reserve failed")
+        s.dropped.try_reserve(count) ?? panic("reserve failed")
+        s.last_ref.try_reserve(count) ?? panic("reserve failed")
+        loop s.eligible.len() < count {
+            s.eligible.push(false)
+            s.dropped.push(false)
+            s.last_ref.push(-1)
+        }
+    }
+    loop i in 0..<n {
+        s.stop[i] = -1
+        s.blocked[i] = false
+        s.kill[i] = false
+    }
+    loop at in 0..<n {
+        if f.op[at] != .If || s.stop[at] >= 0 || !ir_drop_stop_edge(m, f, at, poll, trap, turn) {
+            next
+        }
+        loop inner in at..<(f.c[at] + 1) -> s.stop[inner] = at
+    }
+    loop slot in 0..<count {
+        s.eligible[slot] = fast.type_is_str_drop[f.slot_type[slot]]
+        s.dropped[slot] = false
+        s.last_ref[slot] = -1
+    }
+    if s.open.len() > 0 -> s.open.clear()
+    any := false
+    loop at in 0..<n {
+        op: f.op[at]
+        if op == .Block || op == .Loop || op == .If {
+            s.open.push(at)
+        } else if op == .End {
+            _: s.open.pop()
+        } else if op == .Br || op == .BrIf || op == .Return || op == .Unreachable {
+            if s.stop[at] < 0 {
+                loop opener in s.open -> s.blocked[opener] = true
+            }
+        }
+        if s.stop[at] >= 0 -> next
+        if op == .Drop {
+            slot: f.a[at]
+            if slot >= 0 && slot < count && s.eligible[slot] {
+                s.dropped[slot] = true
+                any = true
+            }
+            next
+        }
+        ir_x64_reads_into(f, at, s.reads)
+        loop slot in s.reads {
+            if slot < 0 || slot >= count || !s.eligible[slot] -> next
+            if !ir_drop_borrows_only(m, f, at) -> s.eligible[slot] = false
+        }
+    }
+    if !any -> return
+    if s.slots.len() > 0 -> s.slots.clear()
+    if s.to.len() > 0 -> s.to.clear()
+    if s.lines.len() > 0 -> s.lines.clear()
+    if s.chain.len() > 0 -> s.chain.clear()
+    loop at in 0..<n {
+        if s.stop[at] >= 0 -> next
+        op: f.op[at]
+        if op == .Drop {
+            slot: f.a[at]
+            if slot >= 0 && slot < count && s.eligible[slot] {
+                previous: s.last_ref[slot]
+                reached: ir_drop_target(f, s.stop, s.blocked, previous, at)
+                to := reached
+                if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap || f.a[to] == turn) && to + 1 < n && s.stop[to + 1] == to + 1 {
+                    to = f.c[to + 1] + 1
+                }
+                if to < at {
+                    s.slots.push(slot)
+                    s.to.push(to)
+                    s.lines.push(if previous >= 0 && reached == previous + 1 -> f.code_line[previous] else -> f.code_line[at])
+                    s.kill[at] = true
+                    loop inner in to..<at {
+                        if s.stop[inner] >= 0 && f.op[inner] == .Drop && f.a[inner] == slot {
+                            s.kill[inner] = true
+                        }
+                    }
+                }
+                if s.dropped[slot] -> s.last_ref[slot] = at
+            }
+            next
+        }
+        ir_x64_reads_into(f, at, s.reads)
+        loop slot in s.reads {
+            if slot >= 0 && slot < count && s.eligible[slot] && s.dropped[slot] -> s.last_ref[slot] = at
+        }
+        written: ir_x64_write(f, at)
+        if written >= 0 && written < count && s.eligible[written] && s.dropped[written] {
+            s.last_ref[written] = at
+        }
+    }
+    if s.slots.len() == 0 -> return
+    s.has_moves = true
+    loop i in 0..<n -> s.head[i] = -1
+    loop k in 0..<s.to.len() {
+        target: s.to[k]
+        s.chain.push(s.head[target])
+        s.head[target] = k
+    }
+}
+
+#Test("ir_drop_plan_into matches ir_drop_plan including multi-drop slots") {
+    m := ir_module_new()
+    str_row: ir_type_row(m, Type.String) ?? panic("no String row")
+    m.types[str_row].drop = "jet_rt_string_drop"
+    i64_row: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("multi_drop", "test:drop.multi", "", "drop.jet", 1)
+    s0: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "s0"), 1)
+    x: ir_slot(f, i64_row, IRSlotKind.Local, ir_intern_name(m, "x"), 2)
+    t1: ir_slot(f, i64_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 1)
+    _ := ir_emit(f, IROp.Const, x, 1, -1, -1, 2)
+    _ := ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 3)
+    _ := ir_emit(f, IROp.Drop, -1, s0, -1, -1, 4)
+    _ := ir_emit(f, IROp.ConstText, s0, 0, -1, -1, 5)
+    _ := ir_emit(f, IROp.Add, x, t1, x, IR_OVERFLOW_WRAP, 6)
+    _ := ir_emit(f, IROp.Add, t1, x, x, IR_OVERFLOW_WRAP, 7)
+    _ := ir_emit(f, IROp.Drop, -1, s0, -1, -1, 8)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 9)
+    flags := [Bool]{}
+    loop t in m.types -> flags.push(t.kind == .String && t.drop != "")
+    expected: ir_drop_plan(m, f, -1, -1, -1)
+    fast: ir_x64_fast_module_new(m, false)
+    assert_eq(fast.type_is_str_drop, flags)
+    scratch := ir_drop_scratch_new()
+    ir_drop_plan_into(scratch, m, fast, f, -1, -1, -1)
+    assert(scratch.has_moves)
+    assert_eq(scratch.slots, expected.slots)
+    assert_eq(scratch.to, expected.to)
+    assert_eq(scratch.lines, expected.lines)
+    loop i in 0..<f.op.len() -> assert_eq(scratch.kill[i], expected.kill[i])
 }

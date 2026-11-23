@@ -1,0 +1,32 @@
+# Verifies that O0 copy-and-patch codegen emits every IR opcode family via
+# toolchain-built stencils embedded in `jet` (zero external stencil files) and
+# produces identical output across `jet run`, `-O0`, `-O1`, and `-O2`.
+fixture: O0StencilEmit.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step run_o0: jet run main.jet
+exit: 0
+stdout: = o0_stencil_emit.out
+stderr: empty
+
+step build_o0: jet build -O0 main.jet
+exit: 0
+step exec_o0: {work}/.jet/build/main
+exit: 0
+stdout: = o0_stencil_emit.out
+stderr: empty
+
+step build_o1: jet build -O1 main.jet
+exit: 0
+step exec_o1: {work}/.jet/build/main
+exit: 0
+stdout: = o0_stencil_emit.out
+stderr: empty
+
+step build_o2: jet build -O2 main.jet
+exit: 0
+step exec_o2: {work}/.jet/build/main
+exit: 0
+stdout: = o0_stencil_emit.out
+stderr: empty

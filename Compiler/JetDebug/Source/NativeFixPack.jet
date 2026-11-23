@@ -25,7 +25,7 @@
 // allocations and frees reach the condition's arena rather than the
 // program's heap, and a routine that leaves the condition's code
 // (native_place_routed) is reached in its trampoline instead.
-use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RelocTarget, link_debug_addr, link_debug_le, x64_jetline_text]
+use jet_backend.[X64CompiledFunction, X64Data, X64DebugEncoding, X64DebugType, X64DebugVariable, X64FunctionDebug, X64FunctionID, X64FunctionSource, X64ModuleDebug, X64ObjectModule, X64Reloc, link_debug_addr, link_debug_le, x64_jetline_text, x64_reloc_runtime]
 
 // The pack's sections and symbols, read once a session, with the image's
 // code facts (NativeEvalImage.pack).
@@ -488,7 +488,7 @@ native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int, r
     symbols: NativeFixSymbols{slots: slots, named: [[NativeFixSymbol]]{[NativeFixSymbol]{NativeFixSymbol{address: 0x401000, size: 32}}}}
     // `call rel32` to the runtime's jet_int_mul, then to its
     // jet_int_compare, which the pack lacks, then `ret`.
-    expression: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Runtime{symbol: "jet_int_mul"}}, X64Reloc{at: 6, target: X64RelocTarget.Runtime{symbol: "jet_int_compare"}}}, align: 16}
+    expression: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_runtime(1, "jet_int_mul"), x64_reloc_runtime(6, "jet_int_compare")}, align: 16}
     object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "eval", file: -1, line: 1, variables: [X64DebugVariable]{}}}}
     edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{expression}, debug: [X64FunctionDebug]{}}
     targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}
@@ -537,7 +537,7 @@ native_fix_pack_write: fn(region: &[U8], loaded: [NativeFixLoaded], base: Int, r
     slots["jet_rt_string_drop"] = 0
     symbols: NativeFixSymbols{slots: slots, named: [[NativeFixSymbol]]{[NativeFixSymbol]{NativeFixSymbol{address: 0x401000, size: 16}}}}
     // `call rel32` to the runtime's jet_rt_string_drop, then `ret`.
-    condition: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Runtime{symbol: "jet_rt_string_drop"}}}, align: 16}
+    condition: X64CompiledFunction{id: X64FunctionID{value: 0}, name: "p.eval", code: [U8]{0xe8, 0, 0, 0, 0, 0xc3}, relocs: [X64Reloc]{x64_reloc_runtime(1, "jet_rt_string_drop")}, align: 16}
     object: X64ObjectModule{data: [X64Data]{}, debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{X64FunctionSource{name: "eval", file: -1, line: 1, variables: [X64DebugVariable]{}}}}
     edit: NativeFixEdit{object: object, functions: [X64CompiledFunction]{condition}, debug: [X64FunctionDebug]{}}
     targets: NativeFixTargets{functions: [Int:Int]{}, data: [Int:Int]{}, runtime: [String:Int]{}, clashed: [String:Bool]{}}

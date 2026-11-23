@@ -1386,3 +1386,192 @@ x64_simd_dispatch_probe: fn(code: &X64Code, dispatch: X64SimdDispatch) -> Int Ne
     probe_simd_site
 }
 
+// leave (C9): restore rsp from rbp and pop rbp.
+x64_leave: fn(code: &X64Code) Never! { x64_byte(code.bytes, 0xc9) }
+
+// cmp reg, gs:[offset] (65 REX.W 3B /r SIB(25) disp32): stack-limit check.
+x64_cmp_gs_abs: fn(code: &X64Code, reg: Int, offset: Int) Never! {
+    x64_byte(code.bytes, 0x65)
+    x64_rex(code.bytes, true, reg, 0)
+    x64_byte(code.bytes, 0x3b)
+    x64_byte(code.bytes, ((reg & 7) << 3) | 4)
+    x64_byte(code.bytes, 0x25)
+    x64_u32(code.bytes, offset)
+}
+
+// mov dst, gs:[offset] (65 REX.W 8B /r SIB(25) disp32): TLS word load.
+x64_mov_gs_abs: fn(code: &X64Code, dst: Int, offset: Int) Never! {
+    x64_byte(code.bytes, 0x65)
+    x64_rex(code.bytes, true, dst, 0)
+    x64_byte(code.bytes, 0x8b)
+    x64_byte(code.bytes, ((dst & 7) << 3) | 4)
+    x64_byte(code.bytes, 0x25)
+    x64_u32(code.bytes, offset)
+}
+
+// cmp qword gs:[offset], imm8 (65 REX.W 83 /7 SIB(25) disp32 imm8): TCB word test.
+x64_cmp_gs_imm8: fn(code: &X64Code, offset: Int, imm8: Int) Never! {
+    x64_byte(code.bytes, 0x65)
+    x64_byte(code.bytes, 0x48)
+    x64_byte(code.bytes, 0x83)
+    x64_byte(code.bytes, 0x3c)
+    x64_byte(code.bytes, 0x25)
+    x64_u32(code.bytes, offset)
+    x64_byte(code.bytes, imm8)
+}
+
+// add/sub/cmp/and/or/xor dst, [base + disp] (REX.W 03|2B|3B|23|0B|33 /r).
+x64_alu_rm: fn(code: &X64Code, op: X64Alu, dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(code.bytes, true, dst, base)
+    x64_byte(code.bytes, x64_alu_opcode(op) + 2)
+    x64_modrm_mem(code, dst, base, disp)
+}
+
+// Sized memory load of 1, 2, 4 or 8 bytes from [base + disp] into `dst`,
+// sign- or zero-extending into the 64-bit register.
+x64_load_sized: fn(code: &X64Code, dst: Int, base: Int, disp: Int, width: Int, signed: Bool) Never! {
+    if width == 8 {
+        x64_load(code, dst, base, disp)
+    } else if width == 4 {
+        if signed {
+            x64_rex(code.bytes, true, dst, base)
+            x64_byte(code.bytes, 0x63)
+            x64_modrm_mem(code, dst, base, disp)
+        } else {
+            if dst >= 8 || base >= 8 -> x64_rex(code.bytes, false, dst, base)
+            x64_byte(code.bytes, 0x8b)
+            x64_modrm_mem(code, dst, base, disp)
+        }
+    } else if width == 2 {
+        x64_rex(code.bytes, true, dst, base)
+        x64_byte(code.bytes, 0x0f)
+        x64_byte(code.bytes, if signed -> 0xbf else -> 0xb7)
+        x64_modrm_mem(code, dst, base, disp)
+    } else {
+        x64_rex(code.bytes, true, dst, base)
+        x64_byte(code.bytes, 0x0f)
+        x64_byte(code.bytes, if signed -> 0xbe else -> 0xb6)
+        x64_modrm_mem(code, dst, base, disp)
+    }
+}
+
+// Sized memory store of 1, 2, 4 or 8 bytes from `src` into [base + disp].
+x64_store_sized: fn(code: &X64Code, base: Int, disp: Int, src: Int, width: Int) Never! {
+    if width == 8 {
+        x64_store(code, base, disp, src)
+    } else if width == 4 {
+        if src >= 8 || base >= 8 -> x64_rex(code.bytes, false, src, base)
+        x64_byte(code.bytes, 0x89)
+        x64_modrm_mem(code, src, base, disp)
+    } else if width == 2 {
+        x64_byte(code.bytes, 0x66)
+        if src >= 8 || base >= 8 -> x64_rex(code.bytes, false, src, base)
+        x64_byte(code.bytes, 0x89)
+        x64_modrm_mem(code, src, base, disp)
+    } else {
+        x64_store_u8(code, base, disp, src)
+    }
+}
+
+// Explicit 32-bit zero-extending mov r32, imm32 ([41] B8+r imm32).
+x64_mov_r32_imm32: fn(code: &X64Code, dst: Int, value: Int) Never! {
+    if dst >= 8 -> x64_byte(code.bytes, 0x41)
+    x64_byte(code.bytes, 0xb8 + (dst & 7))
+    x64_u32(code.bytes, value)
+}
+
+// Explicit mov qword [base + disp], imm32 (REX.W C7 /0 [base+disp] imm32).
+x64_mov_mem_imm32: fn(code: &X64Code, base: Int, disp: Int, value: Int) Never! {
+    x64_rex(code.bytes, true, 0, base)
+    x64_byte(code.bytes, 0xc7)
+    x64_modrm_mem(code, 0, base, disp)
+    x64_u32(code.bytes, value)
+}
+
+// Explicit 64-bit movabs r64, imm64 (REX.W B8+r imm64).
+x64_movabs_ri: fn(code: &X64Code, dst: Int, value: Int) Never! {
+    x64_rex(code.bytes, true, 0, dst)
+    x64_byte(code.bytes, 0xb8 + (dst & 7))
+    x64_u64(code.bytes, value)
+}
+
+// 8-bit ALU dst8, src8 (and 20, or 08, xor 30 /r): e.g. `and al, cl` (20 C8).
+x64_alu8_rr: fn(code: &X64Code, op: X64Alu, dst: Int, src: Int) Never! {
+    if dst >= 4 || src >= 4 -> x64_rex(code.bytes, false, src, dst)
+    x64_byte(code.bytes, x64_alu_opcode(op) - 1)
+    x64_modrm_reg(code.bytes, src, dst)
+}
+
+// 32-bit test r32, r32 ([REX] 85 /r): e.g. `test edx, edx` (85 D2).
+x64_test_r32: fn(code: &X64Code, left: Int, right: Int) Never! {
+    if left >= 8 || right >= 8 -> x64_rex(code.bytes, false, right, left)
+    x64_byte(code.bytes, 0x85)
+    x64_modrm_reg(code.bytes, right, left)
+}
+
+// test eax, imm32 (A9 imm32): 5-byte patchable perf-zone site.
+x64_test_eax_imm32: fn(code: &X64Code, value: Int) Never! {
+    x64_byte(code.bytes, 0xa9)
+    x64_u32(code.bytes, value)
+}
+
+// Short conditional jump jcc rel8 (70+cc ib).
+x64_jcc_rel8: fn(code: &X64Code, cond: X64Cond, rel8: Int) Never! {
+    x64_byte(code.bytes, 0x70 + x64_cond_code(cond))
+    x64_byte(code.bytes, rel8)
+}
+
+// Fixed-width sub/add rsp, imm32 (REX.W 81 /5|/0 rsp imm32) for back-patched frames.
+x64_sub_rsp_imm32: fn(code: &X64Code, value: Int) Never! {
+    x64_byte(code.bytes, 0x48)
+    x64_byte(code.bytes, 0x81)
+    x64_byte(code.bytes, 0xec)
+    x64_u32(code.bytes, value)
+}
+
+x64_add_rsp_imm32: fn(code: &X64Code, value: Int) Never! {
+    x64_byte(code.bytes, 0x48)
+    x64_byte(code.bytes, 0x81)
+    x64_byte(code.bytes, 0xc4)
+    x64_u32(code.bytes, value)
+}
+
+// Compact setcc r8 (omits bare REX for al/cl/dl/bl, 3 bytes instead of 4).
+x64_setcc_compact: fn(code: &X64Code, cond: X64Cond, dst: Int) Never! {
+    if dst >= 4 -> x64_rex(code.bytes, false, 0, dst)
+    x64_byte(code.bytes, 0x0f)
+    x64_byte(code.bytes, 0x90 + x64_cond_code(cond))
+    x64_modrm_reg(code.bytes, 0, dst)
+}
+
+// Compact movzx r32, r8 (0F B6 /r; zero-extends into 64-bit register, 3 bytes for eax, al).
+x64_movzx_r32_r8: fn(code: &X64Code, dst: Int, src: Int) Never! {
+    if dst >= 8 || src >= 4 -> x64_rex(code.bytes, false, dst, src)
+    x64_byte(code.bytes, 0x0f)
+    x64_byte(code.bytes, 0xb6)
+    x64_modrm_reg(code.bytes, dst, src)
+}
+
+#Test("Stencil encoder helpers match canonical x86-64 encodings") {
+    c1 := x64_code()
+    x64_leave(c1)
+    x64_ret(c1)
+    assert_eq(c1.bytes, [U8]{0xc9, 0xc3})
+    c2 := x64_code()
+    x64_cmp_gs_abs(c2, X64_R11, 1024)
+    assert_eq(c2.bytes, [U8]{0x65, 0x4c, 0x3b, 0x1c, 0x25, 0x00, 0x04, 0x00, 0x00})
+    c3 := x64_code()
+    x64_alu_rm(c3, X64Alu.Add, X64_RAX, X64_RBP, -8)
+    assert_eq(c3.bytes, [U8]{0x48, 0x03, 0x45, 0xf8})
+    c4 := x64_code()
+    x64_load_sized(c4, X64_RAX, X64_RBP, -8, 4, true)
+    assert_eq(c4.bytes, [U8]{0x48, 0x63, 0x45, 0xf8})
+    c5 := x64_code()
+    x64_mov_r32_imm32(c5, X64_RDX, 1)
+    assert_eq(c5.bytes, [U8]{0xba, 0x01, 0x00, 0x00, 0x00})
+    c6 := x64_code()
+    x64_alu8_rr(c6, X64Alu.And, X64_RAX, X64_RCX)
+    assert_eq(c6.bytes, [U8]{0x20, 0xc8})
+}
+
+

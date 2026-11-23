@@ -33,10 +33,11 @@ use {
         X64ModuleDebug,
         X64ObjectModule,
         X64Reloc,
-        X64RelocTarget,
         X64RuntimeExport,
         X64VariableRange,
         X64_FUNCTION_ALIGN,
+        X64_RELOC_DATA,
+        X64_RELOC_FUNCTION,
         dwarf_test_bytes,
         x64_dwarf_sections,
         x64_object_functions_threads,
@@ -98,6 +99,8 @@ IRX64Tables: struct {
     last_file: String{""},
     last_text: String{""},
     last_text_row: Int{-1},
+    // Module-wide interned runtime symbol names for indexed X64Reloc targets.
+    runtime_symbols: [String]{[String]{}},
 }
 
 // The data rows a function's selection names besides the IR data rows, a
@@ -622,8 +625,8 @@ ir_x64_tables_heat: fn(tables: &IRX64Tables, rows: [Int], hot: [Int], cold: [Int
 // IR_X64_LOCAL_DATA + k) at `rows[k]`, the module's row of that use.
 ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
     loop at in 0..<function.relocs.len() {
-        if function.relocs[at].target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
-            function.relocs[at].target = X64RelocTarget.Data{id: X64DataID{value: rows[id.value - IR_X64_LOCAL_DATA]}}
+        if function.relocs[at].kind == X64_RELOC_DATA && function.relocs[at].target >= IR_X64_LOCAL_DATA {
+            function.relocs[at].target = rows[function.relocs[at].target - IR_X64_LOCAL_DATA]
         }
     }
 }
@@ -632,8 +635,8 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 // precomputed on the selecting worker thread.
 ir_x64_resolve_at: fn(function: &X64CompiledFunction, rows: [Int], local_relocs: [Int]) Never! {
     loop at in local_relocs {
-        if function.relocs[at].target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
-            function.relocs[at].target = X64RelocTarget.Data{id: X64DataID{value: rows[id.value - IR_X64_LOCAL_DATA]}}
+        if function.relocs[at].kind == X64_RELOC_DATA && function.relocs[at].target >= IR_X64_LOCAL_DATA {
+            function.relocs[at].target = rows[function.relocs[at].target - IR_X64_LOCAL_DATA]
         }
     }
 }
@@ -881,14 +884,18 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
 // the member an `offset` or `load` reaches.
 ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String], trace_sink: CompilerTraceSink?{None}) -> IRX64Result Never! {
     m := program.move()
+    // A fast O0 module moves its Drops per body (Opt.jet ir_opt_o0_bodies,
+    // or ir_x64_select_function_in's drop plan); its tail calls are jumps
+    // as on every level (D-TAIL-CALL1), so the tail-call pass runs for it
+    // too and the stencil emitter jumps (X64Patch.jet patch_tail_jump).
     if !m.fast_o0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
         ir_drop_early(m, threads)
         if trace_sink == .Val(sink) -> sink.end("ir.x64.drop_early", m.functions.len())
-        if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
-        ir_tail_calls(m, threads)
-        if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
     }
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
+    ir_tail_calls(m, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
     log := [String]{}
     if names.len() > 0 {
         if m.struct_fields.len() > 0 {
@@ -930,11 +937,12 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     variables := [[X64DebugVariable]]{}
     errors := [String]{}
     if workers <= 1 {
+        fast := if m.fast_o0 -> ir_x64_fast_module_new(m, true) else -> ir_x64_fast_module_empty()
         tables := ir_x64_tables_start(m)
         patch := ir_patch_emitter_new()
         rows := [Int]{}
         loop row in 0..<count {
-            compiled := ir_x64_select_function_in(m, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
+            compiled := ir_x64_select_function_in(m, fast, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
             if compiled.uses.kinds.len() > 0 {
                 ir_x64_tables_add_into(tables, m.functions[row], compiled.uses, rows)
                 if compiled.local_relocs.len() > 0 {
@@ -957,6 +965,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
             debug.push(compiled.debug.move())
             variables.push(compiled.variables.move())
         }
+        if fast.use_indexed_rt -> tables.runtime_symbols = fast.runtime_symbols.move()
         if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
         if trace_sink == .Val(sink) -> sink.begin("ir.x64.tables_finish", "", -1, -1)
         ir_x64_tables_finish(m, tables)
@@ -966,7 +975,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
     order: if m.fast_o0 -> ir_x64_fast_order(weights) else -> compiler_threads_heaviest_first(weights)
-    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: order, next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn, zone_plot: zone_plot, zone_frame: zone_frame}}
+    fast := if m.fast_o0 -> ir_x64_fast_module_new(m, true) else -> ir_x64_fast_module_empty()
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, fast: fast.move(), names: names, order: order, next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn, zone_plot: zone_plot, zone_frame: zone_frame}}
     outputs := [IRX64FunctionResult?]{}
     stops := [String]{}
     outputs.try_reserve(count) ?? panic("reserve failed")
@@ -987,6 +997,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     shells := ir_x64_take_inputs(inputs)
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
     tables := tables_box.pop() ?? panic("the x64 tables task lost its tables")
+    if shells.fast.use_indexed_rt -> tables.runtime_symbols = shells.fast.runtime_symbols.move()
     has_stops: stops.len() == count
     functions.try_reserve(count) ?? panic("reserve failed")
     debug.try_reserve(count) ?? panic("reserve failed")
@@ -1061,6 +1072,460 @@ ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
     order
 }
 
+// Precomputed O0 module-wide read-only tables (built once per module in
+// O(types + names + functions) and shared across worker threads with zero
+// per-instruction string compares or hash lookups).
+O0_CLS_EMPTY: U8{0}
+
+O0_CLS_GENERAL: U8{1}
+
+O0_CLS_FLOAT: U8{2}
+
+O0_KIND_UNIT: U8{0}
+
+O0_KIND_BOOL: U8{1}
+
+O0_KIND_INT: U8{2}
+
+O0_KIND_WORD: U8{3}
+
+O0_KIND_FLOAT: U8{4}
+
+O0_KIND_FLOAT32: U8{5}
+
+O0_KIND_CHAR: U8{6}
+
+O0_KIND_STRING: U8{7}
+
+O0_KIND_POINTER: U8{8}
+
+O0_KIND_AGGREGATE: U8{9}
+
+O0_RTTAG_PLAIN: U8{0}
+
+O0_RTTAG_BLOCK_UNIQUE: U8{1}
+
+O0_RTTAG_BLOCK_RETAIN: U8{2}
+
+O0_RTTAG_BLOCK_RELEASE: U8{3}
+
+O0_RTTAG_INT_TO_I64: U8{4}
+
+O0_RTTAG_INT_CLONE: U8{5}
+
+O0_RTTAG_INT_FROM_I64: U8{6}
+
+O0_RTTAG_MATH_TO_BITS: U8{7}
+
+O0_RTTAG_MATH_FROM_BITS: U8{8}
+
+O0_RTTAG_INT_CHECKED_FIXED: U8{9}
+
+O0_RTTAG_INT_NATIVE_I64: U8{10}
+
+O0_RTTAG_INT_CHECKED_WIDEN: U8{11}
+
+O0_RTTAG_ZONE_OPEN: U8{12}
+
+O0_RTTAG_ZONE_CLOSE: U8{13}
+
+O0_RTTAG_ZONE_FRAME: U8{14}
+
+O0_RTTAG_ZONE_PLOT: U8{15}
+
+O0_RTTAG_ALLOC: U8{16}
+
+O0_RTTAG_ALLOC_VALUE: U8{17}
+
+O0_RTTAG_FREE: U8{18}
+
+O0_RTTAG_ATOMIC_INIT: U8{19}
+
+O0_RTTAG_ATOMIC_LOAD: U8{20}
+
+O0_RTTAG_ATOMIC_STORE: U8{21}
+
+O0_RTTAG_ATOMIC_ADD: U8{22}
+
+O0_RTTAG_ATOMIC_CAS: U8{23}
+
+O0_RTTAG_CLEANUP_ENTER: U8{24}
+
+O0_RTTAG_CLEANUP_LEAVE: U8{25}
+
+O0_RT_INT_ADD: 0
+
+O0_RT_INT_SUB: 1
+
+O0_RT_INT_MUL: 2
+
+O0_RT_INT_DIV: 3
+
+O0_RT_INT_REM: 4
+
+O0_RT_INT_FLOORDIV: 5
+
+O0_RT_INT_MOD: 6
+
+O0_RT_INT_SHL: 7
+
+O0_RT_INT_SHR: 8
+
+O0_RT_INT_BIT_AND: 9
+
+O0_RT_INT_BIT_OR: 10
+
+O0_RT_INT_BIT_XOR: 11
+
+O0_RT_INT_COMPARE: 12
+
+O0_RT_INT_CLONE: 13
+
+O0_RT_INT_DROP: 14
+
+O0_RT_INT_FROM_STATIC: 15
+
+O0_RT_INT_OWNED_FROM_I64: 16
+
+O0_RT_STRING_CLONE: 17
+
+O0_RT_STRING_EQ: 18
+
+O0_RT_STRING_COMPARE: 19
+
+O0_RT_STRING_CONCAT: 20
+
+O0_RT_STRING_CONCAT_VALUE: 21
+
+O0_RT_BLOCK_RELEASE: 22
+
+O0_RT_PANIC_OVERFLOW: 23
+
+O0_RT_NUMERIC_STOP: 24
+
+O0_RT_FIXED_SHIFT_STOP: 25
+
+O0_RT_SESSION_PROPAGATE: 26
+
+O0_RT_CLEANUP_ENTER: 27
+
+O0_RT_CLEANUP_LEAVE: 28
+
+O0_RT_STACK_GROW: 29
+
+O0_RT_STACK_SHRINK: 30
+
+O0_RT_ALLOC_8: 31
+
+O0_RT_ALLOC_VALUE_8: 32
+
+O0_RT_FREE_8: 33
+
+O0_RT_FMOD: 34
+
+O0_RT_FMODF: 35
+
+O0_RT_FLOOR: 36
+
+O0_RT_FLOORF: 37
+
+O0_RT_CHECKS_ARMED: 38
+
+O0_RT_PROCESS_ENDING: 39
+
+O0_RT_PERF_ZONES: 40
+
+O0_RT_STRING_DROP: 41
+
+IRX64FastModule: struct {
+    type_class: [U8],
+    type_kind: [U8],
+    type_size: [Int],
+    type_align: [Int],
+    type_bits: [Int],
+    type_signed: [Bool],
+    type_is_str_drop: [Bool],
+    type_has_drop: [Bool],
+    type_drop_is_int: [Bool],
+    type_drop_is_str_rt: [Bool],
+    type_copy_clones: [Bool],
+    type_clone_is_int: [Bool],
+    type_drop_fn: [Int],
+    type_drop_rt_id: [Int],
+    type_is_alloc_row: [Bool],
+    name_rt_tag: [U8],
+    name_rt_sym_id: [Int],
+    name_is_alloc: [Bool],
+    fn_is_unique: [Bool],
+    fn_has_asm: [Bool],
+    fn_is_stop: [Bool],
+    data_core_cell_rt_id: [Int],
+    runtime_symbols: [String],
+    use_indexed_rt: Bool{false},
+}
+
+ir_x64_fast_module_empty: fn() -> IRX64FastModule Never! {
+    IRX64FastModule{
+        type_class: [U8]{},
+        type_kind: [U8]{},
+        type_size: [Int]{},
+        type_align: [Int]{},
+        type_bits: [Int]{},
+        type_signed: [Bool]{},
+        type_is_str_drop: [Bool]{},
+        type_has_drop: [Bool]{},
+        type_drop_is_int: [Bool]{},
+        type_drop_is_str_rt: [Bool]{},
+        type_copy_clones: [Bool]{},
+        type_clone_is_int: [Bool]{},
+        type_drop_fn: [Int]{},
+        type_drop_rt_id: [Int]{},
+        type_is_alloc_row: [Bool]{},
+        name_rt_tag: [U8]{},
+        name_rt_sym_id: [Int]{},
+        name_is_alloc: [Bool]{},
+        fn_is_unique: [Bool]{},
+        fn_has_asm: [Bool]{},
+        fn_is_stop: [Bool]{},
+        data_core_cell_rt_id: [Int]{},
+        runtime_symbols: [String]{},
+        use_indexed_rt: false,
+    }
+}
+
+ir_x64_fast_intern_rt: fn(table: &IRX64TextRows, symbols: &[String], name: String) -> Int Never! {
+    existing: ir_x64_text_rows_get(table, name)
+    if existing >= 0 -> return existing
+    id: symbols.len()
+    symbols.push("{name}")
+    ir_x64_text_rows_set(table, symbols[id], id)
+    id
+}
+
+ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule Never! {
+    rt_table := IRX64TextRows{}
+    rt_syms := [String]{}
+    rt_syms.try_reserve(128) ?? panic("reserve failed")
+    // Fixed slots 0..41 matching O0_RT_* compile-time constants.
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_add")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_sub")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_mul")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_div")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_rem")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_floor_div")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_mod")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_shl")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_shr")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_bit_and")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_bit_or")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_bit_xor")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_compare")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_int_clone")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_int_drop")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_int_from_static")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_owned_from_i64")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_clone")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_eq")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_compare")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_concat")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_concat_value")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_block_release")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_panic_overflow")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_numeric_stop")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_fixed_shift_stop")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_session_propagate")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_cleanup_enter")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_cleanup_leave")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_stack_grow")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_stack_shrink")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_alloc_8")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_alloc_value_8")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_free_8")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "fmod")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "fmodf")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "floor")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "floorf")
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, IR_X64_CHECKS_ARMED_SYMBOL)
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, IR_X64_PROCESS_ENDING_SYMBOL)
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, IR_X64_PERF_ZONES_SYMBOL)
+    _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_rt_string_drop")
+
+    tcount: m.types.len()
+    type_class := [U8]{}
+    type_kind := [U8]{}
+    type_size := [Int]{}
+    type_align := [Int]{}
+    type_bits := [Int]{}
+    type_signed := [Bool]{}
+    type_is_str_drop := [Bool]{}
+    type_has_drop := [Bool]{}
+    type_drop_is_int := [Bool]{}
+    type_drop_is_str_rt := [Bool]{}
+    type_copy_clones := [Bool]{}
+    type_clone_is_int := [Bool]{}
+    type_drop_fn := [Int]{}
+    type_drop_rt_id := [Int]{}
+    type_is_alloc_row := [Bool]{}
+    type_class.try_reserve(tcount) ?? panic("reserve failed")
+    type_kind.try_reserve(tcount) ?? panic("reserve failed")
+    type_size.try_reserve(tcount) ?? panic("reserve failed")
+    type_align.try_reserve(tcount) ?? panic("reserve failed")
+    type_bits.try_reserve(tcount) ?? panic("reserve failed")
+    type_signed.try_reserve(tcount) ?? panic("reserve failed")
+    type_is_str_drop.try_reserve(tcount) ?? panic("reserve failed")
+    type_has_drop.try_reserve(tcount) ?? panic("reserve failed")
+    type_drop_is_int.try_reserve(tcount) ?? panic("reserve failed")
+    type_drop_is_str_rt.try_reserve(tcount) ?? panic("reserve failed")
+    type_copy_clones.try_reserve(tcount) ?? panic("reserve failed")
+    type_clone_is_int.try_reserve(tcount) ?? panic("reserve failed")
+    type_drop_fn.try_reserve(tcount) ?? panic("reserve failed")
+    type_drop_rt_id.try_reserve(tcount) ?? panic("reserve failed")
+    type_is_alloc_row.try_reserve(tcount) ?? panic("reserve failed")
+    loop (row, ty) in m.types {
+        k: if ty.kind == {
+            .Unit -> O0_KIND_UNIT
+            .Bool -> O0_KIND_BOOL
+            .Int -> O0_KIND_INT
+            .Word -> O0_KIND_WORD
+            .Float -> O0_KIND_FLOAT
+            .Float32 -> O0_KIND_FLOAT32
+            .Char -> O0_KIND_CHAR
+            .String -> O0_KIND_STRING
+            .Pointer -> O0_KIND_POINTER
+            .Aggregate -> O0_KIND_AGGREGATE
+        }
+        cls: if k == O0_KIND_UNIT -> O0_CLS_EMPTY else if k == O0_KIND_FLOAT || k == O0_KIND_FLOAT32 -> O0_CLS_FLOAT else -> O0_CLS_GENERAL
+        type_class.push(cls)
+        type_kind.push(k)
+        type_size.push(ty.size)
+        type_align.push(ty.align)
+        type_bits.push(if ty.bits > 0 -> ty.bits else -> 64)
+        type_signed.push(ty.signed)
+        has_d: ty.drop != ""
+        type_has_drop.push(has_d)
+        type_is_str_drop.push(k == O0_KIND_STRING && has_d)
+        type_drop_is_int.push(k == O0_KIND_INT || ty.drop == "jet_rt_int_drop")
+        type_drop_is_str_rt.push(k == O0_KIND_STRING && ty.drop == "jet_rt_string_drop")
+        type_copy_clones.push(has_d && k != O0_KIND_AGGREGATE && !ir_clone_shares(ty.clone))
+        type_clone_is_int.push(k == O0_KIND_INT || ty.clone == "jet_rt_int_clone")
+        if has_d {
+            if name_rows_value(m.function_rows, ty.drop) == .Val(fid) {
+                type_drop_fn.push(fid)
+                type_drop_rt_id.push(-1)
+            } else {
+                type_drop_fn.push(-1)
+                type_drop_rt_id.push(ir_x64_fast_intern_rt(rt_table, rt_syms, ty.drop))
+            }
+        } else {
+            type_drop_fn.push(-1)
+            type_drop_rt_id.push(-1)
+        }
+        is_alloc := false
+        if m.alloc_types {
+            if ir_box_row(m, row) -> is_alloc = true else if ty.ty == .Apply(aname, _) {
+                if aname == IR_ALLOC_TYPE -> is_alloc = true
+            }
+        }
+        type_is_alloc_row.push(is_alloc)
+    }
+
+    ncount: m.names.len()
+    name_rt_tag := [U8]{}
+    name_rt_sym_id := [Int]{}
+    name_is_alloc := [Bool]{}
+    name_rt_tag.try_reserve(ncount) ?? panic("reserve failed")
+    name_rt_sym_id.try_reserve(ncount) ?? panic("reserve failed")
+    name_is_alloc.try_reserve(ncount) ?? panic("reserve failed")
+    loop name in m.names {
+        tag: if name == {
+            "jet_rt_block_unique" -> O0_RTTAG_BLOCK_UNIQUE
+            "jet_rt_block_retain" -> O0_RTTAG_BLOCK_RETAIN
+            "jet_rt_block_release" -> O0_RTTAG_BLOCK_RELEASE
+            "jet_int_owned_to_i64" -> O0_RTTAG_INT_TO_I64
+            "jet_rt_int_clone" -> O0_RTTAG_INT_CLONE
+            "jet_int_owned_from_i64" -> O0_RTTAG_INT_FROM_I64
+            "jet_std_math_to_bits" -> O0_RTTAG_MATH_TO_BITS
+            "jet_std_math_from_bits" -> O0_RTTAG_MATH_FROM_BITS
+            "jet_int_checked_fixed" -> O0_RTTAG_INT_CHECKED_FIXED
+            "jet_int_native_i64_at" -> O0_RTTAG_INT_NATIVE_I64
+            "jet_int_checked_widen" -> O0_RTTAG_INT_CHECKED_WIDEN
+            "jet_perf_zone_open_named" -> O0_RTTAG_ZONE_OPEN
+            "jet_perf_zone_close" -> O0_RTTAG_ZONE_CLOSE
+            "jet_perf_frame" -> O0_RTTAG_ZONE_FRAME
+            "jet_perf_plot_float" -> O0_RTTAG_ZONE_PLOT
+            "jet_rt_alloc" -> O0_RTTAG_ALLOC
+            "jet_rt_alloc_value" -> O0_RTTAG_ALLOC_VALUE
+            "jet_rt_free" -> O0_RTTAG_FREE
+            "jet_rt_atomic_i64_init" | "jet_rt_atomic_u64_init" -> O0_RTTAG_ATOMIC_INIT
+            "jet_rt_atomic_i64_load" | "jet_rt_atomic_u64_load" -> O0_RTTAG_ATOMIC_LOAD
+            "jet_rt_atomic_i64_store" | "jet_rt_atomic_u64_store" -> O0_RTTAG_ATOMIC_STORE
+            "jet_rt_atomic_i64_add" | "jet_rt_atomic_u64_add" -> O0_RTTAG_ATOMIC_ADD
+            "jet_rt_atomic_i64_compare_exchange" | "jet_rt_atomic_u64_compare_exchange" -> O0_RTTAG_ATOMIC_CAS
+            "jet_rt_cleanup_enter" -> O0_RTTAG_CLEANUP_ENTER
+            "jet_rt_cleanup_leave" -> O0_RTTAG_CLEANUP_LEAVE
+            else -> O0_RTTAG_PLAIN
+        }
+        name_rt_tag.push(tag)
+        is_alloc: m.alloc_types && name.starts_with("jet_rt_alloc")
+        name_is_alloc.push(is_alloc)
+        if tag != O0_RTTAG_PLAIN || is_alloc || name.starts_with("jet_") {
+            name_rt_sym_id.push(ir_x64_fast_intern_rt(rt_table, rt_syms, name))
+        } else {
+            name_rt_sym_id.push(-1)
+        }
+    }
+
+    fcount: m.functions.len()
+    fn_is_unique := [Bool]{}
+    fn_has_asm := [Bool]{}
+    fn_is_stop := [Bool]{}
+    fn_is_unique.try_reserve(fcount) ?? panic("reserve failed")
+    fn_has_asm.try_reserve(fcount) ?? panic("reserve failed")
+    fn_is_stop.try_reserve(fcount) ?? panic("reserve failed")
+    loop f in m.functions {
+        fn_is_unique.push(f.key.starts_with("#unique<"))
+        fn_has_asm.push(f.asm != None)
+        fn_is_stop.push(ir_stop_key(f.key))
+    }
+
+    dcount: m.data.len()
+    data_core_cell_rt_id := [Int]{}
+    data_core_cell_rt_id.try_reserve(dcount) ?? panic("reserve failed")
+    loop _ in 0..<dcount -> data_core_cell_rt_id.push(-1)
+    loop (drow, symbol) in m.core_cells {
+        if drow >= 0 && drow < dcount {
+            data_core_cell_rt_id[drow] = ir_x64_fast_intern_rt(rt_table, rt_syms, symbol)
+        }
+    }
+
+    IRX64FastModule{
+        type_class: type_class.move(),
+        type_kind: type_kind.move(),
+        type_size: type_size.move(),
+        type_align: type_align.move(),
+        type_bits: type_bits.move(),
+        type_signed: type_signed.move(),
+        type_is_str_drop: type_is_str_drop.move(),
+        type_has_drop: type_has_drop.move(),
+        type_drop_is_int: type_drop_is_int.move(),
+        type_drop_is_str_rt: type_drop_is_str_rt.move(),
+        type_copy_clones: type_copy_clones.move(),
+        type_clone_is_int: type_clone_is_int.move(),
+        type_drop_fn: type_drop_fn.move(),
+        type_drop_rt_id: type_drop_rt_id.move(),
+        type_is_alloc_row: type_is_alloc_row.move(),
+        name_rt_tag: name_rt_tag.move(),
+        name_rt_sym_id: name_rt_sym_id.move(),
+        name_is_alloc: name_is_alloc.move(),
+        fn_is_unique: fn_is_unique.move(),
+        fn_has_asm: fn_has_asm.move(),
+        fn_is_stop: fn_is_stop.move(),
+        data_core_cell_rt_id: data_core_cell_rt_id.move(),
+        runtime_symbols: rt_syms.move(),
+        use_indexed_rt: use_indexed_rt,
+    }
+}
+
 // The selecting threads' inputs, read-only while they run: the module
 // (moved in and taken back after the join), the JET_X64_EMIT_LOG names
 // (ir_x64_log_names), the claim order (heaviest first) and its next rank,
@@ -1068,6 +1533,7 @@ ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
 // is selecting (-1 none).
 IRX64Inputs: struct {
     programs: [IRModule],
+    fast: IRX64FastModule{ir_x64_fast_module_empty()},
     names: [String],
     order: [Int],
     next: Atomic<Int>,
@@ -1189,7 +1655,7 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
         loop rank in first..<end {
             row: reads.value.order[rank]
             reads.value.seats[seat].row.store(row)
-            compiled := ir_x64_select_function_in(reads.value.programs[0], row, reads.value.names, poll, trap, turn, zone_plot, zone_frame, patch)
+            compiled := ir_x64_select_function_in(reads.value.programs[0], reads.value.fast, row, reads.value.names, poll, trap, turn, zone_plot, zone_frame, patch)
             selected.push(IRX64Selected{row: row, compiled: compiled.move()})
         }
     }
@@ -1215,7 +1681,10 @@ ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure,
 
 ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
     permit := inputs.guard_edit()
-    IRX64Inputs{programs: compiler_take_rows<IRModule>(permit.value.programs), names: [String]{}, order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
+    fast_out := ir_x64_fast_module_empty()
+    fast_out.runtime_symbols = compiler_take_rows<String>(permit.value.fast.runtime_symbols)
+    fast_out.use_indexed_rt = permit.value.fast.use_indexed_rt
+    IRX64Inputs{programs: compiler_take_rows<IRModule>(permit.value.programs), fast: fast_out.move(), names: [String]{}, order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
 }
 
 // The relocatable object of `compiled` (moved in, every row moved on): its
@@ -1319,7 +1788,7 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
     debug := [X64FunctionDebug]{}
     errors := ir_x64_main_rows(owned, functions, debug)
     IRX64Program{
-        program: X64ObjectModule{data: compiler_take_rows<X64Data>(owned.tables.data), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}},
+        program: X64ObjectModule{data: compiler_take_rows<X64Data>(owned.tables.data), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}, runtime_symbols: compiler_take_rows<String>(owned.tables.runtime_symbols)},
         functions: functions.move(),
         debug: debug.move(),
         threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available},
@@ -1477,15 +1946,12 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
         row := id_first[id + 1]
         loop row >= 0 {
             loop reloc in functions[row].relocs {
-                if reloc.target == {
-                    .Function(target) -> {
-                        at: target.value + 1
-                        if at >= 0 && at < reached.len() && !reached[at] {
-                            reached[at] = true
-                            work.push(target.value)
-                        }
+                if reloc.kind == X64_RELOC_FUNCTION {
+                    at: reloc.target + 1
+                    if at >= 0 && at < reached.len() && !reached[at] {
+                        reached[at] = true
+                        work.push(reloc.target)
                     }
-                    .Runtime(_) | .Data(_) | .RuntimeData(_) -> {}
                 }
             }
             row = id_next[row]
@@ -1836,6 +2302,7 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
         data: compiler_take_rows<X64Data>(owned.tables.data),
         debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(owned.tables.files), types: compiler_take_rows<X64DebugType>(owned.tables.debug_types), level: owned.program.debug_level, sources: compiler_take_rows<X64DebugSource>(owned.program.debug_sources)},
         functions: sources.move(),
+        runtime_symbols: compiler_take_rows<String>(owned.tables.runtime_symbols),
     }
 }
 
@@ -1945,4 +2412,46 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
         to_handle: if described.kind == .Typedef(target) -> target else -> -1
         assert(to_handle >= 0, "{shown[at]} is a typedef of its handle's pointer")
     }
+}
+
+// walk(n, acc) returns walk(n - 1, acc + n): in a fast O0 module, which the
+// stencil emitter compiles, the call is a jump to walk (D-TAIL-CALL1), so the
+// recursion runs in constant stack; no `call` reaches walk.
+#Test("a fast O0 module's tail call is a jump") {
+    m := ir_module_new()
+    m.fast_o0 = true
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    bool_row: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    acc: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "acc"), 1)
+    f.result = word
+    zero: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(f, bool_row, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    left: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    walked: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, zero, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Eq, done, n, zero, IR_OVERFLOW_WRAP, 2)
+    _ := ir_open_if(f, done, 2)
+    _ := ir_emit(f, IROp.Return, -1, acc, -1, -1, 2)
+    ir_end(f, 2)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 3)
+    _ := ir_emit(f, IROp.Sub, left, n, one, IR_OVERFLOW_WRAP, 3)
+    _ := ir_emit(f, IROp.Add, sum, acc, n, IR_OVERFLOW_WRAP, 3)
+    passed: ir_args(f, [Int]{left, sum})
+    _ := ir_emit(f, IROp.Call, walked, 0, passed, 2, 3)
+    _ := ir_emit(f, IROp.Return, -1, walked, -1, -1, 3)
+    m.functions.push(f)
+    compiled: ir_x64_compile_module(m, compiler_threads_single())
+    assert(compiled.errors.is_empty(), compiled.errors.join("; "))
+    code: compiled.functions[0].code
+    jumps := 0
+    loop reloc in compiled.functions[0].relocs {
+        if reloc.kind != X64_RELOC_FUNCTION || reloc.target != 0 -> next
+        assert(reloc.at > 0 && code[reloc.at - 1] == U8{0xE9}, "walk reaches walk only by a jmp")
+        jumps += 1
+    }
+    assert_eq(jumps, 1)
 }

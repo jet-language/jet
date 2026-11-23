@@ -1,0 +1,1426 @@
+// Toolchain generator for the O0 copy-and-patch x86-64 stencil set: encodes
+// every O0 stencil through JetBackend/Source/X64/Encoder.jet (the single
+// encoding authority) and emits Compiler/JetIR/Source/X64StencilData.jet as
+// compile-time-unrolled byte stampers with fixed hole patches.
+//
+//   x64-stencils --write [--out=PATH]
+//   x64-stencils --check [--out=PATH]
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    jet_backend.[
+        X64Alu,
+        X64Cond,
+        X64FloatOp,
+        X64Shift,
+        X64_R10,
+        X64_R11,
+        X64_R8,
+        X64_R9,
+        X64_RAX,
+        X64_RBP,
+        X64_RCX,
+        X64_RDI,
+        X64_RDX,
+        X64_RSI,
+        X64_RSP,
+        x64_add_rsp_imm32,
+        x64_alu8_rr,
+        x64_alu_mi,
+        x64_alu_ri,
+        x64_alu_rm,
+        x64_alu_rr,
+        x64_call_reg,
+        x64_call_rel32,
+        x64_cmov_rr,
+        x64_cmp_gs_abs,
+        x64_cmp_gs_imm8,
+        x64_code,
+        x64_count_step,
+        x64_cqo,
+        x64_cvtsd2ss,
+        x64_cvtsi2sd,
+        x64_cvtsi2ss,
+        x64_cvtss2sd,
+        x64_cvttsd2si,
+        x64_cvttss2si,
+        x64_div,
+        x64_float_load,
+        x64_float_op,
+        x64_float_op_mem,
+        x64_float_store,
+        x64_idiv,
+        x64_imul_rr,
+        x64_imul_rri,
+        x64_imul_wide,
+        x64_jcc_rel32,
+        x64_jcc_rel8,
+        x64_jmp_rel32,
+        x64_lea,
+        x64_lea_rip,
+        x64_leave,
+        x64_load,
+        x64_load_rip,
+        x64_load_sized,
+        x64_load_u8,
+        x64_lock_cmpxchg,
+        x64_lock_xadd,
+        x64_mov_gs_abs,
+        x64_mov_mem_imm32,
+        x64_mov_r32_imm32,
+        x64_mov_rr,
+        x64_movabs_ri,
+        x64_movnti,
+        x64_movq_from_xmm,
+        x64_movq_to_xmm,
+        x64_movzx_r32_r8,
+        x64_mul,
+        x64_neg,
+        x64_patch_rel32,
+        x64_pop,
+        x64_push,
+        x64_rep_movsb,
+        x64_ret,
+        x64_setcc_compact,
+        x64_sfence,
+        x64_shift_cl,
+        x64_shift_ri,
+        x64_store_u8,
+        x64_store,
+        x64_store_sized,
+        x64_sub_rsp_imm32,
+        x64_test_eax_imm32,
+        x64_test_mi,
+        x64_test_r32,
+        x64_test_ri,
+        x64_test_rr,
+        x64_ucomisd,
+        x64_ucomiss,
+        x64_ud2,
+        x64_vfmadd213sd,
+        x64_xchg_mem,
+        x64_zero,
+    ]
+}
+
+DEFAULT_OUT: "JetIR/Source/X64StencilData.jet"
+
+// Hole encodings stamped into generated functions (plain Int constants).
+HOLE_I8: 0
+HOLE_I32: 1
+HOLE_I64: 2
+HOLE_ZERO32: 3
+HOLE_CC_SET: 4
+HOLE_CC_JCC: 5
+HOLE_CC_CMOV: 6
+
+StencilHole: struct {
+    at: Int,
+    kind: Int,
+    param: String,
+}
+
+StencilSpec: struct {
+    name: String,
+    inline_always: Bool,
+    params: [String],
+    bytes: [U8],
+    holes: [StencilHole],
+}
+
+SENTINEL_D8: -16
+SENTINEL_D32: -512
+SENTINEL_I32: 0x12345678
+SENTINEL_I64: 0x1122334455667788
+
+hex_digit: fn(n: Int) -> String Never! {
+    if n == {
+        0 -> "0"
+        1 -> "1"
+        2 -> "2"
+        3 -> "3"
+        4 -> "4"
+        5 -> "5"
+        6 -> "6"
+        7 -> "7"
+        8 -> "8"
+        9 -> "9"
+        10 -> "a"
+        11 -> "b"
+        12 -> "c"
+        13 -> "d"
+        14 -> "e"
+        else -> "f"
+    }
+}
+
+hex_byte: fn(b: U8) -> String Never! {
+    v: Int{b}
+    "0x{hex_digit((v >> 4) & 15)}{hex_digit(v & 15)}"
+}
+
+hole_width: fn(kind: Int) -> Int Never! {
+    if kind == HOLE_I32 || kind == HOLE_ZERO32 -> return 4
+    if kind == HOLE_I64 -> return 8
+    1
+}
+
+add_stencil: fn(list: &[StencilSpec], name: String, inline_always: Bool, params: [String], bytes: [U8], holes: [StencilHole]) Never! {
+    // Sanity-check every hole fits inside bytes and does not overlap.
+    n: bytes.len()
+    used := [U8]{}
+    loop _ in 0..<n -> used.push(U8{0})
+    loop h in holes {
+        w: hole_width(h.kind)
+        if h.at < 0 || h.at + w > n -> panic("stencil {name}: hole at {h.at} width {w} out of range {n}")
+        loop k in 0..<w {
+            if used[h.at + k] != 0 -> panic("stencil {name}: overlapping hole at {h.at + k}")
+            used[h.at + k] = U8{1}
+        }
+    }
+    list.push(StencilSpec{name: name, inline_always: inline_always, params: params, bytes: bytes, holes: holes})
+}
+
+add_frame_stencils: fn(s: &[StencilSpec]) Never! {
+    c0 := x64_code()
+    x64_push(c0, X64_RBP)
+    x64_mov_rr(c0, X64_RBP, X64_RSP)
+    x64_sub_rsp_imm32(c0, SENTINEL_I32)
+    add_stencil(s, "o0_st_prologue", true, [String]{"frame"}, c0.bytes, [StencilHole]{StencilHole{at: 7, kind: HOLE_I32, param: "frame"}})
+
+    c1 := x64_code()
+    x64_cmp_gs_abs(c1, X64_RSP, SENTINEL_I32)
+    jb_at1: x64_jcc_rel32(c1, X64Cond.B)
+    add_stencil(s, "o0_st_stack_check_small", false, [String]{"limit"}, c1.bytes, [StencilHole]{
+        StencilHole{at: 5, kind: HOLE_I32, param: "limit"},
+        StencilHole{at: jb_at1, kind: HOLE_ZERO32, param: ""},
+    })
+
+    c2 := x64_code()
+    x64_lea(c2, X64_R11, X64_RSP, SENTINEL_D32)
+    x64_cmp_gs_abs(c2, X64_R11, SENTINEL_I32)
+    jb_at2: x64_jcc_rel32(c2, X64Cond.B)
+    add_stencil(s, "o0_st_stack_check_large", false, [String]{"neg_frame", "limit"}, c2.bytes, [StencilHole]{
+        StencilHole{at: 4, kind: HOLE_I32, param: "neg_frame"},
+        StencilHole{at: 13, kind: HOLE_I32, param: "limit"},
+        StencilHole{at: jb_at2, kind: HOLE_ZERO32, param: ""},
+    })
+
+    c3 := x64_code()
+    x64_zero(c3, X64_RDX)
+    x64_leave(c3)
+    x64_ret(c3)
+    add_stencil(s, "o0_st_epilogue", true, [String]{}, c3.bytes, [StencilHole]{})
+
+    c4 := x64_code()
+    x64_zero(c4, X64_RDX)
+    x64_sfence(c4)
+    x64_leave(c4)
+    x64_ret(c4)
+    add_stencil(s, "o0_st_epilogue_sfence", true, [String]{}, c4.bytes, [StencilHole]{})
+
+    c5 := x64_code()
+    x64_mov_r32_imm32(c5, X64_RDX, 1)
+    x64_leave(c5)
+    x64_ret(c5)
+    add_stencil(s, "o0_st_stop_exit", true, [String]{}, c5.bytes, [StencilHole]{})
+
+    c6 := x64_code()
+    x64_mov_r32_imm32(c6, X64_RDX, 1)
+    x64_sfence(c6)
+    x64_leave(c6)
+    x64_ret(c6)
+    add_stencil(s, "o0_st_stop_exit_sfence", true, [String]{}, c6.bytes, [StencilHole]{})
+
+    c7 := x64_code()
+    x64_leave(c7)
+    add_stencil(s, "o0_st_leave", true, [String]{}, c7.bytes, [StencilHole]{})
+
+    c8 := x64_code()
+    x64_ret(c8)
+    add_stencil(s, "o0_st_ret", true, [String]{}, c8.bytes, [StencilHole]{})
+
+    c9 := x64_code()
+    x64_ud2(c9)
+    add_stencil(s, "o0_st_ud2", true, [String]{}, c9.bytes, [StencilHole]{})
+
+    c10 := x64_code()
+    x64_sfence(c10)
+    add_stencil(s, "o0_st_sfence", true, [String]{}, c10.bytes, [StencilHole]{})
+
+    c11 := x64_code()
+    x64_sub_rsp_imm32(c11, SENTINEL_I32)
+    add_stencil(s, "o0_st_sub_rsp_i32", true, [String]{"imm"}, c11.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "imm"}})
+
+    c12 := x64_code()
+    x64_add_rsp_imm32(c12, SENTINEL_I32)
+    add_stencil(s, "o0_st_add_rsp_i32", true, [String]{"imm"}, c12.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "imm"}})
+
+    c13 := x64_code()
+    x64_push(c13, X64_RAX)
+    x64_push(c13, X64_RAX)
+    add_stencil(s, "o0_st_push_rax2", true, [String]{}, c13.bytes, [StencilHole]{})
+
+    c14 := x64_code()
+    x64_pop(c14, X64_RAX)
+    x64_pop(c14, X64_RAX)
+    add_stencil(s, "o0_st_pop_rax2", true, [String]{}, c14.bytes, [StencilHole]{})
+}
+
+add_reg_stencils: fn(s: &[StencilSpec]) Never! {
+    hot_regs: [Int]{X64_RAX, X64_RCX, X64_RDX, X64_RSI, X64_RDI, X64_R8, X64_R9, X64_R10, X64_R11}
+    hot_names: [String]{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
+    loop idx in 0..<hot_regs.len() {
+        reg: hot_regs[idx]
+        rn: hot_names[idx]
+        c8 := x64_code()
+        x64_load(c8, reg, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_load_{rn}_8", true, [String]{"disp"}, c8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "disp"}})
+
+        c32 := x64_code()
+        x64_load(c32, reg, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_load_{rn}_32", true, [String]{"disp"}, c32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "disp"}})
+
+        s8 := x64_code()
+        x64_store(s8, X64_RBP, SENTINEL_D8, reg)
+        add_stencil(s, "o0_st_store_{rn}_8", true, [String]{"disp"}, s8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "disp"}})
+
+        s32 := x64_code()
+        x64_store(s32, X64_RBP, SENTINEL_D32, reg)
+        add_stencil(s, "o0_st_store_{rn}_32", true, [String]{"disp"}, s32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "disp"}})
+
+        l8 := x64_code()
+        x64_lea(l8, reg, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_lea_{rn}_8", true, [String]{"disp"}, l8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "disp"}})
+
+        l32 := x64_code()
+        x64_lea(l32, reg, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_lea_{rn}_32", true, [String]{"disp"}, l32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "disp"}})
+
+        z := x64_code()
+        x64_zero(z, reg)
+        add_stencil(s, "o0_st_zero_{rn}", true, [String]{}, z.bytes, [StencilHole]{})
+
+        m32 := x64_code()
+        x64_mov_r32_imm32(m32, reg, SENTINEL_I32)
+        add_stencil(s, "o0_st_mov32_{rn}_i32", true, [String]{"imm"}, m32.bytes, [StencilHole]{StencilHole{at: m32.bytes.len() - 4, kind: HOLE_I32, param: "imm"}})
+
+        m64 := x64_code()
+        x64_movabs_ri(m64, reg, SENTINEL_I64)
+        add_stencil(s, "o0_st_mov64_{rn}_i64", true, [String]{"imm"}, m64.bytes, [StencilHole]{StencilHole{at: 2, kind: HOLE_I64, param: "imm"}})
+    }
+
+    r1 := x64_code()
+    x64_store(r1, X64_RSP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_store_rsp_rax_8", true, [String]{"disp"}, r1.bytes, [StencilHole]{StencilHole{at: r1.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+    r2 := x64_code()
+    x64_store(r2, X64_RSP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_store_rsp_rax_32", true, [String]{"disp"}, r2.bytes, [StencilHole]{StencilHole{at: r2.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+    r3 := x64_code()
+    x64_float_store(r3, false, X64_RSP, SENTINEL_D8, 0)
+    add_stencil(s, "o0_st_store_rsp_xmm0_f64_8", true, [String]{"disp"}, r3.bytes, [StencilHole]{StencilHole{at: r3.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+    r4 := x64_code()
+    x64_float_store(r4, false, X64_RSP, SENTINEL_D32, 0)
+    add_stencil(s, "o0_st_store_rsp_xmm0_f64_32", true, [String]{"disp"}, r4.bytes, [StencilHole]{StencilHole{at: r4.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+    r5 := x64_code()
+    x64_float_store(r5, true, X64_RSP, SENTINEL_D8, 0)
+    add_stencil(s, "o0_st_store_rsp_xmm0_f32_8", true, [String]{"disp"}, r5.bytes, [StencilHole]{StencilHole{at: r5.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+    r6 := x64_code()
+    x64_float_store(r6, true, X64_RSP, SENTINEL_D32, 0)
+    add_stencil(s, "o0_st_store_rsp_xmm0_f32_32", true, [String]{"disp"}, r6.bytes, [StencilHole]{StencilHole{at: r6.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+
+    loop xmm in 0..<8 {
+        l8d := x64_code()
+        x64_float_load(l8d, false, xmm, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_load_xmm{xmm}_f64_8", true, [String]{"disp"}, l8d.bytes, [StencilHole]{StencilHole{at: l8d.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        l32d := x64_code()
+        x64_float_load(l32d, false, xmm, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_load_xmm{xmm}_f64_32", true, [String]{"disp"}, l32d.bytes, [StencilHole]{StencilHole{at: l32d.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+        s8d := x64_code()
+        x64_float_store(s8d, false, X64_RBP, SENTINEL_D8, xmm)
+        add_stencil(s, "o0_st_store_xmm{xmm}_f64_8", true, [String]{"disp"}, s8d.bytes, [StencilHole]{StencilHole{at: s8d.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        s32d := x64_code()
+        x64_float_store(s32d, false, X64_RBP, SENTINEL_D32, xmm)
+        add_stencil(s, "o0_st_store_xmm{xmm}_f64_32", true, [String]{"disp"}, s32d.bytes, [StencilHole]{StencilHole{at: s32d.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+
+        l8s := x64_code()
+        x64_float_load(l8s, true, xmm, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_load_xmm{xmm}_f32_8", true, [String]{"disp"}, l8s.bytes, [StencilHole]{StencilHole{at: l8s.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        l32s := x64_code()
+        x64_float_load(l32s, true, xmm, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_load_xmm{xmm}_f32_32", true, [String]{"disp"}, l32s.bytes, [StencilHole]{StencilHole{at: l32s.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+        s8s := x64_code()
+        x64_float_store(s8s, true, X64_RBP, SENTINEL_D8, xmm)
+        add_stencil(s, "o0_st_store_xmm{xmm}_f32_8", true, [String]{"disp"}, s8s.bytes, [StencilHole]{StencilHole{at: s8s.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        s32s := x64_code()
+        x64_float_store(s32s, true, X64_RBP, SENTINEL_D32, xmm)
+        add_stencil(s, "o0_st_store_xmm{xmm}_f32_32", true, [String]{"disp"}, s32s.bytes, [StencilHole]{StencilHole{at: s32s.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+    }
+
+    mov_pairs_dst: [Int]{X64_RAX, X64_RCX, X64_RDX, X64_RDI, X64_RSI, X64_R11, X64_RAX, X64_RDI, X64_RSI}
+    mov_pairs_src: [Int]{X64_RCX, X64_RAX, X64_RAX, X64_RAX, X64_RAX, X64_RAX, X64_RDX, X64_RCX, X64_RCX}
+    mov_pairs_name: [String]{"rax_rcx", "rcx_rax", "rdx_rax", "rdi_rax", "rsi_rax", "r11_rax", "rax_rdx", "rdi_rcx", "rsi_rcx"}
+    loop idx in 0..<mov_pairs_dst.len() {
+        mc := x64_code()
+        x64_mov_rr(mc, mov_pairs_dst[idx], mov_pairs_src[idx])
+        add_stencil(s, "o0_st_mov_{mov_pairs_name[idx]}", true, [String]{}, mc.bytes, [StencilHole]{})
+    }
+}
+
+add_const_stencils: fn(s: &[StencilSpec]) Never! {
+    c1 := x64_code()
+    x64_mov_mem_imm32(c1, X64_RBP, SENTINEL_D8, SENTINEL_I32)
+    add_stencil(s, "o0_st_const_i32_8", true, [String]{"dst", "imm"}, c1.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "dst"},
+        StencilHole{at: 4, kind: HOLE_I32, param: "imm"},
+    })
+    c2 := x64_code()
+    x64_mov_mem_imm32(c2, X64_RBP, SENTINEL_D32, SENTINEL_I32)
+    add_stencil(s, "o0_st_const_i32_32", true, [String]{"dst", "imm"}, c2.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "dst"},
+        StencilHole{at: 7, kind: HOLE_I32, param: "imm"},
+    })
+    c3 := x64_code()
+    x64_movabs_ri(c3, X64_RAX, SENTINEL_I64)
+    x64_store(c3, X64_RBP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_const_i64_8", true, [String]{"dst", "imm"}, c3.bytes, [StencilHole]{
+        StencilHole{at: 2, kind: HOLE_I64, param: "imm"},
+        StencilHole{at: 13, kind: HOLE_I8, param: "dst"},
+    })
+    c4 := x64_code()
+    x64_movabs_ri(c4, X64_RAX, SENTINEL_I64)
+    x64_store(c4, X64_RBP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_const_i64_32", true, [String]{"dst", "imm"}, c4.bytes, [StencilHole]{
+        StencilHole{at: 2, kind: HOLE_I64, param: "imm"},
+        StencilHole{at: 13, kind: HOLE_I32, param: "dst"},
+    })
+    cp8 := x64_code()
+    x64_load(cp8, X64_RAX, X64_RBP, SENTINEL_D8)
+    x64_store(cp8, X64_RBP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_copy_8", true, [String]{"src", "dst"}, cp8.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "src"},
+        StencilHole{at: 7, kind: HOLE_I8, param: "dst"},
+    })
+    cp32 := x64_code()
+    x64_load(cp32, X64_RAX, X64_RBP, SENTINEL_D32)
+    x64_store(cp32, X64_RBP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_copy_32", true, [String]{"src", "dst"}, cp32.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "src"},
+        StencilHole{at: 10, kind: HOLE_I32, param: "dst"},
+    })
+
+    r1 := x64_code()
+    h1: x64_lea_rip(r1, X64_RAX)
+    add_stencil(s, "o0_st_lea_rip_rax", true, [String]{}, r1.bytes, [StencilHole]{StencilHole{at: h1, kind: HOLE_ZERO32, param: ""}})
+    r2 := x64_code()
+    h2: x64_lea_rip(r2, X64_RDI)
+    add_stencil(s, "o0_st_lea_rip_rdi", true, [String]{}, r2.bytes, [StencilHole]{StencilHole{at: h2, kind: HOLE_ZERO32, param: ""}})
+    r3 := x64_code()
+    h3: x64_lea_rip(r3, X64_RDX)
+    add_stencil(s, "o0_st_lea_rip_rdx", true, [String]{}, r3.bytes, [StencilHole]{StencilHole{at: h3, kind: HOLE_ZERO32, param: ""}})
+    r4 := x64_code()
+    h4: x64_lea_rip(r4, X64_R11)
+    add_stencil(s, "o0_st_lea_rip_r11", true, [String]{}, r4.bytes, [StencilHole]{StencilHole{at: h4, kind: HOLE_ZERO32, param: ""}})
+    r5 := x64_code()
+    h5: x64_load_rip(r5, X64_RAX)
+    add_stencil(s, "o0_st_load_rip_rax", true, [String]{}, r5.bytes, [StencilHole]{StencilHole{at: h5, kind: HOLE_ZERO32, param: ""}})
+    r6 := x64_code()
+    h6: x64_load_rip(r6, X64_RCX)
+    add_stencil(s, "o0_st_load_rip_rcx", true, [String]{}, r6.bytes, [StencilHole]{StencilHole{at: h6, kind: HOLE_ZERO32, param: ""}})
+    r7 := x64_code()
+    h7: x64_lea_rip(r7, X64_RAX)
+    x64_store(r7, X64_RBP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_lea_rip_slot_8", true, [String]{"dst"}, r7.bytes, [StencilHole]{
+        StencilHole{at: h7, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 10, kind: HOLE_I8, param: "dst"},
+    })
+    r8 := x64_code()
+    h8: x64_lea_rip(r8, X64_RAX)
+    x64_load(r8, X64_RAX, X64_RAX, 0)
+    x64_store(r8, X64_RBP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_static_int_8", true, [String]{"dst"}, r8.bytes, [StencilHole]{
+        StencilHole{at: h8, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 13, kind: HOLE_I8, param: "dst"},
+    })
+}
+
+add_alu_stencils: fn(s: &[StencilSpec]) Never! {
+    alu_ops: [X64Alu]{X64Alu.Add, X64Alu.Sub, X64Alu.Cmp, X64Alu.And, X64Alu.Or, X64Alu.Xor}
+    alu_names: [String]{"add", "sub", "cmp", "and", "or", "xor"}
+    loop idx in 0..<alu_ops.len() {
+        aop: alu_ops[idx]
+        an: alu_names[idx]
+        m8 := x64_code()
+        x64_alu_rm(m8, aop, X64_RAX, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_{an}_rax_m8", true, [String]{"disp"}, m8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "disp"}})
+        m32 := x64_code()
+        x64_alu_rm(m32, aop, X64_RAX, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_{an}_rax_m32", true, [String]{"disp"}, m32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "disp"}})
+        rr := x64_code()
+        x64_alu_rr(rr, aop, X64_RAX, X64_RCX)
+        add_stencil(s, "o0_st_{an}_rax_rcx", true, [String]{}, rr.bytes, [StencilHole]{})
+        ri8 := x64_code()
+        x64_alu_ri(ri8, aop, X64_RAX, 1)
+        add_stencil(s, "o0_st_{an}_rax_i8", true, [String]{"imm"}, ri8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+        ri32 := x64_code()
+        x64_alu_ri(ri32, aop, X64_RAX, SENTINEL_I32)
+        add_stencil(s, "o0_st_{an}_rax_i32", true, [String]{"imm"}, ri32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "imm"}})
+    }
+
+    c1 := x64_code()
+    x64_imul_rr(c1, X64_RAX, X64_RCX)
+    add_stencil(s, "o0_st_imul_rax_rcx", true, [String]{}, c1.bytes, [StencilHole]{})
+    c2 := x64_code()
+    x64_imul_rri(c2, X64_RAX, X64_RAX, SENTINEL_I32)
+    add_stencil(s, "o0_st_imul_rax_i32", true, [String]{"imm"}, c2.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "imm"}})
+    c3 := x64_code()
+    x64_cqo(c3)
+    x64_idiv(c3, X64_RCX)
+    add_stencil(s, "o0_st_cqo_idiv_rcx", true, [String]{}, c3.bytes, [StencilHole]{})
+    c4 := x64_code()
+    x64_zero(c4, X64_RDX)
+    x64_div(c4, X64_RCX)
+    add_stencil(s, "o0_st_div_rcx", true, [String]{}, c4.bytes, [StencilHole]{})
+    c5 := x64_code()
+    x64_mul(c5, X64_RCX)
+    add_stencil(s, "o0_st_mul_rcx", true, [String]{}, c5.bytes, [StencilHole]{})
+    c6 := x64_code()
+    x64_imul_wide(c6, X64_RCX)
+    add_stencil(s, "o0_st_imul_wide_rcx", true, [String]{}, c6.bytes, [StencilHole]{})
+    c7 := x64_code()
+    x64_neg(c7, X64_RAX)
+    add_stencil(s, "o0_st_neg_rax", true, [String]{}, c7.bytes, [StencilHole]{})
+    c8 := x64_code()
+    x64_shift_cl(c8, X64Shift.Shl, X64_RAX)
+    add_stencil(s, "o0_st_shl_rax_cl", true, [String]{}, c8.bytes, [StencilHole]{})
+    c9 := x64_code()
+    x64_shift_cl(c9, X64Shift.Shr, X64_RAX)
+    add_stencil(s, "o0_st_shr_rax_cl", true, [String]{}, c9.bytes, [StencilHole]{})
+    c10 := x64_code()
+    x64_shift_cl(c10, X64Shift.Sar, X64_RAX)
+    add_stencil(s, "o0_st_sar_rax_cl", true, [String]{}, c10.bytes, [StencilHole]{})
+    c11 := x64_code()
+    x64_shift_ri(c11, X64Shift.Shl, X64_RAX, 1)
+    add_stencil(s, "o0_st_shl_rax_i8", true, [String]{"imm"}, c11.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    c12 := x64_code()
+    x64_shift_ri(c12, X64Shift.Shr, X64_RAX, 1)
+    add_stencil(s, "o0_st_shr_rax_i8", true, [String]{"imm"}, c12.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    c13 := x64_code()
+    x64_shift_ri(c13, X64Shift.Sar, X64_RAX, 1)
+    add_stencil(s, "o0_st_sar_rax_i8", true, [String]{"imm"}, c13.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    c14 := x64_code()
+    x64_test_rr(c14, X64_RAX, X64_RAX)
+    add_stencil(s, "o0_st_test_rax_rax", true, [String]{}, c14.bytes, [StencilHole]{})
+    c15 := x64_code()
+    x64_test_rr(c15, X64_RCX, X64_RCX)
+    add_stencil(s, "o0_st_test_rcx_rcx", true, [String]{}, c15.bytes, [StencilHole]{})
+    c16 := x64_code()
+    x64_test_r32(c16, X64_RDX, X64_RDX)
+    j_at: x64_jcc_rel32(c16, X64Cond.NE)
+    add_stencil(s, "o0_st_stop_jne_edx", true, [String]{}, c16.bytes, [StencilHole]{StencilHole{at: j_at, kind: HOLE_ZERO32, param: ""}})
+    c17 := x64_code()
+    x64_setcc_compact(c17, X64Cond.E, X64_RAX)
+    x64_movzx_r32_r8(c17, X64_RAX, X64_RAX)
+    add_stencil(s, "o0_st_setcc_rax", true, [String]{"cc"}, c17.bytes, [StencilHole]{StencilHole{at: 1, kind: HOLE_CC_SET, param: "cc"}})
+    c18 := x64_code()
+    x64_setcc_compact(c18, X64Cond.E, X64_RAX)
+    x64_setcc_compact(c18, X64Cond.NP, X64_RCX)
+    x64_alu8_rr(c18, X64Alu.And, X64_RAX, X64_RCX)
+    x64_movzx_r32_r8(c18, X64_RAX, X64_RAX)
+    add_stencil(s, "o0_st_float_eq_flags", true, [String]{}, c18.bytes, [StencilHole]{})
+    c19 := x64_code()
+    x64_setcc_compact(c19, X64Cond.NE, X64_RAX)
+    x64_setcc_compact(c19, X64Cond.P, X64_RCX)
+    x64_alu8_rr(c19, X64Alu.Or, X64_RAX, X64_RCX)
+    x64_movzx_r32_r8(c19, X64_RAX, X64_RAX)
+    add_stencil(s, "o0_st_float_ne_flags", true, [String]{}, c19.bytes, [StencilHole]{})
+    c20 := x64_code()
+    x64_cmov_rr(c20, X64Cond.E, X64_RAX, X64_RCX)
+    add_stencil(s, "o0_st_cmov_rax_rcx", true, [String]{"cc"}, c20.bytes, [StencilHole]{StencilHole{at: 2, kind: HOLE_CC_CMOV, param: "cc"}})
+    c21 := x64_code()
+    x64_mov_rr(c21, X64_RDX, X64_RAX)
+    x64_alu_rr(c21, X64Alu.Add, X64_RDX, X64_RDX)
+    jo_at: x64_jcc_rel32(c21, X64Cond.O)
+    add_stencil(s, "o0_st_test_inline_rax", true, [String]{}, c21.bytes, [StencilHole]{StencilHole{at: jo_at, kind: HOLE_ZERO32, param: ""}})
+    c22 := x64_code()
+    x64_mov_rr(c22, X64_RDX, X64_RCX)
+    x64_alu_rr(c22, X64Alu.Add, X64_RDX, X64_RDX)
+    jo_at2: x64_jcc_rel32(c22, X64Cond.O)
+    add_stencil(s, "o0_st_test_inline_rcx", true, [String]{}, c22.bytes, [StencilHole]{StencilHole{at: jo_at2, kind: HOLE_ZERO32, param: ""}})
+}
+
+add_float_stencils: fn(s: &[StencilSpec]) Never! {
+    fops: [X64FloatOp]{X64FloatOp.Add, X64FloatOp.Sub, X64FloatOp.Mul, X64FloatOp.Div}
+    fnames: [String]{"add", "sub", "mul", "div"}
+    loop idx in 0..<fops.len() {
+        cd := x64_code()
+        x64_float_op(cd, fops[idx], false, 0, 1)
+        add_stencil(s, "o0_st_f64_{fnames[idx]}", true, [String]{}, cd.bytes, [StencilHole]{})
+        cs := x64_code()
+        x64_float_op(cs, fops[idx], true, 0, 1)
+        add_stencil(s, "o0_st_f32_{fnames[idx]}", true, [String]{}, cs.bytes, [StencilHole]{})
+        md8 := x64_code()
+        x64_float_op_mem(md8, fops[idx], false, 0, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_f64_{fnames[idx]}_m8", true, [String]{"disp"}, md8.bytes, [StencilHole]{StencilHole{at: md8.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        md32 := x64_code()
+        x64_float_op_mem(md32, fops[idx], false, 0, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_f64_{fnames[idx]}_m32", true, [String]{"disp"}, md32.bytes, [StencilHole]{StencilHole{at: md32.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+        ms8 := x64_code()
+        x64_float_op_mem(ms8, fops[idx], true, 0, X64_RBP, SENTINEL_D8)
+        add_stencil(s, "o0_st_f32_{fnames[idx]}_m8", true, [String]{"disp"}, ms8.bytes, [StencilHole]{StencilHole{at: ms8.bytes.len() - 1, kind: HOLE_I8, param: "disp"}})
+        ms32 := x64_code()
+        x64_float_op_mem(ms32, fops[idx], true, 0, X64_RBP, SENTINEL_D32)
+        add_stencil(s, "o0_st_f32_{fnames[idx]}_m32", true, [String]{"disp"}, ms32.bytes, [StencilHole]{StencilHole{at: ms32.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+    }
+    sqd := x64_code()
+    x64_float_op(sqd, X64FloatOp.Sqrt, false, 0, 0)
+    add_stencil(s, "o0_st_f64_sqrt", true, [String]{}, sqd.bytes, [StencilHole]{})
+    sqs := x64_code()
+    x64_float_op(sqs, X64FloatOp.Sqrt, true, 0, 0)
+    add_stencil(s, "o0_st_f32_sqrt", true, [String]{}, sqs.bytes, [StencilHole]{})
+    c1 := x64_code()
+    x64_ucomisd(c1, 0, 1)
+    add_stencil(s, "o0_st_ucomisd_01", true, [String]{}, c1.bytes, [StencilHole]{})
+    c1b := x64_code()
+    x64_ucomisd(c1b, 1, 0)
+    add_stencil(s, "o0_st_ucomisd_10", true, [String]{}, c1b.bytes, [StencilHole]{})
+    c2 := x64_code()
+    x64_ucomiss(c2, 0, 1)
+    add_stencil(s, "o0_st_ucomiss_01", true, [String]{}, c2.bytes, [StencilHole]{})
+    c2b := x64_code()
+    x64_ucomiss(c2b, 1, 0)
+    add_stencil(s, "o0_st_ucomiss_10", true, [String]{}, c2b.bytes, [StencilHole]{})
+    c3 := x64_code()
+    x64_cvtsi2sd(c3, 0, X64_RAX)
+    add_stencil(s, "o0_st_cvtsi2sd", true, [String]{}, c3.bytes, [StencilHole]{})
+    c4 := x64_code()
+    x64_cvtsi2ss(c4, 0, X64_RAX)
+    add_stencil(s, "o0_st_cvtsi2ss", true, [String]{}, c4.bytes, [StencilHole]{})
+    c5 := x64_code()
+    x64_cvttsd2si(c5, X64_RAX, 0)
+    add_stencil(s, "o0_st_cvttsd2si", true, [String]{}, c5.bytes, [StencilHole]{})
+    c6 := x64_code()
+    x64_cvttss2si(c6, X64_RAX, 0)
+    add_stencil(s, "o0_st_cvttss2si", true, [String]{}, c6.bytes, [StencilHole]{})
+    c7 := x64_code()
+    x64_cvtss2sd(c7, 0, 0)
+    add_stencil(s, "o0_st_cvtss2sd", true, [String]{}, c7.bytes, [StencilHole]{})
+    c8 := x64_code()
+    x64_cvtsd2ss(c8, 0, 0)
+    add_stencil(s, "o0_st_cvtsd2ss", true, [String]{}, c8.bytes, [StencilHole]{})
+    c9 := x64_code()
+    x64_movq_to_xmm(c9, false, 0, X64_RAX)
+    add_stencil(s, "o0_st_movq_xmm0_rax", true, [String]{}, c9.bytes, [StencilHole]{})
+    c10 := x64_code()
+    x64_movq_from_xmm(c10, false, X64_RAX, 0)
+    add_stencil(s, "o0_st_movq_rax_xmm0", true, [String]{}, c10.bytes, [StencilHole]{})
+    c11 := x64_code()
+    x64_movq_to_xmm(c11, true, 0, X64_RAX)
+    add_stencil(s, "o0_st_movd_xmm0_eax", true, [String]{}, c11.bytes, [StencilHole]{})
+    c12 := x64_code()
+    x64_movq_from_xmm(c12, true, X64_RAX, 0)
+    add_stencil(s, "o0_st_movd_eax_xmm0", true, [String]{}, c12.bytes, [StencilHole]{})
+    c13 := x64_code()
+    x64_vfmadd213sd(c13, 0, 1, 2)
+    add_stencil(s, "o0_st_vfmadd213sd", true, [String]{}, c13.bytes, [StencilHole]{})
+}
+
+add_mem_stencils: fn(s: &[StencilSpec]) Never! {
+    widths: [Int]{1, 1, 2, 2, 4, 4, 8}
+    signeds: [Bool]{false, true, false, true, false, true, false}
+    wnames: [String]{"u8", "i8", "u16", "i16", "u32", "i32", "i64"}
+    loop idx in 0..<widths.len() {
+        w: widths[idx]
+        sg: signeds[idx]
+        wn: wnames[idx]
+        l0 := x64_code()
+        x64_load_sized(l0, X64_RAX, X64_RAX, 0, w, sg)
+        add_stencil(s, "o0_st_load_field_{wn}_0", true, [String]{}, l0.bytes, [StencilHole]{})
+        l8 := x64_code()
+        x64_load_sized(l8, X64_RAX, X64_RAX, SENTINEL_D8, w, sg)
+        add_stencil(s, "o0_st_load_field_{wn}_8", true, [String]{"off"}, l8.bytes, [StencilHole]{StencilHole{at: l8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+        l32 := x64_code()
+        x64_load_sized(l32, X64_RAX, X64_RAX, SENTINEL_D32, w, sg)
+        add_stencil(s, "o0_st_load_field_{wn}_32", true, [String]{"off"}, l32.bytes, [StencilHole]{StencilHole{at: l32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+    }
+    swidths: [Int]{1, 2, 4, 8}
+    swnames: [String]{"1", "2", "4", "8"}
+    loop idx in 0..<swidths.len() {
+        w: swidths[idx]
+        wn: swnames[idx]
+        st0 := x64_code()
+        x64_store_sized(st0, X64_RAX, 0, X64_RCX, w)
+        add_stencil(s, "o0_st_store_field_{wn}_0", true, [String]{}, st0.bytes, [StencilHole]{})
+        st8 := x64_code()
+        x64_store_sized(st8, X64_RAX, SENTINEL_D8, X64_RCX, w)
+        add_stencil(s, "o0_st_store_field_{wn}_8", true, [String]{"off"}, st8.bytes, [StencilHole]{StencilHole{at: st8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+        st32 := x64_code()
+        x64_store_sized(st32, X64_RAX, SENTINEL_D32, X64_RCX, w)
+        add_stencil(s, "o0_st_store_field_{wn}_32", true, [String]{"off"}, st32.bytes, [StencilHole]{StencilHole{at: st32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+    }
+    f0 := x64_code()
+    x64_float_load(f0, false, 0, X64_RAX, 0)
+    add_stencil(s, "o0_st_load_field_f64_0", true, [String]{}, f0.bytes, [StencilHole]{})
+    f8 := x64_code()
+    x64_float_load(f8, false, 0, X64_RAX, SENTINEL_D8)
+    add_stencil(s, "o0_st_load_field_f64_8", true, [String]{"off"}, f8.bytes, [StencilHole]{StencilHole{at: f8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    f32 := x64_code()
+    x64_float_load(f32, false, 0, X64_RAX, SENTINEL_D32)
+    add_stencil(s, "o0_st_load_field_f64_32", true, [String]{"off"}, f32.bytes, [StencilHole]{StencilHole{at: f32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+
+    sf0 := x64_code()
+    x64_float_store(sf0, false, X64_RAX, 0, 0)
+    add_stencil(s, "o0_st_store_field_f64_0", true, [String]{}, sf0.bytes, [StencilHole]{})
+    sf8 := x64_code()
+    x64_float_store(sf8, false, X64_RAX, SENTINEL_D8, 0)
+    add_stencil(s, "o0_st_store_field_f64_8", true, [String]{"off"}, sf8.bytes, [StencilHole]{StencilHole{at: sf8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    sf32 := x64_code()
+    x64_float_store(sf32, false, X64_RAX, SENTINEL_D32, 0)
+    add_stencil(s, "o0_st_store_field_f64_32", true, [String]{"off"}, sf32.bytes, [StencilHole]{StencilHole{at: sf32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+
+    g0 := x64_code()
+    x64_float_load(g0, true, 0, X64_RAX, 0)
+    add_stencil(s, "o0_st_load_field_f32_0", true, [String]{}, g0.bytes, [StencilHole]{})
+    g8 := x64_code()
+    x64_float_load(g8, true, 0, X64_RAX, SENTINEL_D8)
+    add_stencil(s, "o0_st_load_field_f32_8", true, [String]{"off"}, g8.bytes, [StencilHole]{StencilHole{at: g8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    g32 := x64_code()
+    x64_float_load(g32, true, 0, X64_RAX, SENTINEL_D32)
+    add_stencil(s, "o0_st_load_field_f32_32", true, [String]{"off"}, g32.bytes, [StencilHole]{StencilHole{at: g32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+
+    sg0 := x64_code()
+    x64_float_store(sg0, true, X64_RAX, 0, 0)
+    add_stencil(s, "o0_st_store_field_f32_0", true, [String]{}, sg0.bytes, [StencilHole]{})
+    sg8 := x64_code()
+    x64_float_store(sg8, true, X64_RAX, SENTINEL_D8, 0)
+    add_stencil(s, "o0_st_store_field_f32_8", true, [String]{"off"}, sg8.bytes, [StencilHole]{StencilHole{at: sg8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    sg32 := x64_code()
+    x64_float_store(sg32, true, X64_RAX, SENTINEL_D32, 0)
+    add_stencil(s, "o0_st_store_field_f32_32", true, [String]{"off"}, sg32.bytes, [StencilHole]{StencilHole{at: sg32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+
+    rm := x64_code()
+    x64_rep_movsb(rm)
+    add_stencil(s, "o0_st_rep_movsb", true, [String]{}, rm.bytes, [StencilHole]{})
+
+    ax := x64_code()
+    x64_xchg_mem(ax, X64_RDI, 0, X64_RAX)
+    add_stencil(s, "o0_st_xchg_rdi_rax", true, [String]{}, ax.bytes, [StencilHole]{})
+    alx := x64_code()
+    x64_lock_xadd(alx, X64_RDI, 0, X64_RAX)
+    add_stencil(s, "o0_st_lock_xadd_rdi_rax", true, [String]{}, alx.bytes, [StencilHole]{})
+    alc := x64_code()
+    x64_lock_cmpxchg(alc, X64_RDI, 0, X64_RCX)
+    add_stencil(s, "o0_st_lock_cmpxchg_rdi_rcx", true, [String]{}, alc.bytes, [StencilHole]{})
+}
+
+add_cf_stencils: fn(s: &[StencilSpec]) Never! {
+    c1 := x64_code()
+    h1: x64_jmp_rel32(c1)
+    add_stencil(s, "o0_st_jmp_rel32", true, [String]{}, c1.bytes, [StencilHole]{StencilHole{at: h1, kind: HOLE_ZERO32, param: ""}})
+    c2 := x64_code()
+    h2: x64_jcc_rel32(c2, X64Cond.E)
+    add_stencil(s, "o0_st_jcc_rel32", true, [String]{"cc"}, c2.bytes, [StencilHole]{
+        StencilHole{at: 1, kind: HOLE_CC_JCC, param: "cc"},
+        StencilHole{at: h2, kind: HOLE_ZERO32, param: ""},
+    })
+    c3 := x64_code()
+    h3: x64_call_rel32(c3)
+    add_stencil(s, "o0_st_call_rel32", true, [String]{}, c3.bytes, [StencilHole]{StencilHole{at: h3, kind: HOLE_ZERO32, param: ""}})
+    c4 := x64_code()
+    x64_call_reg(c4, X64_R11)
+    add_stencil(s, "o0_st_call_r11", true, [String]{}, c4.bytes, [StencilHole]{})
+    c5 := x64_code()
+    x64_alu_mi(c5, X64Alu.Cmp, X64_RBP, SENTINEL_D8, 0)
+    h5: x64_jcc_rel32(c5, X64Cond.E)
+    add_stencil(s, "o0_st_if_truth_8", true, [String]{"disp"}, c5.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "disp"},
+        StencilHole{at: h5, kind: HOLE_ZERO32, param: ""},
+    })
+    c6 := x64_code()
+    x64_alu_mi(c6, X64Alu.Cmp, X64_RBP, SENTINEL_D32, 0)
+    h6: x64_jcc_rel32(c6, X64Cond.E)
+    add_stencil(s, "o0_st_if_truth_32", true, [String]{"disp"}, c6.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "disp"},
+        StencilHole{at: h6, kind: HOLE_ZERO32, param: ""},
+    })
+    c7 := x64_code()
+    x64_alu_mi(c7, X64Alu.Cmp, X64_RBP, SENTINEL_D8, 0)
+    h7: x64_jcc_rel32(c7, X64Cond.NE)
+    add_stencil(s, "o0_st_brif_truth_8", true, [String]{"disp"}, c7.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "disp"},
+        StencilHole{at: h7, kind: HOLE_ZERO32, param: ""},
+    })
+    c8 := x64_code()
+    x64_alu_mi(c8, X64Alu.Cmp, X64_RBP, SENTINEL_D32, 0)
+    h8: x64_jcc_rel32(c8, X64Cond.NE)
+    add_stencil(s, "o0_st_brif_truth_32", true, [String]{"disp"}, c8.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "disp"},
+        StencilHole{at: h8, kind: HOLE_ZERO32, param: ""},
+    })
+    c9 := x64_code()
+    x64_test_eax_imm32(c9, 0)
+    add_stencil(s, "o0_st_zone_site", true, [String]{}, c9.bytes, [StencilHole]{StencilHole{at: 1, kind: HOLE_ZERO32, param: ""}})
+    c10 := x64_code()
+    h10a: x64_load_rip(c10, X64_RAX)
+    x64_test_rr(c10, X64_RAX, X64_RAX)
+    h10b: x64_jcc_rel32(c10, X64Cond.NE)
+    add_stencil(s, "o0_st_armed_poll", true, [String]{}, c10.bytes, [StencilHole]{
+        StencilHole{at: h10a, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: h10b, kind: HOLE_ZERO32, param: ""},
+    })
+    c11 := x64_code()
+    x64_mov_gs_abs(c11, X64_RAX, 0)
+    add_stencil(s, "o0_st_stop_quiet_gs", true, [String]{}, c11.bytes, [StencilHole]{})
+    c12 := x64_code()
+    x64_cmp_gs_imm8(c12, 448, 0)
+    add_stencil(s, "o0_st_stop_quiet_turn", true, [String]{}, c12.bytes, [StencilHole]{})
+    c13 := x64_code()
+    x64_test_mi(c13, X64_RAX, 24, SENTINEL_I32)
+    add_stencil(s, "o0_st_test_rax24_i32", true, [String]{"bits"}, c13.bytes, [StencilHole]{StencilHole{at: 4, kind: HOLE_I32, param: "bits"}})
+    c14 := x64_code()
+    x64_test_ri(c14, X64_RAX, SENTINEL_I32)
+    add_stencil(s, "o0_st_test_rax_i32", true, [String]{"imm"}, c14.bytes, [StencilHole]{StencilHole{at: c14.bytes.len() - 4, kind: HOLE_I32, param: "imm"}})
+}
+
+add_fastpath_stencils: fn(s: &[StencilSpec]) Never! {
+    c1 := x64_code()
+    x64_load(c1, X64_RAX, X64_RBP, SENTINEL_D8)
+    x64_mov_rr(c1, X64_RDX, X64_RAX)
+    x64_alu_rr(c1, X64Alu.Add, X64_RDX, X64_RDX)
+    x64_jcc_rel8(c1, X64Cond.NO, 8)
+    x64_mov_rr(c1, X64_RDI, X64_RAX)
+    call_at1: x64_call_rel32(c1)
+    x64_store(c1, X64_RBP, SENTINEL_D8, X64_RAX)
+    add_stencil(s, "o0_st_int_clone_8", false, [String]{"src", "dst"}, c1.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "src"},
+        StencilHole{at: call_at1, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 23, kind: HOLE_I8, param: "dst"},
+    })
+    c2 := x64_code()
+    x64_load(c2, X64_RDI, X64_RBP, SENTINEL_D8)
+    x64_mov_rr(c2, X64_RDX, X64_RDI)
+    x64_alu_rr(c2, X64Alu.Add, X64_RDX, X64_RDX)
+    x64_jcc_rel8(c2, X64Cond.NO, 5)
+    call_at2: x64_call_rel32(c2)
+    add_stencil(s, "o0_st_int_drop_8", true, [String]{"src"}, c2.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "src"},
+        StencilHole{at: call_at2, kind: HOLE_ZERO32, param: ""},
+    })
+    c3 := x64_code()
+    x64_load(c3, X64_RCX, X64_RAX, 16)
+    x64_test_rr(c3, X64_RCX, X64_RCX)
+    j1: x64_jcc_rel32(c3, X64Cond.E)
+    x64_load(c3, X64_RCX, X64_RAX, -8)
+    x64_test_rr(c3, X64_RCX, X64_RCX)
+    j2: x64_jcc_rel32(c3, X64Cond.S)
+    add_stencil(s, "o0_st_str_clone_head", false, [String]{}, c3.bytes, [StencilHole]{
+        StencilHole{at: j1, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: j2, kind: HOLE_ZERO32, param: ""},
+    })
+    c4 := x64_code()
+    x64_count_step(c4, X64_RAX, -8, true, true)
+    jo4: x64_jcc_rel32(c4, X64Cond.O)
+    add_stencil(s, "o0_st_str_inc_mt", true, [String]{}, c4.bytes, [StencilHole]{StencilHole{at: jo4, kind: HOLE_ZERO32, param: ""}})
+    c5 := x64_code()
+    x64_count_step(c5, X64_RAX, -8, true, false)
+    jo5: x64_jcc_rel32(c5, X64Cond.O)
+    add_stencil(s, "o0_st_str_inc_st", true, [String]{}, c5.bytes, [StencilHole]{StencilHole{at: jo5, kind: HOLE_ZERO32, param: ""}})
+    c6 := x64_code()
+    x64_test_rr(c6, X64_RAX, X64_RAX)
+    x64_jcc_rel8(c6, X64Cond.E, 40)
+    x64_load(c6, X64_RCX, X64_RAX, 16)
+    x64_test_rr(c6, X64_RCX, X64_RCX)
+    x64_jcc_rel8(c6, X64Cond.E, 31)
+    x64_load(c6, X64_RCX, X64_RAX, -8)
+    x64_alu_ri(c6, X64Alu.Cmp, X64_RCX, 1)
+    j6a: x64_jcc_rel32(c6, X64Cond.LE)
+    x64_count_step(c6, X64_RAX, -8, false, true)
+    x64_jcc_rel8(c6, X64Cond.NE, 10)
+    x64_count_step(c6, X64_RAX, -8, true, true)
+    j6b: x64_jmp_rel32(c6)
+    add_stencil(s, "o0_st_str_drop_mt", false, [String]{}, c6.bytes, [StencilHole]{
+        StencilHole{at: j6a, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: j6b, kind: HOLE_ZERO32, param: ""},
+    })
+    c7 := x64_code()
+    x64_test_rr(c7, X64_RAX, X64_RAX)
+    x64_jcc_rel8(c7, X64Cond.E, 38)
+    x64_load(c7, X64_RCX, X64_RAX, 16)
+    x64_test_rr(c7, X64_RCX, X64_RCX)
+    x64_jcc_rel8(c7, X64Cond.E, 29)
+    x64_load(c7, X64_RCX, X64_RAX, -8)
+    x64_alu_ri(c7, X64Alu.Cmp, X64_RCX, 1)
+    j7a: x64_jcc_rel32(c7, X64Cond.LE)
+    x64_count_step(c7, X64_RAX, -8, false, false)
+    x64_jcc_rel8(c7, X64Cond.NE, 9)
+    x64_count_step(c7, X64_RAX, -8, true, false)
+    j7b: x64_jmp_rel32(c7)
+    add_stencil(s, "o0_st_str_drop_st", false, [String]{}, c7.bytes, [StencilHole]{
+        StencilHole{at: j7a, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: j7b, kind: HOLE_ZERO32, param: ""},
+    })
+    c8 := x64_code()
+    x64_load(c8, X64_RCX, X64_RAX, -24)
+    x64_test_rr(c8, X64_RCX, X64_RCX)
+    x64_jcc_rel8(c8, X64Cond.S, 8)
+    x64_shift_ri(c8, X64Shift.Shl, X64_RCX, 2)
+    x64_alu_ri(c8, X64Alu.Cmp, X64_RCX, 4)
+    x64_setcc_compact(c8, X64Cond.E, X64_RAX)
+    x64_movzx_r32_r8(c8, X64_RAX, X64_RAX)
+    add_stencil(s, "o0_st_block_unique", false, [String]{}, c8.bytes, [StencilHole]{})
+    c9 := x64_code()
+    x64_load(c9, X64_RCX, X64_RAX, -24)
+    x64_test_rr(c9, X64_RCX, X64_RCX)
+    x64_jcc_rel8(c9, X64Cond.S, 11)
+    x64_count_step(c9, X64_RAX, -24, true, true)
+    jo9: x64_jcc_rel32(c9, X64Cond.O)
+    add_stencil(s, "o0_st_block_retain_mt", false, [String]{}, c9.bytes, [StencilHole]{StencilHole{at: jo9, kind: HOLE_ZERO32, param: ""}})
+    c10 := x64_code()
+    x64_load(c10, X64_RCX, X64_RAX, -24)
+    x64_test_rr(c10, X64_RCX, X64_RCX)
+    x64_jcc_rel8(c10, X64Cond.S, 10)
+    x64_count_step(c10, X64_RAX, -24, true, false)
+    jo10: x64_jcc_rel32(c10, X64Cond.O)
+    add_stencil(s, "o0_st_block_retain_st", false, [String]{}, c10.bytes, [StencilHole]{StencilHole{at: jo10, kind: HOLE_ZERO32, param: ""}})
+    c11 := x64_code()
+    x64_load(c11, X64_RCX, X64_RAX, 8)
+    x64_test_rr(c11, X64_RCX, X64_RCX)
+    j11a: x64_jcc_rel32(c11, X64Cond.LE)
+    x64_load(c11, X64_RCX, X64_RAX, 16)
+    x64_alu_mi(c11, X64Alu.Cmp, X64_RCX, -24, 1)
+    j11b: x64_jcc_rel32(c11, X64Cond.NE)
+    x64_zero(c11, X64_RDX)
+    add_stencil(s, "o0_st_unique_body", false, [String]{}, c11.bytes, [StencilHole]{
+        StencilHole{at: j11a, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: j11b, kind: HOLE_ZERO32, param: ""},
+    })
+}
+
+add_extra_stencils: fn(s: &[StencilSpec]) Never! {
+    // Remaining RIP-relative & disp32 fast-path stencils
+    r_rcx := x64_code()
+    h_rcx: x64_lea_rip(r_rcx, X64_RCX)
+    add_stencil(s, "o0_st_lea_rip_rcx", true, [String]{}, r_rcx.bytes, [StencilHole]{StencilHole{at: h_rcx, kind: HOLE_ZERO32, param: ""}})
+    r_r8 := x64_code()
+    h_r8: x64_lea_rip(r_r8, X64_R8)
+    add_stencil(s, "o0_st_lea_rip_r8", true, [String]{}, r_r8.bytes, [StencilHole]{StencilHole{at: h_r8, kind: HOLE_ZERO32, param: ""}})
+    r_lr11 := x64_code()
+    h_lr11: x64_load_rip(r_lr11, X64_R11)
+    add_stencil(s, "o0_st_load_rip_r11", true, [String]{}, r_lr11.bytes, [StencilHole]{StencilHole{at: h_lr11, kind: HOLE_ZERO32, param: ""}})
+    r_ls32 := x64_code()
+    h_ls32: x64_lea_rip(r_ls32, X64_RAX)
+    x64_store(r_ls32, X64_RBP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_lea_rip_slot_32", true, [String]{"dst"}, r_ls32.bytes, [StencilHole]{
+        StencilHole{at: h_ls32, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 10, kind: HOLE_I32, param: "dst"},
+    })
+    r_si32 := x64_code()
+    h_si32: x64_lea_rip(r_si32, X64_RAX)
+    x64_load(r_si32, X64_RAX, X64_RAX, 0)
+    x64_store(r_si32, X64_RBP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_static_int_32", true, [String]{"dst"}, r_si32.bytes, [StencilHole]{
+        StencilHole{at: h_si32, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 13, kind: HOLE_I32, param: "dst"},
+    })
+
+    // Int clone/drop disp32 variants
+    ic32 := x64_code()
+    x64_load(ic32, X64_RAX, X64_RBP, SENTINEL_D32)
+    x64_mov_rr(ic32, X64_RDX, X64_RAX)
+    x64_alu_rr(ic32, X64Alu.Add, X64_RDX, X64_RDX)
+    x64_jcc_rel8(ic32, X64Cond.NO, 8)
+    x64_mov_rr(ic32, X64_RDI, X64_RAX)
+    call_ic32: x64_call_rel32(ic32)
+    x64_store(ic32, X64_RBP, SENTINEL_D32, X64_RAX)
+    add_stencil(s, "o0_st_int_clone_32", false, [String]{"src", "dst"}, ic32.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "src"},
+        StencilHole{at: call_ic32, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: 26, kind: HOLE_I32, param: "dst"},
+    })
+    id32 := x64_code()
+    x64_load(id32, X64_RDI, X64_RBP, SENTINEL_D32)
+    x64_mov_rr(id32, X64_RDX, X64_RDI)
+    x64_alu_rr(id32, X64Alu.Add, X64_RDX, X64_RDX)
+    x64_jcc_rel8(id32, X64Cond.NO, 5)
+    call_id32: x64_call_rel32(id32)
+    add_stencil(s, "o0_st_int_drop_32", true, [String]{"src"}, id32.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "src"},
+        StencilHole{at: call_id32, kind: HOLE_ZERO32, param: ""},
+    })
+
+    // Call / stack / test helpers
+    cr10 := x64_code()
+    x64_call_reg(cr10, X64_R10)
+    add_stencil(s, "o0_st_call_r10", true, [String]{}, cr10.bytes, [StencilHole]{})
+    pr11 := x64_code()
+    x64_push(pr11, X64_R11)
+    add_stencil(s, "o0_st_push_r11", true, [String]{}, pr11.bytes, [StencilHole]{})
+    popr11 := x64_code()
+    x64_pop(popr11, X64_R11)
+    add_stencil(s, "o0_st_pop_r11", true, [String]{}, popr11.bytes, [StencilHole]{})
+    sr8 := x64_code()
+    x64_alu_ri(sr8, X64Alu.Sub, X64_RSP, 8)
+    add_stencil(s, "o0_st_sub_rsp_i8", true, [String]{"imm"}, sr8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    ar8 := x64_code()
+    x64_alu_ri(ar8, X64Alu.Add, X64_RSP, 8)
+    add_stencil(s, "o0_st_add_rsp_i8", true, [String]{"imm"}, ar8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    tr11 := x64_code()
+    x64_test_rr(tr11, X64_R11, X64_R11)
+    add_stencil(s, "o0_st_test_r11_r11", true, [String]{}, tr11.bytes, [StencilHole]{})
+    tedx := x64_code()
+    x64_test_r32(tedx, X64_RDX, X64_RDX)
+    add_stencil(s, "o0_st_test_edx_edx", true, [String]{}, tedx.bytes, [StencilHole]{})
+    trdx := x64_code()
+    x64_test_rr(trdx, X64_RDX, X64_RDX)
+    add_stencil(s, "o0_st_test_rdx_rdx", true, [String]{}, trdx.bytes, [StencilHole]{})
+
+    // Register moves & ALU helpers
+    extra_dst: [Int]{X64_RAX, X64_RAX, X64_RAX, X64_RAX, X64_RAX, X64_RAX, X64_RSI, X64_R11, X64_R11, X64_RSI}
+    extra_src: [Int]{X64_RSI, X64_RDI, X64_R8, X64_R9, X64_R10, X64_R11, X64_RSP, X64_RBP, X64_RDX, X64_RDX}
+    extra_nm: [String]{"rax_rsi", "rax_rdi", "rax_r8", "rax_r9", "rax_r10", "rax_r11", "rsi_rsp", "r11_rbp", "r11_rdx", "rsi_rdx"}
+    loop idx in 0..<extra_dst.len() {
+        mc := x64_code()
+        x64_mov_rr(mc, extra_dst[idx], extra_src[idx])
+        add_stencil(s, "o0_st_mov_{extra_nm[idx]}", true, [String]{}, mc.bytes, [StencilHole]{})
+    }
+
+    x11 := x64_code()
+    x64_alu_rr(x11, X64Alu.Xor, X64_R11, X64_RCX)
+    add_stencil(s, "o0_st_xor_r11_rcx", true, [String]{}, x11.bytes, [StencilHole]{})
+    adc := x64_code()
+    x64_alu_rr(adc, X64Alu.Add, X64_RDX, X64_RCX)
+    add_stencil(s, "o0_st_add_rdx_rcx", true, [String]{}, adc.bytes, [StencilHole]{})
+    crc8 := x64_code()
+    x64_alu_ri(crc8, X64Alu.Cmp, X64_RCX, 1)
+    add_stencil(s, "o0_st_cmp_rcx_i8", true, [String]{"imm"}, crc8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    cdra := x64_code()
+    x64_alu_rr(cdra, X64Alu.Cmp, X64_RDX, X64_RAX)
+    add_stencil(s, "o0_st_cmp_rdx_rax", true, [String]{}, cdra.bytes, [StencilHole]{})
+    card := x64_code()
+    x64_alu_rr(card, X64Alu.Cmp, X64_RAX, X64_RDX)
+    add_stencil(s, "o0_st_cmp_rax_rdx", true, [String]{}, card.bytes, [StencilHole]{})
+    cr11a := x64_code()
+    x64_alu_rr(cr11a, X64Alu.Cmp, X64_R11, X64_RAX)
+    add_stencil(s, "o0_st_cmp_r11_rax", true, [String]{}, cr11a.bytes, [StencilHole]{})
+    cd8 := x64_code()
+    x64_alu_ri(cd8, X64Alu.Cmp, X64_RDX, 1)
+    add_stencil(s, "o0_st_cmp_rdx_i8", true, [String]{"imm"}, cd8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    ad8 := x64_code()
+    x64_alu_ri(ad8, X64Alu.Add, X64_RDX, 1)
+    add_stencil(s, "o0_st_add_rdx_i8", true, [String]{"imm"}, ad8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    add_dd := x64_code()
+    x64_alu_rr(add_dd, X64Alu.Add, X64_RDX, X64_RDX)
+    add_stencil(s, "o0_st_add_rdx_rdx", true, [String]{}, add_dd.bytes, [StencilHole]{})
+    shl_dc := x64_code()
+    x64_shift_cl(shl_dc, X64Shift.Shl, X64_RDX)
+    add_stencil(s, "o0_st_shl_rdx_cl", true, [String]{}, shl_dc.bytes, [StencilHole]{})
+    sar_11c := x64_code()
+    x64_shift_cl(sar_11c, X64Shift.Sar, X64_R11)
+    add_stencil(s, "o0_st_sar_r11_cl", true, [String]{}, sar_11c.bytes, [StencilHole]{})
+    ldr1 := x64_code()
+    x64_lea(ldr1, X64_RDX, X64_RCX, 1)
+    add_stencil(s, "o0_st_lea_rdx_rcx_1", true, [String]{}, ldr1.bytes, [StencilHole]{})
+    shl_d8 := x64_code()
+    x64_shift_ri(shl_d8, X64Shift.Shl, X64_RDX, 1)
+    add_stencil(s, "o0_st_shl_rdx_i8", true, [String]{"imm"}, shl_d8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    sar_d8 := x64_code()
+    x64_shift_ri(sar_d8, X64Shift.Sar, X64_RDX, 1)
+    add_stencil(s, "o0_st_sar_rdx_i8", true, [String]{"imm"}, sar_d8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    shr_d8 := x64_code()
+    x64_shift_ri(shr_d8, X64Shift.Shr, X64_RDX, 1)
+    add_stencil(s, "o0_st_shr_rdx_i8", true, [String]{"imm"}, shr_d8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+    im8 := x64_code()
+    x64_imul_rri(im8, X64_RAX, X64_RAX, 1)
+    add_stencil(s, "o0_st_imul_rax_i8", true, [String]{"imm"}, im8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "imm"}})
+
+    // Normalize & narrow for parameter/return registers
+    nregs: [Int]{X64_RAX, X64_RCX, X64_RDX, X64_RSI, X64_RDI, X64_R8, X64_R9}
+    nnames: [String]{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9"}
+    loop idx in 0..<nregs.len() {
+        r: nregs[idx]
+        rn: nnames[idx]
+        mz := x64_code()
+        x64_movzx_r32_r8(mz, r, r)
+        add_stencil(s, "o0_st_movzx8_{rn}", true, [String]{}, mz.bytes, [StencilHole]{})
+        ns := x64_code()
+        x64_shift_ri(ns, X64Shift.Shl, r, 1)
+        x64_shift_ri(ns, X64Shift.Sar, r, 1)
+        add_stencil(s, "o0_st_narrow_s_{rn}", true, [String]{"sh"}, ns.bytes, [StencilHole]{
+            StencilHole{at: 3, kind: HOLE_I8, param: "sh"},
+            StencilHole{at: 7, kind: HOLE_I8, param: "sh"},
+        })
+        nu := x64_code()
+        x64_shift_ri(nu, X64Shift.Shl, r, 1)
+        x64_shift_ri(nu, X64Shift.Shr, r, 1)
+        add_stencil(s, "o0_st_narrow_u_{rn}", true, [String]{"sh"}, nu.bytes, [StencilHole]{
+            StencilHole{at: 3, kind: HOLE_I8, param: "sh"},
+            StencilHole{at: 7, kind: HOLE_I8, param: "sh"},
+        })
+    }
+
+    // Memory offset / deref / StreamStore / CopyBytes / Atomics
+    mra8 := x64_code()
+    x64_load(mra8, X64_RAX, X64_RAX, SENTINEL_D8)
+    add_stencil(s, "o0_st_load_rax_rax_8", true, [String]{"disp"}, mra8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "disp"}})
+    mca0 := x64_code()
+    x64_load(mca0, X64_RCX, X64_RAX, 0)
+    add_stencil(s, "o0_st_load_rcx_rax_0", true, [String]{}, mca0.bytes, [StencilHole]{})
+    laa8 := x64_code()
+    x64_lea(laa8, X64_RAX, X64_RAX, SENTINEL_D8)
+    add_stencil(s, "o0_st_lea_rax_rax_8", true, [String]{"off"}, laa8.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I8, param: "off"}})
+    laa32 := x64_code()
+    x64_lea(laa32, X64_RAX, X64_RAX, SENTINEL_D32)
+    add_stencil(s, "o0_st_lea_rax_rax_32", true, [String]{"off"}, laa32.bytes, [StencilHole]{StencilHole{at: 3, kind: HOLE_I32, param: "off"}})
+
+    nt0 := x64_code()
+    x64_movnti(nt0, X64_RAX, -1, 1, 0, X64_RCX, 8)
+    add_stencil(s, "o0_st_movnti_0", true, [String]{}, nt0.bytes, [StencilHole]{})
+    nt8 := x64_code()
+    x64_movnti(nt8, X64_RAX, -1, 1, SENTINEL_D8, X64_RCX, 8)
+    add_stencil(s, "o0_st_movnti_8", true, [String]{"off"}, nt8.bytes, [StencilHole]{StencilHole{at: nt8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    nt32 := x64_code()
+    x64_movnti(nt32, X64_RAX, -1, 1, SENTINEL_D32, X64_RCX, 8)
+    add_stencil(s, "o0_st_movnti_32", true, [String]{"off"}, nt32.bytes, [StencilHole]{StencilHole{at: nt32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+    nt4_0 := x64_code()
+    x64_movnti(nt4_0, X64_RAX, -1, 1, 0, X64_RCX, 4)
+    add_stencil(s, "o0_st_movnti4_0", true, [String]{}, nt4_0.bytes, [StencilHole]{})
+    nt4_8 := x64_code()
+    x64_movnti(nt4_8, X64_RAX, -1, 1, SENTINEL_D8, X64_RCX, 4)
+    add_stencil(s, "o0_st_movnti4_8", true, [String]{"off"}, nt4_8.bytes, [StencilHole]{StencilHole{at: nt4_8.bytes.len() - 1, kind: HOLE_I8, param: "off"}})
+    nt4_32 := x64_code()
+    x64_movnti(nt4_32, X64_RAX, -1, 1, SENTINEL_D32, X64_RCX, 4)
+    add_stencil(s, "o0_st_movnti4_32", true, [String]{"off"}, nt4_32.bytes, [StencilHole]{StencilHole{at: nt4_32.bytes.len() - 4, kind: HOLE_I32, param: "off"}})
+
+    // CopyBytes: [rdx + off] -> [rax + off] via r11
+    c8_0 := x64_code()
+    x64_load(c8_0, X64_R11, X64_RDX, 0)
+    x64_store(c8_0, X64_RAX, 0, X64_R11)
+    add_stencil(s, "o0_st_copy8_0", true, [String]{}, c8_0.bytes, [StencilHole]{})
+    c8_8 := x64_code()
+    x64_load(c8_8, X64_R11, X64_RDX, SENTINEL_D8)
+    x64_store(c8_8, X64_RAX, SENTINEL_D8, X64_R11)
+    add_stencil(s, "o0_st_copy8_8", true, [String]{"off"}, c8_8.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I8, param: "off"},
+        StencilHole{at: 7, kind: HOLE_I8, param: "off"},
+    })
+    c8_32 := x64_code()
+    x64_load(c8_32, X64_R11, X64_RDX, SENTINEL_D32)
+    x64_store(c8_32, X64_RAX, SENTINEL_D32, X64_R11)
+    add_stencil(s, "o0_st_copy8_32", true, [String]{"off"}, c8_32.bytes, [StencilHole]{
+        StencilHole{at: 3, kind: HOLE_I32, param: "off"},
+        StencilHole{at: 10, kind: HOLE_I32, param: "off"},
+    })
+    c1_0 := x64_code()
+    x64_load_u8(c1_0, X64_R11, X64_RDX, 0)
+    x64_store_u8(c1_0, X64_RAX, 0, X64_R11)
+    add_stencil(s, "o0_st_copy1_0", true, [String]{}, c1_0.bytes, [StencilHole]{})
+    c1_8 := x64_code()
+    x64_load_u8(c1_8, X64_R11, X64_RDX, SENTINEL_D8)
+    l1_len: c1_8.bytes.len()
+    x64_store_u8(c1_8, X64_RAX, SENTINEL_D8, X64_R11)
+    add_stencil(s, "o0_st_copy1_8", true, [String]{"off"}, c1_8.bytes, [StencilHole]{
+        StencilHole{at: l1_len - 1, kind: HOLE_I8, param: "off"},
+        StencilHole{at: c1_8.bytes.len() - 1, kind: HOLE_I8, param: "off"},
+    })
+    c1_32 := x64_code()
+    x64_load_u8(c1_32, X64_R11, X64_RDX, SENTINEL_D32)
+    l1_32: c1_32.bytes.len()
+    x64_store_u8(c1_32, X64_RAX, SENTINEL_D32, X64_R11)
+    add_stencil(s, "o0_st_copy1_32", true, [String]{"off"}, c1_32.bytes, [StencilHole]{
+        StencilHole{at: l1_32 - 4, kind: HOLE_I32, param: "off"},
+        StencilHole{at: c1_32.bytes.len() - 4, kind: HOLE_I32, param: "off"},
+    })
+
+    // Atomics on [r10]
+    ai := x64_code()
+    x64_store(ai, X64_R10, 0, X64_RAX)
+    add_stencil(s, "o0_st_atomic_r10_init", true, [String]{}, ai.bytes, [StencilHole]{})
+    al := x64_code()
+    x64_load(al, X64_RAX, X64_R10, 0)
+    add_stencil(s, "o0_st_atomic_r10_load", true, [String]{}, al.bytes, [StencilHole]{})
+    ast := x64_code()
+    x64_xchg_mem(ast, X64_R10, 0, X64_RAX)
+    add_stencil(s, "o0_st_atomic_r10_store", true, [String]{}, ast.bytes, [StencilHole]{})
+    aad := x64_code()
+    x64_lock_xadd(aad, X64_R10, 0, X64_RAX)
+    add_stencil(s, "o0_st_atomic_r10_add", true, [String]{}, aad.bytes, [StencilHole]{})
+    acas := x64_code()
+    x64_lock_cmpxchg(acas, X64_R10, 0, X64_RCX)
+    add_stencil(s, "o0_st_atomic_r10_cas", true, [String]{}, acas.bytes, [StencilHole]{})
+
+    // Block release fast path (MT & ST): holes at marked(rel32) and proc_end(rip rel32)
+    loop mt_i in 0..<2 {
+        mt: mt_i == 0
+        br := x64_code()
+        x64_load(br, X64_RCX, X64_RAX, -24)
+        x64_alu_ri(br, X64Alu.Cmp, X64_RCX, 1)
+        j_last: x64_jcc_rel32(br, X64Cond.E)
+        x64_test_rr(br, X64_RCX, X64_RCX)
+        j_imm: x64_jcc_rel32(br, X64Cond.S)
+        x64_shift_ri(br, X64Shift.Shr, X64_RCX, 62)
+        j_marked: x64_jcc_rel32(br, X64Cond.NE)
+        x64_count_step(br, X64_RAX, -24, false, mt)
+        j_shared: x64_jcc_rel32(br, X64Cond.NE)
+        last_pos: br.bytes.len()
+        x64_patch_rel32(br.bytes, j_last, last_pos)
+        flag_at: x64_load_rip(br, X64_RCX)
+        x64_test_rr(br, X64_RCX, X64_RCX)
+        done_pos: br.bytes.len()
+        x64_patch_rel32(br.bytes, j_imm, done_pos)
+        x64_patch_rel32(br.bytes, j_shared, done_pos)
+        x64_setcc_compact(br, X64Cond.E, X64_RAX)
+        x64_movzx_r32_r8(br, X64_RAX, X64_RAX)
+        add_stencil(s, if mt -> "o0_st_block_release_mt" else -> "o0_st_block_release_st", false, [String]{}, br.bytes, [StencilHole]{
+            StencilHole{at: j_marked, kind: HOLE_ZERO32, param: ""},
+            StencilHole{at: flag_at, kind: HOLE_ZERO32, param: ""},
+        })
+    }
+}
+
+add_stack_grow_stencils: fn(s: &[StencilSpec]) Never! {
+    arg_regs: [Int]{X64_RDI, X64_RSI, X64_RDX, X64_RCX, X64_R8, X64_R9}
+    // Save all 6 arg GPRs + 8 XMMs to [rbp - 8..192]
+    sb := x64_code()
+    loop (i, reg) in arg_regs -> x64_store(sb, X64_RBP, 0 - 8 * (i + 1), reg)
+    loop xmm in 0..<8 -> x64_float_store(sb, false, X64_RBP, 0 - 64 - 16 * xmm, xmm)
+    add_stencil(s, "o0_st_stack_save_rbp", false, [String]{}, sb.bytes, [StencilHole]{})
+    // Restore all 6 arg GPRs + 8 XMMs from [rbp - 8..192]
+    rb := x64_code()
+    loop (i, reg) in arg_regs -> x64_load(rb, reg, X64_RBP, 0 - 8 * (i + 1))
+    loop xmm in 0..<8 -> x64_float_load(rb, false, xmm, X64_RBP, 0 - 64 - 16 * xmm)
+    add_stencil(s, "o0_st_stack_restore_rbp", false, [String]{}, rb.bytes, [StencilHole]{})
+    // Restore all 6 arg GPRs + 8 XMMs from [r11 - 8..192]
+    rr11 := x64_code()
+    loop (i, reg) in arg_regs -> x64_load(rr11, reg, X64_R11, 0 - 8 * (i + 1))
+    loop xmm in 0..<8 -> x64_float_load(rr11, false, xmm, X64_R11, 0 - 64 - 16 * xmm)
+    add_stencil(s, "o0_st_stack_restore_r11", false, [String]{}, rr11.bytes, [StencilHole]{})
+
+    // Bridge header on new stack segment [rax - 8..-32]
+    bh := x64_code()
+    x64_load(bh, X64_R11, X64_RBP, 8)
+    x64_store(bh, X64_RAX, -8, X64_R11)
+    x64_load(bh, X64_R11, X64_RBP, 0)
+    x64_store(bh, X64_RAX, -16, X64_R11)
+    x64_movabs_ri(bh, X64_R11, SENTINEL_I64)
+    br_hole: bh.bytes.len() - 8
+    x64_store(bh, X64_RAX, -24, X64_R11)
+    x64_store(bh, X64_RAX, -32, X64_RBP)
+    add_stencil(s, "o0_st_stack_bridge", false, [String]{"bridge"}, bh.bytes, [StencilHole]{StencilHole{at: br_hole, kind: HOLE_I64, param: "bridge"}})
+
+    // Store r11 to [rax + disp32] (copying stacked arg to new segment)
+    ca := x64_code()
+    x64_store(ca, X64_RAX, SENTINEL_D32, X64_R11)
+    add_stencil(s, "o0_st_store_rax_r11_32", false, [String]{"disp"}, ca.bytes, [StencilHole]{StencilHole{at: ca.bytes.len() - 4, kind: HOLE_I32, param: "disp"}})
+
+    // Switch stack to [rax - copied], rbp = [rax - 16], r11 = old rbp
+    sw := x64_code()
+    x64_mov_rr(sw, X64_R11, X64_RBP)
+    x64_lea(sw, X64_RSP, X64_RAX, SENTINEL_D32)
+    h_sw: sw.bytes.len() - 4
+    x64_lea(sw, X64_RBP, X64_RAX, -16)
+    add_stencil(s, "o0_st_stack_switch", false, [String]{"neg_copied"}, sw.bytes, [StencilHole]{StencilHole{at: h_sw, kind: HOLE_I32, param: "neg_copied"}})
+
+    // After re-call: restore old rbp/rsp, save rax/rdx/xmm0/xmm1 on old stack
+    af := x64_code()
+    x64_load(af, X64_RBP, X64_RSP, SENTINEL_D32)
+    h_af1: af.bytes.len() - 4
+    x64_lea(af, X64_RSP, X64_RBP, SENTINEL_D32)
+    h_af2: af.bytes.len() - 4
+    x64_store(af, X64_RSP, 0, X64_RAX)
+    x64_store(af, X64_RSP, 8, X64_RDX)
+    x64_float_store(af, false, X64_RSP, 16, 0)
+    x64_float_store(af, false, X64_RSP, 24, 1)
+    add_stencil(s, "o0_st_stack_after", false, [String]{"off_rbp", "neg_saves"}, af.bytes, [StencilHole]{
+        StencilHole{at: h_af1, kind: HOLE_I32, param: "off_rbp"},
+        StencilHole{at: h_af2, kind: HOLE_I32, param: "neg_saves"},
+    })
+
+    // After shrink: restore rax/rdx/xmm0/xmm1, leave, ret
+    tl := x64_code()
+    x64_load(tl, X64_RAX, X64_RSP, 0)
+    x64_load(tl, X64_RDX, X64_RSP, 8)
+    x64_float_load(tl, false, 0, X64_RSP, 16)
+    x64_float_load(tl, false, 1, X64_RSP, 24)
+    x64_leave(tl)
+    x64_ret(tl)
+    add_stencil(s, "o0_st_stack_tail", false, [String]{}, tl.bytes, [StencilHole]{})
+}
+
+build_all_stencils: fn() -> [StencilSpec] Never! {
+    s := [StencilSpec]{}
+    add_frame_stencils(s)
+    add_reg_stencils(s)
+    add_const_stencils(s)
+    add_alu_stencils(s)
+    add_float_stencils(s)
+    add_mem_stencils(s)
+    add_cf_stencils(s)
+    add_fastpath_stencils(s)
+    add_extra_stencils(s)
+    add_stack_grow_stencils(s)
+    s
+}
+
+render_stencil_source: fn() -> String Never! {
+    specs: build_all_stencils()
+    total_bytes := 0
+    digest_h := crypto.new()
+    loop sp in specs {
+        total_bytes += sp.bytes.len()
+        digest_h.update("{sp.name}:{sp.bytes.len()}:".bytes())
+        digest_h.update(sp.bytes)
+    }
+    digest: digest_h.digest()
+
+    out := [String]{}
+    out.push("// This file is generated by Compiler/Toolchain/X64Stencils/Main.jet, which `jet build Compiler`")
+    out.push("// runs, from Compiler/JetBackend/Source/X64/Encoder.jet; do not edit.")
+    out.push("")
+    out.push("O0_STENCIL_COUNT: {specs.len()}")
+    out.push("")
+    out.push("O0_STENCIL_BYTES: {total_bytes}")
+    out.push("")
+    out.push("O0_STENCIL_DIGEST: \"{digest}\"")
+    out.push("")
+    out.push("#Inline(Always) o0_patch_i32: fn(c: &[U8], at: Int, value: Int) Never! {{")
+    out.push("    c[at] = U8{{value & 255}}")
+    out.push("    c[at + 1] = U8{{(value >> 8) & 255}}")
+    out.push("    c[at + 2] = U8{{(value >> 16) & 255}}")
+    out.push("    c[at + 3] = U8{{(value >> 24) & 255}}")
+    out.push("}}")
+    out.push("")
+    out.push("#Inline(Always) o0_patch_i64: fn(c: &[U8], at: Int, value: Int) Never! {{")
+    out.push("    o0_patch_i32(c, at, value)")
+    out.push("    o0_patch_i32(c, at + 4, value >> 32)")
+    out.push("}}")
+    out.push("")
+
+    loop sp in specs {
+        n: sp.bytes.len()
+        hole_idx := [Int]{}
+        loop _ in 0..<n -> hole_idx.push(-1)
+        loop (hi, h) in sp.holes {
+            w: hole_width(h.kind)
+            loop k in 0..<w -> hole_idx[h.at + k] = hi
+        }
+        sig := "c: &[U8], p: Int"
+        loop param in sp.params -> sig = "{sig}, {param}: Int"
+        prefix: if sp.inline_always -> "#Inline(Always) " else -> ""
+        out.push("{prefix}{sp.name}: fn({sig}) -> Int Never! {{")
+        i := 0
+        loop i < n {
+            hi: hole_idx[i]
+            if hi < 0 {
+                pos_expr: if i == 0 -> "p" else -> "p + {i}"
+                out.push("    c[{pos_expr}] = U8{{{hex_byte(sp.bytes[i])}}}")
+                i += 1
+            } else {
+                h: sp.holes[hi]
+                pos_expr: if i == 0 -> "p" else -> "p + {i}"
+                if h.kind == HOLE_I8 {
+                    out.push("    c[{pos_expr}] = U8{{{h.param} & 255}}")
+                    i += 1
+                } else if h.kind == HOLE_I32 {
+                    out.push("    o0_patch_i32(c, {pos_expr}, {h.param})")
+                    i += 4
+                } else if h.kind == HOLE_ZERO32 {
+                    out.push("    c[{pos_expr}] = U8{{0}}")
+                    out.push("    c[p + {i + 1}] = U8{{0}}")
+                    out.push("    c[p + {i + 2}] = U8{{0}}")
+                    out.push("    c[p + {i + 3}] = U8{{0}}")
+                    i += 4
+                } else if h.kind == HOLE_I64 {
+                    out.push("    o0_patch_i64(c, {pos_expr}, {h.param})")
+                    i += 8
+                } else if h.kind == HOLE_CC_SET {
+                    out.push("    c[{pos_expr}] = U8{{0x90 + {h.param}}}")
+                    i += 1
+                } else if h.kind == HOLE_CC_JCC {
+                    out.push("    c[{pos_expr}] = U8{{0x80 + {h.param}}}")
+                    i += 1
+                } else {
+                    out.push("    c[{pos_expr}] = U8{{0x40 + {h.param}}}")
+                    i += 1
+                }
+            }
+        }
+        out.push("    p + {n}")
+        out.push("}}")
+        out.push("")
+    }
+    "{out.join("\n")}\n"
+}
+
+run: fn() -[Exec.Args, Exec.Exit, FS, IO]> {
+    args: process.args()
+    mode := ""
+    out_path := DEFAULT_OUT
+    stamp_path := ""
+    loop arg in args {
+        if arg == "--write" || arg == "--check" {
+            mode = arg
+        } else if arg.starts_with("--out=") {
+            out_path = arg.removeprefix("--out=")
+        } else if arg.starts_with("--stamp=") {
+            stamp_path = arg.removeprefix("--stamp=")
+        } else if arg.starts_with("--mount=") {
+            // Hermetic build step folder mount from Compiler/build.jet.
+        } else {
+            process.fail(64, "usage: x64-stencils --write|--check [--out=PATH] [--stamp=PATH]")
+        }
+    }
+    if mode == "" -> process.fail(64, "usage: x64-stencils --write|--check [--out=PATH] [--stamp=PATH]")
+    rendered: render_stencil_source()
+    if mode == "--check" {
+        existing: files.read(out_path) ?? process.fail(1, "x64-stencils: cannot read `{out_path}`: {err}")
+        if existing != rendered {
+            process.fail(1, "x64-stencils: `{out_path}` is stale; regenerate with `jet run Toolchain/X64Stencils/Main.jet -- --write` from Compiler/")
+        }
+        if stamp_path != "" {
+            files.write(stamp_path, "{crypto.sha256(rendered.bytes())}\n") ?? process.fail(1, "x64-stencils: cannot write `{stamp_path}`: {err}")
+        }
+        print("x64-stencils: `{out_path}` is current")
+        return
+    }
+    existing: files.read(out_path) ?? ""
+    if existing != rendered {
+        files.write(out_path, rendered) ?? process.fail(1, "x64-stencils: cannot write `{out_path}`: {err}")
+    }
+    if stamp_path != "" {
+        files.write(stamp_path, "{crypto.sha256(rendered.bytes())}\n") ?? process.fail(1, "x64-stencils: cannot write `{stamp_path}`: {err}")
+    }
+}
+
+#Test("X64Stencils builds deterministic stencils matching Encoder.jet byte-for-byte") {
+    a: render_stencil_source()
+    b: render_stencil_source()
+    assert_eq(a, b)
+    specs: build_all_stencils()
+    assert(specs.len() >= 180, "expected >= 180 stencils, got {specs.len()}")
+    // Spot-check critical multi-instruction stencils against canonical x86-64 bytes.
+    found_pro := false
+    found_str_drop_mt := false
+    found_unique := false
+    loop sp in specs {
+        if sp.name == "o0_st_prologue" {
+            found_pro = true
+            assert_eq(sp.bytes.len(), 11)
+            assert_eq(Int{sp.bytes[0]}, 0x55)
+            assert_eq(Int{sp.bytes[4]}, 0x48)
+            assert_eq(Int{sp.bytes[5]}, 0x81)
+            assert_eq(Int{sp.bytes[6]}, 0xec)
+        } else if sp.name == "o0_st_str_drop_mt" {
+            found_str_drop_mt = true
+            assert_eq(sp.bytes.len(), 45)
+            assert_eq(sp.holes[0].at, 24)
+            assert_eq(sp.holes[1].at, 41)
+        } else if sp.name == "o0_st_unique_body" {
+            found_unique = true
+            assert_eq(sp.bytes.len(), 30)
+            assert_eq(sp.holes[0].at, 9)
+            assert_eq(sp.holes[1].at, 24)
+        }
+    }
+    assert(found_pro && found_str_drop_mt && found_unique, "missing key stencils")
+}

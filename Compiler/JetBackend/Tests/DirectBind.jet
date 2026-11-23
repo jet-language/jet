@@ -25,7 +25,9 @@ use {
         X64ModuleDebug,
         X64ObjectModule,
         X64Reloc,
-        X64RelocTarget,
+        x64_reloc_data,
+        x64_reloc_function,
+        x64_reloc_runtime,
         X64RuntimeExport,
         X64VariableRange,
         link_context,
@@ -84,13 +86,13 @@ direct_bind_program: fn(shape: Int, runtime: String) -> DirectBindProgram Never!
     // call helper; lea rax, [rip + string]; lea rcx, [rip + table];
     // call runtime; ret
     code: direct_bind_code([Int]{0xe8, 0, 0, 0, 0, 0x48, 0x8d, 0x05, 0, 0, 0, 0, 0x48, 0x8d, 0x0d, 0, 0, 0, 0, 0xe8, 0, 0, 0, 0, 0xc3})
-    relocs := [X64Reloc]{X64Reloc{at: 1, target: X64RelocTarget.Function{id: X64FunctionID{value: if shape == 3 -> 7 else -> 1}}}}
+    relocs := [X64Reloc]{x64_reloc_function(1, if shape == 3 -> 7 else -> 1)}
     if shape <= 1 {
-        relocs.push(X64Reloc{at: 8, target: X64RelocTarget.Data{id: X64DataID{value: 0}}})
+        relocs.push(x64_reloc_data(8, 0))
     }
     if shape == 0 {
-        relocs.push(X64Reloc{at: 15, target: X64RelocTarget.Data{id: X64DataID{value: 1}}})
-        relocs.push(X64Reloc{at: 20, target: X64RelocTarget.Runtime{symbol: runtime}})
+        relocs.push(x64_reloc_data(15, 1))
+        relocs.push(x64_reloc_runtime(20, runtime))
     }
     functions.push(X64CompiledFunction{id: X64FunctionID{value: 0}, name: "entry", code: code, relocs: relocs, align: 16})
     debug.push(direct_bind_debug())

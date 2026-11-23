@@ -37,7 +37,6 @@ use {
         X64Cond,
         X64CompiledFunction,
         X64Code,
-        X64DataID,
         X64DebugLocation,
         X64DebugVariable,
         X64EmitKind,
@@ -47,7 +46,14 @@ use {
         X64InlineRange,
         X64LineRow,
         X64Reloc,
-        X64RelocTarget,
+        X64_RELOC_DATA,
+        X64_RELOC_FUNCTION,
+        X64_RELOC_RUNTIME,
+        X64_RELOC_RUNTIME_DATA,
+        x64_reloc_data,
+        x64_reloc_function,
+        x64_reloc_runtime,
+        x64_reloc_runtime_data,
         X64Shift,
         X64VariableRange,
         X64_FUNCTION_ALIGN,
@@ -634,9 +640,9 @@ ir_x64_keep_routed: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out
 // A call from instruction e.at of `target` (`call r10` when `indirect`),
 // keeping the xmm and routed slots live across it (ir_x64_keep_xmms,
 // ir_x64_keep_routed); a stop poll keeps them itself (ir_x64_stop_poll).
-ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64RelocTarget, indirect: Bool) Never! {
+ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64Reloc, indirect: Bool) Never! {
     keeps := false
-    if !indirect && target == .Function(id) -> keeps = ir_x64_is_poll(m, id.value)
+    if !indirect && target.kind == X64_RELOC_FUNCTION -> keeps = ir_x64_is_poll(m, target.target)
     if !keeps {
         ir_x64_keep_xmms(e, f, al, true)
         ir_x64_keep_routed(e, f, al, true)
@@ -648,7 +654,7 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
         x64_call_reg(e.code, X64_R10)
     } else {
         at: x64_call_rel32(e.code)
-        e.relocs.push(X64Reloc{at: at, target: target})
+        e.relocs.push(X64Reloc{at: at, kind: target.kind, target: target.target, symbol: target.symbol})
         if e.alloc_row >= 0 {
             e.alloc_relocs.push(e.relocs.len() - 1)
             e.alloc_rows.push(e.alloc_row)
@@ -705,7 +711,7 @@ IRX64Arg: enum {
 // CallIndirect, else -1. An aggregate result is written through a hidden
 // first argument pointing at the call site's storage at rbp + `storage`,
 // and `dst` receives that pointer.
-ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64RelocTarget, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, storage: Int) Never! {
+ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64Reloc, indirect: Int, args: [Int], start: Int, count: Int, dst: Int, storage: Int) Never! {
     sret: dst >= 0 && ir_x64_type(m, f, dst).kind == .Aggregate
     general := if sret -> 1 else -> 0
     floats := 0
@@ -883,7 +889,7 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     x64_pop(e.code, X64_RBP)
     e.tails.push(e.code.bytes.len())
     site: x64_jmp_rel32(e.code)
-    e.relocs.push(X64Reloc{at: site, target: X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}})
+    e.relocs.push(x64_reloc_function(site, f.a[at]))
 }
 
 // A call of an `#FFI(asm)` leaf with general arguments in registers, as its
@@ -986,11 +992,11 @@ ir_x64_helper: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             .Imm(value) -> { x64_mov_ri(e.code, reg, value) }
             .Data(id) -> {
                 at: x64_lea_rip(e.code, reg)
-                e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: X64DataID{value: id}}})
+                e.relocs.push(x64_reloc_data(at, id))
             }
         }
     }
-    ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, false)
+    ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, symbol), false)
     if dst >= 0 {
         ir_x64_normalize(e, ir_x64_type(m, f, dst), X64_RAX)
         ir_x64_store(e, m, f, al, dst, X64_RAX)
@@ -1160,7 +1166,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             .Route -> {
                 ir_x64_operand(e, m, f, al, cold.left, cold.left_imm, X64_RDI)
                 ir_x64_operand(e, m, f, al, cold.right, cold.right_imm, X64_RSI)
-                ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, false)
+                ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, cold.symbol), false)
                 if cold.dst >= 0 -> ir_x64_store(e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_cold_drops(e, m, f, al, cold.drops)
                 if !cold.falls -> ir_x64_jump_to(e, cold.resume)
@@ -1172,7 +1178,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_lea_data(e, X64_RDX, path)
                 x64_mov_ri(e.code, X64_RCX, ir_x64_use_length(tables, path))
                 x64_mov_ri(e.code, X64_R8, cold.line)
-                ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, false)
+                ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, cold.symbol), false)
                 if m.stop_points && ir_x64_located_stops(f, al, cold) {
                     // A division by zero or a negative shift count publishes
                     // its stop and returns. Two pushes keep the stack aligned
@@ -1181,7 +1187,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                     ir_x64_below(e, 16)
                     x64_push(e.code, X64_RAX)
                     x64_push(e.code, X64_RAX)
-                    ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}, false)
+                    ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, "jet_rt_session_propagate"), false)
                     x64_test_rr(e.code, X64_RAX, X64_RAX)
                     x64_pop(e.code, X64_RAX)
                     x64_pop(e.code, X64_RAX)
@@ -1195,7 +1201,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             .Compare -> {
                 ir_x64_operand(e, m, f, al, cold.left, cold.left_imm, X64_RDI)
                 ir_x64_operand(e, m, f, al, cold.right, cold.right_imm, X64_RSI)
-                ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_int_compare"}, false)
+                ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, "jet_int_compare"), false)
                 if !cold.drops.is_empty() {
                     // Two pushes keep the result (and the stack aligned)
                     // across the drops.
@@ -1217,7 +1223,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             }
             .Release -> {
                 ir_x64_operand(e, m, f, al, cold.left, cold.left_imm, X64_RDI)
-                ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_block_release"}, false)
+                ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, "jet_rt_block_release"), false)
                 x64_movzx_r8(e.code, X64_RAX, X64_RAX)
                 x64_alu_ri(e.code, X64Alu.Cmp, X64_RAX, 1)
                 // A fused release resumes at its branch with these flags.
@@ -1256,7 +1262,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                     x64_mov_ri(e.code, X64_RSI, ir_x64_use_length(tables, path))
                     ir_x64_lea_data(e, X64_RCX, cold.text)
                     x64_mov_ri(e.code, X64_R8, ir_x64_use_length(tables, cold.text))
-                    ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}, false)
+                    ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, "jet_rt_numeric_stop"), false)
                     ir_x64_stop_resume(e, m, target)
                 }
             }
@@ -1273,7 +1279,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 x64_alu_ri(e.code, X64Alu.Sub, X64_RSP, 8)
                 x64_mov_ri(e.code, X64_R11, cold.line)
                 x64_push(e.code, X64_R11)
-                ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_fixed_shift_stop"}, false)
+                ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, "jet_rt_fixed_shift_stop"), false)
                 // The edge runs code of the body's frame: the argument
                 // bytes go first.
                 target: ir_x64_stop_target(e, cold, exit)
@@ -1282,12 +1288,12 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             }
             .Call -> {
                 at: cold.left
-                ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
+                ir_x64_call(e, m, f, al, x64_reloc_runtime(0, cold.symbol), -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
                 if !cold.falls -> ir_x64_jump_to(e, cold.resume)
             }
             .Poll -> {
                 at: cold.left
-                ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
+                ir_x64_call(e, m, f, al, x64_reloc_function(0, f.a[at]), -1, f.args, f.b[at], f.c[at], -1, 0)
                 x64_test_rr(e.code, X64_RAX, X64_RAX)
                 stopped: x64_jcc_rel32(e.code, X64Cond.NE)
                 target: ir_x64_stop_target(e, cold, exit)
@@ -1323,7 +1329,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_jump_to(e, cold.right)
                 ir_x64_land(e, soft)
                 at: cold.left
-                ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
+                ir_x64_call(e, m, f, al, x64_reloc_runtime(0, cold.symbol), -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
                 ir_x64_jump_to(e, cold.resume)
             }
             .Unique -> {
@@ -1341,7 +1347,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                     x64_test_rr(e.code, X64_RCX, X64_RCX)
                     quiet.push(x64_jcc_rel32(e.code, X64Cond.E))
                 }
-                ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, al.stack[at])
+                ir_x64_call(e, m, f, al, x64_reloc_function(0, f.a[at]), -1, f.args, f.b[at], f.c[at], -1, al.stack[at])
                 ir_x64_jump_to(e, cold.resume)
                 if quiet.len() > 0 {
                     written: e.code.bytes.len()
@@ -1372,7 +1378,7 @@ ir_x64_stop_resume: fn(e: &IRX64Emitter, m: IRModule, target: Int) Never! {
 
 ir_x64_lea_data: fn(e: &IRX64Emitter, reg: Int, id: Int) Never! {
     at: x64_lea_rip(e.code, reg)
-    e.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: X64DataID{value: id}}})
+    e.relocs.push(x64_reloc_data(at, id))
 }
 
 // ---------------------------------------------------------------------------
@@ -1950,7 +1956,7 @@ IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 // calls, which record under a profiler as the setting promises.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
     if e.sunk_site >= 0 && at <= e.sunk_end {
-        ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+        ir_x64_call(e, m, f, al, x64_reloc_runtime(0, symbol), -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         return
     }
     if dst >= 0 {
@@ -1965,7 +1971,7 @@ ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
         return
     }
     skip: ir_x64_zones_skip(e)
-    ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, symbol), -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
     ir_x64_patch(e, skip, e.code.bytes.len())
 }
 
@@ -2045,7 +2051,7 @@ ir_x64_zone_stubs: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 ir_x64_zones_skip: fn(e: &IRX64Emitter) -> Int Never! {
     x64_push(e.code, X64_R11)
     flag: x64_load_rip(e.code, X64_R11)
-    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})
+    e.relocs.push(x64_reloc_runtime_data(flag, IR_X64_PERF_ZONES_SYMBOL))
     x64_test_rr(e.code, X64_R11, X64_R11)
     x64_pop(e.code, X64_R11)
     x64_jcc_rel32(e.code, X64Cond.E)
@@ -2345,7 +2351,7 @@ ir_x64_block_release: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
     ir_x64_land(e, last)
     // ZF set (true) when the flag's word is zero.
     flag: x64_load_rip(e.code, X64_RCX)
-    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PROCESS_ENDING_SYMBOL}})
+    e.relocs.push(x64_reloc_runtime_data(flag, IR_X64_PROCESS_ENDING_SYMBOL))
     x64_test_rr(e.code, X64_RCX, X64_RCX)
     ir_x64_land(e, immortal)
     ir_x64_land(e, shared)
@@ -3190,7 +3196,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     single: ty.kind == .Float32
     dst: f.dst[at]
     if op == .Rem {
-        return ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "fmodf" else -> "fmod"}, -1, [Int]{f.a[at], f.b[at]}, 0, 2, dst, 0)
+        return ir_x64_call(e, m, f, al, x64_reloc_runtime(0, if single -> "fmodf" else -> "fmod"), -1, [Int]{f.a[at], f.b[at]}, 0, 2, dst, 0)
     }
     if ir_x64_is_compare(op) {
         left: ir_x64_use_xmm(e, m, f, al, f.a[at], 0)
@@ -3244,7 +3250,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
         else -> x64_float_op_mem(e.code, float_op, single, target, X64_RBP, al.homes[f.b[at]])
     }
     if op == .FloorDiv {
-        ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "floorf" else -> "floor"}, false)
+        ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, if single -> "floorf" else -> "floor"), false)
     }
     ir_x64_store_xmm(e, m, f, al, dst, target)
 }
@@ -3693,7 +3699,7 @@ ir_x64_int_route: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     x64_alu_rr(e.code, X64Alu.Add, X64_RDX, X64_RDX)
     done: x64_jcc_rel32(e.code, X64Cond.NO)
     x64_mov_rr(e.code, X64_RDI, reg)
-    ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, false)
+    ir_x64_call_out(e, m, f, al, x64_reloc_runtime(0, symbol), false)
     ir_x64_land(e, done)
 }
 
@@ -3736,7 +3742,7 @@ ir_x64_drop: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         if f.b[at] < 0 || f.b[at] >= m.names.len() {
             return ir_x64_fail(e, f, at, "Close without a close routine")
         }
-        return ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: m.names[f.b[at]]}, -1, [Int]{slot}, 0, 1, -1, 0)
+        return ir_x64_call(e, m, f, al, x64_reloc_runtime(0, m.names[f.b[at]]), -1, [Int]{slot}, 0, 1, -1, 0)
     }
     drop: m.types[f.slot_type[slot]].drop
     if drop == "" {
@@ -3752,9 +3758,9 @@ ir_x64_drop: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
     // A drop routine the module builds itself (the ScopeGuard drop) is
     // registered under its symbol.
     if name_rows_value(m.function_rows, drop) == .Val(id) {
-        return ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: id}}, -1, [Int]{slot}, 0, 1, -1, 0)
+        return ir_x64_call(e, m, f, al, x64_reloc_function(0, id), -1, [Int]{slot}, 0, 1, -1, 0)
     }
-    ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: drop}, -1, [Int]{slot}, 0, 1, -1, 0)
+    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, drop), -1, [Int]{slot}, 0, 1, -1, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -4316,7 +4322,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             if ir_x64_unique_call(e, m, f, al, at) {
                 return
             }
-            ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+            ir_x64_call(e, m, f, al, x64_reloc_function(0, f.a[at]), -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
         }
         .CallRuntime -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() {
@@ -4364,22 +4370,22 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     ir_x64_zone_site(e, m, f, al, at, symbol, dst)
                 }
                 entry != "" -> {
-                    ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
+                    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, entry), -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 }
                 else -> {
-                    ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
+                    ir_x64_call(e, m, f, al, x64_reloc_runtime(0, symbol), -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
                 }
             }
             e.alloc_row = -1
         }
         .CallIndirect -> {
-            ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: ""}, f.a[at], f.args, f.b[at], f.c[at], dst, al.stack[at])
+            ir_x64_call(e, m, f, al, x64_reloc_runtime(0, ""), f.a[at], f.args, f.b[at], f.c[at], dst, al.stack[at])
         }
         // An address is taken straight into dst's register when it has one.
         .FunctionAddress -> {
             reg: ir_x64_home_reg(m, f, al, dst, X64_RAX)
             reloc_at: x64_lea_rip(e.code, reg)
-            e.relocs.push(X64Reloc{at: reloc_at, target: X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}})
+            e.relocs.push(x64_reloc_function(reloc_at, f.a[at]))
             ir_x64_store(e, m, f, al, dst, reg)
         }
         .DataAddress -> {
@@ -4389,7 +4395,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             if {
                 m.core_cells.get(f.a[at]) == .Val(symbol) -> {
                     reloc_at: x64_lea_rip(e.code, reg)
-                    e.relocs.push(X64Reloc{at: reloc_at, target: X64RelocTarget.RuntimeData{symbol: symbol}})
+                    e.relocs.push(x64_reloc_runtime_data(reloc_at, symbol))
                 }
                 else -> ir_x64_lea_data(e, reg, f.a[at])
             }
@@ -4566,7 +4572,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
                 skips = tests.quiet.move()
             }
-            ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
+            ir_x64_call(e, m, f, al, x64_reloc_function(0, f.a[at]), -1, f.args, f.b[at], f.c[at], -1, 0)
             x64_test_rr(e.code, X64_RAX, X64_RAX)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
         }
@@ -4638,7 +4644,7 @@ ir_x64_armed_poll: fn(e: &IRX64Emitter, at: Int, branch: Int, armed: Bool) Never
     cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{})
     if armed {
         flag: x64_load_rip(e.code, X64_RAX)
-        e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
+        e.relocs.push(x64_reloc_runtime_data(flag, IR_X64_CHECKS_ARMED_SYMBOL))
         x64_test_rr(e.code, X64_RAX, X64_RAX)
         cold.sites.push(x64_jcc_rel32(e.code, X64Cond.NE))
     }
@@ -5558,17 +5564,18 @@ ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64
 // it (ir_x64_log_names).
 ir_x64_select_function: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}) -> IRX64FunctionResult Never! {
     patch := ir_patch_emitter_new()
-    ir_x64_select_function_in(m, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
+    fast := if m.fast_o0 -> ir_x64_fast_module_new(m, false) else -> ir_x64_fast_module_empty()
+    ir_x64_select_function_in(m, fast, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
 }
 
-ir_x64_select_function_in: fn(m: IRModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}, patch: &IRPatchEmitter) -> IRX64FunctionResult Never! {
+ir_x64_select_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, names: [String], poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}, patch: &IRPatchEmitter) -> IRX64FunctionResult Never! {
     if m.fast_o0 {
         f: m.functions[row]
         if f.frame_bound < 0 && f.asm == None && !ir_stop_key(f.key) && !ir_timing_marked(f) && (names.len() == 0 || !ir_x64_log_names(f, names)) {
             p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
             p_trap: if trap != -2 -> trap else -> (name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1)
             p_turn: if turn != -2 -> turn else -> (name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1)
-            return ir_x64_patch_function_in(m, row, p_poll, p_trap, p_turn, patch)
+            return ir_x64_patch_function_in(m, fast, row, p_poll, p_trap, p_turn, patch)
         }
         if !m.dropped_early && f.asm == None && !ir_stop_key(f.key) {
             p_poll: if poll != -2 -> poll else -> (name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1)
@@ -5586,7 +5593,7 @@ ir_x64_select_function_in: fn(m: IRModule, row: Int, names: [String], poll: Int{
                 if compiled.uses.kinds.len() > 0 {
                     locals := [Int]{}
                     loop (at, reloc) in compiled.function.relocs {
-                        if reloc.target == .Data(id) && id.value >= IR_X64_LOCAL_DATA {
+                        if reloc.kind == X64_RELOC_DATA && reloc.target >= IR_X64_LOCAL_DATA {
                             locals.push(at)
                         }
                     }
@@ -5604,7 +5611,7 @@ ir_x64_select_function_in: fn(m: IRModule, row: Int, names: [String], poll: Int{
     if compiled.uses.kinds.len() > 0 {
         locals := [Int]{}
         loop (at, reloc) in compiled.function.relocs {
-            if reloc.target == .Data(id) && id.value >= IR_X64_LOCAL_DATA -> locals.push(at)
+            if reloc.kind == X64_RELOC_DATA && reloc.target >= IR_X64_LOCAL_DATA -> locals.push(at)
         }
         compiled.local_relocs = locals.move()
     }
@@ -5704,7 +5711,7 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     dwarf_cfa_def_cfa_offset(cfi, 8 + frame)
     dwarf_cfa_advance(cfi, framed, restored)
     dwarf_cfa_def_cfa_offset(cfi, 8)
-    relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: ir_stop_routine(f.key)}}}
+    relocs := [X64Reloc]{x64_reloc_runtime(status_at, ir_stop_routine(f.key))}
     name: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: relocs.move(), align: X64_FUNCTION_ALIGN},
@@ -5775,7 +5782,7 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, t
         leaf_start: code.bytes.len()
         loop byte in built.bytes -> code.bytes.push(byte)
         loop site in built.simd_sites {
-            relocs.push(X64Reloc{at: leaf_start + site, target: X64RelocTarget.Data{id: X64DataID{value: tables.simd}}})
+            relocs.push(x64_reloc_data(leaf_start + site, tables.simd))
         }
     } else {
         loop byte in leaf.code -> code.bytes.push(byte)
@@ -6070,7 +6077,7 @@ ir_x64_stack_grow: fn(e: &IRX64Emitter, row: Int, entered: Int, frame: Int, stac
     x64_mov_ri(e.code, X64_RDI, frame + copied + 64)
     x64_mov_rr(e.code, X64_RSI, X64_RSP)
     grown: x64_call_rel32(e.code)
-    e.relocs.push(X64Reloc{at: grown, target: X64RelocTarget.Runtime{symbol: "jet_rt_stack_grow"}})
+    e.relocs.push(x64_reloc_runtime(grown, "jet_rt_stack_grow"))
     x64_test_rr(e.code, X64_RAX, X64_RAX)
     in_place: x64_jcc_rel32(e.code, X64Cond.E)
     x64_load(e.code, X64_R11, X64_RBP, 8)
@@ -6089,7 +6096,7 @@ ir_x64_stack_grow: fn(e: &IRX64Emitter, row: Int, entered: Int, frame: Int, stac
     x64_lea(e.code, X64_RBP, X64_RAX, -16)
     ir_x64_stack_restore(e, X64_R11)
     again: x64_call_rel32(e.code)
-    e.relocs.push(X64Reloc{at: again, target: X64RelocTarget.Function{id: X64FunctionID{value: row}}})
+    e.relocs.push(x64_reloc_function(again, row))
     x64_load(e.code, X64_RBP, X64_RSP, copied - 32)
     x64_lea(e.code, X64_RSP, X64_RBP, 0 - IR_X64_STACK_SAVES)
     x64_store(e.code, X64_RSP, 0, X64_RAX)
@@ -6097,7 +6104,7 @@ ir_x64_stack_grow: fn(e: &IRX64Emitter, row: Int, entered: Int, frame: Int, stac
     x64_float_store(e.code, false, X64_RSP, 16, 0)
     x64_float_store(e.code, false, X64_RSP, 24, 1)
     shrunk: x64_call_rel32(e.code)
-    e.relocs.push(X64Reloc{at: shrunk, target: X64RelocTarget.Runtime{symbol: "jet_rt_stack_shrink"}})
+    e.relocs.push(x64_reloc_runtime(shrunk, "jet_rt_stack_shrink"))
     x64_load(e.code, X64_RAX, X64_RSP, 0)
     x64_load(e.code, X64_RDX, X64_RSP, 8)
     x64_float_load(e.code, false, 0, X64_RSP, 16)
@@ -6614,11 +6621,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     assert(ir_x64_code_find(code, [U8]{0x49, 0xbb, 0x21, 0x6b, 0x74, 0x73, 0x5f, 0x74, 0x65, 0x6a}, 0) > 0)
     calls := [String]{}
     loop reloc in compiled.function.relocs {
-        if reloc.target == {
-            .Runtime(symbol) -> { calls.push(symbol) }
-            .Function(id) -> calls.push("f{id.value}")
-            .Data(_) | .RuntimeData(_) -> {}
-        }
+        if reloc.kind == X64_RELOC_RUNTIME -> calls.push(reloc.symbol)
+        else if reloc.kind == X64_RELOC_FUNCTION -> calls.push("f{reloc.target}")
     }
     assert_eq(calls, [String]{"jet_rt_stack_grow", "f0", "jet_rt_stack_shrink"})
 }
@@ -7277,15 +7281,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         cells := 0
         soft := 0
         loop reloc in compiled.function.relocs {
-            if reloc.target == {
-                .Data(id) -> {
-                    if id.value == tables.fma -> cells += 1
-                }
-                .Runtime(symbol) -> {
-                    if symbol == "jet_std_math_fma" -> soft += 1
-                }
-                .Function(_) | .RuntimeData(_) -> {}
-            }
+            if reloc.kind == X64_RELOC_DATA && reloc.target == tables.fma -> cells += 1
+            else if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_std_math_fma" -> soft += 1
         }
         assert_eq(cells, 2)
         assert_eq(soft, 1)
@@ -7352,8 +7349,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         calls := [Int]{}
         soft := 0
         loop reloc in compiled.relocs {
-            if reloc.target == .Runtime(name) && name == boxed -> calls.push(reloc.at)
-            if reloc.target == .Runtime(name) && name == "jet_std_math_to_bits" -> soft += 1
+            if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == boxed -> calls.push(reloc.at)
+            if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_std_math_to_bits" -> soft += 1
         }
         assert_eq(calls.len(), 1)
         assert_eq(soft, 0)
@@ -7955,18 +7952,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         poll_at := -1
         armed := 0
         loop reloc in compiled.relocs {
-            if reloc.target == {
-                .Runtime(symbol) -> {
-                    if symbol == "jet_int_owned_to_i64" -> route_at = reloc.at
-                }
-                .Function(id) -> {
-                    if id.value == poll -> poll_at = reloc.at
-                }
-                .RuntimeData(symbol) -> {
-                    if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed += 1
-                }
-                .Data(_) -> {}
-            }
+            if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_int_owned_to_i64" -> route_at = reloc.at
+            else if reloc.kind == X64_RELOC_FUNCTION && reloc.target == poll -> poll_at = reloc.at
+            else if reloc.kind == X64_RELOC_RUNTIME_DATA && reloc.symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed += 1
         }
         assert(route_at >= 0 && poll_at > route_at)
         assert_eq(armed, if key == IR_STOP_TURN_KEY -> 1 else -> 0)
@@ -8012,15 +8000,11 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             poll_at := -1
             armed_at := -1
             loop reloc in compiled.relocs {
-                if reloc.target == {
-                    .Function(id) -> {
-                        if id.value == poll + 1 -> call_at = reloc.at
-                        if id.value == poll -> poll_at = reloc.at
-                    }
-                    .RuntimeData(symbol) -> {
-                        if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed_at = reloc.at
-                    }
-                    .Runtime(_) | .Data(_) -> {}
+                if reloc.kind == X64_RELOC_FUNCTION {
+                    if reloc.target == poll + 1 -> call_at = reloc.at
+                    if reloc.target == poll -> poll_at = reloc.at
+                } else if reloc.kind == X64_RELOC_RUNTIME_DATA && reloc.symbol == IR_X64_CHECKS_ARMED_SYMBOL {
+                    armed_at = reloc.at
                 }
             }
             // A function value's call has no reloc; its code is a register's.
@@ -8076,12 +8060,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         call_at := -1
         poll_at := -1
         loop reloc in compiled.relocs {
-            if reloc.target == {
-                .Function(id) -> {
-                    if id.value == poll + 1 -> call_at = reloc.at
-                    if id.value == poll -> poll_at = reloc.at
-                }
-                .Runtime(_) | .RuntimeData(_) | .Data(_) -> {}
+            if reloc.kind == X64_RELOC_FUNCTION {
+                if reloc.target == poll + 1 -> call_at = reloc.at
+                if reloc.target == poll -> poll_at = reloc.at
             }
         }
         assert(call_at >= 0 && poll_at > call_at)
@@ -8212,8 +8193,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         // The call's rel32 field ends at the return address.
         called := false
         loop reloc in compiled.function.relocs {
-            if reloc.at + 4 == site.at && reloc.target == .Runtime(symbol) {
-                called = symbol == "jet_rt_alloc"
+            if reloc.at + 4 == site.at && reloc.kind == X64_RELOC_RUNTIME {
+                called = reloc.symbol == "jet_rt_alloc"
             }
         }
         assert(called && compiled.function.code[site.at - 5] == 0xe8)
@@ -8497,10 +8478,10 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             tests := [Int]{}
             framed := -1
             loop reloc in compiled.function.relocs {
-                if reloc.target == .RuntimeData(symbol) && symbol == IR_X64_PERF_ZONES_SYMBOL {
+                if reloc.kind == X64_RELOC_RUNTIME_DATA && reloc.symbol == IR_X64_PERF_ZONES_SYMBOL {
                     tests.push(reloc.at)
                 }
-                if reloc.target == .Runtime(symbol) && symbol == "jet_perf_frame" {
+                if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_perf_frame" {
                     framed = reloc.at
                 }
             }
@@ -8537,7 +8518,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
             widening: ir_x64_code_find(code, [U8]{0x48, 0xc1, 0xfa, 0x35, 0x48, 0x83, 0xc2, 0x01, 0x48, 0x83, 0xfa, 0x01}, 0)
             called := false
             loop reloc in compiled.function.relocs {
-                if reloc.target == .Runtime(symbol) && symbol == "jet_int_checked_widen" {
+                if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_int_checked_widen" {
                     called = true
                 }
             }
@@ -8701,7 +8682,7 @@ ir_x64_test_stop_edge: fn(f: &IRFunction, flag: Int, callee: Int, exit: IROp, li
     assert(compiled.errors.is_empty())
     propagate := 0
     loop reloc in compiled.function.relocs {
-        if reloc.target == .Runtime(symbol) && symbol == "jet_rt_session_propagate" {
+        if reloc.kind == X64_RELOC_RUNTIME && reloc.symbol == "jet_rt_session_propagate" {
             propagate += 1
         }
     }
