@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6996,
-    "rev": 113245,
+    "rev": 113246,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -134577,6 +134577,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-23T00:59:33.638Z",
+      "by": "Orchestrator",
+      "action": "status.post",
+      "ref": "status00bes3z",
+      "note": "Orchestrator Single-Source-of-Truth (SSoT) Audit & Memory Kernel / 30M LOC/s Status Board (2026-11-22 20:00 EST, dev b6f3fe265b). Memory Kernel (#6842) is DONE with 0 raw memory actions outside declared kernel files (1,012 regions in Compiler/Runtime/Core/Jetpack: 388 raw-memory/FFI inside kernel, 624 non-memory #Unsafe queued on #6976). Found 9 live Multiple-Sources-of-Truth hotspots across Compiler, Runtime, Core, Jetpack, and Tests — ranked and mapped to owning cards below. Active execution: 100% locked on 30M LOC/s Architectural Pillars (#6978, #6793-#6798) through 05:00 EST, then immediate G1->G6 rapid burndown."
+    },
+    {
       "at": "2026-11-23T00:23:18.635Z",
       "by": "Orchestrator",
       "action": "briefing.post",
@@ -140306,29 +140313,175 @@
     }
   ],
   "statusSnapshot": {
-    "id": "status07gnaq7",
-    "by": "Pip-watchdog",
-    "created": "2026-11-03T21:52:40.074Z",
-    "summary": "Pipeline watchdog 2026-11-03T21:52:39.486Z: STALLED: no pipeline unit has run for 21 min (attempt r25). Unit states: jet-devgreen-stage0=inactive/success, jet-devgreen-native-pack=inactive/success, jet-devgreen-native-feed=inactive/success, jet-devgreen-native-smoke=inactive/success, jet-devgreen-native-selfrebuild=inactive/success, jet-land=inactive/success, jet-perfchain=inactive/success, jet-postland=inactive/success.",
+    "id": "status00bes3z",
+    "by": "Orchestrator",
+    "created": "2026-11-23T00:59:33.638Z",
+    "summary": "Orchestrator Single-Source-of-Truth (SSoT) Audit & Memory Kernel / 30M LOC/s Status Board (2026-11-22 20:00 EST, dev b6f3fe265b). Memory Kernel (#6842) is DONE with 0 raw memory actions outside declared kernel files (1,012 regions in Compiler/Runtime/Core/Jetpack: 388 raw-memory/FFI inside kernel, 624 non-memory #Unsafe queued on #6976). Found 9 live Multiple-Sources-of-Truth hotspots across Compiler, Runtime, Core, Jetpack, and Tests — ranked and mapped to owning cards below. Active execution: 100% locked on 30M LOC/s Architectural Pillars (#6978, #6793-#6798) through 05:00 EST, then immediate G1->G6 rapid burndown.",
     "milestones": [
       {
-        "title": "Self-hosting fixed point (stage1 == stage2)",
-        "state": "STALLED: no pipeline unit has run for 21 min (attempt r25)",
-        "progress": {},
-        "links": []
+        "title": "Single Source of Truth: Audited Memory Kernel & Unsafe Chokepoints",
+        "state": "Memory kernel (#6842) DONE: 0 raw memory actions outside declared policy.memory kernel files (Core/Mem, 9 JetRuntime files, 3 JetBackend files, embedded.jet). Remaining: collapse 624 non-memory #Unsafe regions (incl. 200 raw os_syscall* sites across 27 files) on #6976, and reach <=1.00x asm ceiling on all kernel primitives on #6975.",
+        "progress": {
+          "Memory Kernel Chokepoint (#6842)": 100,
+          "Non-Memory #Unsafe Consolidation (#6976)": 0,
+          "Memory Kernel Asm Ceiling (#6975)": 17
+        },
+        "links": [
+          {
+            "card": "c07py9jv"
+          },
+          {
+            "card": "c0ssfud5"
+          }
+        ]
+      },
+      {
+        "title": "Single Source of Truth: Compiler Type, AST & IR Representations (30M LOC/s)",
+        "state": "IN FLIGHT: Eliminating dual Type enum (2,899 sites in 149 JetSema files) vs TypeID Interner (#6978), 2-3x duplicated AST function bodies in Registration/Items.jet (#6793), and dual comptime/O0 lowering paths (#6795, #6798).",
+        "progress": {
+          "Pillar 1: TypeID Interner & Flat Sema (#6978)": 10,
+          "Pillar 2: Copy-and-Patch O0 & Direct Link (#6795)": 25,
+          "Pillar 3-6: Comptime/SoA/TaskGraph/SIMD (#6793-#6798)": 4
+        },
+        "links": [
+          {
+            "card": "c05hrwee"
+          },
+          {
+            "card": "c00g7rk8"
+          },
+          {
+            "card": "c0x3j5om"
+          },
+          {
+            "card": "c0zupuj4"
+          }
+        ]
+      },
+      {
+        "title": "Single Source of Truth: Registries, API Twins & Generated Copies",
+        "state": "17/18 met on #6568; CoreValueSignatures.jet already deleted. Remaining live dual-truth files: (1) Compiler/JetSema/Source/Sema/Calls/Core.jet (1,813 lines) duplicating Core/ APIs (#6151), (2) Tokens.jet TOKEN_* vs Terminators.jet K_* (685 lines), (3) Jetpack/Foundation/Source/Syntax.jet (88 lines) copying JetFoundation/Data/Syntax (#4020), (4) RuntimeInterface.jet (435 lines) manual copy-on-drift, (5) hand-maintained JET_CLI_CORE_LOWERED & diagnostics_coverage_allowlist.tsv (93 lines).",
+        "progress": {
+          "Core/Diagnostic SSoT (#6568)": 94,
+          "Core API Twin Removal (#6151)": 40,
+          "Syntax/Token/Interface SSoT (#4020)": 60
+        },
+        "links": [
+          {
+            "card": "c0xuffg1"
+          }
+        ]
+      },
+      {
+        "title": "Universal Max-Performance Machine Codegen (All Jet Programs) + G1->G6 Queue",
+        "state": "CodegenCeiling 9/9 passing (byte_count at 1.00x asm ceiling; 6 kernels at 5.75x-12.18x gap). Every compiler/Core/IR win applies universally to all Jet programs. G1->G6 rapid burndown (incl. 4 newly ratified A decisions) starts immediately once architectural pillars land.",
+        "progress": {
+          "CodegenCeiling Gate": 100,
+          "Asm Ceiling <=1.00x Coverage": 14,
+          "G1-G6 Ready Queue": 0
+        },
+        "links": [
+          {
+            "card": "c031o59x"
+          },
+          {
+            "card": "c0ssfud5"
+          }
+        ]
       }
     ],
     "workstreams": [
       {
-        "title": "Chain r25",
-        "state": "STALLED: no pipeline unit has run for 21 min (attempt r25)",
+        "title": "SSoT-1: Dual Type Representation (Type heap enum vs TypeID Interner)",
+        "state": "IN FLIGHT (Stream A / Pillar 1): Compiler/JetFoundation/Source/Types/Types.jet (2,899 ': Type' sites across 149 JetSema files) vs TypeIDs.jet (854 lines). Collapsing to one Interner + O(1) canonical u32 TypeID + zero AST body deep copies in Registration/Items.jet.",
         "workers": [
-          "Main"
+          "Stream A (CodegenOpt worktree)"
+        ],
+        "blockers": [],
+        "links": [
+          {
+            "card": "c05hrwee"
+          },
+          {
+            "card": "c0x3j5om"
+          }
+        ]
+      },
+      {
+        "title": "SSoT-2: Scattered Raw Syscalls & Non-Memory #Unsafe Regions (624 regions, 200 os_syscall* sites)",
+        "state": "QUEUED FOR G4 (#6976): 200 raw os_syscall* call sites duplicated across 27 files (Loader.jet 97, PerfSamples.jet 21, Alloc.jet 11, SessionHost.jet 11, Fault.jet 6, Thread.jet 5, etc.) plus 624 non-memory #Unsafe regions (startup-state writes, Core host-leaf calls, Secret/Crypto). Collapse to one typed syscall table in OS/Linux.jet and one once-only startup primitive.",
+        "workers": [
+          "Unassigned (G4 burndown queue)"
         ],
         "blockers": [
-          "STALLED: no pipeline unit has run for 21 min (attempt r25)"
+          "Sequenced after 30M LOC/s architectural pillars"
         ],
-        "links": []
+        "links": [
+          {
+            "card": "c07py9jv"
+          }
+        ]
+      },
+      {
+        "title": "SSoT-3: Compiler Hand-Written Core API Twin (JetSema/Source/Sema/Calls/Core.jet, 1,813 lines)",
+        "state": "QUEUED FOR G1-G6 (#6151): CoreValueSignatures.jet is deleted, but Core.jet (1,813 lines) still maintains compiler-side Core API definitions beside Core/ sources. Derive all Core rows directly from Core/ sources.",
+        "workers": [
+          "Unassigned (G1-G6 queue)"
+        ],
+        "blockers": [
+          "Sequenced after 30M LOC/s architectural pillars"
+        ],
+        "links": [
+          {
+            "card": "c0xuffg1"
+          }
+        ]
+      },
+      {
+        "title": "SSoT-4: Dual Lexer Token Tables & Jetpack Syntax Copy (Tokens.jet vs Terminators.jet, Jetpack Syntax.jet)",
+        "state": "QUEUED FOR G1-G6: (a) JetLexer/Source/Lexer/Tokens.jet (TOKEN_*) vs Terminators.jet (K_*, 685 lines) maintain two parallel token-number tables checked by LexerKeywordRows.jet; collapse to one table. (b) Jetpack/Foundation/Source/Syntax.jet (88 lines) duplicates JetFoundation/Data/Syntax (#4020); derive or import from JetFoundation.",
+        "workers": [
+          "Unassigned (G1-G6 queue)"
+        ],
+        "blockers": [
+          "Sequenced after 30M LOC/s architectural pillars"
+        ],
+        "links": [
+          {
+            "card": "c0xuffg1"
+          }
+        ]
+      },
+      {
+        "title": "SSoT-5: Manual-Sync RuntimeInterface.jet & Hand-Maintained Lists (JET_CLI_CORE_LOWERED, diagnostics_coverage_allowlist.tsv)",
+        "state": "QUEUED FOR G1-G6: (a) JetFoundation/Source/Registry/RuntimeInterface.jet (435 lines) fails build on drift and requires manual copy-over instead of single-source generation. (b) CoreLibrary.jet JET_CLI_CORE_LOWERED (35 packages) and Tests/diagnostics_coverage_allowlist.tsv (93 lines) rely on guard tests instead of direct derivation from source metadata.",
+        "workers": [
+          "Unassigned (G1-G6 queue)"
+        ],
+        "blockers": [
+          "Sequenced after 30M LOC/s architectural pillars"
+        ],
+        "links": [
+          {
+            "card": "c0xuffg1"
+          }
+        ]
+      },
+      {
+        "title": "SSoT-6: Unified O0 / Comptime / Native / Wasm Lowering (I9 One Meaning)",
+        "state": "IN FLIGHT (Stream B / Pillar 2 -> Pillar 3): Building X64Patch copy-and-patch O0 stencils (#6795) and routing JetEval/Source/IR/Native.jet comptime batches (currently bypassing fast_o0 onto O2 regalloc!) onto the same O0 path + shared-memory child (#6798).",
+        "workers": [
+          "Stream B (GoalsOrder worktree)"
+        ],
+        "blockers": [],
+        "links": [
+          {
+            "card": "c00g7rk8"
+          },
+          {
+            "card": "c0zupuj4"
+          }
+        ]
       }
     ]
   }
