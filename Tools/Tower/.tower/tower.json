@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113300,
+    "rev": 113305,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41757,6 +41757,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T12:59:34.150Z"
+        },
+        {
+          "n": 19,
+          "text": "A capped allocator's refusal can always report itself: when a fallible reserve is refused near the cap, the AllocError it returns is built without needing capped heap, so the program never aborts with 'memory allocation of N bytes failed' while handling a refusal, and the refusal point stays exactly at the cap. Found 2026-11-23: Tests/Cases/Atomics/d_atomic_width1_contract (WidthContract at -O1, fill drives a 64 MB Counting cap below 4 KiB) aborts in 15/600 runs on the dev runtime and 72/600 with #6794 S1's per-carrier rings, depending on JET_SCHEDULER_THREADS; the refusal's AllocError record, allocator name text and Result box (JetIR BuildRoutes.jet:1050-1057) are allocated infallibly on the exhausted heap. Proof: 600 runs of that case at JET_SCHEDULER_THREADS 12, 16 and 32 with zero aborts, and the AllocatorFamilies cases unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T14:33:39.966Z"
         }
       ],
       "refs": [],
@@ -41764,9 +41773,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-22T02:10:23.714Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 18
+      "updated": "2026-11-23T14:33:39.966Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 19
     },
     {
       "id": "c0g5cadm",
@@ -56540,6 +56549,24 @@
           "verifiedBy": null,
           "evidence": "dev b66642b8bc (fix 23c9ed608d, case reasons b66642b8bc): `jet test Compiler --profile cases --filter \"Debug/print_a_called_list_text_and_map\"` PASS on gate-p428 (built from 71c563d975) with the landed case, which prints numbers(3, 2) = [3, 4], words(\"xy\", 3) = \"xyxyxy\", counts(\"k\", 7) = [\"k\": 7], each .len() (2, 6, 1) and the same through function values as Ok(...), at a stop on O0, O1 and O2. The rest of Tests/Cases/Debug ran on gate-p428: 162 PASS, 1 known-failing, no new failure.",
           "at": "2026-11-21T19:29:52.023Z"
+        },
+        {
+          "n": 119,
+          "text": "jet perf profiles a built Jet binary, the compiler included, with no source rebuild: (a) `jet perf run` accepts an executable (today: 'Can't securely read the file' for $JET_SCRATCH_ROOT/.../jet, it only takes a .jet source), and (b) `jet perf attach PID` works on the default kernel.yama.ptrace_scope=1 for a Jet program started from another shell, because Jet's runtime sets prctl(PR_SET_PTRACER) for the jet tool or the attach starts through a supported handshake (today: Jet.DebugAttachFailed). Found 2026-11-23 taking the compile-speed profile; the workaround is `jet perf run Compiler/JetCLI/run.jet check Compiler`, which profiles an O0 rebuild instead of the shipped compiler. Proof: both commands profile `jet check Compiler` by the built jet and `jet perf view` names its sema functions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T14:37:26.637Z"
+        },
+        {
+          "n": 120,
+          "text": "jet perf view's per-line rows say which costs were measured: a static cost-site label from CostFacts.jet body_cost_fact ('map copy-on-write' on every map-mutating builtin, 'generic representation fallback' on every List/FixedList index) is never printed as a cost of the sampled line, unless the samples show that path ran. Its sub-rows name the callee each sample landed in, not only a hashed cost site ('map grow 76e6573179fa7127'). The view or export also gives callers: folded stacks, or the top callers of a function. Found 2026-11-23: the compile-speed profile flagged Names.jet:142, a plain slots[slot] read in a probe loop, as 'generic representation fallback'; the export rows carry no stacks. Proof: jet perf view on a trace of jet check Compiler shows measured sub-costs with callee symbols and a callers list for name_find_hashed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T14:42:42.506Z"
         }
       ],
       "refs": [],
@@ -56547,9 +56574,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-22T02:53:06.594Z",
+      "updated": "2026-11-23T14:42:42.506Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 118
+      "criteriaLastN": 120
     },
     {
       "id": "c0in2dft",
@@ -72585,6 +72612,11 @@
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
+          "text": "Slice 3a test 2026-11-23 (dev 03f1442ac1 + 3a): build ok; jet check Compiler --threads 1 and --threads 12 outputs byte-identical; ui no new failures; golden 6 and cases 15 new failures in three roots: (A) CoreRecords.jet:210 'checked comptime item result disagrees with its expected type' (TypedLiteralForms, SameTypeNames, comptime closure kinds, typed datetime, fixed-width integers); (B) TypeIDs.jet type_kind/type_side out of bounds in jet debug expression compiles and jet review (an interner without the program's types); (C) constant-time check finds a secret branch in Core crypto at O0. Sent back to the implementer; 3a is not landed."
+        },
+        {
+          "at": "2026-11-23",
+          "by": "Orchestrator",
           "text": "Slice 3 status 2026-11-23: IR side done in the CodegenOpt worktree (TypeTable and IRModule.value_types deleted, IRType.ty is a TypeID, value_rows indexed by TypeID.id, IRModule.type_delta merged in part order, lint and opt views borrow the module interner). Full jet check Compiler shows 0 errors; JetFoundation 33/0, JetSema 23/0, JetIR 186/0. Decision: the IR raw-pointer row is a built-in type, TYPE_POINTER (id 17; NAME_POINTER is built-in name 8), because ir_pointer_row's 218 callers cannot reach the program interner. It lands as Slice 3a once rebased on dev and tested. Remaining for c1 (Slice 3b+): about 157 Type fields and 1584 construction sites in Facts Body/Checked/Declarations, and the checker's arena_syntax Type column (needs TExpr.ty as a TypeID)."
         },
         {
@@ -72636,6 +72668,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:33:06.314Z"
+        },
+        {
+          "n": 3,
+          "text": "A user-declared type named Pointer is distinct from the IR's built-in raw-pointer type: it gets its own TypeID, and a program declaring Pointer compiles and runs with the same output on every tier. Today both intern as Named \"Pointer\" (TYPE_POINTER id 17). Proof: a case under Tests/Cases declaring struct Pointer, run with jet run, -O1 and -O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-23T14:30:09.864Z"
         }
       ],
       "refs": [],
@@ -72645,9 +72686,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-23T14:30:07.176Z",
+      "updated": "2026-11-23T14:56:30.623Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0py34oh",
@@ -134785,6 +134826,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-23T14:56:30.623Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-23T14:42:42.506Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "117 criteria, soft limit 6: Dogfooding friction in the area this card owns"
+    },
+    {
+      "at": "2026-11-23T14:42:42.506Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#120 jet perf view's per-line rows say which costs were measured:"
+    },
+    {
+      "at": "2026-11-23T14:37:26.637Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "116 criteria, soft limit 6: Dogfooding friction in the area this card owns (owner rule: a gap goes on the owning card)"
+    },
+    {
+      "at": "2026-11-23T14:37:26.637Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#119 jet perf profiles a built Jet binary, the compiler included,"
+    },
+    {
+      "at": "2026-11-23T14:33:39.966Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0ct4a0i",
+      "note": "17 criteria, soft limit 6: Defect found in the area this card owns; the owner rule (2026-11-14) puts a regression or gap on the owning card, never a card of its own"
+    },
+    {
+      "at": "2026-11-23T14:33:39.966Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0ct4a0i",
+      "note": "#19 A capped allocator's refusal can always report itself: when "
+    },
+    {
+      "at": "2026-11-23T14:30:09.864Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05hrwee",
+      "note": "#3 A user-declared type named Pointer is distinct from the IR's"
+    },
     {
       "at": "2026-11-23T14:30:07.176Z",
       "by": "Orchestrator",
