@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[CompilerThreads, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_rows_value, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -514,10 +514,7 @@ ir_x64_tables_start: fn(m: IRModule) -> IRX64Tables Never! {
     tables
 }
 
-// Gives the uses of function `f`, the next in function order, their module
-// rows, adding its source file and the rows no function before it named;
-// returns the row of each use, for ir_x64_resolve.
-ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
+ir_x64_tables_add_file: fn(tables: &IRX64Tables, f: IRFunction) Never! {
     if f.source_file != "" && f.source_file != tables.last_file {
         tables.last_file = f.source_file
         if ir_x64_text_rows_get(tables.file_rows, f.source_file) < 0 {
@@ -525,7 +522,20 @@ ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [
             tables.files.push(f.source_file)
         }
     }
+}
+
+// Gives the uses of function `f`, the next in function order, their module
+// rows, adding its source file and the rows no function before it named;
+// returns the row of each use, for ir_x64_resolve.
+ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [Int] Never! {
     rows := [Int]{}
+    ir_x64_tables_add_into(tables, f, uses, rows)
+    rows
+}
+
+ir_x64_tables_add_into: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses, rows: &[Int]) Never! {
+    ir_x64_tables_add_file(tables, f)
+    if rows.len() > 0 -> rows.clear()
     loop (at, kind) in uses.kinds {
         text: uses.texts[at]
         row: if kind == {
@@ -554,7 +564,6 @@ ir_x64_tables_add: fn(tables: &IRX64Tables, f: IRFunction, uses: IRX64Uses) -> [
         }
         rows.push(row)
     }
-    rows
 }
 
 // The rows of `uses` in tables that hold them all already (ir_x64_tables).
@@ -870,10 +879,14 @@ ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX6
 // names (ir_x64_log_names) in IRX64Result.log, after the members of the
 // module's structs (IRModule.struct_fields), so a reader of the log names
 // the member an `offset` or `load` reaches.
-ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String]) -> IRX64Result Never! {
+ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, names: [String], trace_sink: CompilerTraceSink?{None}) -> IRX64Result Never! {
     m := program.move()
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.drop_early", "", -1, -1)
     ir_drop_early(m, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.drop_early", m.functions.len())
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.tail_calls", "", -1, -1)
     ir_tail_calls(m, threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.tail_calls", m.functions.len())
     log := [String]{}
     if names.len() > 0 {
         if m.struct_fields.len() > 0 {
@@ -900,6 +913,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     zone_plot: name_rows_value(m.name_rows, "jet_perf_plot_float") ?? -1
     zone_frame: name_rows_value(m.name_rows, "jet_perf_frame") ?? -1
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.select", "", -1, -1)
     weights := [Int]{}
     weights.try_reserve(count) ?? panic("reserve failed")
     total := 0
@@ -915,34 +929,49 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     errors := [String]{}
     if workers <= 1 {
         tables := ir_x64_tables_start(m)
+        patch := ir_patch_emitter_new()
+        rows := [Int]{}
         loop row in 0..<count {
-            compiled := ir_x64_select_function(m, row, names, poll, trap, turn, zone_plot, zone_frame)
-            rows: ir_x64_tables_add(tables, m.functions[row], compiled.uses)
-            if compiled.local_relocs.len() > 0 {
-                ir_x64_resolve_at(compiled.function, rows, compiled.local_relocs)
+            compiled := ir_x64_select_function_in(m, row, names, poll, trap, turn, zone_plot, zone_frame, patch)
+            if compiled.uses.kinds.len() > 0 {
+                ir_x64_tables_add_into(tables, m.functions[row], compiled.uses, rows)
+                if compiled.local_relocs.len() > 0 {
+                    ir_x64_resolve_at(compiled.function, rows, compiled.local_relocs)
+                }
+                if compiled.hot.len() > 0 || compiled.cold.len() > 0 {
+                    ir_x64_tables_heat(tables, rows, compiled.hot, compiled.cold)
+                }
+            } else {
+                ir_x64_tables_add_file(tables, m.functions[row])
+                if compiled.hot.len() > 0 || compiled.cold.len() > 0 {
+                    ir_x64_tables_heat(tables, [Int]{}, compiled.hot, compiled.cold)
+                }
             }
-            ir_x64_tables_heat(tables, rows, compiled.hot, compiled.cold)
-            errors.extend(compiler_take_rows<String>(compiled.errors))
-            log.extend(compiler_take_rows<String>(compiled.log))
+            if compiled.errors.len() > 0 {
+                errors.extend(compiler_take_rows<String>(compiled.errors))
+            }
+            if compiled.log.len() > 0 -> log.extend(compiler_take_rows<String>(compiled.log))
             functions.push(compiled.function.move())
             debug.push(compiled.debug.move())
             variables.push(compiled.variables.move())
         }
+        if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
+        if trace_sink == .Val(sink) -> sink.begin("ir.x64.tables_finish", "", -1, -1)
         ir_x64_tables_finish(m, tables)
+        if trace_sink == .Val(sink) -> sink.end("ir.x64.tables_finish", m.types.len())
         return IRX64Result{program: m.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
-    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn, zone_plot: zone_plot, zone_frame: zone_frame}}
+    order: if m.fast_o0 -> ir_x64_fast_order(weights) else -> compiler_threads_heaviest_first(weights)
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, names: names, order: order, next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn, zone_plot: zone_plot, zone_frame: zone_frame}}
     outputs := [IRX64FunctionResult?]{}
     stops := [String]{}
     outputs.try_reserve(count) ?? panic("reserve failed")
-    stops.try_reserve(count) ?? panic("reserve failed")
-    loop _ in 0..<count {
-        outputs.push(None)
-        stops.push("")
-    }
+    loop _ in 0..<count -> outputs.push(None)
     ir_x64_select_rows(inputs, workers, outputs, stops)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
     shells := ir_x64_take_inputs(inputs)
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
     tables := ir_x64_tables_start(program_back)
@@ -952,34 +981,69 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     // Reverse once so popping yields rows 0..<count in forward order, avoiding
     // temporary 60k-row staging arrays and extra reversals.
     outputs.reverse()
-    stops.reverse()
+    has_stops: stops.len() == count
+    if has_stops -> stops.reverse()
+    rows := [Int]{}
     loop row in 0..<count {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
-        stop: stops.pop() ?? ""
+        stop: if has_stops -> (stops.pop() ?? "") else -> ""
         if taken.move() == .Val(compiled) {
             selected := compiled.move()
             if selected.errors.len() > 0 -> errors.extend(selected.errors.move())
             if selected.log.len() > 0 -> log.extend(selected.log.move())
             fn_out := selected.function.move()
-            rows: ir_x64_tables_add(tables, program_back.functions[row], selected.uses)
-            if selected.local_relocs.len() > 0 {
-                ir_x64_resolve_at(fn_out, rows, selected.local_relocs)
+            if selected.uses.kinds.len() > 0 {
+                ir_x64_tables_add_into(tables, program_back.functions[row], selected.uses, rows)
+                if selected.local_relocs.len() > 0 {
+                    ir_x64_resolve_at(fn_out, rows, selected.local_relocs)
+                }
+                if selected.hot.len() > 0 || selected.cold.len() > 0 {
+                    ir_x64_tables_heat(tables, rows, selected.hot, selected.cold)
+                }
+            } else {
+                ir_x64_tables_add_file(tables, program_back.functions[row])
+                if selected.hot.len() > 0 || selected.cold.len() > 0 {
+                    ir_x64_tables_heat(tables, [Int]{}, selected.hot, selected.cold)
+                }
             }
-            ir_x64_tables_heat(tables, rows, selected.hot, selected.cold)
             functions.push(fn_out.move())
             debug.push(selected.debug.move())
             variables.push(selected.variables.move())
         } else {
             errors.push("{program_back.functions[row].name}: selection stopped: {stop}")
-            rows: ir_x64_tables_add(tables, program_back.functions[row], IRX64Uses{})
+            ir_x64_tables_add_into(tables, program_back.functions[row], IRX64Uses{}, rows)
             ir_x64_tables_heat(tables, rows, [Int]{}, [Int]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: program_back.functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             variables.push([X64DebugVariable]{})
         }
     }
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.scatter", count)
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64.tables_finish", "", -1, -1)
     ir_x64_tables_finish(program_back, tables)
+    if trace_sink == .Val(sink) -> sink.end("ir.x64.tables_finish", program_back.types.len())
     IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
+}
+
+// O(N) 3-bucket claim order for fast_o0: heavy functions (>= 512 ops) claim
+// first so no straggler trails the parallel wave, followed by medium (>= 64),
+// then tiny functions (which workers claim in chunks of 16).
+ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
+    count: weights.len()
+    heavy := [Int]{}
+    med := [Int]{}
+    small := [Int]{}
+    small.try_reserve(count) ?? panic("reserve failed")
+    loop row in 0..<count {
+        w: weights[row]
+        if w >= 512 -> heavy.push(row) else if w >= 64 -> med.push(row) else -> small.push(row)
+    }
+    order := [Int]{}
+    order.try_reserve(count) ?? panic("reserve failed")
+    loop row in heavy -> order.push(row)
+    loop row in med -> order.push(row)
+    loop row in small -> order.push(row)
+    order
 }
 
 // The selecting threads' inputs, read-only while they run: the module
@@ -1000,8 +1064,16 @@ IRX64Inputs: struct {
     zone_frame: Int{-1},
 }
 
+// Cache-line padded per-worker seat (64 bytes) to eliminate false sharing across workers.
 IRX64Seat: struct {
     row: Atomic<Int>,
+    pad0: Int{0},
+    pad1: Int{0},
+    pad2: Int{0},
+    pad3: Int{0},
+    pad4: Int{0},
+    pad5: Int{0},
+    pad6: Int{0},
 }
 
 // A function row and its selection, kept by the thread that selected it
@@ -1016,6 +1088,8 @@ IRX64Selected: struct {
 // thread's finished rows go with it and are selected again (selection is
 // deterministic), so a round that leaves rows behind has stopped on one.
 ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[IRX64FunctionResult?], stops: &[String]) {
+    total: outputs.len()
+    filled := 0
     loop {
         parts := ir_x64_claimers(inputs, 0, workers, stops) ?? panic("the x64 selection threads failed")
         loop parts.len() > 0 {
@@ -1026,13 +1100,20 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[IRX
                 selected := part.pop() ?? {
                     break
                 }
+                if outputs[selected.row] == None -> filled += 1
                 outputs[selected.row] = Val(selected.compiled.move())
             }
         }
+        if filled == total {
+            return
+        }
         missing := [Int]{}
         stopped := 0
-        loop row in 0..<outputs.len() {
-            if stops[row] != "" -> stopped += 1 else if outputs[row] == None -> missing.push(row)
+        has_stops: stops.len() == total
+        loop row in 0..<total {
+            if has_stops && stops[row] != "" -> stopped += 1 else if outputs[row] == None {
+                missing.push(row)
+            }
         }
         if missing.len() == 0 {
             return
@@ -1067,23 +1148,35 @@ ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: &
 }
 
 // One thread at `seat`: claims and selects functions until none is left.
+// Reuses one IRPatchEmitter per worker (eliminating per-function scratch heap
+// allocations) and claims small functions in chunks of 16 to cut atomic RMW
+// contention across 24+ cores.
 ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
     reads: inputs.guard_read()
+    order_len: reads.value.order.len()
     selected := [IRX64Selected]{}
-    est: reads.value.order.len().div_euclid(reads.value.seats.len() + 1) + 16
+    est: order_len.div_euclid(reads.value.seats.len() + 1) + 16
     selected.try_reserve(est) ?? panic("reserve failed")
     poll: reads.value.poll
     trap: reads.value.trap
     turn: reads.value.turn
     zone_plot: reads.value.zone_plot
     zone_frame: reads.value.zone_frame
+    heavy_limit: reads.value.seats.len() * 4
+    patch := ir_patch_emitter_new()
     loop {
-        rank: reads.value.next.add(1)
-        if rank >= reads.value.order.len() -> break
-        row: reads.value.order[rank]
-        reads.value.seats[seat].row.store(row)
-        compiled := ir_x64_select_function(reads.value.programs[0], row, reads.value.names, poll, trap, turn, zone_plot, zone_frame)
-        selected.push(IRX64Selected{row: row, compiled: compiled.move()})
+        cur: reads.value.next.load()
+        if cur >= order_len -> break
+        step: if cur < heavy_limit -> 1 else -> 16
+        first: reads.value.next.add(step)
+        if first >= order_len -> break
+        end: if first + step < order_len -> first + step else -> order_len
+        loop rank in first..<end {
+            row: reads.value.order[rank]
+            reads.value.seats[seat].row.store(row)
+            compiled := ir_x64_select_function_in(reads.value.programs[0], row, reads.value.names, poll, trap, turn, zone_plot, zone_frame, patch)
+            selected.push(IRX64Selected{row: row, compiled: compiled.move()})
+        }
     }
     reads.value.seats[seat].row.store(-1)
     selected
@@ -1094,6 +1187,11 @@ ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure,
     reads: inputs.guard_read()
     row: reads.value.seats[seat].row.load()
     if row >= 0 {
+        total: reads.value.programs[0].functions.len()
+        if stops.len() < total {
+            stops.try_reserve(total) ?? panic("reserve failed")
+            loop stops.len() < total -> stops.push("")
+        }
         stops[row] = compiler_threads_failure_text(failure)
         reads.value.seats[seat].row.store(-1)
     }

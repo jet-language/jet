@@ -250,12 +250,12 @@ lexer_chunk_delimiters_nest: fn(facts: [Int], first: Int, closed: Bool) -> Bool 
     index := first
     loop index * 4 < facts.len() {
         kind: facts[index * 4]
-        if kind == K_LPAREN -> parens += 1
-        if kind == K_LBRACKET -> brackets += 1
-        if kind == K_LBRACE -> braces += 1
-        if kind == K_RPAREN -> parens -= 1
-        if kind == K_RBRACKET -> brackets -= 1
-        if kind == K_RBRACE -> braces -= 1
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_LBRACE -> braces += 1
+        if kind == TOKEN_RPAREN -> parens -= 1
+        if kind == TOKEN_RBRACKET -> brackets -= 1
+        if kind == TOKEN_RBRACE -> braces -= 1
         if parens < 0 || brackets < 0 || braces < 0 -> return false
         index += 1
     }
@@ -278,16 +278,16 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     last: to >= source.len()
     facts := [Int]{}
     seed: from > 0
-    previous_code: if seed -> K_RBRACE else -> -1
+    previous_code: if seed -> TOKEN_RBRACE else -> -1
     gap_start: if seed -> from - 2 else -> 0
-    if seed -> emit(facts, K_RBRACE, from - 2, from - 1, false)
+    if seed -> emit(facts, TOKEN_RBRACE, from - 2, from - 1, false)
     scanned: raw_token_facts_range(source, reads.value.config_surface, from, to, previous_code, facts)
     clean := true
     if seed && !scanned.bodies_local -> clean = false
     if !last {
         if scanned.stop != to -> clean = false
         count: facts.len() /% 4
-        if count == 0 || facts[(count - 1) * 4] != K_RBRACE || facts[(count - 1) * 4 + 1] != to - 2 || facts[(count - 1) * 4 + 2] != to - 1 {
+        if count == 0 || facts[(count - 1) * 4] != TOKEN_RBRACE || facts[(count - 1) * 4 + 1] != to - 2 || facts[(count - 1) * 4 + 2] != to - 1 {
             clean = false
         }
     }
@@ -299,7 +299,7 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     if seed {
         // The seed `}` is the last token of the chunk before; it leaves the
         // front in place (reverse, pop, reverse: no token is copied).
-        if lexed.tokens.len() == 0 || lexed.tokens[0].kind != K_RBRACE -> clean = false
+        if lexed.tokens.len() == 0 || lexed.tokens[0].kind != TOKEN_RBRACE -> clean = false
         lexed.tokens.reverse()
         _ := lexed.tokens.pop()
         lexed.tokens.reverse()
