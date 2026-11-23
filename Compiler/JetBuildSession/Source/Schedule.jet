@@ -1,0 +1,206 @@
+// The generation schedule a build's declarations fix (spec "Programmable
+// builds", generation rounds). Its producers are each module `build: fn`
+// generated (`b.generate`, `meta.add`, `meta.rewrite_body`) and each step.
+// What a producer promises are its outputs; what it waits on are its
+// declared inputs (`.input`, `.reads`, `.file`) that another producer
+// promises. A wait on Jet source (a `.jet` path) is a typed barrier: the
+// consumer reads that source only once the build has checked it, so it runs
+// a round later. A wait on any other file keeps the consumer in its
+// producer's round. Every module `build: fn` generated is round 1, checked
+// with the package's sources before any step runs; a step's round is the
+// latest round of what it waits on, one later across a typed barrier, and 1
+// when it waits on nothing. A step that waits on itself, alone or through
+// other steps, has no round: E3511 when Jet source closes the cycle, else
+// the E3502 step cycle. A build generates in at most
+// BUILD_SESSION_GENERATION_ROUNDS rounds (D-META-LADDER1's round limit),
+// and a step past it is E3516. The schedule is computed from the
+// declarations alone, so it does not depend on the order steps ran in, the
+// cache or the thread count.
+
+BUILD_SESSION_GENERATION_ROUNDS: 17
+
+// One wait of a producer: the path it reads, the producer that promises it
+// (`kind` "module" or "step", and its name), and its barrier: "typed" for
+// Jet source, read a round later, else "file".
+BuildSessionScheduleWait: struct {
+    path: String,
+    kind: String,
+    producer: String,
+    barrier: String,
+}
+
+// One producer of the schedule: its kind ("module" or "step"), name, round,
+// the outputs it promises and what it waits on, in declaration order.
+BuildSessionScheduleNode: struct {
+    kind: String,
+    name: String,
+    round: Int,
+    outputs: [String],
+    waits: [BuildSessionScheduleWait],
+}
+
+// Who promises each path: a generated module `index` as `-1 - index`, a
+// step by its action id.
+build_session_schedule_promises: fn(state: BuildSessionState) -> [String:Int] Never! {
+    promises := [String:Int]{}
+    loop (index, generated) in state.generated -> promises[generated.path] = -1 - index
+    loop (id, action) in state.actions {
+        loop output in action.outputs -> promises[output] = id
+    }
+    promises
+}
+
+// Whether a wait on `path` is a typed barrier: Jet source, which its
+// consumer reads only once it is checked.
+build_session_schedule_typed: fn(path: String) -> Bool Never! { path.ends_with(".jet") }
+
+// For each step, the steps whose outputs it reads, itself included.
+build_session_schedule_edges: fn(state: BuildSessionState, promises: [String:Int]) -> [[Int]] Never! {
+    edges := [[Int]]{}
+    loop action in state.actions {
+        row := [Int]{}
+        loop path in action.inputs {
+            producer: promises.get(path) ?? next
+            if producer >= 0 -> build_session_append_int(row, producer)
+        }
+        row.sort()
+        edges.push(row)
+    }
+    edges
+}
+
+// The round of the producer `producer` names (a module's is 1) as the
+// consumer reading `path` from it reaches it.
+build_session_schedule_reached: fn(rounds: [Int], producer: Int, path: String) -> Int Never! {
+    made: if producer < 0 -> 1 else -> rounds[producer]
+    if build_session_schedule_typed(path) -> made + 1 else -> made
+}
+
+// Each step's round, by action id. The step graph has no cycle.
+build_session_schedule_rounds: fn(state: BuildSessionState, promises: [String:Int]) -> [Int] Never! {
+    rounds := [Int]{}
+    loop _ in state.actions -> rounds.push(1)
+    changed := true
+    loop changed {
+        changed = false
+        loop (id, action) in state.actions {
+            round := 1
+            loop path in action.inputs {
+                producer: promises.get(path) ?? next
+                reached: build_session_schedule_reached(rounds, producer, path)
+                if reached > round -> round = reached
+            }
+            if round != rounds[id] {
+                rounds[id] = round
+                changed = true
+            }
+        }
+    }
+    rounds
+}
+
+build_session_schedule_step: fn(state: BuildSessionState, name: String) -> Int Never! {
+    loop (id, action) in state.actions {
+        if action.name == name -> return id
+    }
+    panic("a schedule cycle names a step of this build")
+}
+
+// Whether step `consumer` reads Jet source step `producer` makes.
+build_session_schedule_typed_wait: fn(state: BuildSessionState, consumer: Int, producer: Int) -> Bool Never! {
+    loop path in state.actions[consumer].inputs {
+        if build_session_schedule_typed(path) && build_session_contains_string(state.actions[producer].outputs, path) {
+            return true
+        }
+    }
+    false
+}
+
+// The steps that carry step `id` to its round, earliest first: at each
+// step, the first producer whose round reaches it.
+build_session_schedule_chain: fn(state: BuildSessionState, promises: [String:Int], rounds: [Int], id: Int) -> [String] Never! {
+    chain := [String]{state.actions[id].name.copy()}
+    current := id
+    loop {
+        found := -1
+        loop path in state.actions[current].inputs {
+            producer: promises.get(path) ?? next
+            if producer < 0 || producer == current -> next
+            if build_session_schedule_reached(rounds, producer, path) == rounds[current] {
+                found = producer
+                break
+            }
+        }
+        if found < 0 -> break
+        chain.push(state.actions[found].name.copy())
+        current = found
+    }
+    chain.reverse()
+    chain
+}
+
+// The first schedule fact that refuses the plan: a step that waits on
+// itself (reported at the `b.run` call of the step the cycle starts from),
+// else the first step, in declaration order, past the round limit (at its
+// own `b.run` call).
+build_session_schedule_check: fn(state: BuildSessionState) -> BuildSessionDiagnostic? Never! {
+    promises: build_session_schedule_promises(state)
+    names: loop action in state.actions -> action.name
+    if build_session_cycle(build_session_schedule_edges(state, promises), names) == .Val(nodes) {
+        typed := false
+        loop index in 0..<(nodes.len() - 1) {
+            consumer: build_session_schedule_step(state, nodes[index])
+            producer: build_session_schedule_step(state, nodes[index + 1])
+            if build_session_schedule_typed_wait(state, consumer, producer) -> typed = true
+        }
+        error: if typed -> BuildSessionError.GenerationWaitCycle{nodes: nodes} else -> BuildSessionError.ActionDependencyCycle{nodes: nodes}
+        diagnostic := build_session_error_diag(state, error)
+        first: state.actions[build_session_schedule_step(state, nodes[0])]
+        diagnostic.start = first.start
+        diagnostic.end = first.end
+        return Val(diagnostic)
+    }
+    rounds: build_session_schedule_rounds(state, promises)
+    loop (id, action) in state.actions {
+        if rounds[id] <= BUILD_SESSION_GENERATION_ROUNDS -> next
+        diagnostic := build_session_error_diag(state, BuildSessionError.GenerationRoundLimit{step: action.name, round: rounds[id], chain: build_session_schedule_chain(state, promises, rounds, id)})
+        diagnostic.start = action.start
+        diagnostic.end = action.end
+        return Val(diagnostic)
+    }
+    None
+}
+
+// The schedule of a checked plan's state: round by round, each round's
+// modules, then its steps, each in name order.
+build_session_schedule: fn(state: BuildSessionState) -> [BuildSessionScheduleNode] Never! {
+    promises: build_session_schedule_promises(state)
+    rounds: build_session_schedule_rounds(state, promises)
+    nodes := [BuildSessionScheduleNode]{}
+    loop generated in state.generated {
+        nodes.push(BuildSessionScheduleNode{kind: "module", name: generated.name.copy(), round: 1, outputs: [String]{generated.path.copy()}, waits: [BuildSessionScheduleWait]{}})
+    }
+    loop (id, action) in state.actions {
+        waits := [BuildSessionScheduleWait]{}
+        loop path in action.inputs {
+            producer: promises.get(path) ?? next
+            barrier: if build_session_schedule_typed(path) -> "typed" else -> "file"
+            kind: if producer < 0 -> "module" else -> "step"
+            name: if producer < 0 -> state.generated[-1 - producer].name.copy() else -> state.actions[producer].name.copy()
+            waits.push(BuildSessionScheduleWait{path: path.copy(), kind: kind, producer: name, barrier: barrier})
+        }
+        nodes.push(BuildSessionScheduleNode{kind: "step", name: action.name.copy(), round: rounds[id], outputs: action.outputs.copy(), waits: waits.move()})
+    }
+    nodes.sort_by(fn(left: BuildSessionScheduleNode, right: BuildSessionScheduleNode) {
+        if left.round != right.round -> return left.round <=> right.round
+        if left.kind != right.kind -> return left.kind <=> right.kind
+        left.name <=> right.name
+    })
+    nodes
+}
+
+// The generation schedule of `plan`.
+build_plan_schedule: fn(plan: BuildSessionPlan) -> [BuildSessionScheduleNode] Never! {
+    permit: plan.storage.guard_read()
+    build_session_schedule(permit.value)
+}

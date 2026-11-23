@@ -1,0 +1,11 @@
+Error: Jet.GenerationCycle: Build plan is invalid: generated Jet source waits on itself: `grow` -> `grow`; each step reads Jet source the next one makes
+  --> Tests/UI/GenerateWaitsOnItself/run.jet:9:17
+    |
+  9 |         grow: b.run("grow", b.found(shell), [])
+    |                 ^^^
+ Why: A step reads Jet source only once the build has checked it, so a step that waits on Jet source it makes itself, alone or through other steps, can never start
+ Fix: Have one step of the chain read something no step in it makes, or merge the steps into one
+More: jet-lang.dev/e/Jet.GenerationCycle
+
+1 problem found
+Run `jet explain Jet.GenerationCycle` to learn more

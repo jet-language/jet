@@ -1,0 +1,14 @@
+// Two steps promise the same output.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the steps") {
+        shell: b.probe("shell", "find_program", "sh")
+        first: b.run("first", b.found(shell), ["Exec", "FS"])
+        first.writes("table.txt")
+        second: b.run("second", b.found(shell), ["Exec", "FS"])
+        second.writes("table.txt")
+        app: b.add_executable("app", ["shared.jet"], [first, second])
+        b.default(app)
+    }
+}
+
+run: fn() {}

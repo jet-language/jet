@@ -1,0 +1,15 @@
+// @programmable_build
+// @cli_build
+// A step that reads the Jet source it makes could only start once that
+// source was checked, after the step ran: it waits on itself (E3511),
+// reported at its `b.run` call before anything runs.
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell") {
+        shell: b.probe("shell", "find_program", "sh")
+        grow: b.run("grow", b.found(shell), [])
+        grow.reads(".jet/generated/run/grow.jet")
+        grow.writes(".jet/generated/run/grow.jet")
+    }
+}
+
+run: fn() {}

@@ -1,0 +1,17 @@
+// @programmable_build
+// @cli_build
+// Each step reads the Jet source the one before made, so each generates a
+// round after it. Eighteen of them pass the build's limit of 17 rounds
+// (E3516), reported at the `b.run` call before anything runs.
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell") {
+        shell: b.probe("shell", "find_program", "sh")
+        loop index in 0..<18 {
+            step: b.run("gen{index}", b.found(shell), [])
+            if index > 0 -> step.reads(".jet/generated/run/gen{index - 1}.jet")
+            step.writes(".jet/generated/run/gen{index}.jet")
+        }
+    }
+}
+
+run: fn() {}

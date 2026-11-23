@@ -1,0 +1,16 @@
+// `grow` reads the Jet source it makes: it waits on itself.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generating step") {
+        shell: b.probe("shell", "find_program", "sh")
+        grow: b.run("grow", b.found(shell), ["Exec", "FS"])
+        grow.arg("-c")
+        grow.arg("printf 'grown' > made.txt")
+        grow.reads(".jet/generated/self/grow.jet")
+        grow.writes(".jet/generated/self/grow.jet")
+        grow.writes("made.txt")
+        app: b.add_executable("app", ["self.jet"], [grow])
+        b.default(app)
+    }
+}
+
+run: fn() {}

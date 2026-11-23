@@ -1,0 +1,31 @@
+// The steps are declared consumer first: what each reads, not where it is
+// declared, sets the round it runs in. `render` reads the module
+// `b.generate("facts")` makes, `shown` reads the Jet source `render` makes,
+// and `count` reads the plain file `shown` makes.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generating steps") {
+        shell: b.probe("shell", "find_program", "sh")
+        count: b.run("count", b.found(shell), ["Exec", "FS"])
+        count.arg("-c")
+        count.arg("read -r line < shown.txt && printf 'counted %s' \"$line\" > count.txt")
+        count.reads("shown.txt")
+        count.writes("count.txt")
+        shown: b.run("shown", b.found(shell), ["Exec", "FS"])
+        shown.arg("-c")
+        shown.arg("read -r line < .jet/generated/main/render.jet && printf '%s' \"$line\" > shown.txt")
+        shown.reads(".jet/generated/main/render.jet")
+        shown.writes("shown.txt")
+        render: b.run("render", b.found(shell), ["Exec", "FS"])
+        render.arg("-c")
+        render.arg("test -s .jet/generated/main/facts.jet && printf 'rendered: fn() -> Int {{ 1 }}\\n' > .jet/generated/main/render.jet")
+        render.reads(".jet/generated/main/facts.jet")
+        render.writes(".jet/generated/main/render.jet")
+        b.generate("facts") {
+            answer: fn() -> Int { 42 }
+        }
+        app: b.add_executable("app", ["main.jet"], [count])
+        b.default(app)
+    }
+}
+
+run: fn() {}

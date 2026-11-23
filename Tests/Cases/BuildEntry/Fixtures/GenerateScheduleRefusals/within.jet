@@ -1,0 +1,14 @@
+// Seventeen steps, each reading the Jet source the one before made: the
+// last generates in round 17, the limit.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the generating steps") {
+        shell: b.probe("shell", "find_program", "sh")
+        loop index in 0..<17 {
+            step: b.run("gen{index}", b.found(shell), ["Exec", "FS"])
+            if index > 0 -> step.reads(".jet/generated/within/gen{index - 1}.jet")
+            step.writes(".jet/generated/within/gen{index}.jet")
+        }
+    }
+}
+
+run: fn() {}
