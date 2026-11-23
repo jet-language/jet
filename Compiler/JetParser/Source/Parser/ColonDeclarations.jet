@@ -39,7 +39,7 @@
 // as a plain word, so the parser meets it as any other word there. A local
 // `fn name` in a body stays a local function.
 use {
-    jet_foundation.[Span, name_empty, name_find, name_index]
+    jet_foundation.[Span, name_empty, name_find, name_index, name_intern, name_table_sized]
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
@@ -537,9 +537,97 @@ parser_colon_find_name: fn(tables: TokenTables, text: String) -> Int Never! {
     if name_find(tables.names, text) == .Val(id) -> name_index(id) else -> -1
 }
 
-// `tables` spells the tokens' names.
-parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
+// Per-chunk local result of `parser_colon_declarations_local`: local colon
+// heads are already rotated in place, and only the compact module-instance
+// summary (`candidates`, `declared_modules`, `declared_others`) leaves the
+// chunk for the whole-file fixed point.
+ParserColonLocal: struct {
+    candidates: [ParserColonInstance],
+    declared_modules: [Int],
+    declared_others: [Int],
+    clean: Bool,
+}
+
+// One module-instance candidate resolved to its spellings for cross-chunk
+// fixed-point resolution when chunks hold separate `NameTable`s.
+ParserColonNamedCandidate: struct {
+    chunk: Int,
+    head: Int,
+    name: String,
+    target: String,
+    typed: Bool,
+    snake: Bool,
+}
+
+// Resolves cross-chunk module-instance candidates via the exact whole-file
+// fixed point and returns, per chunk, the ascending local token indexes where
+// `TOKEN_KW_MODULE` must be inserted.
+parser_colon_resolve_named_instances: fn(chunk_count: Int, candidates: [ParserColonNamedCandidate], declared_modules: [String], declared_others: [String]) -> [[Int]] Never! {
+    chosen_by_chunk := [[Int]]{}
+    loop _ in 0..<chunk_count -> chosen_by_chunk.push([Int]{})
+    if candidates.len() == 0 -> return chosen_by_chunk
+    names := name_table_sized(64)
+    modules := [Int:Bool]{}
+    loop spelling in declared_modules -> modules[name_index(name_intern(names, spelling))] = true
+    others := [Int:Bool]{}
+    loop spelling in declared_others -> others[name_index(name_intern(names, spelling))] = true
+    name_ids := [Int]{}
+    target_ids := [Int]{}
+    chosen := [Bool]{}
+    name_ids.try_reserve(candidates.len()) ?? panic("reserve failed")
+    target_ids.try_reserve(candidates.len()) ?? panic("reserve failed")
+    chosen.try_reserve(candidates.len()) ?? panic("reserve failed")
+    loop candidate in candidates {
+        name_ids.push(name_index(name_intern(names, candidate.name)))
+        target_ids.push(name_index(name_intern(names, candidate.target)))
+        chosen.push(false)
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop index in 0..<candidates.len() {
+            if chosen[index] -> next
+            candidate: candidates[index]
+            target_id: target_ids[index]
+            if modules.get(target_id) != None || (candidate.typed && candidate.snake && others.get(target_id) == None) {
+                chosen[index] = true
+                modules[name_ids[index]] = true
+                changed = true
+            }
+        }
+    }
+    loop index in 0..<candidates.len() {
+        if chosen[index] -> chosen_by_chunk[candidates[index].chunk].push(candidates[index].head)
+    }
+    chosen_by_chunk
+}
+
+// Inserts `TOKEN_KW_MODULE` with a zero-width span before each ascending token
+// index in `chosen_heads` inside one chunk's token list.
+parser_colon_insert_module_heads: fn(input: &&[Token], chosen_heads: [Int]) -> [Token] Never! {
     tokens := input.move()
+    if chosen_heads.len() == 0 -> return tokens
+    marked := [Token]{}
+    marked.try_reserve(tokens.len() + chosen_heads.len()) ?? panic("reserve failed")
+    next_chosen := 0
+    loop index in 0..<tokens.len() {
+        loop next_chosen < chosen_heads.len() && chosen_heads[next_chosen] < index {
+            next_chosen += 1
+        }
+        if next_chosen < chosen_heads.len() && chosen_heads[next_chosen] == index {
+            at: tokens[index].span.start
+            marked.push(Token{kind: TOKEN_KW_MODULE, span: Span{start: at, end: at}, text: name_empty(), decoded: name_empty(), literal: -1})
+            next_chosen += 1
+        }
+        marked.push(tokens[index])
+    }
+    marked
+}
+
+// Rotates unambiguous local colon heads (`fn`/`struct`/`enum`/`trait`/`module`)
+// in place on `tokens` and returns the compact module-instance summary for
+// whole-file fixed-point resolution.
+parser_colon_declarations_local: fn(tokens: &[Token], tables: TokenTables) -> ParserColonLocal Never! {
     marker_id: parser_colon_find_name(tables, "Marker")
     derive_id: parser_colon_find_name(tables, "Derive")
     expand_id: parser_colon_find_name(tables, "expand")
@@ -561,7 +649,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
     // inside them (`impl Holds<Int, [String]> {`) ends no member.
     angles := 0
     at_start := true
-    // Module instance candidates, and the names this file declares as
+    // Module instance candidates, and the names this chunk declares as
     // modules and as anything else.
     candidates := [ParserColonInstance]{}
     declared_modules := [Int]{}
@@ -702,6 +790,13 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
         previous = index
         index += 1
     }
-    if candidates.len() == 0 -> return tokens.move()
-    parser_colon_mark_instances(tokens, candidates, declared_modules, declared_others)
+    ParserColonLocal{candidates: candidates.move(), declared_modules: declared_modules.move(), declared_others: declared_others.move(), clean: saved.len() == 0 && frame == PARSER_COLON_FRAME_MODULE}
+}
+
+// `tables` spells the tokens' names.
+parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
+    tokens := input.move()
+    local := parser_colon_declarations_local(tokens, tables)
+    if local.candidates.len() == 0 -> return tokens.move()
+    parser_colon_mark_instances(tokens, local.candidates, local.declared_modules, local.declared_others)
 }

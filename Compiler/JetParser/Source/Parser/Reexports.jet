@@ -34,6 +34,20 @@ parser_report_parenthesized_reexport: fn(state: &JetParserState, definition: Con
     }
 }
 
+// Fast chunk-local check: whether `items` holds any plain lowercase immutable
+// constant binding that could re-export a path or import.
+parser_has_reexport_candidate: fn(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .Const(definition) {
+            if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 || definition.markers.len() > 0 {
+                next
+            }
+            if parser_reexport_value_word(definition.name) -> return true
+        }
+    }
+    false
+}
+
 // `items` with each re-exporting binding moved out, as a public import, to
 // the end of `imports`; the items as they are when none re-exports.
 parser_reexport_declarations: fn(items: &&[Item], imports: &[ImportDecl]) -> [Item] Never! {

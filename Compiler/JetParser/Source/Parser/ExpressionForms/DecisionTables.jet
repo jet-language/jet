@@ -334,7 +334,7 @@ parser_expression_form_distributed_group: fn(state: &JetParserState, span: Span)
     what: "distributed atom groups need parentheses before `&&` or `||`."
     why: "a `|` arm head is one distributed group, so its boundary must stay visible before a Boolean operator applies."
     fix: "write `(atom | atom) && guard` or `(atom | atom) || guard`."
-    if state.sources.len() > 0 && span.start >= 0 && span.start < span.end && span.end <= state.sources[0].len() {
+    if state.sources.len() > 0 && span.start >= state.source_offset && span.start < span.end && span.end <= parser_source_end_offset(state) {
         group: parser_source_slice(state, span.start, span.end)
         parser_add_error_code_edit(state, "E0386", span, what, why, fix, TextEdit{span: span, new_text: "({group})"})
         return

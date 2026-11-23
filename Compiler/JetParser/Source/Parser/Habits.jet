@@ -58,8 +58,9 @@ parser_habit_abort: fn(state: &JetParserState) Never! {
 // The offset of the line break that ends the line holding `offset`, or the
 // end of the source.
 parser_line_end_of: fn(state: JetParserState, offset: Int) -> Int Never! {
+    end: parser_source_end_offset(state)
     at := offset
-    loop at < state.sources[0].len() && parser_marker_byte(state.sources[0], at) != 10 -> at += 1
+    loop at < end && parser_source_byte(state, at) != 10 -> at += 1
     at
 }
 
@@ -84,13 +85,16 @@ parser_header_colon_index: fn(state: JetParserState, from: Int) -> Int Never! {
 parser_colon_block_edits: fn(state: JetParserState, colon: Span) -> [TextEdit] Never! {
     header_start: parser_line_start_of(state, colon.start)
     indent: parser_line_indent_width(state, header_start)
-    size: state.sources[0].len()
+    size: parser_source_end_offset(state)
     at := size
     line := parser_line_number_of(state, colon.start) + 1
-    loop line <= state.line_starts.len() {
-        start: state.line_starts[line - 1]
+    max_line: state.line_base + state.line_starts.len()
+    loop line <= max_line {
+        local: line - 1 - state.line_base
+        if local < 0 || local >= state.line_starts.len() -> break
+        start: state.line_starts[local]
         width: parser_line_indent_width(state, start)
-        blank: start + width >= size || parser_is_space_byte(parser_marker_byte(state.sources[0], start + width))
+        blank: start + width >= size || parser_is_space_byte(parser_source_byte(state, start + width))
         if !blank && width <= indent {
             at = start
             break
@@ -98,7 +102,7 @@ parser_colon_block_edits: fn(state: JetParserState, colon: Span) -> [TextEdit] N
         line += 1
     }
     closer: "{parser_source_slice(state, header_start, header_start + indent)}}}\n"
-    text: if at == size && size > 0 && parser_marker_byte(state.sources[0], size - 1) != 10 -> "\n{closer}" else -> closer
+    text: if at == size && size > state.source_offset && parser_source_byte(state, size - 1) != 10 -> "\n{closer}" else -> closer
     [TextEdit]{TextEdit{span: colon, new_text: " {{"}, TextEdit{span: Span{start: at, end: at}, new_text: text}}
 }
 
@@ -292,7 +296,7 @@ parser_report_pass_habit: fn(state: &JetParserState) -> Bool {
     if line_start + parser_line_indent_width(state, line_start) != token.span.start || parser_source_slice(state, token.span.end, line_end).trim() != "" {
         return false
     }
-    deletion_end: if line_end < state.sources[0].len() -> line_end + 1 else -> line_end
+    deletion_end: if line_end < parser_source_end_offset(state) -> line_end + 1 else -> line_end
     parser_bump(state)
     parser_add_habit(state, token.span, "`pass` is not a Jet statement", "a Jet block may be empty, so it needs no placeholder line", "delete the `pass` line", TextEdit{span: Span{start: line_start, end: deletion_end}, new_text: ""}, [TextEdit]{})
     parser_habit_abort(state)
