@@ -859,7 +859,10 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: &[D
     if dot >= 0 {
         digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
         suffix: String.from_bytes(value_bytes[dot + 1..<value_bytes.len()]) ?? ""
-        scale: if suffix == suffix.to_lower() -> sema_units_catalog_scale("DataSize", suffix) else -> None
+        // `.bytes` is the base's manifest spelling. The DataSize family holds
+        // no `bytes` member: one would mint the unit type `Bytes`, which is
+        // Core's byte buffer.
+        scale: if suffix == "bytes" -> Val(1) else if suffix == suffix.to_lower() -> sema_units_catalog_scale("DataSize", suffix) else -> None
         if scale == .Val(factor) -> multiplier = factor else {
             diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
             return None

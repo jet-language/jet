@@ -1,0 +1,14 @@
+// Core's DataSize unit family is in scope in every program, and none of its
+// members mints the unit type `Bytes`: `Bytes` stays Core's byte buffer, so
+// its constructors return the runtime buffer handle beside byte quantities.
+run: fn() {
+    page: 4KiB
+    buffer := Bytes.with_capacity(16)
+    buffer.write_u8(7)
+    buffer.write_u8(9)
+    copied: Bytes.from([U8]{1, 2, 3})
+    print(page)
+    print(buffer.len())
+    print(copied.len())
+    print(Bytes.new().is_empty())
+}
