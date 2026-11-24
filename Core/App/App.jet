@@ -1462,13 +1462,13 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 
 // `live(source, args...)`: `args` are the encoded arguments. The binding
 // runs as this task's caller.
-priv __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+#Builtin.Role(.LiveBind) priv __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     acting: acting_now(tasks.current_task())
     Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), 0), run: run, acting: acting}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+#Builtin.Role(.LivePoll) priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     acting: acting_now(tasks.current_task())
@@ -1479,7 +1479,7 @@ priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, a
 // registering the binding when nothing has read it yet. Only the binding of
 // this task's caller gets it: a value one caller computed never reaches
 // another's binding.
-priv __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
+#Builtin.Role(.LivePush) priv __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
     encoded: live_json.to_string<T>(value) ?? return
     key: live_key(args)
     id: live_register(source, key, acting_tag(acting_now(tasks.current_task())), 0)
@@ -1487,17 +1487,17 @@ priv __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never!
 }
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
-priv __live_invalidate: fn(source: String, args: [String]) Never! {
+#Builtin.Role(.LiveInvalidate) priv __live_invalidate: fn(source: String, args: [String]) Never! {
     live_invalidate(Val(source), Val(live_key(args)), None, 0)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-priv __live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
+#Builtin.Role(.LiveInvalidateAll) priv __live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
 // doesn't encode, so a job given it fails each run.
-priv __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+#Builtin.Role(.LiveArg) priv __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
 
 // A binding's read set, for core.db: while a task runs a binding's source,
 // each table it reads joins that binding's read set, so a write to the table

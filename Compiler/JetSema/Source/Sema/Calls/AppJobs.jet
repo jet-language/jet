@@ -5,7 +5,7 @@
 // Encode and Decode (E2817 otherwise). The arguments are evaluated and
 // encoded where `enqueue` is called, and the call lowers to a call of the
 // Core function that fills the AppEnqueue role, `(job,
-// [app.__live_arg(argument)...], retries, run)`: `job` is the wire name
+// [<LiveArg filler>(argument)...], retries, run)`: `job` is the wire name
 // `<service module>.<Service>.<method>`, `retries` the marker's `retries:`,
 // and `run` decodes the arguments and calls the method on a copy of the
 // service, replying `{"err":...}` when the method failed.
@@ -210,7 +210,7 @@ sema_app_job_method: fn(alias: String, call: Expr, span: Span, environment: Sema
 // `method` of the service `service`, called with `args`: it must be an
 // `#App.Job` method of the service, passed each argument in its place, and
 // each parameter type must be Encode and Decode. Each argument is encoded
-// with `alias.__live_arg`.
+// by the `app` function that fills the LiveArg role.
 sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_span: Span, args: [CallArg], receiver_span: Span, receiver_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
     graph: program.registration_graph ?? return None
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return sema_app_job_not_one("`self` is a {sema_type_show_quoted(service)}, not a service", receiver_span, diagnostics)
@@ -249,6 +249,7 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
             return sema_app_job_not_one("argument {index + 1} of `{method}` is not passed in its place", argument.span, diagnostics)
         }
     }
+    arg_member: sema_live_role_member(graph, "LiveArg", method_span, diagnostics) ?? return None
     encoded := [Expr]{}
     loop index in 1..<declaration.params.len() {
         param: sema_type_resolve_declared(graph, declaration.params[index].ty, service_module)
@@ -261,7 +262,7 @@ sema_app_job_endpoint: fn(alias: String, service: Type, method: String, method_s
         if missing != "" {
             return sema_app_job_not_one("parameter `{declaration.params[index].name}` of `{service_name}.{method}` has the type {sema_type_show_quoted(param)}, which isn't `{missing}`", argument.span, diagnostics)
         }
-        encoded.push(sema_live_module_call(alias, "__live_arg", [Type]{param}, [CallArg]{sema_live_arg(argument.expr.copy(), argument.span)}, argument.span))  // copy: the written call keeps its argument
+        encoded.push(sema_live_module_call(alias, arg_member, [Type]{param}, [CallArg]{sema_live_arg(argument.expr.copy(), argument.span)}, argument.span))  // copy: the written call keeps its argument
     }
     Val(SemaAppJob{method: declaration, module: service_module, wire: "{module_text(graph.module_table, service_module)}.{service_name}.{method}", retries: sema_app_job_retries(marker), receiver_span: receiver_span, receiver_id: receiver_id, encoded: encoded})
 }
