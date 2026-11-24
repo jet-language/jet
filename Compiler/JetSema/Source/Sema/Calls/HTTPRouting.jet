@@ -469,8 +469,7 @@ sema_http_route_check_literal: fn(argument: CallArg, environment: SemaScopeEnvir
 sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
-        text: sema_call_try_stream_handle_method(argument.expr, checked, "to_string", [CallArg]{}, argument.span, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
-        return text.value
+        return sema_expr_check_declared_method(argument.expr, checked, "to_string", "to_string", argument.span, [Type]{}, [Type]{}, [CallArg]{}, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if type_identity_equal(checked.ty, Type.String) -> return Val(checked)
     compatible: sema_call_type_assignable(Type.String, checked.ty, environment, program) ?? return None

@@ -78,6 +78,44 @@ impl Path.CheckedText {
     }
 }
 
+// The compiler's `Path`: an opaque runtime handle over a path's bytes. Its
+// math is lexical (no filesystem access) except `walk` and `write_atomic`.
+impl Path {
+    /// The path spelled by `path`.
+    from: fn(path: String) -> Path Never! { rt.path_from(path) }
+
+    /// The current user's home directory, read from HOME.
+    home: fn() -[Env]> Path Never! { rt.path_home() }
+
+    /// `other` joined under this path; an absolute `other` replaces it.
+    join: fn(self, other: String) -> Path Never! { rt.path_join(self, other) }
+
+    /// The path up to its last component; None for an empty path or a root.
+    parent: fn(self) -> Path? Never! { rt.path_parent(self) }
+
+    /// The last component's text after its last dot.
+    extension: fn(self) -> String? Never! { rt.path_extension(self) }
+
+    /// The last component's text before its last dot.
+    stem: fn(self) -> String? Never! { rt.path_stem(self) }
+
+    /// The path with `.` dropped and `..` collapsed lexically.
+    normalize: fn(self) -> Path Never! { rt.path_normalize(self) }
+
+    /// Whether this path lies under `other`, compared lexically.
+    is_within: fn(self, other: Path) -> Bool Never! { rt.path_is_within(self, other) }
+
+    /// The path's text.
+    to_string: fn(self) -> String Never! { rt.path_to_string(self) }
+
+    /// Every entry below this directory, depth first; symlinks are listed but
+    /// never followed, and an unreadable directory is skipped.
+    walk: fn(self) -> [Path] Never! { rt.path_walk(self) }
+
+    /// Replaces the file at this path with `bytes` in one atomic step.
+    write_atomic: fn(self, bytes: [U8]) -[FS.Write]> IOError! { write_atomic(self, bytes) }
+}
+
 path_component_encode: fn(component: String) -> String Never! {
     hex: "0123456789ABCDEF".bytes()
     dots: component == "." || component == ".."
