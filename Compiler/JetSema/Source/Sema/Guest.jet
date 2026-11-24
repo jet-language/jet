@@ -17,12 +17,13 @@ use {
         TypeTupleField,
         diagnostic_registry_row,
         ir_runtime_handle_row,
+        module_is_core,
         runtime_c_export,
         runtime_only_read,
         type_name,
         ModuleID,
     ]
-    jet_parser.[parser_guest_import_symbol]
+    jet_parser.[parser_guest_import_symbol, parser_service_import]
 }
 
 // Rust `is_guest_import_marker`: the ratified `#Import(c)` spelling.
@@ -30,13 +31,22 @@ sema_marker_is_guest_import: fn(marker: Marker) -> Bool Never! {
     !marker.negated && sema_marker_is_hook(marker, MarkerHook.Import) && sema_marker_c_argument(marker)
 }
 
-// Rust `is_guest_import`: a function carrying the per-callable `#Import(c)`.
+// Rust `is_guest_import`: a function carrying the per-callable `#Import(c)`,
+// or a compiler or build service import, `#Import(jet.compiler, symbol: "…")`
+// or `#Import(jet.build, symbol: "…")` (parser_service_import). Both are
+// declarations with no Jet body, bound to the symbol they name. Only Core
+// declares a service import (sema_guest_check_surfaces), and only Core, build
+// and compile-time code call one (Calls/Direct.jet sema_call_service_out_of_phase).
 sema_function_is_guest_import: fn(function: Func) -> Bool Never! {
     loop marker in function.markers {
         if sema_marker_is_guest_import(marker) -> return true
     }
-    false
+    parser_service_import(function) != None
 }
+
+// The ABI of a service import's foreign row: the host that runs build and
+// compile-time code answers its symbol (IR ir_foreign_call).
+SEMA_GUEST_SERVICE_ABI: "jet-service"
 
 // Rust `is_guest_export`: a function carrying `#Export(c)`.
 sema_function_is_guest_export: fn(function: Func) -> Bool Never! {
@@ -426,6 +436,10 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
                         failed = true
                     }
                 }
+                if parser_service_import(function) == .Val(service) && !module_is_core(graph.modules[module_index].module_identity) {
+                    diagnostics.push(sema_service_import_outside_core(function, service.provider))
+                    failed = true
+                }
                 if module_index == entry_index && sema_function_is_guest_export(function) {
                     if sema_guest_declared_carrier(function.return_type) == .Val(carrier) {
                         diagnostics.push(sema_guest_export_carrier_error(function, "declares the carrier `{carrier}`"))
@@ -484,6 +498,12 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         }
     }
     if failed -> graph.complete = false
+}
+
+// E1806: `function`, outside Core, imports a `provider` service.
+sema_service_import_outside_core: fn(function: Func, provider: String) -> Diagnostic {
+    row: diagnostic_registry_row("E1806") ?? panic("E1806 has no registry row")
+    sema_error("E1806", function.name_span, row.what.replace("{{name}}", function.name).replace("{{provider}}", provider), row.why.replace("{{provider}}", provider), row.fix)
 }
 
 // The failure carrier a written return declares (`T E!` with E not `Never`,

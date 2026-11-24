@@ -1,0 +1,8 @@
+Error: Jet.ServiceImportOutsideCore: `source_key` imports a `jet.build` service, which only Core declares
+  --> Tests/UI/service_import_outside_core.jet:3:1
+    |
+  3 | source_key: fn(b: Build) -> String Never!
+    | ^^^^^^^^^^
+ Why: The compiler and build host answer each `jet.build` symbol for the declaration Core writes for it; the provider, not a program, decides which services exist and where they run.
+ Fix: Call the Core function or method that declares this service, such as `core.build` or `core.compiler`.
+More: jet-lang.dev/e/Jet.ServiceImportOutsideCore

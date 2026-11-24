@@ -316,6 +316,25 @@ and ETF decoding enter.
 binding, so a leaf whose caller must first prove a UTF-8 encoding
 (`core.encoding.__bytes_into_text`) has none and stays Core's.
 
+The compiler and build host provide their services the same way. A Core module
+declares each one as a body-less service import that names the host symbol
+answering it, with the handle the host made as its first parameter:
+
+```jet
+#Import(jet.build, symbol: "Build.source_key")
+source_key: fn(b: Build) -> String Never!
+```
+
+`#Import(jet.compiler, symbol: "…")` names a compiler query and
+`#Import(jet.build, symbol: "…")` a build operation. Core's public methods on
+its compiler and build types call these imports; the provider owns which
+symbols exist and the phase each runs in. A service import outside Core is
+**E1806**, one without a non-empty `symbol:` or with a body is **E3212**, and
+a call to one outside Core from code that runs when the program does (not
+`build: fn`, a `#run` operand or other compile-time code) is **E0956**. A
+running program that reaches one through Core stops there: no compiler
+answers it.
+
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
 `Compiler/Prelude/Core.rows`. Every other declaration in its source belongs to

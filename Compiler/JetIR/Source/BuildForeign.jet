@@ -7,7 +7,7 @@
 use {
     jet_backend.[x64_assemble_template]
     jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find_symbol, name_column, name_column_get, name_column_set, name_column_table, type_carrier_identity]
-    jet_sema.[SEMA_GUEST_RUNTIME_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
+    jet_sema.[SEMA_GUEST_RUNTIME_ABI, SEMA_GUEST_SERVICE_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
 }
 
 // A C handle type a foreign function names (IRProgram.foreign_handles): the
@@ -146,11 +146,12 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
 // A foreign call in compile-time code or a build invocation stops the
 // evaluation: those builds link no foreign code (jet_eval_ir_comptime_build),
 // and their checked closure reaches a foreign function through branches a
-// run may never take.
-ir_foreign_comptime_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction) -> Int Never! {
+// run may never take. A compiler or build service import reached by a
+// running program stops it the same way: no host answers it there.
+ir_foreign_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, message: String) -> Int Never! {
     string_row: ir_string_row(m)
     text: ir_temp(m, b, string_row)
-    ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, "compile-time code cannot call the foreign (`#FFI`) function `{foreign.name}`"), -1, -1, b.line)
+    ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, message), -1, -1, b.line)
     null: ir_word_const(m, b, 0)
     report: ir_line_report(p, b)
     ir_stop(m, p, b, 2, text, null, null, report)
@@ -202,7 +203,18 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
     if foreign.abi == SEMA_GUEST_RUNTIME_ABI {
         return ir_runtime_binding_call(m, p, b, foreign, args, span)
     }
-    if p.comptime_values || p.invocation -> return ir_foreign_comptime_stop(m, p, b, foreign)
+    // A compiler or build service import: the host that runs build and
+    // compile-time code answers its symbol over the checked arguments, the
+    // handle first, as it answers a compiler value's method. A running
+    // program has no such host; Sema refuses its direct calls
+    // (sema_call_service_out_of_phase), so one is reached only through a
+    // Core branch that build code alone takes, and it stops there.
+    if foreign.abi == SEMA_GUEST_SERVICE_ABI {
+        if !p.comptime_values && !p.invocation -> return ir_foreign_stop(m, p, b, foreign, "a running program cannot call the compile-time service `{foreign.name}`")
+        values: loop arg in args -> arg.value
+        return ir_host_method(m, p, b, foreign.return_type ?? Type.Named{name: "Unit"}, foreign.symbol, values, span)
+    }
+    if p.comptime_values || p.invocation -> return ir_foreign_stop(m, p, b, foreign, "compile-time code cannot call the foreign (`#FFI`) function `{foreign.name}`")
     if foreign.language == "asm" -> return ir_asm_call(m, p, b, foreign, args, span)
     if foreign.language.starts_with("rust:") {
         return ir_rust_foreign_call(m, p, b, foreign, args, span)
