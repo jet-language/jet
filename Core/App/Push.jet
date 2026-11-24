@@ -25,6 +25,7 @@ use {
     client: core.http.client
     h2: __core_http_h2
     net: core.net
+    net_rt: jet.runtime.net
 }
 
 /// The record size of an encrypted push: one record holds the whole
@@ -86,7 +87,7 @@ PushHeader: struct {
 /// A random generator seeded from the system entropy source, for the keys
 /// and the salt of each push.
 push_rng: fn() -> drbg.HMACDrbg PushError! {
-    seed := core.net.tls.__host_entropy(48) ?? return Err(push_fail("the system entropy source failed"))
+    seed := net_rt.tls_entropy(48) ?? return Err(push_fail("the system entropy source failed"))
     if seed.len() != 48 {
         core.crypto.wipe(seed)
         return Err(push_fail("the system entropy source failed"))
@@ -528,9 +529,9 @@ push_deliver: fn(service: String, token: String, p256dh: String, auth: String, k
 
 // The Unix second it is now.
 push_now: fn() -> Int Never! {
-    // core.net.tls's host clock, so a push needs Net alone.
-    sample: core.net.tls.__host_wall_sample()
-    if sample.before_epoch -> 0 else -> sample.seconds
+    // jet.runtime.net's host clock, so a push needs Net alone.
+    sample: net_rt.tls_wall_sample()
+    if sample.pre_epoch -> 0 else -> sample.epoch_seconds
 }
 
 priv push_failed: fn(reason: String) -> PushOutcome Never! {

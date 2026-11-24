@@ -23,6 +23,7 @@
 use {
     core
     rt: jet.runtime.time
+    net_rt: jet.runtime.net
     bn: __core_crypto_bignum
     layer: __core_crypto_cipher_layer
     hashes: __core_crypto_md
@@ -1796,10 +1797,10 @@ ssl_wipe: fn(buf: &[U8]) Never! {
 // Clocks.
 
 /// Seconds since the epoch (mbedtls_time), 0 before it. The wall clock is
-/// core.net.tls's host row, so a handshake needs Net alone.
+/// jet.runtime.net's host leaf, so a handshake needs Net alone.
 ssl_time: fn() -> Int Never! {
-    sample: core.net.tls.__host_wall_sample()
-    if sample.before_epoch -> 0 else -> sample.seconds
+    sample: net_rt.tls_wall_sample()
+    if sample.pre_epoch -> 0 else -> sample.epoch_seconds
 }
 
 /// Milliseconds of the monotonic clock (mbedtls_ms_time, which reads

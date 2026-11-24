@@ -17,6 +17,7 @@ use {
     random: core.crypto.random
     core.files.[basename, dirname, join]
     rt: jet.runtime.files
+    tasks_rt: jet.runtime.tasks
     jetc: __core_crypto_jetc
     hashes: __core_crypto_md
 }
@@ -470,7 +471,7 @@ jetc_exists_errno: fn(errno: Int) -> Bool Never! {
 }
 
 jetc_cancel_checkpoint: fn() FileCryptoError! {
-    if core.tasks.__task_canceled() ?? false -> return Err(.SourceIO)
+    if tasks_rt.task_canceled() ?? false -> return Err(.SourceIO)
     Ok()
 }
 

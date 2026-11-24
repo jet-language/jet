@@ -15,6 +15,7 @@ use {
     suites: __core_net_ssl_ciphersuites
     cipher: __core_crypto_cipher
     rt: jet.runtime.time
+    net_rt: jet.runtime.net
 }
 
 // core.net.tls — TLS 1.2/1.3 byte streams over the Jet port of Mbed TLS
@@ -671,7 +672,7 @@ ascii_lower: fn(text: String) -> String Never! {
 // A fresh configuration for `endpoint` (SSL_IS_CLIENT or SSL_IS_SERVER)
 // whose generator is seeded from the system entropy source.
 priv context_new: fn(endpoint: Int) -> TLSContext TLSFailure! {
-    seed := core.net.tls.__host_entropy(C_SEED_BYTES) ?? return Err(fail("TLS could not create a context: the system entropy source failed"))
+    seed := net_rt.tls_entropy(C_SEED_BYTES) ?? return Err(fail("TLS could not create a context: the system entropy source failed"))
     if seed.len() != C_SEED_BYTES {
         crypto.wipe(seed)
         return Err(fail("TLS could not create a context: the system entropy source failed"))
@@ -875,7 +876,7 @@ priv ca_parse: fn(ca: &[x509crt.X509Crt], bytes: [U8]) -> Int Never! {
 
 // Appends the roots of one bundle file (mbedtls_x509_crt_parse_file).
 priv ca_file: fn(ca: &[x509crt.X509Crt], path: String) -> Int Never! {
-    bytes: core.net.tls.__host_read_bytes(path) ?? return C_PK_FILE_IO_ERROR
+    bytes: net_rt.tls_read_bytes(path) ?? return C_PK_FILE_IO_ERROR
     ca_parse(ca, bytes)
 }
 
@@ -883,12 +884,12 @@ priv ca_file: fn(ca: &[x509crt.X509Crt], path: String) -> Int Never! {
 // (mbedtls_x509_crt_parse_path): each file that fails counts one, and each
 // other file adds its skipped certificates.
 priv ca_dir: fn(ca: &[x509crt.X509Crt], path: String) -> Int Never! {
-    handle: core.net.tls.__host_open_directory(-1, path) ?? return C_X509_FILE_IO_ERROR
+    handle: net_rt.tls_open_directory(-1, path) ?? return C_X509_FILE_IO_ERROR
     rows: core.net.tls.__host_list_directory(handle) ?? {
-        core.net.tls.__host_close_directory(handle)
+        net_rt.tls_close_directory(handle)
         return C_X509_FILE_IO_ERROR
     }
-    core.net.tls.__host_close_directory(handle)
+    net_rt.tls_close_directory(handle)
     count := 0
     loop row in rows {
         // The first byte is 1 for a directory; the name follows.
@@ -934,7 +935,7 @@ priv load_system_roots: fn(context: &TLSContext, required: Bool) TLSFailure! {
 
 // The environment variable's value, "" when it is unset or not UTF-8.
 priv env_text: fn(name: String) -> String Never! {
-    bytes: core.net.tls.__host_env_value(name) ?? return ""
+    bytes: net_rt.tls_env_value(name) ?? return ""
     String.from_bytes(bytes) ?? ""
 }
 
@@ -2146,20 +2147,20 @@ priv unix_ms: fn(time: x509.X509Time) -> Int Never! {
 // core.http.client's capture and replay ride.
 
 // 0 outside `jet prove`, 1 under `--capture-sensitive`, 2 under `--replay`.
-priv prove_net_mode: fn() -> Int Never! { core.net.tls.__host_prove_mode() }
+priv prove_net_mode: fn() -> Int Never! { net_rt.tls_prove_mode() }
 
 // A capture journals one HTTP client hop's encoded bytes.
 priv prove_net_record: fn(tape: [U8]) Never! {
     if tape.len() == 0 {
         return
     }
-    core.net.tls.__host_prove_record(tape)
+    net_rt.tls_prove_record(tape)
 }
 
 // A replay traces this hop's request and takes the next recorded hop's
 // bytes; empty once the run diverged.
 priv prove_net_take: fn(request: [U8]) -> [U8] Never! {
-    core.net.tls.__host_prove_take(request) ?? [U8]{}
+    net_rt.tls_prove_take(request) ?? [U8]{}
 }
 
 #Test("A TLS operation's deadline counts from when the operation reads the clock, not from a reading the build kept") {

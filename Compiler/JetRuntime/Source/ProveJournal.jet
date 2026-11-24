@@ -211,7 +211,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
     got
 }
 
-// Core/Net/TLS.jet's `__host_prove_mode` row, which Core/HTTP/Client.jet
+// jet.runtime.net's `tls_prove_mode` leaf, which Core/HTTP/Client.jet
 // `__client_once` reads: 0 outside `jet prove`, 1 capture, 2 replay
 // (diverged included).
 #Export(c) jet_prove_net_mode: fn() -> I64 {
@@ -238,7 +238,7 @@ rt_prove_stdin_terminal_read: fn(into: I64, capacity: I64) -> I64 {
 // A replay traces the hop's request (`Q`, u64 LE length, the `length` bytes
 // `data` lends) and serves the next `N` record: 1 with a copy of its bytes
 // stored in the `out` and `out_length` words, which the caller's [u8] owns
-// (the `__host_prove_take` row's Option<[u8]>), 0 once the run diverged.
+// (the `tls_prove_take` leaf's [U8]?), 0 once the run diverged.
 #Export(c) jet_prove_net_take: fn(data: I64, length: I64, out: I64, out_length: I64) -> I64 {
     root: prove_journal_root
     if (root == I64{0} || length < I64{0}) { return I64{0} }
