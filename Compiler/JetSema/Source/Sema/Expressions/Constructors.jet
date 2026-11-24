@@ -28,7 +28,6 @@ use {
         ParamZone,
         PlaceAccess,
         Span,
-        StrFormat,
         StrPart,
         Symbol,
         SymbolKind,
@@ -2096,7 +2095,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
             .Byte(value) -> { encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)}) }
             .Interp(value, _) -> {
                 if building -> encoded_parts.push(StrPart.Lit{text: "{{}}"}) else {
-                    encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value), format: StrFormat.Display})
+                    encoded_parts.push(StrPart.Interp{expr: sema_expression_checked_text_encoder(type_name, value), format: None})
                 }
             }
         }

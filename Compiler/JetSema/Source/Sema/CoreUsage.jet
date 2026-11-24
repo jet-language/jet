@@ -23,7 +23,7 @@ use jet_foundation.[
     Param,
     Span,
     Stmt,
-    StrFormat,
+    StrSelector,
     StructDef,
     SwitchArm,
     SymbolKind,
@@ -41,6 +41,7 @@ use jet_foundation.[
     expr_binary_operands,
     expr_optional_method_call_as_call,
     expr_span,
+    str_selector_style,
     jet_ring_classify_prelude_closure,
     jet_ring_closure_rows_layer,
     jet_ring_prelude_closure_layer,
@@ -480,23 +481,17 @@ sema_core_note_usage: fn(used: &[String], spans: &[SemaCoreUsageSpan], usage: St
     }
 }
 
-// A public `core.text.fmt` member of the module an interpolation selector
-// needs: a style trait's Core impls and the formatters sema calls live there.
-// Display and Debug render through the typed route and need none.
-sema_core_format_selector_member: fn(format: StrFormat) -> String? Never! {
-    if format == {
-        .Display | .Debug | .Count -> None
-        .Pretty -> Val("pretty")
-        .Fixed(_) -> Val("decimal")
-        .Grouped(_) -> Val("grouped")
-        .Hex(_) -> Val("hex")
-        .Bin -> Val("bin")
-        .Oct -> Val("oct")
-        .Sci(_) -> Val("sci")
-        .Percent(_) -> Val("percent")
-        .Pad(_, _) -> Val("pad")
-        .PadLeft(_, _) -> Val("pad_left")
-        .Unit(_) -> Val("quantity")
+// The public `core.text.fmt` formatter an interpolation selector with its
+// own meaning calls: Pretty, padding and units. A style selector needs its
+// trait's module instead (`:Hex(n)` is HexFormat, whose Core impls live in
+// core.text.fmt), and Debug renders through the typed route.
+sema_core_format_selector_member: fn(selector: StrSelector) -> String? Never! {
+    if selector.name == {
+        "Pretty" -> Val("pretty")
+        "Pad" -> Val("pad")
+        "PadLeft" -> Val("pad_left")
+        "Unit" -> Val("quantity")
+        else -> None
     }
 }
 
@@ -1358,11 +1353,15 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                 if part == {
                     .Interp(value, format) -> {
                         sema_core_note_usage(used, spans, "core.text.fmt.interpolation", Val(expr_span(value)))
-                        // A selector's trait impl or formatter lives in
+                        // A selector's formatter or Core trait impl lives in
                         // `Core/Text/Fmt.jet`, which no name here spells: the
-                        // selector's public member brings that source module in.
-                        if sema_core_format_selector_member(format) == .Val(member) {
-                            sema_core_note_usage(used, spans, "core.text.fmt.{member}", Val(expr_span(value)))
+                        // formatter's public member, or the trait's module,
+                        // brings that source module in.
+                        if format == .Val(selector) {
+                            if sema_core_format_selector_member(selector) == {
+                                .Val(member) -> sema_core_note_usage(used, spans, "core.text.fmt.{member}", Val(expr_span(value)))
+                                .None -> sema_core_note_type_modules(str_selector_style(selector.name).trait_name, registered, used, spans, Val(expr_span(value)))
+                            }
                         }
                         sema_core_collect_expr(value, tables, imports, registered, used, spans, callbacks)
                     }

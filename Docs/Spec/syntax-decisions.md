@@ -3279,6 +3279,11 @@ defined.
 
 **Current spelling amendment (D-ONCE-HASH1=B):** write `{value:Fixed(n)}`.
 
+**Current meaning amendment (D-FORMAT-TRAIT1=A):** a selector `{value:Name(args)}`
+calls method `name` of trait `NameFormat` in scope at the string; `Fixed` is
+Core's `FixedFormat.fixed`. A selector whose trait is not in scope is E0914,
+reported by the checker.
+
 **D-FMT-INTERP2=A — Interpolation debug-label shorthand** *(ratified
 2026-07-31, card #1351)*: trailing `=` in an interpolation hole prints the
 expression's own source text, then ` = `, then the value. Example:
@@ -8817,14 +8822,14 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 
 ## Canonical syntax source homes
 
-`Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet` owns one
-`INTERPOLATION_SELECTORS` table for the selector names and their argument
-shapes. Law: each selector vocabulary name appears in that table exactly once,
-and parser/formatter code reads the row rather than copying the name. Adding a
-selector of an existing shape adds one row there. This surface is separate from
-the applied-rule registry because a selector chooses how a value is rendered
-inside one string hole; it does not attach a rule, inherit policy, or select a
-target.
+Interpolation selectors have no name table (D-FORMAT-TRAIT1=A): the parser
+reads any `:Name(args)`, and the checker resolves trait `NameFormat` in the
+string's scope, so a selector is added by declaring its trait, in Core or in a
+package. Only the argument forms are grammar (`StrSelectorArg` in
+`Compiler/JetFoundation/Source/AST/Expressions.jet`). This surface is separate
+from the applied-rule registry because a selector chooses how a value is
+rendered inside one string hole; it does not attach a rule, inherit policy, or
+select a target.
 
 ### Marker and effect declarations
 

@@ -4958,7 +4958,11 @@ quoted delimiters, redacted lists, incomplete fragments, and trailing text
 remain unchanged.
 
 Exact integer formatting also uses the public `Fixed`, `Grouped`, `Hex`,
-`Bin`, and `Oct` interpolation selectors. The `quantity`, `fixed_int`,
+`Bin`, and `Oct` interpolation selectors. Each is a trait here:
+`{value:Hex(4)}` calls `value.hex(4)` of `HexFormat`, and so on for
+`FixedFormat`, `GroupedFormat`, `SciFormat`, `PercentFormat`, `BinFormat` and
+`OctFormat`. A package declares its own selector the same way: a trait
+`ColorFormat { color: fn(self) -> String }` in scope gives `{value:Color}`. The `quantity`, `fixed_int`,
 `grouped_int_fixed`, and `*_decimal` source helpers support compiler lowering;
 they are not exported application APIs. Their lexical-policy witnesses live
 with the source helpers, while application examples use public formatting.

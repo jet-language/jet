@@ -59,14 +59,21 @@ vocabulary](vocabulary.md).
   starts with `/*` and ends with the matching `*/`; block comments nest. An
   unbalanced block comment is E0002 (S5).
 - A single-line string uses `"..."`. Its only escapes are `\n`, `\t`, `\"`,
-  and `\\`; another escape is E0001. Interpolation uses `{expr}`. The format
-  selector rail is closed: `{value:Debug}`, `{value:Pretty}`,
-  `{value:Fixed(2)}`, `{value:Grouped(2)}`, and `{value:Unit(name|bare)}` are
-  the registered forms. The number of a numbered selector (`Pad`, `PadLeft`,
-  `Fixed`, `Grouped`, `Sci`, `Percent`, `Hex`) is any `Int` expression, such as
-  `{name:Pad(width)}`; another type is E0112. It runs after the value, and a
-  negative number acts as zero; an integer literal stays a constant
-  (D-SCRIPT-LOCAL-CLOCK1=A). `{{` and `}}` produce literal braces; an unmatched
+  and `\\`; another escape is E0001. Interpolation uses `{expr}`. A format
+  selector `{value:Name}` or `{value:Name(args)}` calls method `name` (the
+  selector in snake case) of trait `NameFormat` in scope at the string, with
+  the value as receiver and the arguments after it (D-FORMAT-TRAIT1=A): Core's
+  `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Hex(4)}` and their siblings
+  are `FixedFormat`, `GroupedFormat` and `HexFormat` in `core.text.fmt`, and a
+  package declaring `ColorFormat` gets `{value:Color}` with no compiler change.
+  `{value:Debug}`, `{value:Pretty}`, `{value:Pad(n)}`, `{value:PadLeft(n)}` and
+  `{value:Unit(name|bare)}` keep their own meanings. A selector whose trait is
+  not in scope is E0914; arguments the method does not take, or a type the
+  value does not implement the trait for, are E0112. A selector argument is an
+  `Int` literal, a quoted text, or any expression, such as
+  `{name:Pad(width)}`; an `Int` parameter given another type is E0112. A
+  computed argument runs after the value, and a negative number acts as zero;
+  an integer literal stays a constant (D-SCRIPT-LOCAL-CLOCK1=A). `{{` and `}}` produce literal braces; an unmatched
   brace is E0001 (S8, S20).
 - A run of N backticks opens a raw ordinary `String`; the next maximal run of
   exactly N backticks closes it. Other runs remain text. Raw text has no

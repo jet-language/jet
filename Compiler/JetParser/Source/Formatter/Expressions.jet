@@ -24,9 +24,9 @@ use {
         PlaceAccess,
         Span,
         Stmt,
-        StrFormat,
         StrMatchPart,
         StrPart,
+        StrSelector,
         Type,
         TypedLitBody,
         LIST_TYPE_OWNER,
@@ -39,6 +39,7 @@ use {
         foundation_byte_text,
         measure_expression,
         pipe_value_is_name,
+        str_selector_computed,
         type_name,
     ]
     jet_lexer.[
@@ -2881,11 +2882,13 @@ jfmt_fmt_str_raw: fn(f: &JetFmt, parts: [StrPart], span: Span) {
 }
 
 // The parser expands `{expr=}` to Lit(label) + Lit(" = ") +
-// Interp; reprint the surface form. Returns true when parts[i..i+3] matched.
-jfmt_fmt_debug_interp: fn(f: &JetFmt, parts: [StrPart], index: Int) -> Bool {
-    if index + 2 >= parts.len() -> return false
-    if jfmt_str_part_lit(parts[index]) == None -> return false
-    if (jfmt_str_part_lit(parts[index + 1]) ?? "") != " = " -> return false
+// Interp; reprint the surface form. Returns how many parts it reprinted (the
+// three and the selector's computed arguments), 0 when parts[i..i+3] don't
+// match.
+jfmt_fmt_debug_interp: fn(f: &JetFmt, parts: [StrPart], index: Int) -> Int {
+    if index + 2 >= parts.len() -> return 0
+    if jfmt_str_part_lit(parts[index]) == None -> return 0
+    if (jfmt_str_part_lit(parts[index + 1]) ?? "") != " = " -> return 0
     if parts[index + 2] == .Interp(value, format) {
         jfmt_write(f, "{{")
         f.interp_depth += 1
@@ -2894,9 +2897,9 @@ jfmt_fmt_debug_interp: fn(f: &JetFmt, parts: [StrPart], index: Int) -> Bool {
         jfmt_write(f, "=")
         jfmt_fmt_str_format(f, format, parts, index + 3)
         jfmt_write(f, "}}")
-        return true
+        return 3 + jfmt_selector_computed(format)
     }
-    false
+    0
 }
 
 jfmt_str_part_lit: fn(part: StrPart) -> String? Never! {
@@ -2910,9 +2913,9 @@ jfmt_lambda_of: fn(expr: Expr) -> Lambda? Never! {
     None
 }
 
-// `next` is the index of the part after this one, which holds the computed
-// selector number when it is a StrFormat.Count part.
-jfmt_fmt_interp: fn(f: &JetFmt, value: Expr, format: StrFormat, parts: [StrPart], next: Int) {
+// `next` is the index of the part after this one, the first of the
+// selector's computed arguments.
+jfmt_fmt_interp: fn(f: &JetFmt, value: Expr, format: StrSelector?, parts: [StrPart], next: Int) {
     jfmt_write(f, "{{")
     f.interp_depth += 1
     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
@@ -2925,14 +2928,16 @@ jfmt_fmt_str: fn(f: &JetFmt, parts: [StrPart]) {
     jfmt_write(f, "\"")
     index := 0
     loop index < parts.len() {
-        if jfmt_fmt_debug_interp(f, parts, index) {
-            index += 3
+        taken: jfmt_fmt_debug_interp(f, parts, index)
+        if taken > 0 {
+            index += taken
             next
         }
         if parts[index] == {
             .Lit(text) -> { jfmt_write(f, jfmt_escape_str_lit(text)) }
             .Interp(value, format) -> {
-                if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
+                jfmt_fmt_interp(f, value, format, parts, index + 1)
+                index += jfmt_selector_computed(format)
             }
             .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
@@ -2961,14 +2966,16 @@ jfmt_fmt_typed_head_str: fn(f: &JetFmt, parts: [StrPart], span: Span) {
 jfmt_fmt_typed_head_str_parts: fn(f: &JetFmt, parts: [StrPart]) {
     index := 0
     loop index < parts.len() {
-        if jfmt_fmt_debug_interp(f, parts, index) {
-            index += 3
+        taken: jfmt_fmt_debug_interp(f, parts, index)
+        if taken > 0 {
+            index += taken
             next
         }
         if parts[index] == {
             .Lit(text) -> { jfmt_write(f, jfmt_escape_typed_head_single_line(text)) }
             .Interp(value, format) -> {
-                if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
+                jfmt_fmt_interp(f, value, format, parts, index + 1)
+                index += jfmt_selector_computed(format)
             }
             .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
@@ -2981,8 +2988,9 @@ jfmt_fmt_typed_head_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
     jfmt_newline(f)
     index := 0
     loop index < parts.len() {
-        if jfmt_fmt_debug_interp(f, parts, index) {
-            index += 3
+        taken: jfmt_fmt_debug_interp(f, parts, index)
+        if taken > 0 {
+            index += taken
             next
         }
         if parts[index] == {
@@ -2993,7 +3001,8 @@ jfmt_fmt_typed_head_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
                 }
             }
             .Interp(value, format) -> {
-                if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
+                jfmt_fmt_interp(f, value, format, parts, index + 1)
+                index += jfmt_selector_computed(format)
             }
             .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
@@ -3003,53 +3012,37 @@ jfmt_fmt_typed_head_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
     jfmt_write(f, "\"\"\"")
 }
 
-// A StrFormat.Count part prints inside the selector before it.
-jfmt_fmt_str_format: fn(f: &JetFmt, format: StrFormat, parts: [StrPart], next: Int) {
-    if format == {
-        .Display | .Count -> {}
-        .Debug -> { jfmt_write(f, ":Debug") }
-        .Pretty -> { jfmt_write(f, ":Pretty") }
-        .Fixed(digits) -> { jfmt_fmt_selector_number(f, ":Fixed(", digits, parts, next, ")") }
-        .Grouped(digits) -> { jfmt_fmt_selector_number(f, ":Grouped(", digits, parts, next, ")") }
-        .Hex(digits) -> { jfmt_fmt_selector_number(f, ":Hex(", digits, parts, next, ")") }
-        .Pad(width, fill) -> {
-            jfmt_fmt_selector_number(f, ":Pad(", width, parts, next, "")
-            if fill.len() > 0 -> jfmt_write(f, ", \"{jfmt_escape_str_lit(fill)}\"")
-            jfmt_write(f, ")")
-        }
-        .PadLeft(width, fill) -> {
-            jfmt_fmt_selector_number(f, ":PadLeft(", width, parts, next, "")
-            if fill.len() > 0 -> jfmt_write(f, ", \"{jfmt_escape_str_lit(fill)}\"")
-            jfmt_write(f, ")")
-        }
-        .Sci(digits) -> { jfmt_fmt_selector_number(f, ":Sci(", digits, parts, next, ")") }
-        .Percent(digits) -> { jfmt_fmt_selector_number(f, ":Percent(", digits, parts, next, ")") }
-        .Bin -> { jfmt_write(f, ":Bin") }
-        .Oct -> { jfmt_write(f, ":Oct") }
-        .Unit(style) -> {
-            if style == {
-                .Symbol -> {}
-                .Name -> { jfmt_write(f, ":Unit(name)") }
-                .Bare -> jfmt_write(f, ":Unit(bare)")
+// How many parts after a selector are its computed arguments.
+jfmt_selector_computed: fn(format: StrSelector?) -> Int Never! {
+    if format == .Val(selector) -> return str_selector_computed(selector)
+    0
+}
+
+// The selector as written, `:Name` or `:Name(args)`; its computed arguments
+// are the parts from `next` on.
+jfmt_fmt_str_format: fn(f: &JetFmt, format: StrSelector?, parts: [StrPart], next: Int) {
+    selector: format ?? return
+    jfmt_write(f, ":{selector.name}")
+    if selector.args.len() == 0 -> return
+    jfmt_write(f, "(")
+    computed := next
+    loop (index, arg) in selector.args {
+        if index > 0 -> jfmt_write(f, ", ")
+        if arg == {
+            .Number(value) -> { jfmt_write(f, "{value}") }
+            .Text(value) -> { jfmt_write(f, "\"{jfmt_escape_str_lit(value)}\"") }
+            .Word(name) -> { jfmt_write(f, name) }
+            .Computed -> {
+                if computed < parts.len() && parts[computed] == .Interp(argument, _) {
+                    f.interp_depth += 1
+                    jfmt_fmt_expr(f, argument, JFMT_PREC_OR_FALLBACK)
+                    f.interp_depth -= 1
+                }
+                computed += 1
             }
         }
     }
-}
-
-// A selector's number: the computed expression of the Count part at `next`,
-// else the literal.
-jfmt_fmt_selector_number: fn(f: &JetFmt, open: String, literal: Int, parts: [StrPart], next: Int, close: String) {
-    jfmt_write(f, open)
-    if next < parts.len() {
-        if parts[next] == .Interp(count, .Count) {
-            f.interp_depth += 1
-            jfmt_fmt_expr(f, count, JFMT_PREC_OR_FALLBACK)
-            f.interp_depth -= 1
-            jfmt_write(f, close)
-            return
-        }
-    }
-    jfmt_write(f, "{literal}{close}")
+    jfmt_write(f, ")")
 }
 
 // S70 re-emit a triple-quoted string at the current indent, so
@@ -3059,8 +3052,9 @@ jfmt_fmt_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
     jfmt_newline(f)
     index := 0
     loop index < parts.len() {
-        if jfmt_fmt_debug_interp(f, parts, index) {
-            index += 3
+        taken: jfmt_fmt_debug_interp(f, parts, index)
+        if taken > 0 {
+            index += taken
             next
         }
         if parts[index] == {
@@ -3071,7 +3065,8 @@ jfmt_fmt_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
                 }
             }
             .Interp(value, format) -> {
-                if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
+                jfmt_fmt_interp(f, value, format, parts, index + 1)
+                index += jfmt_selector_computed(format)
             }
             .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }

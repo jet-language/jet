@@ -252,9 +252,12 @@ TryConvert: enum {
     WidenUnion(enum_name: String, tag: String),
 }
 
+// A string literal's pieces. An interpolated value's `format` is its
+// selector, None for bare `{value}`; each Computed argument of the selector
+// is the value of one of the parts right after it, in order.
 StrPart: enum {
     Lit(text: String),
-    Interp(expr: Expr, format: StrFormat),
+    Interp(expr: Expr, format: StrSelector?),
     Byte(value: U8),
 }
 
@@ -313,61 +316,48 @@ ast_empty_lambda_meta: fn() -> LambdaMeta Never! {
     }
 }
 
-StrFormat: enum {
-    Display,
-    Debug,
-    Pretty,
-    Fixed(digits: Int),
-    Grouped(digits: Int),
-    Hex(digits: Int),
-    Pad(width: Int, fill: String),
-    PadLeft(width: Int, fill: String),
-    Sci(digits: Int),
-    Percent(digits: Int),
-    Bin,
-    Oct,
-    Unit(format: UnitFormat),
-    Count,
+// A format selector, `{value:Name}` or `{value:Name(args)}`. Its meaning is
+// a trait's: `Name` is trait `NameFormat`, and the selector calls its method
+// `name` (the selector name in snake case) on the value with the arguments,
+// so `{value:Hex(4)}` is `value.hex(4)` of core.text.fmt's HexFormat and a
+// package's own `ColorFormat` gives it `{value:Color}`. `Debug` and `Pretty`
+// show the value's Debug text, `Pad` and `PadLeft` pad its Display text, and
+// `Unit` writes a quantity, each through core.text.fmt.
+StrSelector: struct {
+    name: String,
+    span: Span,
+    args: [StrSelectorArg],
 }
 
-// The computed number of the selector in the part just before this one
-// (`{x:Pad(width)}`: the part `x:Pad`, then `width:Count`), whose own
-// number is then 0. A literal number stays the selector's constant.
-
-UnitFormat: enum {
-    Symbol,
-    Name,
-    Bare,
+// A selector argument as written: an Int literal, a quoted text, a word
+// (`:Unit(bare)`), or any other expression, computed at run time after the
+// value; the parts after the selector's own hold those, in order.
+StrSelectorArg: enum {
+    Number(value: Int),
+    Text(value: String),
+    Word(name: String),
+    Computed,
 }
 
-// The trait call a style selector is: selector `Hex` is trait `HexFormat`
-// of core.text.fmt, and `{value:Hex(n)}` calls `value.hex(n)` (the
-// selector name in lower case), its number as the argument. A type that
-// implements the trait takes the selector. `digits` is the selector's
-// written number, None for a selector that takes none.
-StrFormatStyle: struct {
+// The trait call a style selector is: trait `{selector}Format` and its
+// method, the selector name in snake case (`PadLeft` is `pad_left`).
+StrSelectorStyle: struct {
     selector: String,
     trait_name: String,
     method: String,
-    digits: Int?,
 }
 
-// The trait call `format` is, or None for a selector with its own meaning.
-str_format_style: fn(format: StrFormat) -> StrFormatStyle? Never! {
-    if format == {
-        .Fixed(n) -> Val(str_format_style_named("Fixed", Val(n)))
-        .Grouped(n) -> Val(str_format_style_named("Grouped", Val(n)))
-        .Hex(n) -> Val(str_format_style_named("Hex", Val(n)))
-        .Sci(n) -> Val(str_format_style_named("Sci", Val(n)))
-        .Percent(n) -> Val(str_format_style_named("Percent", Val(n)))
-        .Bin -> Val(str_format_style_named("Bin", None))
-        .Oct -> Val(str_format_style_named("Oct", None))
-        .Display | .Debug | .Pretty | .Pad(_, _) | .PadLeft(_, _) | .Unit(_) | .Count -> None
+str_selector_style: fn(selector: String) -> StrSelectorStyle {
+    StrSelectorStyle{selector: selector, trait_name: "{selector}Format", method: sema_casing_snake_words(selector)}
+}
+
+// How many of the parts after a selector are its computed arguments.
+str_selector_computed: fn(selector: StrSelector) -> Int Never! {
+    count := 0
+    loop arg in selector.args {
+        if arg == .Computed -> count += 1
     }
-}
-
-str_format_style_named: fn(selector: String, digits: Int?) -> StrFormatStyle Never! {
-    StrFormatStyle{selector: selector, trait_name: "{selector}Format", method: selector.lower(), digits: digits}
+    count
 }
 
 // A lambda parameter; `convention` is its written mark (`(buf: &[Int])`

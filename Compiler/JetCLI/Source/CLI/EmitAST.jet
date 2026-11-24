@@ -32,8 +32,8 @@ use {
         PlaceAccess,
         Program,
         StmtNode,
-        StrFormat,
         StrPart,
+        StrSelector,
         StructPatField,
         SwitchArm,
         TupleField,
@@ -444,23 +444,21 @@ jet_cli_emit_ast_stmt: fn(tables: ASTTables, statement: StmtNode) -> JetCLIEmitN
     }
 }
 
-jet_cli_emit_ast_format: fn(format: StrFormat) -> String Never! {
-    if format == {
-        .Display -> ""
-        .Debug -> ":Debug"
-        .Pretty -> ":Pretty"
-        .Fixed(digits) -> ":Fixed({digits})"
-        .Grouped(digits) -> ":Grouped({digits})"
-        .Hex(digits) -> ":Hex({digits})"
-        .Pad(width, fill) -> ":Pad({width}, {jet_cli_debug_quote(fill)})"
-        .PadLeft(width, fill) -> ":PadLeft({width}, {jet_cli_debug_quote(fill)})"
-        .Sci(digits) -> ":Sci({digits})"
-        .Percent(digits) -> ":Percent({digits})"
-        .Bin -> ":Bin"
-        .Oct -> ":Oct"
-        .Unit(_) -> ":Unit"
-        .Count -> ":Count"
+// A selector as written; a computed argument shows as `_`, its expression
+// being the interpolation part after this one.
+jet_cli_emit_ast_format: fn(format: StrSelector?) -> String Never! {
+    selector: format ?? return ""
+    if selector.args.len() == 0 -> return ":{selector.name}"
+    args := [String]{}
+    loop arg in selector.args {
+        args.push(if arg == {
+            .Number(value) -> "{value}"
+            .Text(value) -> jet_cli_debug_quote(value)
+            .Word(name) -> name
+            .Computed -> "_"
+        })
     }
+    ":{selector.name}({args.join(", ")})"
 }
 
 jet_cli_emit_ast_args: fn(tables: ASTTables, args: [CallArg], children: &[JetCLIEmitNode]) Never! {

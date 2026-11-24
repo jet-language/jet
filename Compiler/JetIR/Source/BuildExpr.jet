@@ -4030,8 +4030,8 @@ IRStringPiece: struct {
 ir_string_part: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], index: Int, pieces: &[IRStringPiece], releases: &[Int], span: Span) -> Bool Never! {
     if parts[index] == {
         .Literal(text) -> pieces.push(IRStringPiece{text: text, slot: -1, route: ""})
-        .Interpolation(value, format) -> {
-            mode: if format == .Debug -> IRRender.Debug else -> IRRender.Display
+        .Interpolation(value, debug) -> {
+            mode: if debug -> IRRender.Debug else -> IRRender.Display
             slot: ir_expr(m, p, b, value)
             if ir_failed(b) -> return false
             value_type: ir_ty(m, p, b, value)
@@ -4101,8 +4101,8 @@ ir_self_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding
         }
     }
     if parts.len() < 2 -> return false
-    if parts[0] == .Interpolation(_, format) {
-        if format != .Display -> return false
+    if parts[0] == .Interpolation(_, debug) {
+        if debug -> return false
     }
     head: if parts[0] == {
         .Interpolation(first, _) -> first

@@ -20,12 +20,10 @@ use jet_foundation.[
     Stmt,
     CopyFact,
     Span,
-    StrFormat,
     StrPart,
     SymbolKind,
     TFailureCarrier,
     TLetTy,
-    TStrFormat,
     TextEdit,
     Type,
     core_call,
@@ -229,7 +227,7 @@ sema_call_try_debug_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    text: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, format: TStrFormat.Debug}}}, span)
+    text: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, debug: true}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(text, expected, environment, program, diagnostics)}
 }
 
@@ -309,7 +307,7 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
     }
     local: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span, checked.ty)
     read: sema_tree_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
-    line: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
+    line: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, debug: true}}}, call.name_span)
     unavailable: sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route")
     unit: Type.Named{name: "Unit"}
     // The trace adds no effect: its stderr write is a known-pure call site, so
@@ -921,7 +919,7 @@ sema_call_check_term_eprint: fn(record: CoreCallRecord, args: [CallArg], span: S
         }
         if parts.len() > 0 -> parts.push(TStrPart.Literal{text: "\n"})
         formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
-        parts.push(TStrPart.Interpolation{value: formatted, format: TStrFormat.Display})
+        parts.push(TStrPart.Interpolation{value: formatted, debug: false})
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
@@ -1147,7 +1145,7 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
         return None
     }
     value_span: expr_span(call.args[0].expr)
-    text: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: call.args[0].expr, format: StrFormat.Display}}, span: value_span, id: AST_NODE_GENERATED}
+    text: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: call.args[0].expr, format: None}}, span: value_span, id: AST_NODE_GENERATED}
     checked_text: sema_check_expression(text, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     route: sema_call_core_resolve_route(environment, program, "core.testing", "snap", [Type]{}, 2, false, call.name_span, diagnostics) ?? return None
     target: if route == {

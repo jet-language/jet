@@ -47,7 +47,6 @@ use jet_foundation.[
     Pattern,
     Span,
     Stmt,
-    StrFormat,
     StrPart,
     StructDef,
     SwitchArm,
@@ -928,7 +927,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], st
         if sema_serde_items_allowed_keys(definition, items, stored) == .Val(keys) {
             allowed := [Expr]{}
             loop key in keys -> allowed.push(sema_serde_items_string(key, span))
-            unknown: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "push", [Expr]{sema_serde_items_field_error_value(sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), Expr.Str{parts: [StrPart]{StrPart.Lit{text: "Jet.UnknownDecodedField: unknown field `"}, StrPart.Interp{expr: sema_serde_items_field_read("jet_serde_pair", "key", span), format: StrFormat.Display}, StrPart.Lit{text: "`"}}, span: span, id: AST_NODE_GENERATED}, span)}, span)}
+            unknown: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "push", [Expr]{sema_serde_items_field_error_value(sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), Expr.Str{parts: [StrPart]{StrPart.Lit{text: "Jet.UnknownDecodedField: unknown field `"}, StrPart.Interp{expr: sema_serde_items_field_read("jet_serde_pair", "key", span), format: None}, StrPart.Lit{text: "`"}}, span: span, id: AST_NODE_GENERATED}, span)}, span)}
             allowed_check: sema_serde_items_if(sema_serde_items_not(sema_serde_items_method_call(Expr.ListLit{elements: allowed, span: span, id: AST_NODE_GENERATED}, "contains", [Expr]{sema_serde_items_field_read("jet_serde_pair", "key", span)}, span), span), [Stmt]{unknown}, span)
             body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "Object", [String]{"entries"}, [Stmt]{sema_serde_items_for_each("jet_serde_pair", sema_serde_items_ident("entries", span), [Stmt]{allowed_check}, span)}, Val([Stmt]{}), span))
         }
@@ -1147,7 +1146,7 @@ sema_serde_items_struct_read_body: fn(definition: StructDef, span: Span) -> [Stm
     unknown := [Stmt]{}
     if sema_serde_items_denies_unknown(definition) {
         key_name: "jet_serde_unknown_key"
-        reason: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "Jet.UnknownDecodedField: unknown field `"}, StrPart.Interp{expr: sema_serde_items_ident(key_name, span), format: StrFormat.Display}, StrPart.Lit{text: "`"}}, span: span, id: AST_NODE_GENERATED}
+        reason: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "Jet.UnknownDecodedField: unknown field `"}, StrPart.Interp{expr: sema_serde_items_ident(key_name, span), format: None}, StrPart.Lit{text: "`"}}, span: span, id: AST_NODE_GENERATED}
         unknown.push(sema_serde_items_binding(key_name, None, sema_serde_items_reader_call("key_text", [Expr]{}, span), false, span))
         unknown.push(Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "push", [Expr]{sema_serde_items_field_error_value(sema_serde_items_copy(sema_serde_items_ident(key_name, span), span), reason, span)}, span)})
     }

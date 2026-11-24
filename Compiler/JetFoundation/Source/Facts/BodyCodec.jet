@@ -3465,7 +3465,7 @@ body_codec_put_bodystrpart: fn(out: &BodyCodecOut, value: BodyStrPart) Never! {
         .Interpolation(p0, p1) -> {
             body_codec_put_tag(out, 1)
             body_codec_put_int(out, p0)
-            body_codec_put_tstrformat(out, p1)
+            body_codec_put_bool(out, p1)
         }
     }
 }
@@ -3475,28 +3475,13 @@ body_codec_get_bodystrpart: fn(bytes: [U8], input: &BodyCodecIn) -> BodyStrPart 
     if position == {
         1 -> {
             f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_tstrformat(bytes, input)
-            BodyStrPart.Interpolation{value: f0, format: f1}
+            f1: body_codec_get_bool(bytes, input)
+            BodyStrPart.Interpolation{value: f0, debug: f1}
         }
         else -> {
             f0: body_codec_get_string(bytes, input)
             BodyStrPart.Literal{text: f0}
         }
-    }
-}
-
-body_codec_put_tstrformat: fn(out: &BodyCodecOut, value: TStrFormat) Never! {
-    if value == {
-        .Display -> { body_codec_put_tag(out, 0) }
-        .Debug -> body_codec_put_tag(out, 1)
-    }
-}
-
-body_codec_get_tstrformat: fn(bytes: [U8], input: &BodyCodecIn) -> TStrFormat Never! {
-    position: body_codec_get_tag(bytes, input, 2, 0)
-    if position == {
-        1 -> TStrFormat.Debug
-        else -> TStrFormat.Display
     }
 }
 

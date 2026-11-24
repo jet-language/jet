@@ -36,7 +36,6 @@ use {
         RuleSite,
         Span,
         Stmt,
-        StrFormat,
         StrPart,
         SymbolKind,
         TTryConvert,
@@ -310,7 +309,7 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
         loop position >= 0 {
             value := Expr.Ident{name: "{payload}", span: name_span, id: AST_NODE_GENERATED}
             if sema_expr_unwrap_tag(members[position]) != (Type.Named{name: "Err"}) {
-                shown: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: StrFormat.Display}}, span: name_span, id: AST_NODE_GENERATED}
+                shown: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: None}}, span: name_span, id: AST_NODE_GENERATED}
                 argument: CallArg{convention: AccessConvention.Read, expr: shown, span: name_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
                 value = Expr.Call{call: Call{name: "Err", name_span: name_span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
             }

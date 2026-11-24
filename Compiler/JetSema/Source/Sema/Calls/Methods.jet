@@ -26,7 +26,6 @@ use jet_foundation.[
     NamedSpan,
     OrFallback,
     Stmt,
-    StrFormat,
     StrPart,
     Span,
     SymbolID,
@@ -1391,7 +1390,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
         .Val(declared) -> sema_app_typed_failure(sema_type_resolve_declared(graph, declared, function.symbol.module_identity))
         .None -> false
     }
-    failure_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED}
+    failure_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: None}}, span: span, id: AST_NODE_GENERATED}
     failed: sema_app_call_method(call, "__failed", [Type]{}, [CallArg]{sema_app_arg(failure_text, AccessConvention.Read, span)}, span)
     handler_call: if typed_failure -> Expr.OrFallback{value: direct_call, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED} else -> direct_call
     reply := sema_app_call_method(call, "__done", [Type]{}, [CallArg]{}, span)

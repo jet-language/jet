@@ -542,8 +542,8 @@ policy_is_constant_duration: fn(expression: Expr, aliases: [String:String]) -> B
 
 policy_plain_fixed_projection: fn(expression: Expr) -> Bool {
     if policy_without_parens(expression) == .Str(parts, _, _) {
-        if parts.len() == 1 && parts[0] == .Interp(_, format) {
-            if format == .Fixed(_) -> return true
+        if parts.len() == 1 && parts[0] == .Interp(_, .Val(selector)) {
+            if selector.name == "Fixed" -> return true
         }
     }
     false
