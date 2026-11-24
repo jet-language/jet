@@ -421,6 +421,16 @@ diagnostic_registry_row: fn(code: String) -> DiagnosticRegistryRow? Never! {
     Val(DIAGNOSTIC_ROWS[row])
 }
 
+// The row of a code the compiler's own source names: a literal at the raise
+// site, or the code of a diagnostic already built from its row. The census
+// (Tests/diagnostics_census.tsv) lists every code the sources raise, and the
+// guard every_emitted_code_has_typed_row (Tests/Guards/diagnostics_coverage.jet)
+// holds each to a typed row. So the one stop here checks nothing about input;
+// it fires only if a raise site's code has no row in this compiler's build.
+diagnostic_registry_row_of: fn(code: String) -> DiagnosticRegistryRow Never! {
+    diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+}
+
 // The row whose name is `name` (`Jet.UnknownName`).
 diagnostic_registry_row_named: fn(name: String) -> DiagnosticRegistryRow? Never! {
     row: ir_key_row(DIAGNOSTIC_NAME_KEYS, DIAGNOSTIC_NAME_ROWS, name) ?? return None
@@ -507,7 +517,7 @@ diagnostic_registry_project_row: fn(diagnostic: ^^Diagnostic, row: DiagnosticReg
 // Every type in the prose prints by the shared display rule
 // (diagnostic_display_identities), with clashes judged over the whole message.
 diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
-    row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(code)
     if row.status == DiagnosticRegistryStatus.Retired {
         panic("diagnostic `{code}` is retired and is never reported")
     }
@@ -529,7 +539,7 @@ diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: Strin
 // deriving safety from human Fix prose.
 diagnostic_registry_with_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
     }
@@ -566,7 +576,7 @@ diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool N
 
 diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
-    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
     }
@@ -585,7 +595,7 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit
 
 diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
         panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
     }
@@ -602,7 +612,7 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: Tex
 diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(updated.code)
     if row.no_fix_reason == None {
         panic("updated `{updated.code}` has no explanatory row reason to replace")
     }
@@ -620,9 +630,7 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic,
 diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    if diagnostic_registry_row(updated.code) == None {
-        panic("updated `{updated.code}` has no generated Source registry row")
-    }
+    _: diagnostic_registry_row_of(updated.code)
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Safe)
     updated.safety = Val(DiagnosticFixSafety.BehaviorPreserving)

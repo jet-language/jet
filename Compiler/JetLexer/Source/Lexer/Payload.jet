@@ -11,7 +11,7 @@ use {
         Span,
         TextEdit,
         diagnostic_from_registry,
-        diagnostic_registry_row,
+        diagnostic_registry_row_of,
         diagnostic_with_edit,
         foundation_byte_text,
         name_empty,
@@ -616,7 +616,7 @@ lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: ^[
             next
         }
         if (source[at] == U8{226}) && lexer_bidi_control_at(source, at) {
-            row: diagnostic_registry_row("E0088") ?? panic("E0088 has no registry row")
+            row: diagnostic_registry_row_of("E0088")
             add_diagnostic(diagnostics, row.code, at, at + 3, row.what.replace("{{character}}", codepoint_hex(scalar_codepoint(source, at, 3))), row.why, row.fix)
             at += 3
             next
@@ -1011,7 +1011,7 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
     loop last < finish && byte_at(source, last) != 32 && byte_at(source, last) != 9 {
         last += utf8_width(source, last)
     }
-    row: diagnostic_registry_row("E0084") ?? panic("E0084 has no registry row")
+    row: diagnostic_registry_row_of("E0084")
     add_diagnostic(diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
 }
 

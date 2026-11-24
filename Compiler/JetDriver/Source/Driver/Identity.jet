@@ -39,7 +39,7 @@ use {
         Span,
         FnBody,
         diagnostic_from_registry,
-        diagnostic_registry_row,
+        diagnostic_registry_row_of,
         diagnostic_with_source_path,
         sha256_hex,
         package_key_check_key,
@@ -1266,7 +1266,7 @@ jet_driver_diagnostic_without_span: fn(code: String, what: String, why: String, 
 jet_driver_row_diagnostic: fn(code: String, span: Span?) -> Diagnostic {
     // Unreachable: the callers (Loader.jet) pass only the literal codes E1013,
     // E1360, E1361, E1362 and E1363, each a row of DiagnosticRows.jet.
-    row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    row: diagnostic_registry_row_of(code)
     diagnostic_from_registry(code, span, row.what, row.why, row.fix)
 }
 

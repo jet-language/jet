@@ -423,7 +423,7 @@ diagnostic_stop_parse: fn(line: String) -> DiagnosticStopHead? Never! {
 
 // The lines that close a runtime stop: its row's Why and Fix, then More.
 diagnostic_stop_footer: fn(code: String) -> String Never! {
-    row: diagnostic_registry_row(code) ?? panic("runtime stop `{code}` has no registry row")
+    row: diagnostic_registry_row_of(code)
     " Why: {row.why}\n Fix: {row.fix}\n{diagnostic_more_line(code)}"
 }
 

@@ -22,7 +22,7 @@
 // the same addresses (each batch has its own, above the last one).
 use {
     math: core.math
-    jet_foundation.[BuildDebugEvent, CompilerThreads, NameTable, Span, TComptimeValue, build_debug_ask, build_debug_on, build_debug_tell, build_debug_tracer, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_table_sized]
+    jet_foundation.[BuildDebugEvent, CompilerThreads, NameTable, Span, TComptimeValue, build_debug_ask, build_debug_on, build_debug_tell, build_debug_tracer, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row_of, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_table_sized]
     jet_ir.[IRFunction, IRMember, IRModule, IROp, IRProgram, IRSlotKind, IRType, IRX64Program, IR_X64_COMPTIME_STEPS_SYMBOL, ir_align8, ir_args, ir_emit, ir_function_bind, ir_function_new, ir_intern_name, ir_intern_text, ir_keyed_function, ir_module_new, ir_opt_inline_marked_module, ir_opt_report, ir_pointer_row, ir_row_ty, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_debug_program, ir_x64_object, ir_x64_program]
     jet_backend.[
         X64BindResult,
@@ -1213,7 +1213,7 @@ jet_eval_ir_effect_refused: fn(s: ^JetEvalIRState, what: String, nondeterministi
         return
     }
     if nondeterministic {
-        entry: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
+        entry: diagnostic_registry_row_of("E3403")
         refusal: diagnostic_from_registry("E3403", Val(s.span), entry.what.replace("{{what_text}}", what), entry.why, entry.fix)
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{what}, [String]{}, None)})
         return
@@ -1224,7 +1224,7 @@ jet_eval_ir_effect_refused: fn(s: ^JetEvalIRState, what: String, nondeterministi
         return
     }
     if impure {
-        entry: diagnostic_registry_row("E3411") ?? panic("E3411 has no registry row")
+        entry: diagnostic_registry_row_of("E3411")
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3411", Val(s.span), "`{what}` inside `#Impure` is a Tier-2 comptime effect, but its package doesn't hold `Meta.Host`", entry.why, entry.fix)})
         return
     }
@@ -1672,7 +1672,7 @@ jet_eval_ir_unsupported: fn(s: ^JetEvalIRState, operation: String) Never! {
 // closure, or a function a call returned), shown as `shown`.
 jet_eval_ir_function_value_refused: fn(s: ^JetEvalIRState, shown: String) Never! {
     if s.failure == None {
-        row: diagnostic_registry_row("E1020") ?? panic("E1020 has no registry row")
+        row: diagnostic_registry_row_of("E1020")
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Unsupported, diagnostic: diagnostic_from_registry("E1020", Val(s.span), row.what.replace("{{type}}", shown), row.why, row.fix)})
     }
 }
