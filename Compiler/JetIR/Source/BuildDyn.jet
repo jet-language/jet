@@ -1030,17 +1030,17 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
     Val(args)
 }
 
-// The read a `__Decoding.read<Target, Source>` call (Core/Encoding/
-// Encoding.jet) lowers to: the target's own read (a derived streaming
-// `__read`), else the `__Decoding` read of a list (not bytes), option,
-// String-keyed map, Int, Bool, Float or String, each with its arguments and
-// then Source. None for another call, and for any other target, which takes
-// the reference body: the value's captured tree, decoded.
+// The read a `__Decoding.read<Target, Source>` call lowers to: the target's
+// own read (a derived streaming `__read`), else the `__Decoding` read of a
+// list (not bytes), option, String-keyed map, Int, Bool, Float or String,
+// each with its arguments and then Source. None for another call, and for
+// any other target, which takes the reference body: the value's captured
+// tree, decoded.
 ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> {key: String, args: [Type]}? Never! {
     if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") {
         return None
     }
-    if !module_is_core(function.module_identity) || !ir_core_source_path(function.source_file, "Core/Encoding/Encoding.jet") {
+    if !module_is_core(function.module_identity) {
         return None
     }
     owner: if function.kind == {

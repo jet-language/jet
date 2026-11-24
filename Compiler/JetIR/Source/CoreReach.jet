@@ -48,13 +48,6 @@ ir_core_reach_generated_codec: fn(function: FnBody) -> Bool Never! {
     function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read" || function.name == "encode_stored" || function.name == "decode_stored")
 }
 
-// Whether a checked source path names the Core file `relative` (`Core/...`).
-// A Core unit outside the entry root keeps its canonical or `<corelib>/`
-// prefixed path (`jet_driver_display_path`), so `relative` is its suffix.
-ir_core_source_path: fn(path: String, relative: String) -> Bool Never! {
-    path == relative || path.ends_with("/{relative}")
-}
-
 // A `#Context(print: …)` block roots the Core format trait implementations
 // print's styled Int and Float text calls (BuildTypes.jet
 // ir_print_style_impl_used): only a program that sets a style calls them.
@@ -108,7 +101,7 @@ ir_core_method_lowered_by_owner: fn(name: String) -> Bool Never! {
     name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next" || ir_print_style_method(name)
 }
 
-// The `__Decoding` reads of Core/Encoding/Encoding.jet that lowering selects
+// The `__Decoding` reads of core.encoding that lowering selects
 // by a `__Decoding.read` call's target (BuildDyn.jet ir_decoding_read), with
 // no keyed call in a checked body. A compile that lowers checks each up front
 // under Core demand (driver jet_driver_core_lowering_roots).
@@ -965,13 +958,6 @@ ir_core_reach_row_targets: fn(interner: Interner, functions: [FnBody], symbols: 
             if held_rows[index] >= 0 -> targets.push(held_rows[index])
         }
     }
-}
-
-#Test("A Core source path matches under any Core root") {
-    assert(ir_core_source_path("Core/Encoding/Encoding.jet", "Core/Encoding/Encoding.jet"))
-    assert(ir_core_source_path("/toolchain/Core/Encoding/Encoding.jet", "Core/Encoding/Encoding.jet"))
-    assert(ir_core_source_path("<corelib>/Core/Text/Fmt.jet", "Core/Text/Fmt.jet"))
-    assert(!ir_core_source_path("/toolchain/MyCore/text/fmt.jet", "Core/Text/Fmt.jet"))
 }
 
 #Test("A precise operation with no role adds nothing to a comptime closure") {
