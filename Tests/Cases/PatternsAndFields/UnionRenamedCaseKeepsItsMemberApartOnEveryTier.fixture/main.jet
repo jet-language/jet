@@ -1,0 +1,33 @@
+// E0363's fix applied: the named case renamed (`Point(Int)` to `At(Int)`)
+// leaves each member its own arm, for this module's `Point` and for
+// `geo.Point`.
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+Point: struct {
+    x: Int,
+}
+
+local: fn(v: At(Int) | Point) -> Int {
+    if v == {
+        .At(n) -> n
+        .Point(p) -> p.x * 10
+    }
+}
+
+qualified: fn(v: At(Int) | geo.Point) -> Int {
+    if v == {
+        .At(n) -> n
+        .geo.Point(p) -> p.x * 100
+    }
+}
+
+run: fn() {
+    print(local(Point{x: 1}))
+    print(local(.At(2)))
+    print(qualified(geo.Point{x: 3}))
+    print(qualified(.At(4)))
+}

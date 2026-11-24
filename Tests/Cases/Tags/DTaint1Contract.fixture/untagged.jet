@@ -1,0 +1,20 @@
+use process: core.process
+
+Contact: struct {
+    name: String,
+    email: #PII String,
+}
+
+// Values that never held the tag reach the sink: a branch over plain
+// strings, a list of them, an untagged field and a call on one.
+domain: fn(email: String) -> String { email.split("@").to_list()[1] }
+
+send: fn(contact: Contact, plain: String) {
+    print(contact.email.len())
+    word: if plain.len() > 3 -> plain.copy() else -> "fallback"
+    words: [String]{plain.copy()}
+    receipt: process.cmd(["echo", word, words[0], contact.name, domain("x@y.z")]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send(Contact{name: "Ann", email: "ann@example.com"}, "plain") }

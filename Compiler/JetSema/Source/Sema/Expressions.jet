@@ -4547,8 +4547,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if game == .Val(check) {
         if check.handled -> return check
     }
-    geometry := sema_call_try_geometry(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if geometry.handled -> return geometry
     if method == "swizzle" {
         swizzle := sema_expr_try_numeric_swizzle(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if swizzle.handled -> return swizzle
@@ -4883,7 +4881,7 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
         }
         return Val(projected_value.value)
     }
-    routed_method: sema_call_geometry_routed_method(receiver_value.ty, method, args.len(), environment, program) ?? core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    routed_method: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     // Only method absence enables the callable field. As in the reference,
     // the callee field is spanned at the method name and the call runs from
     // that name to its last argument.

@@ -1,0 +1,14 @@
+use process: core.process
+
+Contact: struct {
+    name: String,
+    email: #PII String,
+}
+
+// A tagged struct field carries its tag to every read of it.
+send: fn(contact: Contact) {
+    receipt: process.cmd(["echo", contact.email]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send(Contact{name: "Ann", email: "ann@example.com"}) }

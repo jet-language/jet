@@ -1,0 +1,80 @@
+// The `check` rules of the compiler's own contract markers: ordinary Prelude
+// source the driver loads into a program that declares a `#run { … }` contract
+// clause, parsed ahead of time into JetSema's PreludeRows.jet. The text is
+// Compiler/Prelude/Rules.jet, copied by `jet build Compiler`
+// (Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this copy.
+SEMA_PRELUDE_RULE_SOURCE_PATH: "jet:canonical-prelude/Prelude/Rules.jet"
+
+SEMA_PRELUDE_RULE_SOURCE: #run { ```// The `check` rules of the compiler's own contract markers.
+// A `#Pre` or `#Post` condition written `#run { … }` is decided for each call
+// while building, once, over that call's arguments; a call whose answer is
+// false, or which has no answer, is heard by its marker's rule here, which
+// rejects it (E0180). A call whose conditions all hold has nothing to reject
+// and is not heard. The compiler loads this module only into a program that
+// declares such a clause (JetDriver jet_driver_retain_prelude_modules).
+// A marker here is the rule's receiver, not the marker a program writes:
+// `#Pre` and `#Post` are declared in Prelude/Markers.jet.
+
+// One call's answer to its callee's `#run { … }` clauses of one marker:
+// `condition` is the answer, and None when the build has none, which
+// `reason` explains.
+Pre: struct {
+    callee: String,
+    condition: Bool?,
+    reason: String,
+
+    impl Marker {
+        sites: [.Function, .Method],
+        repeatable: true,
+
+        check: fn(self, call: CompilerCall) {
+            if required_contract_finding(self.callee, "Pre", self.condition, self.reason) == .Val(finding) -> reject(finding, at: call.name)
+        }
+    }
+}
+
+Post: struct {
+    callee: String,
+    condition: Bool?,
+    reason: String,
+
+    impl Marker {
+        sites: [.Function, .Method],
+        repeatable: true,
+
+        check: fn(self, call: CompilerCall) {
+            if required_contract_finding(self.callee, "Post", self.condition, self.reason) == .Val(finding) -> reject(finding, at: call.name)
+        }
+    }
+}
+
+// The finding of a `#clause` answer for a call of `callee`: none when the
+// condition holds.
+required_contract_finding: fn(callee: String, clause: String, condition: Bool?, reason: String) -> RequiredContractNotTrue? {
+    if condition == Val(true) -> return None
+    if condition == Val(false) {
+        return Val(RequiredContractNotTrue{callee: callee, clause: clause, answer: "is false", reason: "", remedy: "that make the condition true"})
+    }
+    Val(RequiredContractNotTrue{callee: callee, clause: clause, answer: "has no answer", reason: ", but {reason}", remedy: "the build can read"})
+}
+
+// The finding E0180 reports, with the texts of its row in
+// Prelude/Diagnostics.jet.
+RequiredContractNotTrue: struct {
+    callee: String,
+    clause: String,
+    answer: String,
+    reason: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E0180",
+
+        what: fn(self) -> String { "`{self.callee}`'s `#{self.clause}` condition {self.answer} for this call while building" }
+
+        why: fn(self) -> String { "The condition is written `#run {{ … }}`, so every call decides it while building from its arguments{self.reason}" }
+
+        fix: fn(self) -> String { "Pass arguments {self.remedy}, or drop `#run` so the condition is checked when the program runs" }
+    }
+}
+``` }

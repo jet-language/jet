@@ -1,0 +1,22 @@
+// `item` is a write parameter, but `.Point(p)` over a subject written
+// without `&` binds a read window: the write is refused at `p`, and the fix
+// is the subject's `&` (`if &item.v == { … }` binds a write window).
+Point: struct {
+    x: Int,
+}
+
+Item: struct {
+    v: Point | Int,
+}
+
+reset: fn(item: &Item) {
+    if item.v == {
+        .Point(p) -> { p.x = 5 }
+        .Int(_) -> {}
+    }
+}
+
+run: fn() {
+    item := Item{v: Point{x: 1}}
+    reset(item)
+}

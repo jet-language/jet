@@ -1,0 +1,29 @@
+# A value tag in type position parses directly before
+# the type it qualifies (`#PII String`). The checks:
+# - On a struct field, a parameter, a return, a typed local, a list element
+#   and an optional, it checks clean, keeps jet fmt's form, and runs the
+#   same on every tier.
+# - The tag is the value's own: a `#PII String` parameter's value is refused
+#   at a sink `PII` denies.
+# - A tag written after the type is not this spelling and does not parse.
+fixture: DQual4Contract.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step fmt: jet fmt --check main.jet sink.jet
+exit: 0
+step o0: jet run main.jet
+exit: 0
+stdout: = "Ann\n15 chars\nann@example.com\n15\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
+step sink: jet check sink.jet
+exit: 1
+stderr: ~ "Jet.TaggedValueDenied: A `PII` value is denied at `process.cmd`" # the refusal names the type-position tag and the sink
+step postfix: jet check postfix.jet
+exit: 1
+stderr: ~ "Expected `,` between parameters, found `#`" # the parser stops at the trailing tag

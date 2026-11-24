@@ -1,0 +1,10 @@
+use process: core.process
+
+// A branch whose value may be the tagged one carries the tag.
+pick: fn(email: #PII String, plain: String) {
+    word: if plain.len() > 3 -> email.copy() else -> plain.copy()
+    receipt: process.cmd(["echo", word]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { pick("ann@example.com", "plain") }

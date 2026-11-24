@@ -1,0 +1,60 @@
+# D-CORE-CHECK1=A: a `#Pre` or `#Post` clause written `#run { … }` that fails
+# for a call is heard by its marker's `check` rule in the compiler's Prelude
+# rule module (Compiler/Prelude/Rules.jet), which rejects the call (E0180)
+# with the text the check gave before. Only a compile whose programs declare
+# such a clause loads the module, and a call whose clauses hold runs no rule.
+# JET_TRACE_DETAIL=functions writes one `sema.module` event per module the
+# check reaches and one `comptime.body.run` event per compile-time run, named
+# by what it runs (a rule's run is `Pre.check` or `Post.check`).
+fixture: ContractRulesHearFailedRunClauses.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet check --trace=plain.json plain/main.jet
+exit: 0
+file: plain.json ~ "{\"name\":\"Prelude/Errors" # the compiler's error module is checked
+file: plain.json !~ "{\"name\":\"Prelude/Rules" # with no `#run` clause the rule module is never loaded
+step: jet run plain/main.jet
+exit: 0
+stdout: = "12\n"
+step: jet check --trace=holds.json holds/main.jet
+exit: 0
+file: holds.json ~ "{\"name\":\"Prelude/Rules" # a `#run` clause loads the rule module
+file: holds.json !~ "Pre.check\",\"cat\":\"comptime.body.run\"" # a call whose `#Pre` holds is not heard
+file: holds.json !~ "Post.check\",\"cat\":\"comptime.body.run\"" # nor one whose `#Post` holds
+step: jet run -O0 holds/main.jet
+exit: 0
+stdout: = "10\n12\n"
+step: jet run -O2 holds/main.jet
+exit: 0
+stdout: = "10\n12\n"
+step: jet check --trace=false.json false/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `sum`'s `#Pre` condition is false for this call while building" # the rule's finding
+stderr: ~ "6 | run: fn() { print(sum(3, [1, 2, 3])) }" # at the call
+stderr: ~ "Fix: Pass arguments that make the condition true, or drop `#run`" # with its row's remedy
+stderr: count "Error: " = 1 # and nothing else
+file: false.json ~ "Pre.check\",\"cat\":\"comptime.body.run\"" # the `Pre` rule heard the call
+step: jet run -O0 false/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `sum`'s `#Pre` condition is false" # a run is refused alike
+stderr: count "Error: " = 1 # once
+step: jet build -O2 false/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `sum`'s `#Pre` condition is false" # as is a build
+stderr: count "Error: " = 1 # once
+step: jet check --trace=post.json post/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `width`'s `#Post` condition is false for this call while building" # the `#Post` rule's finding
+stderr: count "Error: " = 1 # and nothing else
+file: post.json ~ "Post.check\",\"cat\":\"comptime.body.run\"" # the `Post` rule heard the call
+step: jet check twice/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `sum`'s `#Pre` condition is false" # two false clauses of one marker
+stderr: count "Error: " = 1 # are heard as one call
+step: jet check unanswered/main.jet
+exit: 1
+stderr: ~ "Error: Jet.RequiredContractNotTrue: `width`'s `#Post` condition has no answer for this call while building" # a method call is not computed again
+stderr: ~ "but only a call by name is computed again while building" # the reason rides the rule's receiver
+stderr: ~ "Fix: Pass arguments the build can read, or drop `#run`" # with the unanswered remedy
+stderr: count "Error: " = 1 # and nothing else

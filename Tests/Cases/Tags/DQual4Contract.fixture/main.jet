@@ -1,0 +1,24 @@
+// D-QUAL4=A: a value tag in type position is written directly before the
+// type it qualifies.
+Contact: struct {
+    name: String,
+    email: #PII String,
+}
+
+masked: fn(email: #PII String) -> #PII String { "{email.len()} chars" }
+
+first_or: fn(emails: [#PII String], fallback: #PII String) -> #PII String {
+    if emails.len() > 0 -> return emails[0].copy()
+    fallback.copy()
+}
+
+run: fn() {
+    contact := Contact{name: "Ann", email: "ann@example.com"}
+    local: #PII String{"bob@example.com"}
+    list := [#PII String]{contact.email.copy(), local.copy()}
+    maybe: #PII String?{Val(local.copy())}
+    print(contact.name)
+    print(masked(contact.email))
+    print(first_or(list, "none"))
+    if maybe == .Val(found) -> print(found.len())
+}

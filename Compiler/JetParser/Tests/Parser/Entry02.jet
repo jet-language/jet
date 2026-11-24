@@ -643,3 +643,17 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     missing: entry02_diag(entry02_errors(`show: fn(x: Float) -> String { "{x:Fixed()}" }`), "E0003")
     assert(missing.what == "Expected decimal places inside `:Fixed( )`", missing.what)
 }
+
+// A tag before a module's type reads the whole static call: `#Reviewed
+// crypto.Secret.from_text(…)` tags the call's value, not `crypto.Secret`.
+#Test("value_tag_reads_a_module_type_static_call") {
+    p: entry02_program(`run: fn() { tagged: #Reviewed crypto.Secret.from_text("x") }`)
+    binding: entry02_binding(entry02_func(p, "run"))
+    if binding.init == .Tainted(.MethodCall(receiver, method, _, _, _, args, _), tag, _, _) {
+        assert(tag == Val("Reviewed"), "the tag is `Reviewed`")
+        assert(method == "from_text" && args.len() == 1, method)
+        assert(receiver == .Field(.Ident("crypto", _, _), "Secret", _, _), "the receiver is `crypto.Secret`")
+    } else { panic("expected a tagged `crypto.Secret.from_text` call") }
+    field: entry02_binding(entry02_func(entry02_program(`run: fn() { tagged: #Reviewed holder.value.len() }`), "run"))
+    assert(field.init == .MethodCall(.Tainted(.Field(.Ident("holder", _, _), "value", _, _), _, _, _), "len", _, _, _, _, _), "a value's field keeps the tag on the field")
+}

@@ -1,0 +1,11 @@
+use process: core.process
+
+// A call's result carries the tags of the arguments it was computed from.
+domain: fn(email: String) -> String { email.split("@").to_list()[1] }
+
+send: fn(email: #PII String) {
+    receipt: process.cmd(["echo", domain(email)]).run() ?? return
+    receipt.drop("only the argument flow matters here")
+}
+
+run: fn() { send("ann@example.com") }

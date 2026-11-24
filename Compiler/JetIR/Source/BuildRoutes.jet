@@ -5250,6 +5250,16 @@ ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
                     record_drops.push("jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}")
                     next
                 }
+                // A payload-free enum crosses as its tag word, as a Tag
+                // carrier's does: a binding that names a Core enum gets its
+                // runtime row's handle carrier.
+                if carrier == .Handle(handle_name) && kind == .Word && ir_enum_def(m, p, slot_row) == .Val(enum_row) {
+                    if !ir_route_enum_tag(p, shown, enum_row, handle_name) {
+                        return ir_fail_slot(b, span, "runtime route {name} Tag argument of {shown:Debug}")
+                    }
+                    lowered.push(slot)
+                    next
+                }
                 // A runtime handle crosses as itself (a mutable one too: the
                 // route mutates the runtime value behind it).
                 if !ir_is_handle(m, slot_row) {
@@ -5461,6 +5471,28 @@ ir_variant_names: fn(p: IRProgram, row: Int) -> String Never! {
         loop variant in variants -> names.push(variant.name)
     }
     names.join(",")
+}
+
+// Whether payload-free enum declaration `row`, of type `ty`, is runtime enum
+// `runtime`: its runtime handle row is that enum's, and the row's schema
+// lists its variants in the runtime's order, so its tag word is the
+// runtime's.
+ir_route_enum_tag: fn(p: IRProgram, ty: Type, row: Int, runtime: String) -> Bool Never! {
+    name: ir_nominal_name(ir_untag(ty)) ?? ""
+    held: ir_handle_runtime(p, name) ?? ir_handle_runtime(p, p.types[row].key) ?? return false
+    schema: ir_record_schema_row(held) ?? return false
+    held.runtime == runtime && schema.fields == "" && schema.variants == ir_variant_names(p, row)
+}
+
+// A binding's Core enum spells its runtime row by either name; the row's
+// schema holds the runtime's variant order that ir_route_enum_tag compares.
+#Test("a Core payload-free enum's runtime row lists the runtime's variants") {
+    spellings: [String]{"NetShutdown", "<corelib>/core.net.NetShutdown"}
+    loop spelling in spellings {
+        held: ir_runtime_handle(spelling) ?? panic("no runtime row for {spelling}")
+        schema: ir_record_schema_row(held) ?? panic("no schema for {spelling}")
+        assert(held.runtime == "JetNetShutdown" && schema.fields == "" && schema.variants == "Read,Write,Both")
+    }
 }
 
 // A zeroed frame out slot of `words` words.

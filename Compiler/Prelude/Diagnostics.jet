@@ -2810,6 +2810,8 @@ RequiredContractNotTrue: struct {
     callee: String,
     clause: String,
     answer: String,
+    reason: String,
+    remedy: String,
 
     impl Diagnostic {
         code: "E0180",
@@ -2821,15 +2823,15 @@ RequiredContractNotTrue: struct {
         no_fix: .Behavior,
 
         what: fn(self) -> String {
-            "`{self.callee}`'s `#{self.clause}` condition is {self.answer} for this call while building"
+            "`{self.callee}`'s `#{self.clause}` condition {self.answer} for this call while building"
         }
 
         why: fn(self) -> String {
-            "A condition written `#run {{ … }}` must be decided while building for every call, from the call's arguments after contract substitution. A false answer, or no answer because it reads a value only known at run time, stops the build at the call."
+            "The condition is written `#run {{ … }}`, so every call decides it while building from its arguments{self.reason}"
         }
 
         fix: fn(self) -> String {
-            "Pass arguments the build can read that make the condition true, or drop `#run` so the condition is checked when the program runs."
+            "Pass arguments {self.remedy}, or drop `#run` so the condition is checked when the program runs"
         }
     }
 }

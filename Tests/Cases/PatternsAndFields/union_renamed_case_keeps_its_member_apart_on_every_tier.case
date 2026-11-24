@@ -1,0 +1,17 @@
+# E0363's fix for a named case that takes a member's name ("rename the
+# case so no member type of the union has its name") compiles when applied:
+# `At(Int) | Point` and `At(Int) | geo.Point` check clean, and each case and
+# member reaches its own arm on every tier.
+fixture: UnionRenamedCaseKeepsItsMemberApartOnEveryTier.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "10\n2\n300\n4\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "10\n2\n300\n4\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "10\n2\n300\n4\n"

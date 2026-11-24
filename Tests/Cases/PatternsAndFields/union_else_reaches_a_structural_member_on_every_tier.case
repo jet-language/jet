@@ -1,0 +1,18 @@
+# An `else` over a union with a structural member (`Int | [Int] | String`)
+# stands for the member no arm can name: check reports nothing (no E0641
+# whose fix writes a mangled case name) and every tier takes the `else` for
+# `[Int]`.
+fixture: UnionElseReachesAStructuralMemberOnEveryTier.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+stderr: !~ "M__" # no mangled member name
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "7\n4\n-1\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "7\n4\n-1\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "7\n4\n-1\n"

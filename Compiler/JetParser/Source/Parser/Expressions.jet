@@ -1920,6 +1920,17 @@ parser_parse_collection: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
     ParsedExpr{expr: Expr.ListLit{elements: values, span: span, id: parser_node_id(state)}, span: span}
 }
 
+// Whether `expr` is a module's type (`crypto.Secret`) with `.member` next,
+// which a primary tail reads on: `#Reviewed crypto.Secret.from_text(…)` tags
+// the call's value, as `#Checked Die.from_int(1)` does.
+parser_module_type_member_ahead: fn(state: &JetParserState, expr: Expr) -> Bool Never! {
+    if parser_current_kind(state) != TOKEN_DOT || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    if expr == .Field(base, member, _, _) && parser_pascal_name(member) {
+        if base == .Ident(alias, _, _) -> return !parser_pascal_name(alias)
+    }
+    false
+}
+
 // The dotted name an `Ident(.Ident)*` chain spells, or "" for any other shape.
 parser_literal_head_path: fn(expr: Expr) -> String Never! {
     if expr == {
@@ -1958,7 +1969,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             if kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_QUESTION_DOT {
                 break
             }
-            if tail_member && kind != TOKEN_LPAREN && kind != TOKEN_LT && kind != TOKEN_LBRACE {
+            if tail_member && kind != TOKEN_LPAREN && kind != TOKEN_LT && kind != TOKEN_LBRACE && !parser_module_type_member_ahead(state, expression.expr) {
                 break
             }
         }

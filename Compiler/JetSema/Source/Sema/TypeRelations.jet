@@ -61,6 +61,7 @@ use jet_foundation.[
     core_source_owns_type,
     type_name,
     type_union_member_tag,
+    type_unqualified_name,
     type_unqualified_nominals,
     name_text_hash,
     core_identity_in_module,
@@ -1255,7 +1256,7 @@ sema_type_record_rows_own: fn(fields: [CoreRecordFieldRow], literals: [CoreRecor
 
 // The carriers the checker types itself, which no Core source or registry
 // row declares: the raw pointer `Ptr<T>` (`*T`), the coordinate spaces a
-// geometry point, delta or transform names (sema_call_geometry_space), the
+// geometry point, delta or transform names (sema_expr_geometry_space), the
 // compute shapes `Vec` and `Matrix`, the collection windows `View` and
 // `ViewMut`, a generator's `Stream`, the `FileLines` a file reader's
 // `lines()` yields, and the `DataGroupedQuery` a query's `group_by` yields,
@@ -1462,7 +1463,10 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
             }
         }
         .Union(members) -> {
-            sema_type_union_case_conflicts(members, span, diagnostics)
+            if {
+                caller >= 0 && caller < graph.modules.len() -> sema_type_union_case_conflicts(members, graph.modules[caller].program.items, span, diagnostics)
+                else -> sema_type_union_case_conflicts(members, [Item]{}, span, diagnostics)
+            }
             loop member in members {
                 sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
             }
@@ -1477,9 +1481,11 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
 }
 
 // E0363 for a named case of the union `members` whose name another member
-// takes: a member type with that name, or an earlier case of that name with
+// takes: a member type with that name or that leaf name (`Point`,
+// `geo.Point`, an inline module's `M3GeoPoint` read through `items`, its
+// module's items, sema_name_type_leaf), or an earlier case of that name with
 // another payload type. A case repeated with its payload is one case.
-sema_type_union_case_conflicts: fn(members: [Type], span: Span, diagnostics: &[Diagnostic]) {
+sema_type_union_case_conflicts: fn(members: [Type], items: [Item], span: Span, diagnostics: &[Diagnostic]) {
     loop index in 0..<members.len() {
         if members[index] == .Case(name, payload) {
             loop other_index in 0..<members.len() {
@@ -1488,12 +1494,31 @@ sema_type_union_case_conflicts: fn(members: [Type], span: Span, diagnostics: &[D
                     if other_index < index && other_name == name && !type_identity_equal(other_payload, payload) {
                         diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` already carries `{type_name(other_payload)}` in this union", "give each named case one payload type"))
                     }
-                } else if type_union_member_tag(other) == name {
+                } else if type_union_member_tag(other) == name || sema_type_union_member_leaf(items, other) == name {
                     diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` reuses the name of a member type of this union", "rename the case so no member type of the union has its name"))
                 }
             }
         }
     }
+}
+
+// sema_type_union_case_conflicts for a union written in the environment's
+// module, whose items name the types it lifted from inline modules.
+sema_type_union_case_conflicts_in: fn(members: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) {
+    if program.registration_graph == .Val(graph) {
+        if sema_scope_caller_index(environment, graph) == .Val(row) {
+            sema_type_union_case_conflicts(members, graph.modules[row].program.items, span, diagnostics)
+            return
+        }
+    }
+    sema_type_union_case_conflicts(members, [Item]{}, span, diagnostics)
+}
+
+// The leaf name of nominal union member `member`, a type of the module
+// whose items are `items`: `Point` for `Point`, `geo.Point` and the
+// `M3GeoPoint` an inline module `geo` lifts; "" for any other member.
+sema_type_union_member_leaf: fn(items: [Item], member: Type) -> String Never! {
+    sema_name_type_leaf(items, type_unqualified_name(sema_pattern_base_name(member) ?? return ""))
 }
 
 // Rust `resolve_measure`: a fixed length `[T#N]` in a declared member type

@@ -1,0 +1,15 @@
+// `[Int]` is a member no arm can name, so the `else` is how the table
+// reaches it: E0641 asks for no arm it could not write.
+total: fn(value: Int | [Int] | String) -> Int {
+    if value == {
+        .Int(n) -> n
+        .String(s) -> s.len()
+        else -> -1
+    }
+}
+
+run: fn() {
+    print(total(7))
+    print(total("four"))
+    print(total([Int]{1, 2}))
+}
