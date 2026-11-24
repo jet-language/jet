@@ -1,0 +1,15 @@
+// The host's network interfaces, in index order: the loopback is the first
+// a Linux network namespace makes, so it has index 1.
+use net: core.net
+
+run: fn() {
+    found: net.interfaces()
+    ordered := true
+    loop at in 1..<found.len() {
+        if found[at - 1].index >= found[at].index -> ordered = false
+    }
+    print("in index order: {ordered}")
+    loop each in found {
+        if each.name == "lo" -> print("lo: index {each.index}")
+    }
+}

@@ -1,0 +1,19 @@
+// How an app names itself and the rows it makes. `desktop_entry` is the
+// Linux launcher file the app installs for its `exec` path, with the link
+// scheme it opens. `new_id` gives a fresh UUIDv7 a client stamps on a row
+// it creates, so a row made offline has its final ID at once.
+package: {
+    name: "app_identity"
+    authority: { allow: [IO, Rand, Time] }
+}
+
+use app
+
+run: fn() {
+    crew: app.new("Crew Board").url_scheme("crewboard")
+    print(crew.desktop_entry("/opt/crew/run"))
+    first: app.new_id()
+    second: app.new_id()
+    groups: first.split("-").to_list()
+    print("groups: {groups.len()}, version: {groups[2].starts_with("7")}, characters: {first.len()}, fresh: {first != second}")
+}

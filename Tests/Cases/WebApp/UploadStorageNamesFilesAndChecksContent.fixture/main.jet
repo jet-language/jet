@@ -16,13 +16,18 @@ AlbumError: enum {
     NoAlbum,
 }
 
+// Keeps `file` in `shelf` when its first bytes are an image's.
+kept_image: fn(shelf: app.Blobs, file: app.Upload) -[FS.Write]> app.Blob app.BlobError! {
+    shelf.keep(file, allow: [app.Media]{app.Media.Image})
+}
+
 Photos: struct {
     shelf: app.Blobs,
 
     // Keeps an image in album `album`.
     #[App.Public, App.UploadCheck(method: "may_add")]
     add: fn(self, album: Int, file: app.Upload) -[FS.Write]> String app.BlobError! {
-        blob: self.shelf.keep(file, allow: [app.Media]{app.Media.Image}) ?? return Err(err)
+        blob: kept_image(self.shelf, file) ?? return Err(err)
         Ok("an image of {blob.bytes} bytes, sent as {file.name}, kept as {blob.id.raw().len()} hex digits")
     }
 

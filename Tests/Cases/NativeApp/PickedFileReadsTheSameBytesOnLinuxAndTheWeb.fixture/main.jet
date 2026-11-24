@@ -42,14 +42,14 @@ media_name: fn(media: app.Media?) -> String {
     }
 }
 
-// The file's bytes read through its stream, a few at a time.
+// The file's bytes read through its stream, a few at a time, each part
+// appended to one buffer.
 streamed: fn(file: app.PickedFile) -[FS.Read, Time.Wait]> [U8] IOError! {
     stream := file.stream() ?? return Err(err)
     out := [U8]{}
     loop {
-        part: stream.read_bytes(7) ?? return Err(err)
-        if part.len() == 0 -> break
-        loop b in part -> out.push(b)
+        count: stream.read_into(out, 7) ?? return Err(err)
+        if count == 0 -> break
     }
     Ok(out)
 }

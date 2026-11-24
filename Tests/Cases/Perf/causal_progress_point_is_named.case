@@ -1,0 +1,14 @@
+# A program names a progress point with `perf.progress(name)`: under
+# `jet perf run --lens=causal` each call is one pass of that point, and the
+# causal section ranks it beside the finished tasks.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: CausalProgressPointIsNamed.fixture
+env: NO_COLOR=1
+step: jet perf run -A -O2 main.jet --lens=causal --out jobs.jettrace
+exit: 0
+stdout: = "done\n"
+json: file jobs.jettrace doc $.content.receipt_sections[?name="causal"][0].value.points[?name="job"] #= 1 # each `perf.progress("job")` is a pass of the point `job`
+step: jet perf view jobs.jettrace
+exit: 0
+stdout: ~ "causal\n  " # the view gives the lens's ranking or its refusal

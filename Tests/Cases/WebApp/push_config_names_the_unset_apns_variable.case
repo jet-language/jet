@@ -1,0 +1,11 @@
+# A graph that names APNs (`app.apns`) and FCM (`app.fcm`) settings in
+# `.push` reads their variables as the server binds. With `APNS_KEY` unset
+# the server stops before it listens: exit 78, naming the variable, the
+# maker's argument that names it and the `.push` call.
+fixture: PushConfigNamesTheUnsetApnsVariable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -A main.jet
+exit: 78
+stdout: = ""
+stderr: ^= "Stop: Jet.EnvDecodeFailed: `APNS_KEY` (`app.apns(key_env:)`) is unset, so the app's push services can't start\n  --> main.jet:11 in run\n" # the stop names the variable, the maker's argument and the `.push` call

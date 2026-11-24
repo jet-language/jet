@@ -1,0 +1,11 @@
+# `net.interfaces()` lists the host's network interfaces from /sys/class/net
+# in index order (if_nameindex). On Linux the loopback `lo` is the first
+# interface of every network namespace, index 1.
+requires: os-name:linux
+fixture: InterfacesListTheLoopbackFirst.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "in index order: true\nlo: index 1\n"
+stderr: empty

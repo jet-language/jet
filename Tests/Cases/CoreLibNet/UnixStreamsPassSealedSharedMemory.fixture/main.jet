@@ -15,6 +15,12 @@ run: fn() {
     client := net.unix_connect(path) ?? panic("connect: {err}")
     server := net.unix_accept(listener) ?? panic("accept: {err}")
     print(net.unix_wait(server, 0) ?? panic("idle wait: {err}"))
+    // A wait that also watches a wake pipe: 0 while neither has bytes, then
+    // bit 2 once the pipe has one.
+    wake: sys.open_pipe() ?? panic("pipe: {err}")
+    print(net.unix_wait_wake(server, wake[0], 0) ?? panic("idle wake wait: {err}"))
+    _: wake[1].write([U8]{1}, 1000000000) ?? panic("wake: {err}")
+    print(net.unix_wait_wake(server, wake[0], 1000000000) ?? panic("woken wait: {err}"))
 
     memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
     memory.write(8, "jet".bytes()) ?? panic("write: {err}")

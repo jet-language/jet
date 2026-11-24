@@ -37,6 +37,11 @@ PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
 
 BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 
+// The compiler's Core table: a `source_module NAME path PATH …` row names the
+// module a file declares, where it differs from the file's path
+// (`Core/Web/DevServer.jet` is `core.web.devserver`).
+CORE_ROWS: "Compiler/Prelude/Core.rows"
+
 // Core functions no program spells: the compiler lowers a language construct
 // to each (`tree.worker(…)` to core.service.typed_worker, the kernel's unmap
 // under the memory sentry to core.mem.unmapping), so no call site names them.
@@ -183,6 +188,10 @@ Table: struct {
     tails: [String:String],
     units: [String],
     names: [String],
+    // The builder methods a reserved `__` method lowers (`App.screen` is
+    // `App.__screen`) that return their owner type: a chain keeps its type
+    // through one, though no row is its to credit.
+    lowered: [String:Bool],
     // Each number size a family's methods reach (`I8`), and its owner type in
     // the module of those methods (`core.math.I8`): with_family_sizes.
     sizes: [String:String],
@@ -710,7 +719,10 @@ bytes_between: fn(source: [U8], start: Int, end: Int) -> [U8] Never! { source[st
 // members of a public inline module. Function types (`fn(Int) -> Int`), trait
 // signatures and functions local to a body are not inventoried.
 public_functions: fn(path: String, source_text: String) -> [Function] Never! {
-    unit: module_name(path)
+    public_functions_in(module_name(path), path, source_text)
+}
+
+public_functions_in: fn(unit: String, path: String, source_text: String) -> [Function] Never! {
     source: source_text.bytes()
     tokens: lex(source)
     lines: newlines(source)
@@ -831,7 +843,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
 
 // Call resolution's view of the inventory.
 table_of: fn(functions: [Function]) -> Table Never! {
-    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}, sizes: [String:String]{}}
+    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}, lowered: [String:Bool]{}, sizes: [String:String]{}}
     loop index in 0..<functions.len() {
         row: functions[index]
         table.ids.push(row.id.copy())
@@ -848,6 +860,18 @@ table_of: fn(functions: [Function]) -> Table Never! {
         }
     }
     table
+}
+
+// Table.lowered: each excluded `Owner.__name` method that returns Owner, as
+// `Owner.name`.
+lowered_builders: fn(excluded: [Function]) -> [String:Bool] Never! {
+    found := [String:Bool]{}
+    loop row in excluded {
+        split: row.id.rpartition(".")
+        if !row.name.contains(".") || !split.tail.starts_with("__") || !row.signature.ends_with(" -> {split.head}") -> next
+        found["{split.head}.{split.tail.remove_prefix("__")}"] = true
+    }
+    found
 }
 
 // `table` with each method of a number family (`impl Signed.Roundable` in
@@ -963,8 +987,11 @@ chained_type: fn(tokens: [Token], table: Table, typed: String, open: Int) -> Str
         if token(tokens, close) != "." -> return current
         next_open: after_generics(tokens, close + 2)
         if token(tokens, next_open) != "(" -> return ""
-        row: table.by_id.get("{current}.{token(tokens, close + 1)}") ?? return ""
-        current = bound_type(table, row)
+        member: "{current}.{token(tokens, close + 1)}"
+        if !table.lowered.has_key(member) {
+            row: table.by_id.get(member) ?? return ""
+            current = bound_type(table, row)
+        }
         at = next_open
     }
 }
@@ -1196,14 +1223,18 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
             next
         }
         // Each method chained on the result (`args.spec().flag(…).repeat(…)`)
-        // is a method of the type the call before it returns.
+        // is a method of the type the call before it returns; a builder a
+        // reserved method lowers keeps that type and credits no row.
         current := return_types[slot].copy()
         loop token(tokens, close + 1) == "." {
-            member: token(tokens, close + 2)
+            member: "{current}.{token(tokens, close + 2)}"
             at: after_generics(tokens, close + 3)
-            row: table.by_id.get("{current}.{member}") ?? break
             if token(tokens, at) != "(" -> break
-            calls.push(Call{index: row, offset: tokens[close + 2].offset})
+            if !table.lowered.has_key(member) {
+                row: table.by_id.get(member) ?? break
+                calls.push(Call{index: row, offset: tokens[close + 2].offset})
+                current = bound_type(table, row)
+            }
             close = at + 1
             depth := 1
             loop close < tokens.len() && depth > 0 {
@@ -1211,7 +1242,6 @@ call_sites: fn(source_text: String, table: Table, initial: [String:String]) -> [
                 close += 1
             }
             close -= 1
-            current = bound_type(table, row)
         }
     }
     calls
@@ -1497,6 +1527,20 @@ bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
     found
 }
 
+// Each Core file's module as CORE_ROWS names it. A tree without that table (a
+// fixture) names none, and module_name spells each module from its path.
+source_modules: fn(root: String) -[FS]> [String:String] Never! {
+    found := [String:String]{}
+    source: files.read("{root}/{CORE_ROWS}") ?? return found
+    loop line in source.split("\n") {
+        if !line.starts_with("source_module ") -> next
+        words := [String]{}
+        loop word in line.split(" ") -> words.push(word.copy())
+        if words.len() >= 4 && words[2] == "path" -> found[words[3].copy()] = words[1].copy()
+    }
+    found
+}
+
 // `aliases` with every bare spelling it does not already bind.
 with_bare: fn(aliases: [String:String], bare: [Alias]) -> [String:String] Never! {
     out := aliases.copy()
@@ -1510,7 +1554,9 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     parts: part_paths(root) ?? return Err(err)
     listed := [String]{}
     files_under(root, "Core", listed) ?? return Err(err)
+    named: source_modules(root)
     paths := [String]{}
+    path_units := [String]{}
     sources := [String]{}
     functions := [Function]{}
     excluded := [Function]{}
@@ -1518,15 +1564,18 @@ census: fn(root: String) -[FS]> Report CoverageError! {
         if !path.ends_with(".jet") -> next
         source: read_source(root, path) ?? return Err(err)
         part: parts.has_key(path)
-        loop found in public_functions(path, source) {
+        unit: named.get(path) ?? module_name(path)
+        loop found in public_functions_in(unit, path, source) {
             row := found.copy()
             row.part = part
             if outside_surface(row) -> excluded.push(row) else -> functions.push(row)
         }
         paths.push(path.copy())
+        path_units.push(unit.copy())
         sources.push(source.copy())
     }
-    inventory: table_of(functions)
+    inventory := table_of(functions)
+    inventory.lowered = lowered_builders(excluded)
     unique := 0
     loop _ in inventory.by_id -> unique += 1
     if functions.len() == 0 || unique != functions.len() {
@@ -1542,18 +1591,29 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     loop index in 0..<paths.len() {
         programs: doctest_programs(sources[index])
         if programs.len() == 0 -> next
-        initial: with_bare(initial_aliases(table, module_name(paths[index])), bare)
+        initial: with_bare(initial_aliases(table, path_units[index]), bare)
         loop at in 0..<programs.len() {
             record(functions, seen, table, programs[at], "{paths[index]}#doctest-{at + 1}", DOCTESTS, initial)
         }
     }
     plain: with_bare(initial_aliases(table, ""), bare)
     kinds: [Int]{EXAMPLES, TESTS}
+    written := [String:Bool]{}
     loop kind in kinds {
         found := [String]{}
         files_under(root, if kind == EXAMPLES -> "Examples" else -> "Tests", found) ?? return Err(err)
         loop path in found {
             suffix: extension(path)
+            if suffix == ".case" {
+                case_source: read_source(root, path) ?? return Err(err)
+                loop template in case_templates(path, case_source) {
+                    if written.has_key(template) || !files.exists("{root}/{template}") -> next
+                    written[template.copy()] = true
+                    program: read_source(root, template) ?? return Err(err)
+                    record(functions, seen, table, program, template, kind, plain)
+                }
+                next
+            }
             if suffix != ".jet" && !HOST_EXTENSIONS.contains(suffix) -> next
             source: read_source(root, path) ?? return Err(err)
             if suffix == ".jet" {
@@ -1594,6 +1654,28 @@ census: fn(root: String) -[FS]> Report CoverageError! {
         }
     }
     Ok(Report{modules: modules.copy(), total_public: functions.len(), total_uncovered: uncovered, functions: functions.copy(), excluded: excluded.copy()})
+}
+
+// The templates the case at `path` writes as Jet programs
+// (`write: main.jet main.template`), as tree paths: a template's path is
+// the case directory's or its fixture's, and the census reads whichever
+// exists.
+case_templates: fn(path: String, source: String) -> [String] Never! {
+    dir: path.rpartition("/").head
+    fixtures := [String]{}
+    sources := [String]{}
+    loop line in source.split("\n") {
+        if line.starts_with("fixture: ") -> fixtures.push(line.remove_prefix("fixture: ").trim().copy())
+        if !line.starts_with("write: ") -> next
+        words: line.remove_prefix("write: ").trim().split(" ").to_list()
+        if words.len() == 2 && words[0].ends_with(".jet") && words[1].ends_with(".template") -> sources.push(words[1].copy())
+    }
+    out := [String]{}
+    loop template in sources {
+        out.push("{dir}/{template}")
+        loop fixture in fixtures -> out.push("{dir}/{fixture}/{template}")
+    }
+    out
 }
 
 is_untested: fn(row: Function) -> Bool Never! {
@@ -1993,6 +2075,17 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
     assert_eq(module_name("Core/Time/Expiring.jet"), "core.time.expiring")
 }
 
+#Test("a Core.rows source_module row names its file's module over the path spelling") {
+    root: fixture_tree()
+    put(root, "Core/Web/DevServer.jet", "url: fn() -> String Never! {{ \"\" }}\n")
+    put(root, CORE_ROWS, "source_module core.web.devserver path Core/Web/DevServer.jet alias core_core_web_devserver owns {{ url }}\n")
+    put(root, "Examples/Basics/dev.jet", "use devserver: core.web.devserver\nrun: fn() {{ print(devserver.url()) }}\n")
+    report: census(root) ?? panic(err.message)
+    found: find_function(report, "url")
+    assert_eq("{found.id} {found.examples.len()}", "core.web.devserver.url 1")
+    files.remove_all(root) ?? ()
+}
+
 #Test("every public function, including same-named methods, is inventoried") {
     found: public_functions("Core/demo/demo.jet", "// fake: fn() {{}}\n    /* nested /* fake2: fn() {{}} */ comment */\n    priv internal: module {{ hidden: fn() {{}} }}\n    priv helper: fn() -> Int Never! {{ 1 }}\n    priv(package) shared: fn() -> Int Never! {{ 2 }}\n    A: struct {{ new: fn() -> A Never! {{ {{}} }} }}\n    B: struct<T> {{}}\n    impl B<T> {{ new: fn<T>(f: fn(Int) -> Int) -[FS]> B Never! {{ {{}} }} }}\n    new: fn() -> A Never! {{ A.new() }}\n    generic: fn<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! {{ {{}} }}\n    label: \"fake3: fn() {{}}\"\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.A.new", "core.demo.B.new", "core.demo.new", "core.demo.generic"})
@@ -2114,6 +2207,20 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     panic("no function {name}")
 }
 
+#Test("a template a case writes as a Jet program is that case's test program") {
+    root: fixture_tree()
+    put(root, "Core/demo/demo.jet", "unused: fn() {{}}\nwritten: fn() {{}}\nin_fixture: fn() {{}}\n")
+    put(root, "Tests/Cases/Demo/demo.case", "fixture: Demo.fixture\nwrite: main.jet Demo.fixture/main.template\nwrite: peer.jet peer.template\nwrite: notes.txt Demo.fixture/notes.template\nwrite: other.jet = \"run: fn() {{ core.demo.unused() }}\"\n")
+    put(root, "Tests/Cases/Demo/Demo.fixture/main.template", "use d: core.demo\nrun: fn() {{\n    d.written()\n}}\n")
+    put(root, "Tests/Cases/Demo/Demo.fixture/peer.template", "run: fn() {{ core.demo.in_fixture() }}\n")
+    put(root, "Tests/Cases/Demo/Demo.fixture/notes.template", "core.demo.unused()\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(find_function(report, "written").tests, [String]{"Tests/Cases/Demo/Demo.fixture/main.template:3"})
+    assert_eq(find_function(report, "in_fixture").tests, [String]{"Tests/Cases/Demo/Demo.fixture/peer.template:1"})
+    assert_eq(find_function(report, "unused").tests, [String]{})
+    files.remove_all(root) ?? ()
+}
+
 #Test("a routed function is tested by the witness that runs its construct; a row naming no function or no witness is refused") {
     root: fixture_tree()
     put(root, ROUTES, "# id\tconstruct\twitness\ncore.demo.unused\t`demo.lowered()` lowers to it\tExamples/Basics/demo.jet\n")
@@ -2130,6 +2237,16 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     assert_eq(coverage_exit([String]{}, root), 1)
     put(root, ROUTES, "core.demo.unused\tExamples/Basics/demo.jet\n")
     assert_eq(coverage_exit([String]{}, root), 1)
+    files.remove_all(root) ?? ()
+}
+
+#Test("a chain credits each method in turn and keeps its type through a builder a reserved method lowers") {
+    root: fixture_tree()
+    put(root, "Core/Shop/Shop.jet", "Shop: struct {{\n    __screen: fn(self, path: String) -> Shop Never! {{ self }}\n    window: fn(self, width: Int) -> Shop Never! {{ self }}\n    title: fn(self) -> String Never! {{ \"\" }}\n}}\nnew: fn() -> Shop Never! {{ Shop{{}} }}\n")
+    put(root, "Examples/Basics/shop.jet", "use shop: core.shop\nrun: fn() {{\n    print(shop.new().screen(\"/\").window(2).title())\n}}\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(find_function(report, "Shop.window").examples, [String]{"Examples/Basics/shop.jet:3"})
+    assert_eq(find_function(report, "Shop.title").examples, [String]{"Examples/Basics/shop.jet:3"})
     files.remove_all(root) ?? ()
 }
 

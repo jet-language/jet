@@ -8,14 +8,17 @@ Count: enum {
     Total(actor.Reply<Int>),
 }
 
+// Answers a `Total` ask with the running total, which stays the state.
+answered: fn(reply: actor.Reply<Int>, total: Int) -> Int {
+    reply.answer(total)
+    total
+}
+
 // The counter's state is its running total; `Total` answers an ask.
 count: fn(total: Int, message: Count) -> Int {
     if message == {
         .Add(amount) -> total + amount
-        .Total(reply) -> {
-            reply.answer(total)
-            total
-        }
+        .Total(reply) -> answered(reply, total)
     }
 }
 
@@ -28,10 +31,7 @@ checked: fn(total: Int, message: Count) -> Int {
             if amount > 1000 -> panic("amount {amount} is too large")
             total + amount
         }
-        .Total(reply) -> {
-            reply.answer(total)
-            total
-        }
+        .Total(reply) -> answered(reply, total)
     }
 }
 
